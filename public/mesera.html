@@ -1,0 +1,195 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mesera - KANM</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="js/auth.js" defer></script>
+    <script src="js/mesera.js" defer></script>
+  </head>
+  <body data-role="mesera">
+    <header class="kanm-header">
+      <div class="kanm-header-left">
+        <div class="kanm-header-logo-container">
+          <img id="kanm-header-logo" alt="" />
+          <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
+        </div>
+
+        <div class="kanm-header-texts">
+          <div
+            id="kanm-header-negocio-nombre-principal"
+            class="kanm-header-title"
+            data-negocio-titulo
+          ></div>
+          <div id="kanm-header-negocio-subtitulo" class="kanm-header-subtitle">Panel de mesera</div>
+        </div>
+      </div>
+
+      <div class="kanm-header-right">
+        <div class="kanm-header-actions">
+          <span class="tag-rol">Mesera</span>
+          <button class="kanm-button ghost" type="button" onclick="logout()">Cerrar sesión</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="kanm-main">
+      <section class="kanm-page-header">
+        <h1 class="kanm-page-title">Toma de pedidos</h1>
+        <p class="kanm-page-subtitle">Selecciona la mesa y agrega los productos al pedido.</p>
+      </section>
+      <div class="mesera-tabs">
+        <button class="mesera-tab-btn active" data-tab="tomar" type="button">Tomar pedido</button>
+        <button class="mesera-tab-btn" data-tab="pendientes" type="button">Pendientes</button>
+        <button class="mesera-tab-btn" data-tab="preparando" type="button">En preparación</button>
+        <button class="mesera-tab-btn" data-tab="listos" type="button">Listos</button>
+      </div>
+
+      <div class="mesera-tab-panel active" data-tab="tomar">
+        <section class="kanm-card datos-mesa">
+          <div class="kanm-card-header">
+            <h2>Datos del pedido</h2>
+            <p class="kanm-subtitle">Identifica la mesa o el cliente para personalizar la atención.</p>
+          </div>
+          <label for="campo-mesa" class="kanm-label">Mesa o cliente</label>
+          <input
+            type="text"
+            id="campo-mesa"
+            class="kanm-input"
+            placeholder="Ej. Mesa 5 o Juan Pérez"
+            autocomplete="off"
+          />
+          <p class="kanm-helper" id="mesera-identidad"></p>
+          <div class="kanm-input-group">
+            <label for="tipo-servicio" class="kanm-label">Tipo de servicio</label>
+            <select id="tipo-servicio" class="kanm-input">
+              <option value="en_local">Para consumir en el negocio</option>
+              <option value="para_llevar">Para llevar</option>
+            </select>
+          </div>
+          <div class="kanm-input-group">
+            <label for="nota-pedido" class="kanm-label">Nota para preparación (opcional)</label>
+            <textarea
+              id="nota-pedido"
+              class="kanm-input"
+              rows="2"
+              maxlength="200"
+              placeholder="Ej. Sin cebolla, extra queso..."
+            ></textarea>
+            <p class="kanm-helper">Máx. 200 caracteres</p>
+          </div>
+        </section>
+
+                <section class="kanm-card productos">
+          <div class="kanm-mesera-productos-top">
+            <div class="kanm-card-header">
+              <h2>Productos</h2>
+              <p class="kanm-subtitle">Explora el menú, filtra por nombre y selecciona los favoritos.</p>
+            </div>
+            <div class="busqueda-productos">
+              <div class="buscador-input">
+                <span class="buscador-icono">🔍</span>
+                <input
+                  type="search"
+                  id="buscador-productos"
+                  class="kanm-input"
+                  placeholder="Buscar por nombre..."
+                  autocomplete="off"
+                />
+              </div>
+              <p class="search-results-info" id="contador-productos"></p>
+            </div>
+          </div>
+          <div class="kanm-mesera-productos-lista-scroll">
+            <div id="lista-productos" class="lista-productos"></div>
+          </div>
+        </section>
+        <div class="kanm-scroll-actions">
+          <button type="button" class="kanm-button ghost" id="mesera-scroll-top" aria-label="Ir arriba">↑ Arriba</button>
+          <button type="button" class="kanm-button ghost" id="mesera-scroll-bottom" aria-label="Ir abajo">↓ Abajo</button>
+        </div>
+
+        <section class="kanm-card carrito">
+          <div class="kanm-card-header">
+            <h2>Carrito</h2>
+            <p class="kanm-subtitle">
+              Revisa los artículos agregados, ajusta cantidades y valida el pedido antes de enviarlo.
+            </p>
+          </div>
+          <div id="carrito" class="lista-carrito"></div>
+          <div class="carrito-resumen" id="resumen-carrito">
+            <div class="resumen-item">
+              <span>Subtotal</span>
+              <span id="resumen-subtotal">DOP 0.00</span>
+            </div>
+            <div class="resumen-item">
+              <span>Impuesto estimado</span>
+              <span id="resumen-impuesto">DOP 0.00</span>
+            </div>
+            <div class="resumen-item total">
+              <span>Total estimado</span>
+              <span id="resumen-total">DOP 0.00</span>
+            </div>
+          </div>
+        </section>
+
+        <footer class="kanm-footer" id="mesera-footer">
+          <div class="flex-between" style="width: 100%; gap: 16px; flex-wrap: wrap;">
+            <div id="mesera-mensaje" class="kanm-message"></div>
+            <div class="acciones-pedido">
+              <button id="boton-cancelar-edicion" type="button" class="kanm-button secondary" hidden>
+                Cancelar edición
+              </button>
+              <button id="boton-enviar" type="button" class="kanm-button primary" data-accion="enviar-cocina">
+                Enviar a preparar orden
+              </button>
+              <button id="boton-enviar-caja" type="button" class="kanm-button primary">
+                Enviar pedido a caja
+              </button>
+            </div>
+          </div>
+        </footer>
+      </div>
+
+      <div class="mesera-tab-panel" data-tab="pendientes">
+        <section class="kanm-card pedidos-activos">
+          <div class="kanm-card-header">
+            <h2>Pedidos pendientes</h2>
+            <p class="kanm-subtitle">Consulta las cuentas con pedidos aún sin preparar.</p>
+          </div>
+          <div id="mesera-pendientes-mensaje" class="kanm-message"></div>
+          <div id="lista-pedidos-pendientes" class="lista-pedidos-activos"></div>
+        </section>
+      </div>
+
+      <div class="mesera-tab-panel" data-tab="preparando">
+        <section class="kanm-card pedidos-activos">
+          <div class="kanm-card-header">
+            <h2>En preparación</h2>
+            <p class="kanm-subtitle">Pedidos en preparación (cocina / bar).</p>
+          </div>
+          <div id="mesera-preparando-mensaje" class="kanm-message"></div>
+          <div id="lista-pedidos-preparando" class="lista-pedidos-activos"></div>
+        </section>
+      </div>
+
+      <div class="mesera-tab-panel" data-tab="listos">
+        <section class="kanm-card pedidos-activos">
+          <div class="kanm-card-header">
+            <h2>Pedidos listos</h2>
+            <p class="kanm-subtitle">Pedidos listos para servir o cobrar.</p>
+          </div>
+          <div id="mesera-listos-mensaje" class="kanm-message"></div>
+          <div id="lista-pedidos-listos" class="lista-pedidos-activos"></div>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

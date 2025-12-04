@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KANM - Cocina</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="js/auth.js" defer></script>
+    <script src="js/cocina.js" defer></script>
+  </head>
+  <body data-role="cocina">
+    <header class="kanm-header">
+      <div class="kanm-header-left">
+        <div class="kanm-header-logo-container">
+          <img id="kanm-header-logo" alt="" />
+          <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
+        </div>
+
+        <div class="kanm-header-texts">
+          <div
+            id="kanm-header-negocio-nombre-principal"
+            class="kanm-header-title"
+            data-negocio-titulo
+          ></div>
+          <div id="kanm-header-negocio-subtitulo" class="kanm-header-subtitle">Panel de cocina</div>
+        </div>
+      </div>
+
+      <div class="kanm-header-right">
+        <div class="kanm-header-actions">
+          <span class="tag-rol">Cocina</span>
+          <button class="kanm-button ghost" type="button" onclick="logout()">Cerrar sesión</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="kanm-main cocina-main">
+      <section class="kanm-page-header">
+        <h1 class="kanm-page-title">Pedidos en cocina</h1>
+        <p class="kanm-page-subtitle">Gestiona y actualiza el estado de cada pedido.</p>
+      </section>
+      <div class="kanm-tabs cocina-tabs" role="tablist">
+        <button class="kanm-tab active" data-tab="activos" type="button" role="tab" aria-selected="true">
+          Activos
+        </button>
+        <button class="kanm-tab" data-tab="finalizados" type="button" role="tab" aria-selected="false">
+          Finalizados del día
+        </button>
+      </div>
+
+      <section class="kanm-card kanm-card--panel cocina-panel" id="panel-activos" role="tabpanel">
+        <div class="kanm-card-header">
+          <h2>Pedidos activos</h2>
+          <p class="kanm-subtitle">Pedidos pendientes y en preparación.</p>
+        </div>
+        <div id="cocina-pedidos-activos" class="cocina-grid" aria-live="polite"></div>
+      </section>
+
+      <section class="kanm-card kanm-card--panel cocina-panel hidden" id="panel-finalizados" role="tabpanel">
+        <div class="kanm-card-header">
+          <h2>Pedidos del día finalizados</h2>
+          <p class="kanm-subtitle">
+            Pedidos marcados como listos o cancelados durante la jornada actual.
+          </p>
+        </div>
+        <div id="cocina-pedidos-finalizados" class="cocina-grid" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <div id="cocina-focus-overlay" class="cocina-focus hidden" aria-hidden="true">
+      <div class="cocina-focus-backdrop"></div>
+      <div class="cocina-focus-card" role="dialog" aria-modal="true">
+        <div class="cocina-focus-header">
+          <div>
+            <p class="cocina-focus-label">Cuenta</p>
+            <h3 id="focus-cuenta"></h3>
+            <p id="focus-servicio" class="kanm-subtitle"></p>
+          </div>
+          <button class="kanm-button ghost" type="button" id="focus-cerrar">Volver al tablero</button>
+        </div>
+        <div class="cocina-focus-body">
+          <div class="cocina-focus-meta" id="focus-meta"></div>
+          <div class="cocina-focus-nota" id="focus-nota"></div>
+          <div class="cocina-focus-items" id="focus-items"></div>
+        </div>
+        <div class="cocina-focus-actions">
+          <button class="kanm-button secondary" type="button" id="focus-preparar">Marcar preparando</button>
+          <button class="kanm-button primary" type="button" id="focus-listo">Marcar listo</button>
+          <button class="kanm-button ghost-danger" type="button" id="focus-cancelar">Cancelar pedido</button>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

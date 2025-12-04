@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KANM - Historial de ventas</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="js/auth.js" defer></script>
+    <script src="js/historial.js" defer></script>
+  </head>
+  <body data-role="admin">
+    <header class="kanm-header">
+      <div class="kanm-header-left">
+        <div class="kanm-header-brand">
+          <div class="kanm-header-logo-wrapper">
+            <img id="kanm-header-logo" class="kanm-header-logo oculto" src="" alt="Logo negocio" />
+            <div id="kanm-header-logo-fallback" class="kanm-header-logo-fallback"></div>
+          </div>
+          <div class="kanm-header-text">
+            <div
+              id="kanm-header-negocio-nombre-principal"
+              class="kanm-header-negocio-nombre-principal"
+              data-negocio-titulo
+            ></div>
+            <div id="kanm-header-negocio-subtitulo" class="kanm-header-negocio-subtitulo">Historial de ventas</div>
+          </div>
+        </div>
+      </div>
+      <div class="kanm-header-right">
+        <div class="kanm-header-actions">
+          <button class="kanm-button ghost" type="button" onclick="logout()">Cerrar sesión</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="historial-container">
+      <section class="kanm-card">
+        <h1>Historial de ventas</h1>
+        <p class="kanm-subtitle">Consulta los pedidos pagados y el total vendido.</p>
+        <form class="historial-filtros" id="historial-form-filtros" novalidate>
+          <div class="kanm-input-group">
+            <label for="historial-fecha">Periodo</label>
+            <select id="historial-fecha">
+              <option value="hoy">Hoy</option>
+              <option value="ayer">Ayer</option>
+              <option value="rango">Rango personalizado</option>
+              <option value="todos">Todos</option>
+            </select>
+          </div>
+          <div class="kanm-input-group historial-rango" id="historial-rango-fechas" hidden>
+            <label for="historial-desde">Desde</label>
+            <input type="date" id="historial-desde" />
+            <label for="historial-hasta" class="sr-only">Hasta</label>
+            <input type="date" id="historial-hasta" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="historial-buscar">Mesa / Cliente</label>
+            <input type="search" id="historial-buscar" placeholder="Buscar por nombre o mesa" />
+          </div>
+          <button type="button" class="kanm-button secondary" id="historial-filtrar">
+            Aplicar filtros
+          </button>
+        </form>
+      </section>
+
+      <section class="kanm-card resumen" id="resumen-ventas">
+        <div class="resumen-metric">
+          <span class="resumen-label">Pedidos pagados</span>
+          <span class="resumen-value" id="resumen-cantidad">0</span>
+        </div>
+        <div class="resumen-metric">
+          <span class="resumen-label">Total vendido</span>
+          <span class="resumen-value" id="resumen-total">DOP 0.00</span>
+        </div>
+      </section>
+
+      <section class="kanm-card" id="lista-ventas">
+        <div class="kanm-card-header">
+          <h2>Pedidos pagados</h2>
+          <div id="historial-mensaje" class="kanm-message"></div>
+        </div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Fecha</th>
+                <th>Mesa / Cliente</th>
+                <th>Subtotal</th>
+                <th>Impuesto</th>
+                <th>Propina</th>
+                <th>Descuento</th>
+                <th>Total final</th>
+                <th>Factura</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="historial-tabla"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <div class="kanm-modal-overlay" id="historial-eliminar-modal" hidden>
+      <div class="kanm-modal" role="dialog" aria-modal="true" aria-labelledby="historial-eliminar-titulo">
+        <h3 id="historial-eliminar-titulo">Eliminar pedido</h3>
+        <p id="historial-eliminar-descripcion">
+          Esta acción es irreversible y eliminará el pedido seleccionado del historial y de los reportes fiscales.
+        </p>
+        <div class="kanm-input-group">
+          <label for="historial-eliminar-password">Contraseña de administrador</label>
+          <input
+            type="password"
+            id="historial-eliminar-password"
+            placeholder="Ingresa la contraseña"
+            autocomplete="current-password"
+          />
+        </div>
+        <div class="kanm-modal-actions">
+          <button type="button" class="kanm-button ghost" id="historial-eliminar-cancelar">Cancelar</button>
+          <button type="button" class="kanm-button danger" id="historial-eliminar-confirmar">Eliminar</button>
+        </div>
+        <div id="historial-eliminar-mensaje" class="kanm-message"></div>
+      </div>
+    </div>
+  </body>
+</html>

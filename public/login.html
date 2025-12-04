@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlexiPOS - Iniciar sesión</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="js/login.js" defer></script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: 'Poppins', sans-serif;
+        background: radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--color-primario, #7b5bff) 18%, transparent), transparent),
+          radial-gradient(circle at 80% 10%, color-mix(in srgb, var(--color-secundario, #5de0e6) 20%, transparent), transparent),
+          linear-gradient(135deg, color-mix(in srgb, var(--color-secundario, #5de0e6) 12%, #f6f8fb),
+          color-mix(in srgb, var(--color-primario, #7b5bff) 10%, #f6f8fb));
+        color: var(--color-texto, #1f2937);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+
+      .login-shell {
+        width: 100%;
+        max-width: 520px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        align-items: center;
+      }
+
+      .login-brand {
+        font-weight: 700;
+        font-size: 1.8rem;
+        letter-spacing: 0.04em;
+        color: var(--color-primario, #7b5bff);
+        text-align: center;
+      }
+
+      .login-card {
+        width: 100%;
+        background: rgba(255, 255, 255, 0.88);
+        border-radius: 24px;
+        padding: 36px 32px;
+        box-shadow: 0 25px 60px rgba(0, 0, 0, 0.08);
+        backdrop-filter: blur(12px);
+        border: 1px solid color-mix(in srgb, var(--color-primario, #7b5bff) 8%, transparent);
+      }
+
+      .login-card h1 {
+        margin: 0 0 16px;
+        font-size: 1.6rem;
+        font-weight: 600;
+        text-align: center;
+        color: var(--color-primario, #7b5bff);
+      }
+
+      .login-card p {
+        margin: 0 0 26px;
+        text-align: center;
+        font-size: 0.95rem;
+        color: color-mix(in srgb, var(--color-texto, #1f2937) 80%, transparent);
+      }
+
+      .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 20px;
+      }
+
+      label {
+        font-size: 0.9rem;
+        font-weight: 500;
+      }
+
+      input[type='text'],
+      input[type='password'] {
+        padding: 14px 16px;
+        border-radius: 14px;
+        border: 1px solid color-mix(in srgb, var(--color-primario, #7b5bff) 20%, transparent);
+        background-color: rgba(255, 255, 255, 0.9);
+        font-size: 1rem;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      input[type='text']:focus,
+      input[type='password']:focus {
+        outline: none;
+        border-color: var(--color-primario, #7b5bff);
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primario, #7b5bff) 20%, transparent);
+      }
+
+      button[type='submit'] {
+        width: 100%;
+        margin-top: 8px;
+        padding: 16px;
+        border: none;
+        border-radius: 18px;
+        background: linear-gradient(135deg, var(--color-primario, #7b5bff), color-mix(in srgb, var(--color-secundario, #5de0e6) 60%, transparent));
+        color: #ffffff;
+        font-size: 1.05rem;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 16px 30px color-mix(in srgb, var(--color-primario, #7b5bff) 25%, transparent);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      button[type='submit']:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 18px 34px color-mix(in srgb, var(--color-primario, #7b5bff) 32%, transparent);
+      }
+
+      button[type='submit']:active {
+        transform: translateY(0);
+        box-shadow: 0 12px 20px color-mix(in srgb, var(--color-primario, #7b5bff) 24%, transparent);
+      }
+
+      #login-error {
+        margin-top: 16px;
+        min-height: 20px;
+        font-size: 0.9rem;
+        text-align: center;
+        color: #d93050;
+        font-weight: 500;
+      }
+
+      @media (max-width: 480px) {
+        .login-card {
+          padding: 30px 22px;
+        }
+
+        .login-card h1 {
+          font-size: 1.5rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="login-shell">
+      <div class="login-brand">FlexiPOS</div>
+      <div class="login-card">
+        <h1>Bienvenido a FlexiPOS</h1>
+        <p>La plataforma inteligente para administrar ventas, pedidos e inventario.</p>
+        <form id="login-form" novalidate>
+          <div class="form-group">
+            <label for="usuario">Usuario</label>
+            <input type="text" id="usuario" name="usuario" autocomplete="username" />
+          </div>
+          <div class="form-group">
+            <label for="password">Contraseña</label>
+            <input type="password" id="password" name="password" autocomplete="current-password" />
+          </div>
+          <button type="submit">Iniciar sesión</button>
+        </form>
+        <div id="login-error"></div>
+      </div>
+    </div>
+  </body>
+</html>

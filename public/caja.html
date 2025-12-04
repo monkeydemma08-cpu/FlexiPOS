@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KANM - Caja</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="js/auth.js" defer></script>
+    <script src="js/caja.js" defer></script>
+  </head>
+  <body data-role="caja">
+    <header class="kanm-header">
+      <div class="kanm-header-left">
+        <div class="kanm-header-logo-container">
+          <img id="kanm-header-logo" alt="" />
+          <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
+        </div>
+
+        <div class="kanm-header-texts">
+          <div
+            id="kanm-header-negocio-nombre-principal"
+            class="kanm-header-title"
+            data-negocio-titulo
+          ></div>
+          <div id="kanm-header-negocio-subtitulo" class="kanm-header-subtitle">Panel de caja</div>
+        </div>
+      </div>
+
+      <div class="kanm-header-right">
+        <div class="kanm-header-actions">
+          <span class="tag-rol">Caja</span>
+          <button class="kanm-button ghost" type="button" onclick="logout()">Cerrar sesión</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="caja-main">
+      <section class="kanm-page-header">
+        <h1 class="kanm-page-title">Caja y cobros</h1>
+        <p class="kanm-page-subtitle">Gestiona los pedidos listos, aplica descuentos y registra pagos.</p>
+      </section>
+      <div class="caja-tabs">
+        <button class="kanm-tab active" data-tab="cobros" id="tab-cobros" type="button">Cobros</button>
+        <button class="kanm-tab" data-tab="cuadre" id="tab-cuadre" type="button">Cuadre de caja</button>
+      </div>
+
+      <section class="caja-panel" id="panel-cobros">
+        <div class="caja-cobros-grid">
+          <div class="kanm-card caja-lista-card">
+            <div class="kanm-card-header sticky-header">
+              <h2>Pedidos listos para cobrar</h2>
+              <p class="kanm-subtitle">Selecciona un pedido para revisar los montos y finalizar el pago.</p>
+            </div>
+            <div id="caja-mensaje-lista" class="kanm-message"></div>
+            <div id="caja-pedidos" class="caja-pedidos-lista"></div>
+          </div>
+
+          <div class="kanm-card caja-detalle-card">
+            <div class="kanm-card-header">
+              <h2>Detalle de cobro</h2>
+              <p class="kanm-subtitle">Ajusta descuentos, propina e información fiscal antes de cerrar el pedido.</p>
+            </div>
+
+            <div id="caja-seleccion" class="kanm-empty-message caja-detalle-placeholder">
+              Selecciona una cuenta de la izquierda para ver el detalle y cobrar.
+            </div>
+
+            <form id="caja-form" class="kanm-form" novalidate hidden>
+              <div class="kanm-message" id="caja-mensaje"></div>
+
+              <div class="caja-detalle-info" id="caja-detalle-info"></div>
+              <div class="caja-items" id="caja-detalle-items"></div>
+
+              <div class="kanm-form-grid">
+                <div class="kanm-input-group">
+                  <label for="caja-descuento">Descuento (%)</label>
+                  <input type="number" id="caja-descuento" min="0" max="100" step="0.5" value="0" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="caja-propina">Propina legal (%)</label>
+                  <input type="number" id="caja-propina" min="0" max="100" step="0.5" value="10" />
+                </div>
+
+                <div class="kanm-input-group">
+                  <label for="caja-cliente-buscar">Buscar cliente</label>
+                  <input type="text" id="caja-cliente-buscar" list="caja-clientes" placeholder="Nombre o documento" />
+                  <datalist id="caja-clientes"></datalist>
+                </div>
+
+                <div class="kanm-input-group">
+                  <label for="caja-cliente-nombre">Cliente / Razon social</label>
+                  <input type="text" id="caja-cliente-nombre" placeholder="Consumidor final" />
+                </div>
+
+                <div class="kanm-input-group">
+                  <label for="caja-cliente-documento">RNC / Cédula</label>
+                  <input type="text" id="caja-cliente-documento" placeholder="00000000000" />
+                </div>
+
+                <div class="kanm-input-group">
+                  <label for="caja-tipo-comprobante">Tipo de comprobante</label>
+                  <select id="caja-tipo-comprobante">
+                    <option value="B02">B02 - Consumidor final</option>
+                    <option value="B01">B01 - Crédito fiscal</option>
+                    <option value="B14">B14 - Gastos menores</option>
+                  </select>
+                </div>
+
+                <div class="kanm-input-group">
+                  <label for="caja-ncf-manual">NCF (opcional)</label>
+                  <input type="text" id="caja-ncf-manual" placeholder="Dejar en blanco para generar" />
+                </div>
+
+                <div class="kanm-input-group">
+                  <label for="caja-comentarios">Notas internas</label>
+                  <textarea id="caja-comentarios" rows="2" placeholder="Comentarios del pago"></textarea>
+                </div>
+
+                <div class="kanm-card-subsection">
+                  <div class="kanm-card-header">
+                    <h3>Métodos de pago</h3>
+                    <p class="kanm-subtitle">Selecciona el método y completa los montos correspondientes.</p>
+                  </div>
+                  <div class="kanm-form-grid cols-2">
+                    <div class="kanm-input-group">
+                      <label for="pago-metodo">Selecciona el método</label>
+                      <select id="pago-metodo">
+                        <option value="efectivo">Efectivo</option>
+                        <option value="tarjeta">Tarjeta</option>
+                        <option value="transferencia">Transferencia / Depósito</option>
+                        <option value="combinado">Combinado</option>
+                      </select>
+                    </div>
+                    <div class="kanm-input-group" data-metodo="efectivo combinado">
+                      <label for="pago-efectivo-entregado">Efectivo recibido</label>
+                      <input
+                        type="number"
+                        id="pago-efectivo-entregado"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div class="kanm-input-group" data-metodo="tarjeta combinado">
+                      <label for="pago-tarjeta">Tarjeta</label>
+                      <input type="number" id="pago-tarjeta" min="0" step="0.01" placeholder="0.00" />
+                    </div>
+                    <div class="kanm-input-group" data-metodo="transferencia combinado">
+                      <label for="pago-transferencia">Transferencia / Depósito</label>
+                      <input type="number" id="pago-transferencia" min="0" step="0.01" placeholder="0.00" />
+                    </div>
+                    <div class="kanm-input-group" data-metodo="efectivo combinado">
+                      <label>Cambio a entregar</label>
+                      <div id="pago-cambio" class="pago-cambio-display">DOP&nbsp;0.00</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="caja-resumen">
+                <div class="flex-between">
+                  <span>Subtotal</span>
+                  <span id="caja-resumen-subtotal">DOP&nbsp;0.00</span>
+                </div>
+                <div class="flex-between">
+                  <span>Impuesto</span>
+                  <span id="caja-resumen-impuesto">DOP&nbsp;0.00</span>
+                </div>
+                <div class="flex-between">
+                  <span>Propina</span>
+                  <span id="caja-resumen-propina">DOP&nbsp;0.00</span>
+                </div>
+                <div class="flex-between">
+                  <span>Descuento</span>
+                  <span id="caja-resumen-descuento">- DOP&nbsp;0.00</span>
+                </div>
+                <div class="flex-between total">
+                  <span>Total a cobrar</span>
+                  <span id="caja-resumen-total">DOP&nbsp;0.00</span>
+                </div>
+              </div>
+
+              <div class="caja-acciones">
+                <button type="button" class="kanm-button secondary" id="caja-recalcular">
+                  Recalcular montos
+                </button>
+                <button type="submit" class="kanm-button primary" id="caja-cobrar">
+                  Confirmar pago
+                </button>
+              </div>
+
+              <div class="caja-factura" id="caja-factura-acciones" hidden>
+                <p class="kanm-subtitle">Factura generada:</p>
+                <div class="caja-factura-info" id="caja-factura-info"></div>
+                <div class="caja-acciones">
+                  <button type="button" class="kanm-button" id="caja-imprimir">Ver / Imprimir factura</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section class="caja-panel hidden" id="panel-cuadre">
+        <div class="kanm-card caja-cuadre-card">
+          <div class="kanm-card-header">
+            <h2>Cuadre de caja</h2>
+            <p class="kanm-subtitle">
+              Revisa el total registrado por el sistema y documenta el cuadre físico del día.
+            </p>
+          </div>
+
+          <div id="cuadre-mensaje" class="kanm-message"></div>
+
+          <form id="cuadre-form" class="kanm-form" novalidate>
+            <div class="caja-cuadre-form">
+              <div class="caja-cuadre-columns">
+                <div class="caja-cuadre-col">
+                  <div class="caja-cuadre-section">
+                    <h3 class="caja-cuadre-title">Datos del cuadre</h3>
+                    <div class="caja-cuadre-grid">
+                      <div class="kanm-input-group">
+                        <label for="cuadre-fecha">Fecha del cuadre</label>
+                        <input type="date" id="cuadre-fecha" />
+                      </div>
+                      <div class="kanm-input-group">
+                        <label for="cuadre-fondo-inicial">Fondo de caja inicial</label>
+                        <input
+                          type="number"
+                          id="cuadre-fondo-inicial"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div class="kanm-input-group">
+                        <label for="cuadre-total-declarado">Monto contado en caja</label>
+                        <input
+                          type="number"
+                          id="cuadre-total-declarado"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div class="kanm-input-group">
+                        <label for="cuadre-usuario">Nombre de quien cuadra</label>
+                        <input type="text" id="cuadre-usuario" placeholder="Nombre" />
+                      </div>
+                    </div>
+                  </div>
+                  <div class="caja-cuadre-section">
+                    <h3 class="caja-cuadre-title">Diferencia y esperados</h3>
+                    <div class="caja-cuadre-grid two-cols">
+                      <div class="kanm-input-group">
+                        <label for="cuadre-total-sistema">Total en sistema</label>
+                        <input type="text" id="cuadre-total-sistema" readonly />
+                        <small class="kanm-subtitle">
+                          Pedidos pagados: <span id="cuadre-cantidad-pedidos">0</span>
+                        </small>
+                      </div>
+                      <div class="kanm-input-group">
+                        <label for="cuadre-efectivo-esperado">Efectivo esperado</label>
+                        <input type="text" id="cuadre-efectivo-esperado" readonly />
+                      </div>
+                      <div class="kanm-input-group">
+                        <label>Diferencia</label>
+                        <div class="cuadre-diferencia" id="cuadre-diferencia" data-sign="neutral">DOP&nbsp;0.00</div>
+                      </div>
+                      <div class="kanm-input-group">
+                        <label for="cuadre-salidas-display">Salidas de caja</label>
+                        <input type="text" id="cuadre-salidas-display" readonly />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="caja-cuadre-col">
+                  <div class="caja-cuadre-section">
+                    <h3 class="caja-cuadre-title">Ventas por método</h3>
+                    <div class="caja-cuadre-grid">
+                      <div class="kanm-input-group">
+                        <label for="cuadre-total-efectivo">Ventas en efectivo</label>
+                        <input type="text" id="cuadre-total-efectivo" readonly />
+                      </div>
+                      <div class="kanm-input-group">
+                        <label for="cuadre-total-tarjeta">Ventas en tarjeta</label>
+                        <input type="text" id="cuadre-total-tarjeta" readonly />
+                      </div>
+                      <div class="kanm-input-group">
+                        <label for="cuadre-total-transferencia">Ventas en transferencia</label>
+                        <input type="text" id="cuadre-total-transferencia" readonly />
+                      </div>
+                      <div class="kanm-input-group">
+                        <label for="cuadre-total-general">Ventas totales (con propina)</label>
+                        <input type="text" id="cuadre-total-general" readonly />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="kanm-input-group">
+              <label for="cuadre-observaciones">Observaciones</label>
+              <textarea
+                id="cuadre-observaciones"
+                rows="2"
+                placeholder="Comentarios opcionales"
+              ></textarea>
+            </div>
+
+            <div class="cuadre-summary-grid">
+              <div class="cuadre-summary-card">
+                <span class="pill-label">Descuentos aplicados</span>
+                <strong id="cuadre-total-descuentos">DOP&nbsp;0.00</strong>
+              </div>
+              <div class="cuadre-summary-card">
+                <span class="pill-label">Fondo inicial</span>
+                <strong id="cuadre-fondo-display">DOP&nbsp;0.00</strong>
+              </div>
+              <div class="cuadre-summary-card">
+                <span class="pill-label">Ventas en efectivo</span>
+                <strong id="cuadre-total-efectivo">DOP&nbsp;0.00</strong>
+              </div>
+              <div class="cuadre-summary-card">
+                <span class="pill-label">Salidas en efectivo</span>
+                <strong id="cuadre-salidas-display">DOP&nbsp;0.00</strong>
+              </div>
+              <div class="cuadre-summary-card">
+                <span class="pill-label">Total ventas</span>
+                <strong id="cuadre-total-general">DOP&nbsp;0.00</strong>
+              </div>
+              <div class="cuadre-summary-card">
+                <span class="pill-label">Tarjeta</span>
+                <strong id="cuadre-total-tarjeta">DOP&nbsp;0.00</strong>
+              </div>
+              <div class="cuadre-summary-card">
+                <span class="pill-label">Transferencia</span>
+                <strong id="cuadre-total-transferencia">DOP&nbsp;0.00</strong>
+              </div>
+              <div class="cuadre-summary-card destacado">
+                <span class="pill-label">Efectivo esperado</span>
+                <strong id="cuadre-efectivo-esperado">DOP&nbsp;0.00</strong>
+              </div>
+            </div>
+
+            <div class="caja-acciones">
+              <button type="button" class="kanm-button primary" id="cuadre-registrar">
+                Registrar cuadre de caja
+              </button>
+            </div>
+          </form>
+
+          <div class="kanm-card-subsection cuadre-salidas">
+            <div class="kanm-card-header">
+              <h3>Salidas de efectivo</h3>
+              <p class="kanm-subtitle">Registra retiros de efectivo para que el efectivo esperado sea preciso.</p>
+            </div>
+            <div id="salidas-mensaje" class="kanm-message"></div>
+            <div class="cuadre-salidas-form">
+              <div class="kanm-input-group">
+                <label for="salida-descripcion">Descripción</label>
+                <input type="text" id="salida-descripcion" placeholder="Ej. compra de insumos" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="salida-monto">Monto</label>
+                <input type="number" id="salida-monto" min="0" step="0.01" placeholder="0.00" />
+              </div>
+              <div class="cuadre-salidas-acciones">
+                <button type="button" class="kanm-button ghost" id="salida-agregar">Agregar salida de caja</button>
+              </div>
+            </div>
+            <div class="salidas-lista" id="salida-lista"></div>
+          </div>
+
+          <div class="kanm-card-subsection">
+            <div class="kanm-card-header">
+              <h3>Detalle del cuadre actual</h3>
+              <p class="kanm-subtitle">Revisa los pedidos pagados en este turno antes de cerrar.</p>
+            </div>
+            <div class="caja-acciones">
+              <button type="button" class="kanm-button ghost" id="cuadre-ver-detalle">
+                Ver detalle del cuadre actual
+              </button>
+            </div>
+            <div class="kanm-table-wrapper" id="cuadre-detalle-wrapper" hidden>
+              <table class="kanm-table condensed">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Mesa / Cliente</th>
+                    <th>Fecha pago</th>
+                    <th>Método de pago</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody id="cuadre-detalle-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

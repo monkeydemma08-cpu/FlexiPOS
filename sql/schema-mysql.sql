@@ -1,0 +1,371 @@
+-- MySQL schema for FlexiPOS (generated from existing SQLite definitions)
+CREATE TABLE IF NOT EXISTS negocios (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(150) NOT NULL,
+  slug VARCHAR(120) NOT NULL UNIQUE,
+  rnc VARCHAR(20),
+  telefono VARCHAR(30),
+  direccion VARCHAR(255),
+  activo TINYINT DEFAULT 1,
+  color_primario VARCHAR(20),
+  color_secundario VARCHAR(20),
+  color_texto VARCHAR(7) NULL,
+  color_header VARCHAR(7) NULL,
+  color_boton_primario VARCHAR(7) NULL,
+  color_boton_secundario VARCHAR(7) NULL,
+  color_boton_peligro VARCHAR(7) NULL,
+  config_modulos JSON NULL,
+  admin_principal_usuario_id BIGINT NULL,
+  logo_url LONGTEXT,
+  titulo_sistema VARCHAR(150),
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS categorias (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(255) NOT NULL,
+  activo TINYINT DEFAULT 1,
+  area_preparacion ENUM('ninguna', 'cocina', 'bar') NOT NULL DEFAULT 'ninguna',
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en DATETIME,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_categorias_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS productos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(255) NOT NULL,
+  categoria_id INT,
+  precio DECIMAL(10,2) NOT NULL,
+  stock INT DEFAULT 0,
+  activo TINYINT DEFAULT 1,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_productos_categoria FOREIGN KEY (categoria_id) REFERENCES categorias(id),
+  CONSTRAINT fk_productos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS clientes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(255) NOT NULL,
+  documento VARCHAR(100),
+  tipo_documento VARCHAR(50),
+  telefono VARCHAR(50),
+  email VARCHAR(255),
+  direccion TEXT,
+  notas TEXT,
+  activo TINYINT DEFAULT 1,
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en DATETIME,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_clientes_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS configuracion (
+  clave VARCHAR(191) NOT NULL,
+  valor TEXT NOT NULL,
+  negocio_id INT NOT NULL,
+  PRIMARY KEY (clave, negocio_id),
+  CONSTRAINT fk_configuracion_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS usuarios (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(255) NOT NULL,
+  usuario VARCHAR(100) UNIQUE,
+  password TEXT,
+  rol VARCHAR(50) NOT NULL,
+  activo TINYINT NOT NULL DEFAULT 1,
+  negocio_id INT NOT NULL,
+  es_super_admin TINYINT(1) NOT NULL DEFAULT 0,
+  CONSTRAINT fk_usuarios_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS insumos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(255) NOT NULL,
+  unidad VARCHAR(50),
+  categoria VARCHAR(100),
+  stock_actual DECIMAL(10,2) DEFAULT 0,
+  costo_unitario_promedio DECIMAL(10,2) DEFAULT 0,
+  activo TINYINT DEFAULT 1,
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en DATETIME,
+  comentarios TEXT,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_insumos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS recetas (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  producto_id INT NOT NULL,
+  nombre VARCHAR(255),
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_recetas_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
+  CONSTRAINT fk_recetas_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS receta_detalle (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  receta_id INT NOT NULL,
+  insumo_id INT NOT NULL,
+  cantidad_por_unidad DECIMAL(10,2) NOT NULL,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_receta_detalle_receta FOREIGN KEY (receta_id) REFERENCES recetas(id),
+  CONSTRAINT fk_receta_detalle_insumo FOREIGN KEY (insumo_id) REFERENCES insumos(id),
+  CONSTRAINT fk_receta_detalle_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS cotizaciones (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  codigo VARCHAR(100),
+  cliente_nombre VARCHAR(255),
+  cliente_documento VARCHAR(100),
+  cliente_contacto VARCHAR(255),
+  fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+  fecha_validez DATETIME,
+  estado VARCHAR(50) DEFAULT 'borrador',
+  subtotal DECIMAL(10,2) DEFAULT 0,
+  impuesto DECIMAL(10,2) DEFAULT 0,
+  descuento_monto DECIMAL(10,2) DEFAULT 0,
+  descuento_porcentaje DECIMAL(5,2) DEFAULT 0,
+  total DECIMAL(10,2) DEFAULT 0,
+  notas_internas TEXT,
+  notas_cliente TEXT,
+  creada_por INT,
+  pedido_id INT,
+  negocio_id INT NOT NULL,
+  UNIQUE KEY idx_cotizaciones_codigo_negocio (codigo, negocio_id),
+  CONSTRAINT fk_cotizaciones_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS cotizacion_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  cotizacion_id INT NOT NULL,
+  producto_id INT,
+  descripcion TEXT,
+  cantidad DECIMAL(10,2) DEFAULT 1,
+  precio_unitario DECIMAL(10,2) DEFAULT 0,
+  descuento_porcentaje DECIMAL(5,2) DEFAULT 0,
+  descuento_monto DECIMAL(10,2) DEFAULT 0,
+  subtotal_linea DECIMAL(10,2) DEFAULT 0,
+  impuesto_linea DECIMAL(10,2) DEFAULT 0,
+  total_linea DECIMAL(10,2) DEFAULT 0,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_cotizacion_items_cotizacion FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones(id) ON DELETE CASCADE,
+  CONSTRAINT fk_cotizacion_items_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
+  CONSTRAINT fk_cotizacion_items_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS pedidos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  cuenta_id INT,
+  mesa VARCHAR(100),
+  cliente VARCHAR(255),
+  modo_servicio VARCHAR(50) DEFAULT 'en_local',
+  pago_efectivo DECIMAL(10,2) DEFAULT 0,
+  pago_efectivo_entregado DECIMAL(10,2) DEFAULT 0,
+  pago_tarjeta DECIMAL(10,2) DEFAULT 0,
+  pago_transferencia DECIMAL(10,2) DEFAULT 0,
+  pago_cambio DECIMAL(10,2) DEFAULT 0,
+  cliente_documento VARCHAR(100),
+  tipo_comprobante VARCHAR(50),
+  ncf VARCHAR(50),
+  estado_comprobante VARCHAR(50) DEFAULT 'sin_emitir',
+  nota_credito_referencia INT,
+  comentarios TEXT,
+  estado VARCHAR(50) NOT NULL DEFAULT 'pendiente',
+  subtotal DECIMAL(10,2) DEFAULT 0,
+  impuesto DECIMAL(10,2) DEFAULT 0,
+  total DECIMAL(10,2) DEFAULT 0,
+  descuento_porcentaje DECIMAL(5,2) DEFAULT 0,
+  descuento_monto DECIMAL(10,2) DEFAULT 0,
+  propina_porcentaje DECIMAL(5,2) DEFAULT 0,
+  propina_monto DECIMAL(10,2) DEFAULT 0,
+  nota TEXT,
+  fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+  fecha_listo DATETIME,
+  fecha_cierre DATETIME,
+  fecha_factura DATETIME,
+  cocinero_id INT,
+  cocinero_nombre VARCHAR(255),
+  cierre_id INT,
+  insumos_descontados TINYINT DEFAULT 0,
+  creado_por INT,
+  preparado_por INT,
+  cobrado_por INT,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_pedidos_nota_credito FOREIGN KEY (nota_credito_referencia) REFERENCES pedidos(id),
+  CONSTRAINT fk_pedidos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id),
+  UNIQUE KEY idx_pedidos_ncf (negocio_id, ncf)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS detalle_pedido (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  pedido_id INT NOT NULL,
+  producto_id INT NOT NULL,
+  cantidad INT NOT NULL,
+  precio_unitario DECIMAL(10,2) NOT NULL,
+  descuento_porcentaje DECIMAL(5,2) DEFAULT 0,
+  descuento_monto DECIMAL(10,2) DEFAULT 0,
+  cantidad_descuento DECIMAL(10,2),
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_detalle_pedido_pedido FOREIGN KEY (pedido_id) REFERENCES pedidos(id),
+  CONSTRAINT fk_detalle_pedido_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
+  CONSTRAINT fk_detalle_pedido_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS historial_cocina (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  cuenta_id INT,
+  pedido_id INT NOT NULL,
+  item_nombre VARCHAR(255) NOT NULL,
+  cantidad DECIMAL(10,2) NOT NULL,
+  cocinero_id INT,
+  cocinero_nombre VARCHAR(255),
+  created_at DATETIME,
+  completed_at DATETIME,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_historial_cocina_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS historial_bar (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  cuenta_id INT,
+  pedido_id INT NOT NULL,
+  item_nombre VARCHAR(255) NOT NULL,
+  cantidad DECIMAL(10,2) NOT NULL,
+  bartender_id INT,
+  bartender_nombre VARCHAR(255),
+  created_at DATETIME,
+  completed_at DATETIME,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_historial_bar_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS compras (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  proveedor VARCHAR(255) NOT NULL,
+  rnc VARCHAR(50),
+  fecha DATETIME NOT NULL,
+  tipo_comprobante VARCHAR(50),
+  ncf VARCHAR(50),
+  monto_gravado DECIMAL(10,2) DEFAULT 0,
+  impuesto DECIMAL(10,2) DEFAULT 0,
+  total DECIMAL(10,2) DEFAULT 0,
+  estado VARCHAR(50) NOT NULL DEFAULT 'emitido',
+  nota_credito_referencia INT,
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en DATETIME,
+  monto_exento DECIMAL(10,2) DEFAULT 0,
+  comentarios TEXT,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_compras_nota_credito FOREIGN KEY (nota_credito_referencia) REFERENCES compras(id),
+  CONSTRAINT fk_compras_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS detalle_compra (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  compra_id INT NOT NULL,
+  insumo_id INT NOT NULL,
+  cantidad DECIMAL(10,2) NOT NULL,
+  costo_unitario DECIMAL(10,2) NOT NULL,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_detalle_compra_compra FOREIGN KEY (compra_id) REFERENCES compras(id),
+  CONSTRAINT fk_detalle_compra_insumo FOREIGN KEY (insumo_id) REFERENCES insumos(id),
+  CONSTRAINT fk_detalle_compra_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS notas_credito_ventas (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  pedido_id INT NOT NULL,
+  fecha DATETIME NOT NULL,
+  motivo TEXT,
+  monto DECIMAL(10,2) NOT NULL,
+  ncf_nota VARCHAR(50),
+  ncf_referencia VARCHAR(50),
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_notas_credito_ventas_pedido FOREIGN KEY (pedido_id) REFERENCES pedidos(id),
+  CONSTRAINT fk_notas_credito_ventas_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS notas_credito_compras (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  compra_id INT NOT NULL,
+  fecha DATETIME NOT NULL,
+  motivo TEXT,
+  monto DECIMAL(10,2) NOT NULL,
+  ncf_nota VARCHAR(50),
+  ncf_referencia VARCHAR(50),
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_notas_credito_compras_compra FOREIGN KEY (compra_id) REFERENCES compras(id),
+  CONSTRAINT fk_notas_credito_compras_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS secuencias_ncf (
+  tipo VARCHAR(50) NOT NULL,
+  prefijo VARCHAR(50) NOT NULL,
+  digitos INT NOT NULL DEFAULT 8,
+  correlativo INT NOT NULL DEFAULT 1,
+  negocio_id INT NOT NULL,
+  actualizado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tipo, negocio_id),
+  CONSTRAINT fk_secuencias_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS cierres_caja (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  fecha_cierre DATETIME DEFAULT CURRENT_TIMESTAMP,
+  fecha_operacion DATETIME NOT NULL,
+  usuario VARCHAR(255) NOT NULL,
+  usuario_rol VARCHAR(50),
+  fondo_inicial DECIMAL(10,2) DEFAULT 0,
+  total_sistema DECIMAL(10,2) DEFAULT 0,
+  total_declarado DECIMAL(10,2) DEFAULT 0,
+  diferencia DECIMAL(10,2) DEFAULT 0,
+  observaciones TEXT,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_cierres_caja_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS salidas_caja (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  negocio_id INT NOT NULL,
+  fecha DATETIME NOT NULL,
+  descripcion TEXT,
+  monto DECIMAL(10,2) NOT NULL,
+  metodo VARCHAR(50) DEFAULT 'efectivo',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_salidas_caja_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS sesiones_usuarios (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  usuario_id INT NOT NULL,
+  token VARCHAR(255) NOT NULL,
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  ultimo_uso DATETIME,
+  user_agent TEXT,
+  ip VARCHAR(100),
+  cerrado_en DATETIME,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_sesiones_usuarios_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+  CONSTRAINT fk_sesiones_usuarios_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id),
+  UNIQUE KEY uq_sesiones_token (token)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_historial_cocina_completed ON historial_cocina (completed_at);
+CREATE INDEX idx_historial_bar_completed ON historial_bar (completed_at);
+CREATE INDEX idx_cierres_caja_fecha ON cierres_caja (negocio_id, fecha_operacion);
+CREATE INDEX idx_salidas_caja_fecha ON salidas_caja (negocio_id, fecha);
+CREATE INDEX idx_sesiones_usuario ON sesiones_usuarios (usuario_id);
+CREATE INDEX idx_pedidos_cierre_id ON pedidos (cierre_id);
+CREATE INDEX idx_cotizaciones_estado ON cotizaciones (negocio_id, estado, fecha_creacion);
+CREATE INDEX idx_cotizacion_items_cotizacion ON cotizacion_items (cotizacion_id);
+CREATE INDEX idx_clientes_activo_nombre ON clientes (negocio_id, activo, nombre);
+CREATE UNIQUE INDEX idx_recetas_producto_unica ON recetas (producto_id);
+CREATE INDEX idx_receta_detalle_receta ON receta_detalle (receta_id);
+CREATE INDEX idx_receta_detalle_insumo ON receta_detalle (insumo_id);
+CREATE INDEX idx_configuracion_negocio ON configuracion (negocio_id);

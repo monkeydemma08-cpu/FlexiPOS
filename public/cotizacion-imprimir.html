@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cotizacion</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script src="/js/auth.js" defer></script>
+    <script src="/js/cotizacion-imprimir.js" defer></script>
+  </head>
+  <body class="cotizacion-print" data-role="admin">
+    <main class="cotizacion-print__container">
+      <header class="cotizacion-print__header">
+        <div class="cotizacion-print__brand">
+          <div class="header-logo" id="cotizacion-logo-texto"></div>
+          <img id="cotizacion-logo-img" alt="Logo" />
+        </div>
+        <div class="cotizacion-print__identity">
+          <p class="cotizacion-print__title">Cotizacion</p>
+          <p id="cotizacion-direccion" class="cotizacion-print__meta">Direccion del negocio</p>
+          <p id="cotizacion-telefono" class="cotizacion-print__meta">Telefono</p>
+          <p id="cotizacion-rnc" class="cotizacion-print__meta">RNC</p>
+        </div>
+        <div class="cotizacion-print__actions">
+          <button type="button" class="kanm-button" id="cotizacion-imprimir-btn">Imprimir</button>
+        </div>
+      </header>
+
+      <section class="cotizacion-print__panel cotizacion-print__grid">
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Codigo</span>
+          <span class="cotizacion-print__value" id="cotizacion-codigo">--</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Estado</span>
+          <span class="cotizacion-estado-badge" id="cotizacion-estado" data-estado="borrador">Borrador</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Fecha</span>
+          <span class="cotizacion-print__value" id="cotizacion-fecha">--</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Valida hasta</span>
+          <span class="cotizacion-print__value" id="cotizacion-validez">--</span>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel">
+        <div class="cotizacion-print__section-header">
+          <h2>Datos del cliente</h2>
+        </div>
+        <div class="cotizacion-print__grid">
+          <div class="cotizacion-print__field">
+            <span class="cotizacion-print__label">Nombre</span>
+            <span class="cotizacion-print__value" id="cotizacion-cliente">--</span>
+          </div>
+          <div class="cotizacion-print__field">
+            <span class="cotizacion-print__label">Documento</span>
+            <span class="cotizacion-print__value" id="cotizacion-documento">--</span>
+          </div>
+          <div class="cotizacion-print__field">
+            <span class="cotizacion-print__label">Contacto</span>
+            <span class="cotizacion-print__value" id="cotizacion-contacto">--</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel">
+        <div class="cotizacion-print__section-header">
+          <h2>Detalle de items</h2>
+        </div>
+        <div class="cotizacion-print__table-wrapper">
+          <table class="cotizacion-print__table">
+            <thead>
+              <tr>
+                <th>Cantidad</th>
+                <th>Descripcion</th>
+                <th>Precio</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody id="cotizacion-items"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel cotizacion-print__totales">
+        <div class="cotizacion-print__totales-linea">
+          <span>Subtotal</span>
+          <span id="cotizacion-subtotal">DOP&nbsp;0.00</span>
+        </div>
+        <div class="cotizacion-print__totales-linea">
+          <span>Descuento</span>
+          <span id="cotizacion-descuento">DOP&nbsp;0.00</span>
+        </div>
+        <div class="cotizacion-print__totales-linea">
+          <span>Impuesto</span>
+          <span id="cotizacion-impuesto">DOP&nbsp;0.00</span>
+        </div>
+        <div class="cotizacion-print__totales-linea cotizacion-print__totales-final">
+          <span>Total</span>
+          <span id="cotizacion-total">DOP&nbsp;0.00</span>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel">
+        <div class="cotizacion-print__section-header">
+          <h2>Notas</h2>
+        </div>
+        <p id="cotizacion-notas-cliente" class="cotizacion-print__notas">--</p>
+      </section>
+
+      <footer class="cotizacion-print__footer">
+        <p id="cotizacion-pie">Documento de cotizacion, no es un comprobante fiscal.</p>
+      </footer>
+    </main>
+  </body>
+</html>

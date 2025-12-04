@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Factura</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="js/auth.js" defer></script>
+    <script src="js/factura.js" defer></script>
+  </head>
+  <body class="factura-body" data-role="caja,admin">
+    <main class="factura-container">
+      <header class="factura-header">
+        <div class="factura-identidad">
+          <div class="factura-logo">
+            <div class="header-logo" id="factura-logo-texto"></div>
+            <img id="factura-logo-img" alt="Logo del negocio" />
+          </div>
+          <div class="factura-info-negocio">
+            <h1 id="factura-negocio-nombre">Factura</h1>
+            <p id="factura-direccion">Republica Dominicana - ITBIS incluido</p>
+            <p id="factura-telefono" class="factura-dato"></p>
+          </div>
+        </div>
+        <div class="factura-acciones">
+          <button type="button" class="kanm-button" id="factura-imprimir">Imprimir</button>
+        </div>
+      </header>
+
+      <section class="kanm-card factura-datos" id="factura-datos">
+        <div class="factura-col">
+          <h2>Datos de la factura</h2>
+          <p><strong>NCF:</strong> <span id="factura-ncf">-</span></p>
+          <p><strong>Fecha:</strong> <span id="factura-fecha">-</span></p>
+          <p><strong>Pedido:</strong> <span id="factura-pedido">-</span></p>
+        </div>
+        <div class="factura-col">
+          <h2>Cliente</h2>
+          <p><strong>Nombre:</strong> <span id="factura-cliente">Consumidor final</span></p>
+          <p><strong>Documento:</strong> <span id="factura-documento">00000000000</span></p>
+          <p><strong>Tipo de comprobante:</strong> <span id="factura-tipo">B02</span></p>
+        </div>
+      </section>
+
+      <section class="kanm-card">
+        <h2>Detalle</h2>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th>Cantidad</th>
+                <th>Precio unitario</th>
+                <th>Subtotal</th>
+              </tr>
+            </thead>
+            <tbody id="factura-items"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="kanm-card factura-resumen">
+        <div class="factura-resumen-linea">
+          <span>Subtotal</span>
+          <span id="factura-subtotal">DOP&nbsp;0.00</span>
+        </div>
+        <div class="factura-resumen-linea">
+          <span>Impuesto</span>
+          <span id="factura-impuesto">DOP&nbsp;0.00</span>
+        </div>
+        <div class="factura-resumen-linea">
+          <span>Descuento</span>
+          <span id="factura-descuento">- DOP&nbsp;0.00</span>
+        </div>
+        <div class="factura-resumen-linea">
+          <span>Propina</span>
+          <span id="factura-propina">DOP&nbsp;0.00</span>
+        </div>
+        <div class="factura-resumen-total">
+          <span>Total</span>
+          <span id="factura-total">DOP&nbsp;0.00</span>
+        </div>
+      </section>
+
+      <footer class="factura-footer">
+        <p id="factura-pie">Gracias por su compra.</p>
+      </footer>
+    </main>
+  </body>
+</html>

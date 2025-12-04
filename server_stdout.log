@@ -1,0 +1,5 @@
+[dotenv@17.2.3] injecting env (6) from .env -- tip: ⚙️  override existing env vars with { override: true }
+[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+server.js cargó correctamente
+Preparando para escuchar en el puerto... { HOST: '0.0.0.0', PORT: 3000 }
+Servidor iniciado en http://0.0.0.0:3000

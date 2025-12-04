@@ -1,0 +1,1378 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KANM - Panel de administración</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <style>
+    /* Modal Negocios */
+    #kanm-negocios-modal {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+    }
+    #kanm-negocios-modal.oculto {
+      display: none;
+    }
+    #kanm-negocios-modal {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+    }
+    #kanm-negocios-modal.oculto {
+      display: none;
+    }
+    #kanm-negocios-modal .kanm-modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+    }
+    #kanm-negocios-modal .kanm-modal-panel {
+      position: relative;
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+      max-width: 560px;
+      width: 90%;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      z-index: 1;
+    }
+    #kanm-negocios-modal .kanm-modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #f0f0f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #kanm-negocios-modal .kanm-modal-body {
+      padding: 16px 20px;
+      overflow-y: auto;
+    }
+
+    @media (max-width: 768px) {
+      #kanm-negocios-modal .kanm-modal-panel {
+        max-width: 100%;
+        width: 100%;
+        border-radius: 0;
+      }
+    }
+  </style>
+</head>
+<body data-role="admin,caja">
+  <header class="kanm-header">
+    <div class="kanm-header-left">
+      <div class="kanm-header-logo-container">
+        <img id="kanm-header-logo" alt="" />
+        <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
+      </div>
+      <div class="kanm-header-texts">
+        <div
+          id="kanm-header-negocio-nombre-principal"
+          class="kanm-header-title"
+          data-negocio-titulo
+        ></div>
+        <div id="kanm-header-negocio-subtitulo" class="kanm-header-subtitle">Panel de administración</div>
+      </div>
+    </div>
+
+    <div class="kanm-header-right">
+      <div class="kanm-header-actions">
+        <span class="tag-rol">Admin</span>
+        <button type="button" class="kanm-button ghost" onclick="logout()">Cerrar sesión</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="admin-container">
+    <div class="admin-tabs" id="admin-tabs">
+      <button type="button" class="kanm-tab active" data-admin-tab="productos" data-modulo="admin">Productos</button>
+      <button type="button" class="kanm-tab" data-admin-tab="insumos" data-modulo="admin">Insumos</button>
+      <button type="button" class="kanm-tab" data-admin-tab="configuracion" data-modulo="admin">Configuración</button>
+      <button type="button" class="kanm-tab" data-admin-tab="usuarios" data-modulo="admin">Usuarios</button>
+      <button type="button" class="kanm-tab" data-admin-tab="categorias" data-modulo="admin">Categorías</button>
+      <button type="button" class="kanm-tab" data-admin-tab="clientes" data-modulo="admin">Clientes</button>
+      <button type="button" class="kanm-tab" data-admin-tab="cotizaciones" data-modulo="admin" data-tab-url="/admin/cotizaciones">
+        Cotizaciones
+      </button>
+      <button type="button" class="kanm-tab" data-admin-tab="compras" data-modulo="admin">Compras &amp; 606</button>
+      <button type="button" class="kanm-tab" data-admin-tab="ventas" data-modulo="caja">Ventas &amp; 607</button>
+      <button type="button" class="kanm-tab" data-admin-tab="cuadres" data-modulo="caja">Cuadres de caja</button>
+      <button type="button" class="kanm-tab" data-admin-tab="historial" data-modulo="historialCocina">Historial de cocina</button>
+      <button type="button" class="kanm-tab super-admin-only" data-admin-tab="negocios" data-modulo="admin">Negocios</button>
+    </div>
+
+    <!-- Productos -->
+    <section class="admin-panel" data-admin-section="productos" id="admin-section-productos">
+      <div class="kanm-card-header">
+        <h2>Productos</h2>
+        <p class="kanm-subtitle">Consulta y edita los productos disponibles para la venta.</p>
+      </div>
+      <div class="admin-products-layout">
+        <section class="kanm-card admin-card productos-card">
+          <header class="kanm-card-header">
+            <h3>Productos</h3>
+            <p class="kanm-subtitle">Listado con precios, estado y stock.</p>
+          </header>
+          <div class="productos-controls">
+            <div class="kanm-input-group">
+              <input type="text" id="productos-buscar" class="admin-product-search" placeholder="Buscar producto..." />
+            </div>
+            <div class="kanm-input-group">
+              <select id="productos-filtro-categoria" class="admin-product-filter">
+                <option value="">Todas las categorías</option>
+              </select>
+            </div>
+          </div>
+          <div id="productos-lista" class="productos-lista admin-product-list"></div>
+        </section>
+
+        <section class="kanm-card admin-card producto-form-card">
+          <header class="kanm-card-header">
+            <h3>Formulario de producto</h3>
+            <p class="kanm-subtitle">Crea nuevos productos o actualiza los existentes.</p>
+          </header>
+          <form id="prod-form" class="kanm-form" novalidate>
+            <input type="hidden" id="prod-id" />
+
+            <div class="product-form-grid">
+              <div class="kanm-input-group">
+                <label for="prod-nombre">Nombre</label>
+                <input type="text" id="prod-nombre" placeholder="Ej. Cheesecake de fresa" />
+              </div>
+
+              <div class="kanm-input-group">
+                <label for="prod-precio">Precio</label>
+                <input type="number" id="prod-precio" step="0.01" min="0" placeholder="0.00" />
+              </div>
+
+              <div class="kanm-input-group">
+                <label for="prod-stock">Stock</label>
+                <input type="number" id="prod-stock" min="0" placeholder="Cantidad en inventario" />
+              </div>
+
+              <div class="kanm-input-group">
+                <label for="prod-categoria">Categor&iacute;a</label>
+                <select id="prod-categoria">
+                  <option value="">Selecciona</option>
+                </select>
+              </div>
+
+              <div class="kanm-input-group producto-activo-group">
+                <label for="prod-activo">Activo</label>
+                <input type="checkbox" id="prod-activo" checked />
+              </div>
+            </div>
+
+            <div class="admin-product-recipe">
+              <div class="kanm-card-header">
+                <h4>Receta del producto (insumos)</h4>
+                <p class="kanm-subtitle">
+                  Opcional. Define qué insumos y en qué cantidad se consumen cada vez que se prepara este producto.
+                </p>
+              </div>
+
+              <div class="receta-wrapper">
+                <div class="receta-header">
+                  <span>Insumo</span>
+                  <span>Cantidad</span>
+                  <span>Unidad</span>
+                  <span></span>
+                </div>
+                <div id="receta-rows" class="receta-rows"></div>
+              </div>
+
+              <div class="receta-actions">
+                <button type="button" class="kanm-button secondary" id="receta-agregar">Agregar insumo</button>
+              </div>
+              <div id="receta-mensaje" class="kanm-message"></div>
+            </div>
+
+            <div class="admin-form-actions producto-form-actions">
+              <button type="submit" class="kanm-button" id="prod-guardar">Guardar producto</button>
+            </div>
+            <div id="admin-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <!-- Insumos -->
+    <section class="admin-panel hidden" data-admin-section="insumos" id="admin-section-insumos">
+      <div class="kanm-card-header">
+        <h2>Insumos</h2>
+        <p class="kanm-subtitle">Gestiona materia prima y consumibles del negocio.</p>
+      </div>
+      <div class="admin-layout-two-cols">
+        <section class="kanm-card admin-card">
+          <header class="kanm-card-header">
+            <h3>Insumos registrados</h3>
+            <p class="kanm-subtitle">Consulta existencias, costos y estado.</p>
+          </header>
+          <div class="insumos-filtros">
+            <div class="kanm-input-group">
+              <input type="text" id="insumos-buscar" placeholder="Buscar insumo..." />
+            </div>
+            <button type="button" class="kanm-button secondary" id="insumos-filtrar">Buscar</button>
+          </div>
+          <div id="insumos-mensaje" class="kanm-message"></div>
+          <div class="kanm-table-wrapper">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Unidad</th>
+                  <th>Stock</th>
+                  <th>Costo</th>
+                  <th>Activo</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="insumos-lista"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="kanm-card admin-card">
+          <header class="kanm-card-header">
+            <h3>Formulario de insumo</h3>
+            <p class="kanm-subtitle">Crea o edita un insumo y su disponibilidad.</p>
+          </header>
+          <form id="insumo-form" class="kanm-form" novalidate>
+            <input type="hidden" id="insumo-id" />
+
+            <div class="kanm-form-grid">
+              <div class="kanm-input-group">
+                <label for="insumo-nombre">Nombre</label>
+                <input type="text" id="insumo-nombre" placeholder="Ej. Harina" />
+              </div>
+
+              <div class="kanm-input-group">
+                <label for="insumo-unidad">Unidad</label>
+                <input type="text" id="insumo-unidad" placeholder="Kg, L, Caja..." />
+              </div>
+
+              <div class="kanm-input-group">
+                <label for="insumo-stock">Stock actual</label>
+                <input type="number" id="insumo-stock" min="0" step="0.01" placeholder="0" />
+              </div>
+
+              <div class="kanm-input-group">
+                <label for="insumo-costo">Costo unitario promedio</label>
+                <input type="number" id="insumo-costo" min="0" step="0.01" placeholder="0.00" />
+              </div>
+            </div>
+
+            <div class="kanm-input-group">
+              <label for="insumo-comentarios">Notas</label>
+              <textarea id="insumo-comentarios" rows="3" placeholder="Observaciones opcionales"></textarea>
+            </div>
+
+            <div class="kanm-input-group kanm-input-group--inline">
+              <label for="insumo-activo">Activo</label>
+              <input type="checkbox" id="insumo-activo" checked />
+            </div>
+
+            <div class="admin-form-actions">
+              <button type="button" class="kanm-button ghost" id="insumo-nuevo">Nuevo</button>
+              <button type="submit" class="kanm-button" id="insumo-guardar">Guardar insumo</button>
+            </div>
+            <div id="insumo-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <!-- Configuración -->
+    <section class="admin-panel hidden" data-admin-section="configuracion" id="admin-section-config">
+      <div class="kanm-card-header">
+        <h2>Configuración</h2>
+        <p class="kanm-subtitle">Impuesto ITBIS y datos de facturación.</p>
+      </div>
+      <div class="admin-grid-two">
+        <section class="kanm-card admin-card">
+          <header class="kanm-card-header">
+            <h3>Configuración de impuesto</h3>
+            <p class="kanm-subtitle">Define el porcentaje de impuesto (ITBIS) aplicado.</p>
+          </header>
+          <form class="kanm-form" id="impuesto-form" novalidate>
+            <div class="kanm-input-group">
+              <label for="impuesto-valor">Impuesto (%)</label>
+              <input type="number" id="impuesto-valor" min="0" step="0.01" placeholder="Ej. 18" />
+            </div>
+            <div class="admin-form-actions">
+              <button type="button" class="kanm-button" id="impuesto-guardar">Guardar impuesto</button>
+            </div>
+            <div id="impuesto-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+
+        <section class="kanm-card admin-card" id="factura-config">
+          <header class="kanm-card-header">
+            <h3>Configuración de facturación</h3>
+            <p class="kanm-subtitle">Encabezado, contactos y rangos de comprobantes fiscales.</p>
+          </header>
+
+          <form class="kanm-form factura-form" id="factura-form" novalidate>
+            <div class="admin-billing-grid">
+              <div class="admin-field">
+                <label for="factura-telefonos">Teléfonos</label>
+                <div class="admin-phone-row">
+                  <div id="factura-telefonos" class="factura-telefonos admin-phone-list"></div>
+                  <button
+                    type="button"
+                    id="factura-telefono-agregar"
+                    class="kanm-button ghost kanm-button--sm"
+                  >
+                    Agregar teléfono
+                  </button>
+                </div>
+              </div>
+
+              <div class="admin-field">
+                <label for="factura-direccion">Dirección</label>
+                <input type="text" id="factura-direccion" placeholder="Dirección del negocio" />
+              </div>
+
+              <div class="admin-field">
+                <label for="factura-rnc">RNC del negocio</label>
+                <input type="text" id="factura-rnc" placeholder="Ej. 1-01-99999-9" />
+              </div>
+
+              <div class="admin-field">
+                <label for="factura-logo">Logo (URL)</label>
+                <input type="text" id="factura-logo" placeholder="https://..." />
+              </div>
+
+              <div class="admin-field admin-field--full">
+                <label for="factura-pie">Mensaje de pie</label>
+                <textarea id="factura-pie" rows="2" placeholder="Gracias por su compra"></textarea>
+              </div>
+            </div>
+
+            <div class="factura-rangos">
+              <div class="kanm-card kanm-card--subsection">
+                <div class="kanm-card-header">
+                  <h4>Secuencia B02 (Consumidor final)</h4>
+                  <p class="kanm-subtitle">Define el rango disponible para comprobantes B02.</p>
+                </div>
+                <div class="factura-rango-grid">
+                  <div class="kanm-input-group">
+                    <label for="ncf-b02-inicio">Inicio</label>
+                    <input type="number" id="ncf-b02-inicio" min="1" />
+                  </div>
+                  <div class="kanm-input-group">
+                    <label for="ncf-b02-fin">Fin</label>
+                    <input type="number" id="ncf-b02-fin" min="1" />
+                  </div>
+                  <div class="kanm-input-group">
+                    <label>Restantes</label>
+                    <div class="factura-restante" id="ncf-b02-restante">—</div>
+                  </div>
+                </div>
+                <div id="ncf-b02-alerta" class="kanm-message"></div>
+              </div>
+
+              <div class="kanm-card kanm-card--subsection">
+                <div class="kanm-card-header">
+                  <h4>Secuencia B01</h4>
+                  <p class="kanm-subtitle">Configura el rango para comprobantes B01.</p>
+                </div>
+                <div class="factura-rango-grid">
+                  <div class="kanm-input-group">
+                    <label for="ncf-b01-inicio">Inicio</label>
+                    <input type="number" id="ncf-b01-inicio" min="1" />
+                  </div>
+                  <div class="kanm-input-group">
+                    <label for="ncf-b01-fin">Fin</label>
+                    <input type="number" id="ncf-b01-fin" min="1" />
+                  </div>
+                  <div class="kanm-input-group">
+                    <label>Restantes</label>
+                    <div class="factura-restante" id="ncf-b01-restante">—</div>
+                  </div>
+                </div>
+                <div id="ncf-b01-alerta" class="kanm-message"></div>
+              </div>
+            </div>
+
+            <div class="admin-form-actions">
+              <button type="button" class="kanm-button" id="factura-guardar">Guardar facturación</button>
+            </div>
+            <div id="factura-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <!-- Usuarios -->
+    <section class="admin-panel hidden" data-admin-section="usuarios" id="admin-section-usuarios">
+      <div class="kanm-card-header">
+        <h2>Usuarios</h2>
+        <p class="kanm-subtitle">Administra las cuentas de meseras, cocina y caja.</p>
+      </div>
+      <div class="admin-layout-two-cols">
+        <section class="kanm-card admin-card">
+          <header class="kanm-card-header">
+            <h3>Usuarios registrados</h3>
+            <p class="kanm-subtitle">Filtra por rol y gestiona estado.</p>
+          </header>
+          <div class="kanm-input-group">
+            <label for="usuarios-rol">Rol</label>
+            <select id="usuarios-rol">
+              <option value="mesera">Mesera</option>
+              <option value="cocina">Cocina</option>
+              <option value="bar">Bar</option>
+              <option value="caja">Caja</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </div>
+          <div id="usuarios-mensaje" class="kanm-message"></div>
+          <div class="kanm-table-wrapper">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Usuario</th>
+                  <th>Rol</th>
+                  <th>Activo</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="usuarios-tabla-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="kanm-card admin-card">
+          <header class="kanm-card-header">
+            <h3>Crear o editar usuario</h3>
+            <p class="kanm-subtitle">Actualiza datos y permisos.</p>
+          </header>
+          <form id="usuario-form" class="kanm-form" novalidate>
+            <input type="hidden" id="usuario-id" />
+
+            <div class="kanm-form-grid">
+              <div class="kanm-input-group">
+                <label for="usuario-nombre">Nombre</label>
+                <input type="text" id="usuario-nombre" placeholder="Nombre visible" />
+              </div>
+
+              <div class="kanm-input-group">
+                <label for="usuario-usuario">Usuario</label>
+                <input type="text" id="usuario-usuario" placeholder="nombre.de.usuario" />
+              </div>
+
+              <div class="kanm-input-group">
+                <label for="usuario-password">Contraseña</label>
+                <input type="password" id="usuario-password" placeholder="•••••••" />
+                <p class="kanm-help-text">Obligatoria al crear. En edición es opcional.</p>
+              </div>
+
+              <div class="kanm-input-group">
+                <label for="usuario-rol">Rol</label>
+                <select id="usuario-rol">
+                  <option value="mesera">Mesera</option>
+                  <option value="cocina">Cocina</option>
+                  <option value="bar">Bar</option>
+                  <option value="caja">Caja</option>
+                  <option value="admin">Administrador</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="kanm-input-group kanm-input-group--inline">
+              <label for="usuario-activo">Activo</label>
+              <input type="checkbox" id="usuario-activo" checked />
+            </div>
+
+            <div class="kanm-actions">
+              <button type="submit" class="kanm-button">Guardar usuario</button>
+              <button type="button" class="kanm-button ghost" id="usuario-limpiar">Limpiar</button>
+            </div>
+            <div id="usuario-form-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <!-- Categorías -->
+    <section class="admin-panel hidden" data-admin-section="categorias" id="admin-section-categorias">
+      <div class="kanm-card-header">
+        <h2>Categorías</h2>
+        <p class="kanm-subtitle">Organiza las categorías que usarás en productos e insumos.</p>
+      </div>
+      <div class="admin-layout-two-cols categorias-layout">
+        <section class="kanm-card admin-card">
+          <header class="kanm-card-header">
+            <h3>Listado de categorías</h3>
+            <p class="kanm-subtitle">Busca por nombre.</p>
+          </header>
+          <div class="categorias-busqueda">
+            <div class="kanm-input-group">
+              <label for="categorias-buscar">Buscar</label>
+              <input type="text" id="categorias-buscar" placeholder="Nombre de la categoría" />
+            </div>
+            <button type="button" class="kanm-button secondary" id="categorias-filtrar">Buscar</button>
+          </div>
+          <div id="categorias-lista-mensaje" class="kanm-message"></div>
+          <div class="kanm-table-wrapper">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Área de preparación</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="categorias-tabla"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="kanm-card admin-card">
+          <header class="kanm-card-header">
+            <h3>Formulario de categoría</h3>
+            <p class="kanm-subtitle">Crea o actualiza una categoría.</p>
+          </header>
+          <form id="categoria-form" class="kanm-form" novalidate>
+            <input type="hidden" id="categoria-id" />
+            <div class="kanm-form-grid categorias-grid">
+              <div class="kanm-input-group">
+                <label for="categoria-nombre">Nombre *</label>
+                <input type="text" id="categoria-nombre" required placeholder="Ej. Postres, Bebidas" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="categoria-area">Área de preparación</label>
+                <select id="categoria-area">
+                  <option value="ninguna">Ninguna</option>
+                  <option value="cocina">Cocina</option>
+                  <option value="bar">Bar</option>
+                </select>
+              </div>
+              <div class="kanm-input-group kanm-input-group--inline">
+                <label for="categoria-activo">Activa</label>
+                <input type="checkbox" id="categoria-activo" checked />
+              </div>
+            </div>
+
+            <div class="admin-form-actions">
+              <button type="button" class="kanm-button ghost" id="categoria-nuevo">Nuevo</button>
+              <button type="submit" class="kanm-button" id="categoria-guardar">Guardar categoría</button>
+            </div>
+            <div id="categoria-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <!-- Clientes -->
+    <section class="admin-panel hidden" data-admin-section="clientes" id="admin-section-clientes">
+      <div class="kanm-card-header">
+        <h2>Clientes</h2>
+        <p class="kanm-subtitle">Gestiona clientes y reutiliza sus datos en cotizaciones y caja.</p>
+      </div>
+      <div class="admin-layout-two-cols clientes-layout">
+        <section class="kanm-card admin-card">
+          <header class="kanm-card-header">
+            <h3>Listado de clientes</h3>
+            <p class="kanm-subtitle">Busca por nombre o documento.</p>
+          </header>
+          <div class="clientes-busqueda">
+            <div class="kanm-input-group">
+              <label for="clientes-buscar">Buscar</label>
+              <input type="text" id="clientes-buscar" placeholder="Nombre o documento" />
+            </div>
+            <button type="button" class="kanm-button secondary" id="clientes-filtrar">Buscar</button>
+          </div>
+          <div id="clientes-lista-mensaje" class="kanm-message"></div>
+          <div class="kanm-table-wrapper">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Documento</th>
+                  <th>Teléfono</th>
+                  <th>Email</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="clientes-tabla"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="kanm-card admin-card">
+          <header class="kanm-card-header">
+            <h3>Formulario de cliente</h3>
+            <p class="kanm-subtitle">Crea o edita información de contacto.</p>
+          </header>
+          <form id="cliente-form" class="kanm-form" novalidate>
+            <input type="hidden" id="cliente-id" />
+            <div class="kanm-form-grid clientes-grid">
+              <div class="kanm-input-group">
+                <label for="cliente-nombre">Nombre del cliente *</label>
+                <input type="text" id="cliente-nombre" required placeholder="Ej. Juan Pérez" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="cliente-documento">Documento</label>
+                <input type="text" id="cliente-documento" placeholder="RNC o cédula" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="cliente-tipo-documento">Tipo de documento</label>
+                <select id="cliente-tipo-documento">
+                  <option value="">Selecciona</option>
+                  <option value="cedula">Cédula</option>
+                  <option value="rnc">RNC</option>
+                  <option value="pasaporte">Pasaporte</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="cliente-telefono">Teléfono</label>
+                <input type="text" id="cliente-telefono" placeholder="809..." />
+              </div>
+              <div class="kanm-input-group">
+                <label for="cliente-email">Email</label>
+                <input type="email" id="cliente-email" placeholder="correo@dominio.com" />
+              </div>
+            </div>
+
+            <div class="kanm-form-grid clientes-grid">
+              <div class="kanm-input-group">
+                <label for="cliente-direccion">Dirección</label>
+                <textarea id="cliente-direccion" rows="2" placeholder="Calle, número, sector"></textarea>
+              </div>
+              <div class="kanm-input-group">
+                <label for="cliente-notas">Notas internas</label>
+                <textarea id="cliente-notas" rows="2" placeholder="Recordatorios o preferencias"></textarea>
+              </div>
+            </div>
+
+            <div class="kanm-input-group kanm-input-group--inline">
+              <label for="cliente-activo">Activo</label>
+              <input type="checkbox" id="cliente-activo" checked />
+            </div>
+
+            <div class="admin-form-actions">
+              <button type="button" class="kanm-button ghost" id="cliente-nuevo">Nuevo</button>
+              <button type="submit" class="kanm-button" id="cliente-guardar">Guardar cliente</button>
+            </div>
+            <div id="cliente-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <!-- Cotizaciones -->
+    <section class="admin-panel hidden" data-admin-section="cotizaciones" id="admin-section-cotizaciones">
+      <div class="kanm-card-header">
+        <h2>Cotizaciones</h2>
+        <p class="kanm-subtitle">Gestiona propuestas, descuentos y facturación.</p>
+      </div>
+      <div class="cotizaciones-layout">
+        <section class="kanm-card admin-card cotizaciones-card cotizaciones-card--lista">
+          <header class="kanm-card-header">
+            <div>
+              <h3>Listado de cotizaciones</h3>
+              <p class="kanm-subtitle">Filtra por fecha, estado o cliente.</p>
+            </div>
+          </header>
+
+          <form class="cotizaciones-filtros" novalidate>
+            <div class="kanm-input-group">
+              <label for="cotizaciones-desde">Fecha desde</label>
+              <input type="date" id="cotizaciones-desde" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="cotizaciones-hasta">Fecha hasta</label>
+              <input type="date" id="cotizaciones-hasta" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="cotizaciones-estado">Estado</label>
+              <select id="cotizaciones-estado">
+                <option value="">Todos</option>
+                <option value="borrador">Borrador</option>
+                <option value="enviada">Enviada</option>
+                <option value="aceptada">Aceptada</option>
+                <option value="rechazada">Rechazada</option>
+                <option value="vencida">Vencida</option>
+                <option value="facturada">Facturada</option>
+              </select>
+            </div>
+            <div class="kanm-input-group">
+              <label for="cotizaciones-buscar">Búsqueda</label>
+              <input type="text" id="cotizaciones-buscar" placeholder="Cliente o código" />
+            </div>
+            <div class="cotizaciones-filtros-actions">
+              <button type="button" class="kanm-button secondary" id="cotizaciones-filtrar">Filtrar</button>
+              <button type="button" class="kanm-button" id="cotizaciones-nueva">Nueva cotización</button>
+            </div>
+          </form>
+
+          <div id="cotizaciones-lista-mensaje" class="kanm-message"></div>
+          <div id="cotizaciones-lista" class="cotizacion-list"></div>
+        </section>
+
+        <section class="kanm-card admin-card cotizaciones-card cotizaciones-card--editor">
+          <header class="kanm-card-header">
+            <h3>Editor de cotización</h3>
+            <p class="kanm-subtitle">Completa los datos y guarda como borrador o envía al cliente.</p>
+          </header>
+          <form id="cotizacion-form" class="kanm-form" novalidate>
+            <input type="hidden" id="cotizacion-id" />
+            <div class="cotizacion-meta-grid">
+              <div class="cotizacion-meta-block">
+                <p class="kanm-subtitle">Código</p>
+                <div class="cotizacion-codigo" id="cotizacion-codigo">Nueva</div>
+              </div>
+              <div class="cotizacion-meta-block">
+                <p class="kanm-subtitle">Estado</p>
+                <span id="cotizacion-estado" class="cotizacion-estado-badge" data-estado="borrador">Borrador</span>
+              </div>
+              <div class="cotizacion-meta-block">
+                <p class="kanm-subtitle">Creada</p>
+                <div id="cotizacion-fecha" class="cotizacion-meta-value">--</div>
+              </div>
+              <div class="kanm-input-group">
+                <label for="cotizacion-validez">Válida hasta</label>
+                <input type="date" id="cotizacion-validez" />
+              </div>
+            </div>
+
+            <div class="cotizacion-section">
+              <div class="cotizacion-section-header">
+                <h4>Datos del cliente</h4>
+                <p class="kanm-subtitle">Identifica a quién se envía la propuesta.</p>
+              </div>
+              <div class="cotizacion-grid">
+                <div class="kanm-input-group">
+                  <label for="cotizacion-cliente-buscar">Buscar cliente</label>
+                  <input type="text" id="cotizacion-cliente-buscar" list="cotizacion-clientes" placeholder="Nombre o documento" />
+                  <datalist id="cotizacion-clientes"></datalist>
+                </div>
+                <div class="kanm-input-group">
+                  <label for="cotizacion-cliente-nombre">Nombre del cliente</label>
+                  <input type="text" id="cotizacion-cliente-nombre" placeholder="Consumidor final" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="cotizacion-cliente-documento">Documento</label>
+                  <input type="text" id="cotizacion-cliente-documento" placeholder="RNC o cédula" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="cotizacion-cliente-contacto">Contacto</label>
+                  <input type="text" id="cotizacion-cliente-contacto" placeholder="Teléfono o correo" />
+                </div>
+              </div>
+            </div>
+
+            <div class="cotizacion-section">
+              <div class="cotizacion-section-header">
+                <h4>Notas</h4>
+                <p class="kanm-subtitle">Información visible y recordatorios internos.</p>
+              </div>
+              <div class="cotizacion-grid">
+                <div class="kanm-input-group">
+                  <label for="cotizacion-notas-cliente">Notas para el cliente</label>
+                  <textarea id="cotizacion-notas-cliente" rows="3" placeholder="Condiciones, entregas, etc."></textarea>
+                </div>
+                <div class="kanm-input-group">
+                  <label for="cotizacion-notas-internas">Notas internas</label>
+                  <textarea id="cotizacion-notas-internas" rows="3" placeholder="Recordatorios para el equipo"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <div class="cotizacion-section">
+              <div class="cotizacion-section-header">
+                <h4>Ítems de cotización</h4>
+                <p class="kanm-subtitle">Agrega productos y ajustes por línea.</p>
+              </div>
+              <div class="cotizacion-items-wrapper kanm-table-wrapper">
+                <table class="kanm-table cotizacion-items-table">
+                  <thead>
+                    <tr>
+                      <th>Producto</th>
+                      <th>Descripción</th>
+                      <th>Cantidad</th>
+                      <th>Precio</th>
+                      <th>Desc %</th>
+                      <th>Desc $</th>
+                      <th>Total línea</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="cotizacion-items-body"></tbody>
+                </table>
+              </div>
+
+              <div class="cotizacion-items-actions">
+                <button type="button" class="kanm-button secondary" id="cotizacion-item-agregar">Agregar ítem</button>
+              </div>
+            </div>
+
+            <div class="cotizacion-section cotizacion-totales">
+              <div class="cotizacion-totales-grid">
+                <div class="kanm-input-group">
+                  <label for="cotizacion-descuento-porcentaje">Descuento global (%)</label>
+                  <input type="number" id="cotizacion-descuento-porcentaje" min="0" step="0.01" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="cotizacion-descuento-monto">Descuento global (monto)</label>
+                  <input type="number" id="cotizacion-descuento-monto" min="0" step="0.01" />
+                </div>
+              </div>
+              <div class="cotizacion-totales-display">
+                <div class="cotizacion-total-row"><span>Subtotal</span><span id="cotizacion-subtotal">DOP&nbsp;0.00</span></div>
+                <div class="cotizacion-total-row"><span>Descuento</span><span id="cotizacion-descuento-total">DOP&nbsp;0.00</span></div>
+                <div class="cotizacion-total-row"><span>Impuesto</span><span id="cotizacion-impuesto">DOP&nbsp;0.00</span></div>
+                <div class="cotizacion-total-row cotizacion-total-final"><span>Total</span><span id="cotizacion-total">DOP&nbsp;0.00</span></div>
+              </div>
+            </div>
+
+            <div class="admin-form-actions cotizacion-actions">
+              <button type="button" class="kanm-button secondary" id="cotizacion-guardar">Guardar borrador</button>
+              <button type="button" class="kanm-button ghost" id="cotizacion-enviar">Marcar enviada</button>
+              <button type="button" class="kanm-button" id="cotizacion-aceptar">Aceptar</button>
+              <button type="button" class="kanm-button ghost" id="cotizacion-imprimir">Imprimir</button>
+              <button type="button" class="kanm-button" id="cotizacion-facturar">Facturar cotización</button>
+            </div>
+            <div id="cotizacion-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <!-- Compras & 606 -->
+    <section class="admin-panel hidden" data-admin-section="compras" id="admin-section-compras">
+      <div class="kanm-card-header">
+        <h2>Compras &amp; 606</h2>
+        <p class="kanm-subtitle">Registra compras, actualiza inventario y genera el 606.</p>
+      </div>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Registro de compras (606)</h3>
+          <p class="kanm-subtitle">Captura facturas de proveedores y recalcula montos.</p>
+        </header>
+
+        <form id="compra-form" class="kanm-form" novalidate>
+          <div class="kanm-form-grid compra-grid">
+            <div class="kanm-input-group">
+              <label for="compra-proveedor">Proveedor</label>
+              <input type="text" id="compra-proveedor" placeholder="Nombre del proveedor" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="compra-rnc">RNC</label>
+              <input type="text" id="compra-rnc" placeholder="RNC" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="compra-fecha">Fecha</label>
+              <input type="date" id="compra-fecha" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="compra-tipo">Tipo de comprobante</label>
+              <select id="compra-tipo">
+                <option value="B01">B01</option>
+                <option value="B02">B02</option>
+                <option value="B15">B15</option>
+                <option value="B16">B16</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="kanm-form-grid compra-grid">
+            <div class="kanm-input-group">
+              <label for="compra-ncf">NCF</label>
+              <input type="text" id="compra-ncf" placeholder="B01XXXXXXXX" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="compra-gravado">Monto gravado</label>
+              <input type="number" id="compra-gravado" min="0" step="0.01" placeholder="0.00" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="compra-impuesto">ITBIS</label>
+              <input type="number" id="compra-impuesto" min="0" step="0.01" placeholder="0.00" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="compra-exento">Monto exento</label>
+              <input type="number" id="compra-exento" min="0" step="0.01" placeholder="0.00" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="compra-total">Total factura</label>
+              <input type="number" id="compra-total" min="0" step="0.01" placeholder="0.00" />
+            </div>
+          </div>
+
+          <div class="kanm-input-group">
+            <label for="compra-comentarios">Comentarios</label>
+            <textarea id="compra-comentarios" rows="2" placeholder="Notas u observaciones"></textarea>
+          </div>
+
+          <div class="compra-detalle-header">
+            <h4 class="kanm-subheading">Detalle de insumos</h4>
+            <div class="compra-detalle-actions">
+              <button type="button" class="kanm-button secondary" id="compra-agregar-detalle">
+                Agregar insumo
+              </button>
+              <button type="button" class="kanm-button ghost" id="compra-recalcular">Recalcular</button>
+            </div>
+          </div>
+          <div class="compra-detalles" id="compra-detalles"></div>
+
+          <div class="admin-form-actions">
+            <button type="submit" class="kanm-button">Guardar compra</button>
+          </div>
+
+          <div id="compra-mensaje" class="kanm-message"></div>
+        </form>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Historial de compras</h3>
+          <p class="kanm-subtitle">Revisa las compras registradas y sus totales.</p>
+        </header>
+        <div id="compras-mensaje" class="kanm-message"></div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Proveedor</th>
+                <th>NCF</th>
+                <th>Total</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="compras-tabla"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="kanm-card admin-card" id="admin-reporte-606">
+        <header class="kanm-card-header">
+          <h3>Reporte 606 - Compras</h3>
+          <p class="kanm-subtitle">Genera el resumen mensual de compras y gastos deducibles.</p>
+        </header>
+        <div class="admin-report-controls">
+          <div class="kanm-input-group">
+            <label for="reporte-606-mes">Mes de consulta</label>
+            <input type="month" id="reporte-606-mes" />
+          </div>
+          <div class="admin-report-actions">
+            <button type="button" class="kanm-button secondary" id="reporte-606-consultar">
+              Consultar
+            </button>
+            <button type="button" class="kanm-button" id="reporte-606-exportar">
+              Exportar 606 (CSV)
+            </button>
+          </div>
+        </div>
+        <div class="admin-resumen-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">Facturas</span>
+            <span class="resumen-value" id="reporte-606-total">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Total mes</span>
+            <span class="resumen-value" id="reporte-606-monto">DOP&nbsp;0.00</span>
+          </div>
+        </div>
+        <div id="reporte-606-mensaje" class="kanm-message"></div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Proveedor</th>
+                <th>RNC</th>
+                <th>Tipo</th>
+                <th>NCF</th>
+                <th>Gravado</th>
+                <th>ITBIS</th>
+                <th>Exento</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody id="reporte-606-tabla"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- Ventas & 607 -->
+    <section class="admin-panel hidden" data-admin-section="ventas" id="admin-section-ventas">
+      <div class="kanm-card-header">
+        <h2>Ventas &amp; 607</h2>
+        <p class="kanm-subtitle">Consulta y exporta el 607 de ventas.</p>
+      </div>
+
+      <section class="kanm-card admin-card" id="admin-reporte-607">
+        <header class="kanm-card-header">
+          <h3>Reporte 607 - Ventas</h3>
+          <p class="kanm-subtitle">Resumen fiscal mensual de ventas.</p>
+        </header>
+        <div class="admin-report-controls">
+          <div class="kanm-input-group">
+            <label for="reporte-607-mes">Mes de consulta</label>
+            <input type="month" id="reporte-607-mes" />
+          </div>
+          <div class="admin-report-actions">
+            <button type="button" class="kanm-button secondary" id="reporte-607-consultar">
+              Consultar
+            </button>
+            <button type="button" class="kanm-button" id="reporte-607-exportar">
+              Exportar 607 (CSV)
+            </button>
+          </div>
+        </div>
+        <div class="admin-resumen-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">Facturas</span>
+            <span class="resumen-value" id="reporte-607-total">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Total mes</span>
+            <span class="resumen-value" id="reporte-607-monto">DOP&nbsp;0.00</span>
+          </div>
+        </div>
+        <div id="reporte-607-mensaje" class="kanm-message"></div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>NCF</th>
+                <th>Cliente</th>
+                <th>Documento</th>
+                <th>Tipo</th>
+                <th>Gravado</th>
+                <th>ITBIS</th>
+                <th>Descuento</th>
+                <th>Propina</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody id="reporte-607-tabla"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- Cuadres -->
+    <section class="admin-panel hidden" data-admin-section="cuadres" id="admin-section-cierres">
+      <div class="kanm-card-header">
+        <h2>Cuadres de caja</h2>
+        <p class="kanm-subtitle">Consulta los cierres registrados y verifica diferencias declaradas.</p>
+      </div>
+      <section class="kanm-card admin-card">
+        <div class="admin-report-controls">
+          <div class="kanm-input-group">
+            <label for="cierres-desde">Desde</label>
+            <input type="date" id="cierres-desde" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="cierres-hasta">Hasta</label>
+            <input type="date" id="cierres-hasta" />
+          </div>
+          <div class="admin-report-actions">
+            <button type="button" class="kanm-button secondary" id="cierres-buscar">
+              Buscar
+            </button>
+            <button type="button" class="kanm-button" id="cierres-exportar">
+              Exportar cuadres (CSV)
+            </button>
+          </div>
+        </div>
+        <div id="cierres-mensaje" class="kanm-message"></div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Fecha operación</th>
+                <th>Hora de cuadre</th>
+                <th>Usuario</th>
+                <th>Total sistema</th>
+                <th>Total declarado</th>
+                <th>Diferencia</th>
+                <th>Observaciones</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="cierres-tabla"></tbody>
+          </table>
+        </div>
+        <div class="kanm-table-wrapper" id="cierres-detalle-wrapper" hidden>
+          <h3 class="kanm-subheading">Detalle del cierre seleccionado</h3>
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Mesa/Cliente</th>
+                <th>Total</th>
+                <th>Fecha de cobro</th>
+              </tr>
+            </thead>
+            <tbody id="cierres-detalle-tabla"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- Historial de cocina -->
+    <section class="admin-panel hidden" data-admin-section="historial" id="admin-section-historial">
+      <div class="kanm-card-header">
+        <h2>Historial de cocina</h2>
+        <p class="kanm-subtitle">Consulta los items finalizados agrupados por día.</p>
+      </div>
+      <section class="kanm-card admin-card">
+        <div class="admin-report-controls">
+          <div class="kanm-input-group">
+            <label for="hist-cocina-fecha">Fecha</label>
+            <input type="date" id="hist-cocina-fecha" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="hist-cocina-cocinero">Cocinero</label>
+            <select id="hist-cocina-cocinero">
+              <option value="">Todos</option>
+            </select>
+          </div>
+          <div class="admin-report-actions">
+            <button type="button" class="kanm-button secondary" id="hist-cocina-buscar">Consultar</button>
+            <button type="button" class="kanm-button" id="hist-cocina-exportar">Exportar a CSV</button>
+          </div>
+        </div>
+        <div id="hist-cocina-mensaje" class="kanm-message"></div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Cuenta</th>
+                <th>Pedido</th>
+                <th>Ítem</th>
+                <th>Cantidad</th>
+                <th>Cocinero</th>
+                <th>Entrada</th>
+                <th>Finalizado</th>
+              </tr>
+            </thead>
+            <tbody id="hist-cocina-tabla"></tbody>
+          </table>
+        </div>
+        <div class="kanm-pagination" id="hist-cocina-paginacion">
+          <button type="button" class="kanm-button ghost" id="hist-cocina-prev">Anterior</button>
+          <span class="kanm-pagination-info" id="hist-cocina-info">Página 1</span>
+          <button type="button" class="kanm-button ghost" id="hist-cocina-next">Siguiente</button>
+        </div>
+      </section>
+    </section>
+
+    <!-- Negocios (solo super admin) -->
+    <section class="admin-panel hidden" data-admin-section="negocios" id="kanm-negocios-section">
+      <div class="kanm-card-header">
+        <h2 data-negocio-titulo>Negocios</h2>
+        <p class="kanm-subtitle">Administra los negocios del sistema (solo super admin).</p>
+      </div>
+      <div class="kanm-card admin-card">
+        <div class="kanm-card-header kanm-card-header--actions">
+          <div>
+            <h3>Listado</h3>
+            <p class="kanm-subtitle">Solo visible para Super Admin.</p>
+          </div>
+          <button type="button" class="kanm-button primary" id="kanm-negocios-btn-nuevo">Nuevo negocio</button>
+        </div>
+        <div id="kanm-negocios-mensaje" class="kanm-subtitle"></div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table" id="kanm-negocios-tabla">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Slug</th>
+                <th>Colores</th>
+                <th>Logo</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="kanm-negocios-tbody">
+              <tr>
+                <td colspan="5">Cargando...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal Crear/Editar Negocio -->
+  <div class="kanm-modal oculto" id="kanm-negocios-modal">
+    <div class="kanm-modal-backdrop"></div>
+    <div class="kanm-modal-panel">
+      <div class="kanm-modal-header">
+        <h3 id="kanm-negocios-modal-titulo">Nuevo negocio</h3>
+        <button type="button" class="kanm-button ghost" id="kanm-negocios-btn-cerrar">Cerrar</button>
+      </div>
+      <div class="kanm-modal-body">
+        <form id="kanm-negocios-form" class="kanm-form" novalidate>
+          <input type="hidden" id="kanm-negocios-id" />
+          <section class="kanm-modal-section">
+            <h4>Datos básicos</h4>
+            <div class="kanm-input-group">
+              <label for="kanm-negocios-nombre">Título / Nombre público</label>
+              <input type="text" id="kanm-negocios-nombre" placeholder="Ej. Mi Cafetería" required />
+            </div>
+            <div class="kanm-input-group" id="kanm-negocios-slug-group">
+              <label for="kanm-negocios-slug">Slug</label>
+              <input type="text" id="kanm-negocios-slug" placeholder="mi-cafeteria" required />
+            </div>
+            <div class="kanm-input-group">
+              <label for="kanm-negocios-logo-url">Logo URL</label>
+              <input type="text" id="kanm-negocios-logo-url" placeholder="https://..." />
+            </div>
+          </section>
+
+          <section class="kanm-modal-section">
+            <h4>Tema visual</h4>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-color-primario">Color primario</label>
+                <input type="color" id="kanm-negocios-color-primario" value="#ff6699" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-color-secundario">Color secundario</label>
+                <input type="color" id="kanm-negocios-color-secundario" value="#ff99bb" />
+              </div>
+            </div>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-color-texto">Color texto</label>
+                <input type="color" id="kanm-negocios-color-texto" value="#222222" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-color-header">Color header</label>
+                <input type="color" id="kanm-negocios-color-header" value="#ff6699" />
+              </div>
+            </div>
+            <div class="kanm-grid-3">
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-color-boton-primario">Color botón primario</label>
+                <input type="color" id="kanm-negocios-color-boton-primario" value="#ff6699" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-color-boton-secundario">Color botón secundario</label>
+                <input type="color" id="kanm-negocios-color-boton-secundario" value="#ff99bb" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-color-boton-peligro">Color botón peligro</label>
+                <input type="color" id="kanm-negocios-color-boton-peligro" value="#ff4b4b" />
+              </div>
+            </div>
+          </section>
+
+          <section class="kanm-modal-section">
+            <h4>Módulos habilitados</h4>
+            <div class="kanm-grid-3">
+              <label class="kanm-checkbox">
+                <input type="checkbox" id="kanm-modulo-admin" checked />
+                <span>Admin</span>
+              </label>
+              <label class="kanm-checkbox">
+                <input type="checkbox" id="kanm-modulo-mesera" checked />
+                <span>Mesera</span>
+              </label>
+              <label class="kanm-checkbox">
+                <input type="checkbox" id="kanm-modulo-cocina" checked />
+                <span>Cocina</span>
+              </label>
+              <label class="kanm-checkbox">
+                <input type="checkbox" id="kanm-modulo-bar" />
+                <span>Bar</span>
+              </label>
+              <label class="kanm-checkbox">
+                <input type="checkbox" id="kanm-modulo-caja" checked />
+                <span>Caja</span>
+              </label>
+              <label class="kanm-checkbox">
+                <input type="checkbox" id="kanm-modulo-historial" checked />
+                <span>Historial de cocina</span>
+              </label>
+            </div>
+          </section>
+
+          <section class="kanm-modal-section">
+            <h4>Admin principal</h4>
+          <div class="kanm-input-group">
+            <label for="kanm-negocios-admin-correo">Correo del admin principal</label>
+            <input type="email" id="kanm-negocios-admin-correo" placeholder="admin@negocio.com" />
+          </div>
+          <div class="kanm-grid-2">
+            <div class="kanm-input-group">
+              <label for="kanm-negocios-admin-usuario">Usuario admin (opcional)</label>
+              <input type="text" id="kanm-negocios-admin-usuario" placeholder="admin.negocio" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="kanm-negocios-admin-password">Contraseña admin (opcional)</label>
+              <input type="password" id="kanm-negocios-admin-password" placeholder="********" />
+            </div>
+          </div>
+        </section>
+
+          <div class="kanm-modal-footer">
+            <div id="kanm-negocios-form-mensaje" class="kanm-subtitle"></div>
+            <button type="submit" class="kanm-button primary" id="kanm-negocios-btn-guardar">Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="kanm-modal-overlay" id="admin-eliminar-modal" hidden>
+    <div class="kanm-modal" role="dialog" aria-modal="true" aria-labelledby="admin-eliminar-titulo">
+      <h3 id="admin-eliminar-titulo">Eliminar registro</h3>
+      <p id="admin-eliminar-descripcion">
+        Esta acción es irreversible. Confirma la eliminación del registro seleccionado.
+      </p>
+      <div class="kanm-input-group">
+        <label for="admin-eliminar-password">Contraseña de administrador</label>
+        <input
+          type="password"
+          id="admin-eliminar-password"
+          placeholder="Ingresa la contraseña"
+          autocomplete="current-password"
+        />
+      </div>
+      <div class="kanm-modal-actions">
+        <button type="button" class="kanm-button ghost" id="admin-eliminar-cancelar">Cancelar</button>
+        <button type="button" class="kanm-button danger" id="admin-eliminar-confirmar">Eliminar</button>
+      </div>
+      <div id="admin-eliminar-mensaje" class="kanm-message"></div>
+    </div>
+  </div>
+
+  <script src="/js/auth.js"></script>
+  <script src="/js/admin.js"></script>
+  <script src="/js/admin-cotizaciones.js"></script>
+  <script src="/js/admin-clientes.js"></script>
+  <script src="/js/admin-categorias.js"></script>
+</body>
+</html>
+
+
+
