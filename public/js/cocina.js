@@ -92,9 +92,10 @@ const obtenerPedidoPropioEnPreparacion = () => {
   if (!usuario) return null;
 
   for (const cuenta of cuentasActivas) {
-    const pedido = (cuenta.pedidos || []).find(
-      (p) => p.estado === 'preparando' && p.cocinero_id === usuario.id
-    );
+    const pedido = (cuenta.pedidos || []).find((p) => {
+      const estadoCocina = p.estadoCocina || p.estado;
+      return estadoCocina === 'preparando' && p.cocinero_id === usuario.id;
+    });
     if (pedido) {
       return { pedido, cuenta };
     }
@@ -187,6 +188,34 @@ const textoMesaCliente = (pedido) => {
 
 const textoServicio = (pedido) =>
   pedido.modo_servicio === 'para_llevar' ? 'Para llevar' : 'Consumir en el negocio';
+
+const estadoCocinaDeCuenta = (cuenta) => {
+  const estados = new Set(
+    (cuenta.pedidos || []).map((pedido) => pedido.estadoCocina || pedido.estado).filter(Boolean)
+  );
+
+  if (estados.has('cancelado')) {
+    return 'cancelado';
+  }
+
+  if (estados.size === 0) {
+    return cuenta.estado || 'pendiente';
+  }
+
+  if (estados.has('preparando') || (estados.has('pendiente') && estados.has('listo'))) {
+    return 'preparando';
+  }
+
+  if (estados.size === 1 && estados.has('pendiente')) {
+    return 'pendiente';
+  }
+
+  if (estados.size === 1 && estados.has('listo')) {
+    return 'listo';
+  }
+
+  return 'preparando';
+};
 
 const abrirFoco = (cuenta, pedido) => {
   if (!focusOverlay || !cuenta || !pedido) return;
@@ -321,6 +350,7 @@ const crearAccionesPedido = (cuenta, pedido) => {
 
   const usuario = obtenerUsuarioActual();
   const enCurso = obtenerPedidoPropioEnPreparacion();
+  const estadoCocina = pedido.estadoCocina || pedido.estado;
   const bloqueadoPorOtro = pedido.cocinero_id && usuario && pedido.cocinero_id !== usuario.id;
   const bloqueadoPorTrabajo = enCurso && enCurso.pedido.id !== pedido.id;
   const bloqueoMensaje = bloqueadoPorOtro
@@ -330,7 +360,7 @@ const crearAccionesPedido = (cuenta, pedido) => {
       : '';
   const accionesBloqueadas = bloqueadoPorOtro || bloqueadoPorTrabajo;
 
-  if (pedido.estado === 'pendiente') {
+  if (estadoCocina === 'pendiente') {
     const btnPreparar = document.createElement('button');
     btnPreparar.type = 'button';
     btnPreparar.className = 'kanm-button secondary';
@@ -348,7 +378,7 @@ const crearAccionesPedido = (cuenta, pedido) => {
     if (bloqueoMensaje) btnListo.title = bloqueoMensaje;
     btnListo.addEventListener('click', () => abrirFoco(cuenta, pedido));
     acciones.appendChild(btnListo);
-  } else if (pedido.estado === 'preparando') {
+  } else if (estadoCocina === 'preparando') {
     const btnListo = document.createElement('button');
     btnListo.type = 'button';
     btnListo.className = 'kanm-button primary';
@@ -359,7 +389,7 @@ const crearAccionesPedido = (cuenta, pedido) => {
     acciones.appendChild(btnListo);
   }
 
-  if (pedido.estado === 'pendiente' || pedido.estado === 'preparando') {
+  if (estadoCocina === 'pendiente' || estadoCocina === 'preparando') {
     const btnCancelar = document.createElement('button');
     btnCancelar.type = 'button';
     btnCancelar.className = 'kanm-button ghost-danger';
@@ -392,9 +422,10 @@ const crearPedidoSubcard = (cuenta, pedido, indice, conAcciones = false) => {
   label.textContent = `Pedido #${indice}`;
   header.appendChild(label);
 
+  const estadoCocina = pedido.estadoCocina || pedido.estado;
   const badge = document.createElement('span');
-  badge.className = `kanm-badge estado-${pedido.estado}`;
-  badge.textContent = pedido.estado.charAt(0).toUpperCase() + pedido.estado.slice(1);
+  badge.className = `kanm-badge estado-${estadoCocina}`;
+  badge.textContent = estadoCocina.charAt(0).toUpperCase() + estadoCocina.slice(1);
   header.appendChild(badge);
 
   const tiempos = document.createElement('p');
@@ -451,11 +482,10 @@ const renderActivos = (cuentas) => {
     titulo.textContent = `Cuenta #${cuenta.cuenta_id || cuenta.id || '—'}`;
     header.appendChild(titulo);
 
+    const estadoCuenta = estadoCocinaDeCuenta(cuenta);
     const badge = document.createElement('span');
-    badge.className = `kanm-badge estado-${cuenta.estado_cuenta || cuenta.estado || 'pendiente'}`;
-    badge.textContent = (cuenta.estado_cuenta || cuenta.estado || 'pendiente')
-      .charAt(0)
-      .toUpperCase() + (cuenta.estado_cuenta || cuenta.estado || 'pendiente').slice(1);
+    badge.className = `kanm-badge estado-${estadoCuenta}`;
+    badge.textContent = estadoCuenta.charAt(0).toUpperCase() + estadoCuenta.slice(1);
     header.appendChild(badge);
 
     const meta = document.createElement('div');
@@ -510,11 +540,10 @@ const renderFinalizados = (cuentas) => {
     titulo.textContent = `Cuenta #${cuenta.cuenta_id || cuenta.id || '—'}`;
     header.appendChild(titulo);
 
+    const estadoCuenta = estadoCocinaDeCuenta(cuenta);
     const badge = document.createElement('span');
-    badge.className = `kanm-badge estado-${cuenta.estado_cuenta || cuenta.estado || 'listo'}`;
-    badge.textContent = (cuenta.estado_cuenta || cuenta.estado || 'listo')
-      .charAt(0)
-      .toUpperCase() + (cuenta.estado_cuenta || cuenta.estado || 'listo').slice(1);
+    badge.className = `kanm-badge estado-${estadoCuenta}`;
+    badge.textContent = estadoCuenta.charAt(0).toUpperCase() + estadoCuenta.slice(1);
     header.appendChild(badge);
 
     const meta = document.createElement('div');

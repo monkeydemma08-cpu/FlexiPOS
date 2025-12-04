@@ -92,9 +92,10 @@ const obtenerPedidoPropioEnPreparacion = () => {
   if (!usuario) return null;
 
   for (const cuenta of cuentasActivas) {
-    const pedido = (cuenta.pedidos || []).find(
-      (p) => p.estado === 'preparando' && p.cocinero_id === usuario.id
-    );
+    const pedido = (cuenta.pedidos || []).find((p) => {
+      const estadoBar = p.estadoBar || p.estado;
+      return estadoBar === 'preparando' && p.bartender_id === usuario.id;
+    });
     if (pedido) {
       return { pedido, cuenta };
     }
@@ -188,6 +189,35 @@ const textoMesaCliente = (pedido) => {
 const textoServicio = (pedido) =>
   pedido.modo_servicio === 'para_llevar' ? 'Para llevar' : 'Consumir en el negocio';
 
+const estadoBarDeCuenta = (cuenta) => {
+  const estados = new Set(
+    (cuenta.pedidos || []).map((pedido) => pedido.estadoBar || pedido.estado).filter(Boolean)
+  );
+
+  if (estados.has('cancelado')) {
+    return 'cancelado';
+  }
+
+  if (estados.size === 0) {
+    return cuenta.estado || 'pendiente';
+  }
+
+  if (estados.has('preparando') || (estados.has('pendiente') && estados.has('listo'))) {
+    return 'preparando';
+  }
+
+  if (estados.size === 1 && estados.has('pendiente')) {
+    return 'pendiente';
+  }
+
+  if (estados.size === 1 && estados.has('listo')) {
+    return 'listo';
+  }
+
+  return 'preparando';
+};
+
+
 const abrirFoco = (cuenta, pedido) => {
   if (!focusOverlay || !cuenta || !pedido) return;
 
@@ -195,8 +225,8 @@ const abrirFoco = (cuenta, pedido) => {
   const enCurso = obtenerPedidoPropioEnPreparacion();
   const enTrabajo = leerPedidoEnTrabajo();
 
-  if (pedido.cocinero_id && usuario && pedido.cocinero_id !== usuario.id) {
-    alert(`Este pedido está siendo preparado por ${pedido.cocinero_nombre || 'otro bartender'}.`);
+  if (pedido.bartender_id && usuario && pedido.bartender_id !== usuario.id) {
+    alert(`Este pedido está siendo preparado por ${pedido.bartender_nombre || 'otro bartender'}.`);
     return;
   }
 
@@ -217,12 +247,12 @@ const abrirFoco = (cuenta, pedido) => {
 
   focusCuenta.textContent = `Cuenta #${cuenta.cuenta_id || cuenta.id || '—'}`;
   focusServicio.textContent = `${textoMesaCliente(cuenta)} • ${textoServicio(cuenta)}`;
-  const cocineroLabel =
-    pedido.cocinero_nombre ||
-    (usuario && pedido.cocinero_id === usuario.id ? 'Tú' : pedido.cocinero_id ? 'Otro bartender' : 'Sin asignar');
+  const bartenderLabel =
+    pedido.bartender_nombre ||
+    (usuario && pedido.bartender_id === usuario.id ? 'Tú' : pedido.bartender_id ? 'Otro bartender' : 'Sin asignar');
   focusMeta.textContent = `Entrada: ${formatoFecha(pedido.fecha_creacion)} · Salida: ${formatoFecha(
     pedido.fecha_listo || pedido.fecha_cierre
-  )} · Bartender: ${cocineroLabel}`;
+  )} · Bartender: ${bartenderLabel}`;
 
   if (pedido.nota) {
     focusNota.classList.remove('hidden');
@@ -321,16 +351,17 @@ const crearAccionesPedido = (cuenta, pedido) => {
 
   const usuario = obtenerUsuarioActual();
   const enCurso = obtenerPedidoPropioEnPreparacion();
-  const bloqueadoPorOtro = pedido.cocinero_id && usuario && pedido.cocinero_id !== usuario.id;
+  const estadoBar = pedido.estadoBar || pedido.estado;
+  const bloqueadoPorOtro = pedido.bartender_id && usuario && pedido.bartender_id !== usuario.id;
   const bloqueadoPorTrabajo = enCurso && enCurso.pedido.id !== pedido.id;
   const bloqueoMensaje = bloqueadoPorOtro
-    ? `Pedido asignado a ${pedido.cocinero_nombre || 'otro bartender'}.`
+    ? `Pedido asignado a ${pedido.bartender_nombre || 'otro bartender'}.`
     : bloqueadoPorTrabajo
       ? `Ya trabajas en el pedido #${enCurso.pedido.id}.`
       : '';
   const accionesBloqueadas = bloqueadoPorOtro || bloqueadoPorTrabajo;
 
-  if (pedido.estado === 'pendiente') {
+  if (estadoBar === 'pendiente') {
     const btnPreparar = document.createElement('button');
     btnPreparar.type = 'button';
     btnPreparar.className = 'kanm-button secondary';
@@ -348,7 +379,7 @@ const crearAccionesPedido = (cuenta, pedido) => {
     if (bloqueoMensaje) btnListo.title = bloqueoMensaje;
     btnListo.addEventListener('click', () => abrirFoco(cuenta, pedido));
     acciones.appendChild(btnListo);
-  } else if (pedido.estado === 'preparando') {
+  } else if (estadoBar === 'preparando') {
     const btnListo = document.createElement('button');
     btnListo.type = 'button';
     btnListo.className = 'kanm-button primary';
@@ -359,7 +390,7 @@ const crearAccionesPedido = (cuenta, pedido) => {
     acciones.appendChild(btnListo);
   }
 
-  if (pedido.estado === 'pendiente' || pedido.estado === 'preparando') {
+  if (estadoBar === 'pendiente' || estadoBar === 'preparando') {
     const btnCancelar = document.createElement('button');
     btnCancelar.type = 'button';
     btnCancelar.className = 'kanm-button ghost-danger';
@@ -392,9 +423,10 @@ const crearPedidoSubcard = (cuenta, pedido, indice, conAcciones = false) => {
   label.textContent = `Pedido #${indice}`;
   header.appendChild(label);
 
+  const estadoBar = pedido.estadoBar || pedido.estado;
   const badge = document.createElement('span');
-  badge.className = `kanm-badge estado-${pedido.estado}`;
-  badge.textContent = pedido.estado.charAt(0).toUpperCase() + pedido.estado.slice(1);
+  badge.className = `kanm-badge estado-${estadoBar}`;
+  badge.textContent = estadoBar.charAt(0).toUpperCase() + estadoBar.slice(1);
   header.appendChild(badge);
 
   const tiempos = document.createElement('p');
@@ -403,13 +435,13 @@ const crearPedidoSubcard = (cuenta, pedido, indice, conAcciones = false) => {
     pedido.fecha_listo || pedido.fecha_cierre
   )}`;
 
-  const cocineroInfo = document.createElement('p');
-  cocineroInfo.className = 'pedido-info';
-  cocineroInfo.textContent = `Bartender: ${pedido.cocinero_nombre || 'Sin asignar'}`;
+  const bartenderInfo = document.createElement('p');
+  bartenderInfo.className = 'pedido-info';
+  bartenderInfo.textContent = `Bartender: ${pedido.bartender_nombre || 'Sin asignar'}`;
 
   subcard.appendChild(header);
   subcard.appendChild(tiempos);
-  subcard.appendChild(cocineroInfo);
+  subcard.appendChild(bartenderInfo);
 
   if (pedido.nota) {
     const nota = document.createElement('div');
@@ -451,11 +483,10 @@ const renderActivos = (cuentas) => {
     titulo.textContent = `Cuenta #${cuenta.cuenta_id || cuenta.id || '—'}`;
     header.appendChild(titulo);
 
+    const estadoCuenta = estadoBarDeCuenta(cuenta);
     const badge = document.createElement('span');
-    badge.className = `kanm-badge estado-${cuenta.estado_cuenta || cuenta.estado || 'pendiente'}`;
-    badge.textContent = (cuenta.estado_cuenta || cuenta.estado || 'pendiente')
-      .charAt(0)
-      .toUpperCase() + (cuenta.estado_cuenta || cuenta.estado || 'pendiente').slice(1);
+    badge.className = `kanm-badge estado-${estadoCuenta}`;
+    badge.textContent = estadoCuenta.charAt(0).toUpperCase() + estadoCuenta.slice(1);
     header.appendChild(badge);
 
     const meta = document.createElement('div');
@@ -510,11 +541,10 @@ const renderFinalizados = (cuentas) => {
     titulo.textContent = `Cuenta #${cuenta.cuenta_id || cuenta.id || '—'}`;
     header.appendChild(titulo);
 
+    const estadoCuenta = estadoBarDeCuenta(cuenta);
     const badge = document.createElement('span');
-    badge.className = `kanm-badge estado-${cuenta.estado_cuenta || cuenta.estado || 'listo'}`;
-    badge.textContent = (cuenta.estado_cuenta || cuenta.estado || 'listo')
-      .charAt(0)
-      .toUpperCase() + (cuenta.estado_cuenta || cuenta.estado || 'listo').slice(1);
+    badge.className = `kanm-badge estado-${estadoCuenta}`;
+    badge.textContent = estadoCuenta.charAt(0).toUpperCase() + estadoCuenta.slice(1);
     header.appendChild(badge);
 
     const meta = document.createElement('div');
@@ -586,12 +616,12 @@ const cambiarEstado = async (pedidoId, estado, boton) => {
     return;
   }
 
-  if (datosPedido && usuario && datosPedido.cocinero_id && datosPedido.cocinero_id !== usuario.id) {
+  if (datosPedido && usuario && datosPedido.bartender_id && datosPedido.bartender_id !== usuario.id) {
     if (boton) {
       boton.disabled = false;
       boton.classList.remove('is-loading');
     }
-    alert(`Este pedido está asignado a ${datosPedido.cocinero_nombre || 'otro bartender'}.`);
+    alert(`Este pedido está asignado a ${datosPedido.bartender_nombre || 'otro bartender'}.`);
     return;
   }
 
@@ -686,5 +716,5 @@ window.addEventListener('beforeunload', () => {
   if (refreshTimer) clearInterval(refreshTimer);
 });
 
-// El backend valida que cada cocinero solo tenga un pedido en preparacion.
+// El backend valida que cada bartender solo tenga un pedido en preparacion.
 // Se mantiene el guardado en localStorage para recordar visualmente el pedido en curso en este navegador.

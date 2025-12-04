@@ -476,6 +476,8 @@ async function runMigrations() {
   await ensureColumn('negocios', 'logo_url VARCHAR(255) NULL');
   await ensureColumn('negocios', 'titulo_sistema VARCHAR(150) NULL');
   await ensureColumn('categorias', "area_preparacion ENUM('ninguna', 'cocina', 'bar') NOT NULL DEFAULT 'ninguna'");
+  await ensureColumn('pedidos', 'bartender_id INT NULL');
+  await ensureColumn('pedidos', 'bartender_nombre VARCHAR(255) NULL');
   await ensureNegocioThemeAndModulesColumns();
   await ensureLogoUrlCapacity();
   await ensureDefaultNegocio();

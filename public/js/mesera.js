@@ -44,6 +44,50 @@ const estado = {
   modoServicio: 'en_local',
 };
 
+let notificationSound;
+let notificationSoundReady = false;
+let notificationSoundUnlocking = null;
+const areaNotificationState = new Map();
+
+function deduplicatePedidos(pedidos) {
+  if (!Array.isArray(pedidos)) return [];
+  const seen = new Set();
+  const result = [];
+  pedidos.forEach((pedido) => {
+    const key = pedido?.id ?? pedido?.pedido_id ?? pedido?.numero ?? null;
+    if (key == null) {
+      result.push(pedido);
+      return;
+    }
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(pedido);
+  });
+  return result;
+}
+
+const calcularEstadoAreaDesdeSet = (estadosSet) => {
+  if (!estadosSet || estadosSet.size === 0) return null;
+  if (estadosSet.has('cancelado')) return 'cancelado';
+  if (estadosSet.has('preparando') || (estadosSet.has('pendiente') && estadosSet.has('listo'))) {
+    return 'preparando';
+  }
+  if (estadosSet.size === 1 && estadosSet.has('pendiente')) return 'pendiente';
+  if (estadosSet.size === 1 && estadosSet.has('listo')) return 'listo';
+  return 'preparando';
+};
+
+const estadoAreaCuenta = (cuenta, area = 'cocina') => {
+  const estados = new Set();
+  (cuenta.pedidos || []).forEach((pedido) => {
+    const valor = area === 'bar' ? pedido.estadoBar : pedido.estadoCocina;
+    if (valor) {
+      estados.add(valor);
+    }
+  });
+  return calcularEstadoAreaDesdeSet(estados);
+};
+
 const agruparCuentas = (...listas) => {
   const mapa = new Map();
 
@@ -71,7 +115,147 @@ const agruparCuentas = (...listas) => {
     });
   });
 
-  return Array.from(mapa.values());
+  const resultado = Array.from(mapa.values());
+  resultado.forEach((cuenta) => {
+    cuenta.estadoCocina = estadoAreaCuenta(cuenta, 'cocina');
+    cuenta.estadoBar = estadoAreaCuenta(cuenta, 'bar');
+  });
+  return resultado;
+};
+
+const ensureNotificationSound = () => {
+  if (!notificationSound) {
+    notificationSound = new Audio('/sounds/notify.mp3');
+    notificationSound.preload = 'auto';
+  }
+  return notificationSound;
+};
+
+const primeNotificationSound = () => {
+  if (notificationSoundReady) return Promise.resolve(true);
+  const audio = ensureNotificationSound();
+  const intento = audio
+    .play()
+    .then(() => {
+      audio.pause();
+      audio.currentTime = 0;
+      notificationSoundReady = true;
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => {
+      notificationSoundUnlocking = null;
+    });
+  notificationSoundUnlocking = intento;
+  return intento;
+};
+
+const registerSoundUnlockOnInteraction = () => {
+  const handler = () => {
+    primeNotificationSound();
+    ['click', 'touchstart', 'keydown'].forEach((evento) => {
+      document.removeEventListener(evento, handler, true);
+    });
+  };
+  ['click', 'touchstart', 'keydown'].forEach((evento) => {
+    document.addEventListener(evento, handler, { capture: true });
+  });
+};
+
+const playNotificationSound = () => {
+  ensureNotificationSound();
+  const intentarReproducir = () => {
+    notificationSound.currentTime = 0;
+    notificationSound.play().catch(() => {});
+  };
+
+  if (notificationSoundReady) {
+    intentarReproducir();
+    return;
+  }
+
+  const promesa = notificationSoundUnlocking || primeNotificationSound();
+  Promise.resolve(promesa)
+    .then(() => {
+      intentarReproducir();
+    })
+    .catch(() => {
+      intentarReproducir();
+    });
+};
+
+const showToast = (message, timeoutMs = 4000) => {
+  const contenedor = document.getElementById('toast-container');
+  if (!contenedor) return;
+
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  contenedor.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.classList.add('visible');
+  });
+
+  setTimeout(() => {
+    toast.classList.remove('visible');
+    setTimeout(() => {
+      toast.remove();
+    }, 220);
+  }, timeoutMs);
+};
+
+const speakNotification = (message) => {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  try {
+    const utterance = new SpeechSynthesisUtterance(message);
+    utterance.lang = 'es-ES';
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  } catch (error) {
+    console.warn('No se pudo reproducir la voz de la notificación:', error);
+  }
+};
+
+const notifyAreaReady = (cuenta, areaLabel) => {
+  playNotificationSound();
+  if (navigator.vibrate) {
+    navigator.vibrate([120, 60, 120]);
+  }
+  const mesaTexto = cuenta.mesa || cuenta.mesaNumero || cuenta.mesa_nombre || cuenta.mesa_id || '';
+  const mensaje = mesaTexto ? `Mesa ${mesaTexto} - ${areaLabel} lista` : `${areaLabel} lista`;
+  showToast(mensaje);
+  speakNotification(mensaje);
+};
+
+const checkAreaNotifications = (cuenta) => {
+  if (!cuenta) return;
+  const cuentaId = cuenta.cuenta_id || cuenta.id;
+  if (!cuentaId) return;
+
+  const areas = [
+    { clave: 'cocina', estado: cuenta.estadoCocina, label: 'Cocina' },
+    { clave: 'bar', estado: cuenta.estadoBar, label: 'Bar' },
+  ];
+
+  areas.forEach(({ clave, estado, label }) => {
+    const estadoNormalizado = estado ? estado.toString().toLowerCase() : null;
+    const key = `${cuentaId}-${clave}`;
+
+    if (!estadoNormalizado || estadoNormalizado === 'sin_productos') {
+      areaNotificationState.set(key, estadoNormalizado);
+      return;
+    }
+
+    const previo = areaNotificationState.get(key);
+    areaNotificationState.set(key, estadoNormalizado);
+
+    if (estadoNormalizado === 'listo' && previo !== 'listo') {
+      notifyAreaReady(cuenta, label);
+    }
+  });
 };
 
 const formatCurrency = (valor) => {
@@ -577,6 +761,40 @@ const cancelarPedido = async (pedidoId) => {
   }
 };
 
+const crearBadgeArea = (titulo, estadoArea) => {
+  const span = document.createElement('span');
+  const estadoTexto = estadoArea ? estadoArea.charAt(0).toUpperCase() + estadoArea.slice(1) : 'Sin productos';
+  span.className = `kanm-badge ghost${estadoArea ? ` estado-${estadoArea}` : ''}`;
+  span.textContent = `${titulo}: ${estadoTexto}`;
+  return span;
+};
+
+const obtenerFlagsListo = (cuenta) => {
+  const estadoCocina = cuenta.estadoCocina;
+  const estadoBar = cuenta.estadoBar;
+  const cocinaListo = cuenta.cocinaListo ?? (estadoCocina === 'listo' || estadoCocina == null);
+  const barListo = cuenta.barListo ?? (estadoBar === 'listo' || estadoBar == null);
+  return { cocinaListo: Boolean(cocinaListo), barListo: Boolean(barListo) };
+};
+
+const obtenerBadgeCuenta = (cuenta) => {
+  const { cocinaListo, barListo } = obtenerFlagsListo(cuenta);
+  const puedeCobrar = Boolean(cuenta.puedeCobrar ?? (cocinaListo && barListo));
+  const estadoCuentaMesera = cuenta.estadoCuentaMesera;
+
+  if (puedeCobrar || estadoCuentaMesera === 'listo') {
+    return { texto: 'Listo', clase: 'estado-listo' };
+  }
+
+  if (estadoCuentaMesera === 'preparando' && (cocinaListo || barListo)) {
+    return { texto: 'Listo parcial', clase: 'ghost estado-parcial' };
+  }
+
+  const base = (estadoCuentaMesera || cuenta.estado_cuenta || cuenta.estado || 'pendiente').toString();
+  const texto = base.charAt(0).toUpperCase() + base.slice(1);
+  return { texto, clase: `estado-${base}` };
+};
+
 const crearCardCuenta = (cuenta) => {
   const card = document.createElement('article');
   card.className = 'kanm-card pedido-activo-card';
@@ -598,19 +816,25 @@ const crearCardCuenta = (cuenta) => {
     `;
 
   const badge = document.createElement('span');
-  badge.className = `kanm-badge estado-${cuenta.estado_cuenta || cuenta.estado || 'pendiente'}`;
-  const textoEstado = (cuenta.estado_cuenta || cuenta.estado || 'pendiente')
-    .charAt(0)
-    .toUpperCase() + (cuenta.estado_cuenta || cuenta.estado || 'pendiente').slice(1);
-  badge.textContent = textoEstado;
+  const badgeInfo = obtenerBadgeCuenta(cuenta);
+  badge.className = `kanm-badge ${badgeInfo.clase}`;
+  badge.textContent = badgeInfo.texto;
+
+  const estadoCocina = cuenta.estadoCocina ?? estadoAreaCuenta(cuenta, 'cocina');
+  const estadoBar = cuenta.estadoBar ?? estadoAreaCuenta(cuenta, 'bar');
+  const badgeAreas = document.createElement('div');
+  badgeAreas.className = 'pedido-area-badges';
+  badgeAreas.appendChild(crearBadgeArea('Cocina', estadoCocina));
+  badgeAreas.appendChild(crearBadgeArea('Bar', estadoBar));
 
   header.appendChild(info);
+  header.appendChild(badgeAreas);
   header.appendChild(badge);
 
   const pedidosContainer = document.createElement('div');
   pedidosContainer.className = 'cuenta-pedidos';
 
-  const pedidosOrdenados = (cuenta.pedidos || []).slice().sort((a, b) => {
+  const pedidosOrdenados = deduplicatePedidos(cuenta.pedidos || []).slice().sort((a, b) => {
     const fechaA = new Date(a.fecha_creacion || 0).getTime();
     const fechaB = new Date(b.fecha_creacion || 0).getTime();
     return fechaA - fechaB;
@@ -714,12 +938,9 @@ const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVac
   if (!contenedor) return;
 
   contenedor.innerHTML = '';
-  const cuentasFiltradas = estado.pedidosActivos
-    .map((cuenta) => ({
-      ...cuenta,
-      pedidos: (cuenta.pedidos || []).filter((pedido) => estadosFiltro.includes(pedido.estado)),
-    }))
-    .filter((cuenta) => cuenta.pedidos?.length);
+  const cuentasFiltradas = estado.pedidosActivos.filter((cuenta) =>
+    estadosFiltro.includes(cuenta.estadoCuentaMesera)
+  );
 
   if (!cuentasFiltradas.length) {
     mostrarMensajeTab(mensajeEl, mensajeVacio, 'info');
@@ -769,7 +990,9 @@ const cargarPedidosActivos = async (mostrarCarga = true) => {
       agrupadosListos
     );
 
-    const pedidosParaDetalle = cuentasAgrupadas.flatMap((cuenta) => cuenta.pedidos || []);
+    const pedidosParaDetalle = deduplicatePedidos(
+      cuentasAgrupadas.flatMap((cuenta) => cuenta.pedidos || [])
+    );
 
     const detallesPorId = new Map(
       await Promise.all(
@@ -788,7 +1011,7 @@ const cargarPedidosActivos = async (mostrarCarga = true) => {
     );
 
     cuentasAgrupadas.forEach((cuenta) => {
-      const pedidosOrdenados = (cuenta.pedidos || []).slice().sort((a, b) => {
+      const pedidosOrdenados = deduplicatePedidos(cuenta.pedidos || []).slice().sort((a, b) => {
         const fechaA = new Date(a.fecha_creacion || 0).getTime();
         const fechaB = new Date(b.fecha_creacion || 0).getTime();
         return fechaA - fechaB;
@@ -799,6 +1022,8 @@ const cargarPedidosActivos = async (mostrarCarga = true) => {
         items: detallesPorId.get(pedido.id) || [],
       }));
     });
+
+    cuentasAgrupadas.forEach((cuenta) => checkAreaNotifications(cuenta));
 
     estado.pedidosActivos = cuentasAgrupadas;
     renderPedidosPorEstado(['pendiente'], listasPorEstado.pendiente, mensajesPorEstado.pendiente, 'No hay pedidos pendientes.');
@@ -987,6 +1212,7 @@ const inicializarEventos = () => {
 
 window.addEventListener('DOMContentLoaded', async () => {
   aplicarModulosMesera();
+  registerSoundUnlockOnInteraction();
   const usuario = obtenerUsuarioActual();
   if (identidadMesera && usuario?.nombre) {
     identidadMesera.textContent = `Mesera: ${usuario.nombre}`;

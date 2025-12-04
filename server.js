@@ -548,7 +548,7 @@ const registrarHistorialBar = (pedidoId, negocioId, callback = () => {}) => {
   }
 
   db.get(
-    `SELECT cuenta_id, fecha_creacion, COALESCE(fecha_listo, CURRENT_TIMESTAMP) AS fecha_listo, cocinero_id, cocinero_nombre
+    `SELECT cuenta_id, fecha_creacion, COALESCE(fecha_listo, CURRENT_TIMESTAMP) AS fecha_listo, bartender_id, bartender_nombre
      FROM pedidos WHERE id = ? AND negocio_id = ?`,
     [pedidoId, negocioId],
     (pedidoErr, pedido) => {
@@ -605,13 +605,13 @@ const registrarHistorialBar = (pedidoId, negocioId, callback = () => {}) => {
               );
 
               items.forEach((item) => {
-                stmt.run(
+              stmt.run(
                   pedido.cuenta_id || pedidoId,
                   pedidoId,
                   item.nombre,
                   item.cantidad,
-                  pedido.cocinero_id || null,
-                  pedido.cocinero_nombre || null,
+                  pedido.bartender_id || null,
+                  pedido.bartender_nombre || null,
                   pedido.fecha_creacion,
                   pedido.fecha_listo,
                   negocioId
@@ -1374,6 +1374,7 @@ const obtenerDetallePedidosPorIds = async (pedidoIds, negocioId, opciones = {}) 
       descuento_porcentaje: Number(row.descuento_porcentaje) || 0,
       descuento_monto: descuentoMonto,
       cantidad_descuento: Number(row.cantidad_descuento) || null,
+      area: areaPreparacion,
       area_preparacion: areaPreparacion,
       subtotal_sin_descuento: subtotalBruto,
       total_linea: Math.max(subtotalBruto - descuentoMonto, 0),
@@ -1382,6 +1383,152 @@ const obtenerDetallePedidosPorIds = async (pedidoIds, negocioId, opciones = {}) 
   });
 
   return itemsMap;
+};
+
+const obtenerHistorialAreasPorPedidos = async (pedidoIds = [], negocioId) => {
+  const vacio = { cocina: new Set(), bar: new Set() };
+  if (!Array.isArray(pedidoIds) || pedidoIds.length === 0) {
+    return vacio;
+  }
+
+  const placeholders = pedidoIds.map(() => '?').join(', ');
+  const params = [...pedidoIds, negocioId];
+  const [historialCocina, historialBar] = await Promise.all([
+    db.all(
+      `SELECT DISTINCT pedido_id FROM historial_cocina WHERE pedido_id IN (${placeholders}) AND negocio_id = ?`,
+      params
+    ),
+    db.all(
+      `SELECT DISTINCT pedido_id FROM historial_bar WHERE pedido_id IN (${placeholders}) AND negocio_id = ?`,
+      params
+    ),
+  ]);
+
+  return {
+    cocina: new Set((historialCocina || []).map((row) => Number(row.pedido_id ?? row.pedidoId))),
+    bar: new Set((historialBar || []).map((row) => Number(row.pedido_id ?? row.pedidoId))),
+  };
+};
+
+const calcularEstadoAreaPedido = (pedido, items = [], area, historialesPorArea = {}) => {
+  const areaNormalizada = normalizarAreaPreparacion(area);
+  const itemsArea = (items || []).filter(
+    (item) => normalizarAreaPreparacion(item.area_preparacion || item.area || 'ninguna') === areaNormalizada
+  );
+
+  if (!itemsArea.length) {
+    return null;
+  }
+
+  if (pedido.estado === 'cancelado') {
+    return 'cancelado';
+  }
+
+  const historialSet = areaNormalizada === 'bar' ? historialesPorArea.bar : historialesPorArea.cocina;
+  const yaListo = historialSet instanceof Set && historialSet.has(Number(pedido.id));
+  if (yaListo) {
+    return 'listo';
+  }
+
+  if (pedido.estado === 'pagado') {
+    return 'listo';
+  }
+
+  const responsableId =
+    areaNormalizada === 'bar'
+      ? pedido.bartender_id ?? pedido.bartenderId
+      : pedido.cocinero_id ?? pedido.cocineroId;
+
+  if (responsableId) {
+    return 'preparando';
+  }
+
+  return 'pendiente';
+};
+
+const calcularEstadosAreasPedido = (pedido, items = [], historialesPorArea = {}) => ({
+  estadoCocina: calcularEstadoAreaPedido(pedido, items, 'cocina', historialesPorArea),
+  estadoBar: calcularEstadoAreaPedido(pedido, items, 'bar', historialesPorArea),
+});
+
+const calcularEstadoAreaCuenta = (pedidos = [], area = 'cocina') => {
+  const estados = new Set();
+  (pedidos || []).forEach((pedido) => {
+    const estadoArea = area === 'bar' ? pedido.estadoBar : pedido.estadoCocina;
+    if (estadoArea === null || estadoArea === undefined) {
+      estados.add('sin_productos');
+    } else {
+      estados.add(estadoArea);
+    }
+  });
+
+  if (estados.size === 0) {
+    return 'sin_productos';
+  }
+
+  if (estados.has('preparando') || (estados.has('pendiente') && estados.has('listo'))) {
+    return 'preparando';
+  }
+
+  if (estados.size === 1) {
+    const unico = Array.from(estados)[0];
+    return unico;
+  }
+
+  if (estados.has('pendiente')) {
+    return 'preparando';
+  }
+
+  return 'preparando';
+};
+
+function calcularEstadoCuentaMesera(estadoCocina, estadoBar, tienePagosPendientes) {
+  if (!tienePagosPendientes) {
+    return 'pagado';
+  }
+
+  const areasListasOSinProd =
+    (estadoCocina === 'listo' || estadoCocina === 'sin_productos') &&
+    (estadoBar === 'listo' || estadoBar === 'sin_productos');
+
+  const areasPendientes =
+    (estadoCocina === 'pendiente' || estadoCocina === 'sin_productos') &&
+    (estadoBar === 'pendiente' || estadoBar === 'sin_productos');
+
+  if (areasListasOSinProd) {
+    return 'listo';
+  }
+
+  if (areasPendientes) {
+    return 'pendiente';
+  }
+
+  return 'preparando';
+}
+
+const combinarEstadoCuenta = (pedido) => {
+  if (pedido.estado === 'pagado' || pedido.estado === 'cancelado') {
+    return pedido.estado;
+  }
+
+  const estados = new Set([pedido.estadoCocina, pedido.estadoBar].filter(Boolean));
+  if (estados.size === 0) {
+    return pedido.estado;
+  }
+
+  if (estados.has('preparando') || (estados.has('pendiente') && estados.has('listo'))) {
+    return 'preparando';
+  }
+
+  if (estados.size === 1 && estados.has('pendiente')) {
+    return 'pendiente';
+  }
+
+  if (estados.size === 1 && estados.has('listo')) {
+    return 'listo';
+  }
+
+  return 'preparando';
 };
 
 const agruparPedidosEnCuentas = (pedidos = [], itemsMap = new Map()) => {
@@ -1398,21 +1545,49 @@ const agruparPedidosEnCuentas = (pedidos = [], itemsMap = new Map()) => {
         modo_servicio: pedido.modo_servicio,
         estado: pedido.estado,
         estado_cuenta: pedido.estado,
+        estadoCocina: null,
+        estadoBar: null,
+        estadoCuentaMesera: null,
         pedidos: [],
       });
     }
 
     const cuenta = cuentasMap.get(clave);
     const detalle = itemsMap.get(pedido.id) || [];
+    const estadoCuenta = combinarEstadoCuenta(pedido);
     cuenta.pedidos.push({
       ...pedido,
       items: detalle,
     });
-    cuenta.estado = pedido.estado;
-    cuenta.estado_cuenta = pedido.estado;
+    cuenta.estado = estadoCuenta;
+    cuenta.estado_cuenta = estadoCuenta;
   });
 
-  return Array.from(cuentasMap.values());
+  const cuentas = Array.from(cuentasMap.values());
+  cuentas.forEach((cuenta) => {
+    const pedidosCuenta = cuenta.pedidos || [];
+    const estadoCocinaCuenta = calcularEstadoAreaCuenta(pedidosCuenta, 'cocina');
+    const estadoBarCuenta = calcularEstadoAreaCuenta(pedidosCuenta, 'bar');
+    cuenta.estadoCocina = estadoCocinaCuenta;
+    cuenta.estadoBar = estadoBarCuenta;
+
+    const tienePagosPendientes = pedidosCuenta.some(
+      (p) => p.estado !== 'pagado' && p.estado !== 'cancelado'
+    );
+    cuenta.estadoCuentaMesera = calcularEstadoCuentaMesera(
+      estadoCocinaCuenta,
+      estadoBarCuenta,
+      tienePagosPendientes
+    );
+
+    const cocinaListo = estadoCocinaCuenta === 'listo' || estadoCocinaCuenta === 'sin_productos';
+    const barListo = estadoBarCuenta === 'listo' || estadoBarCuenta === 'sin_productos';
+    cuenta.cocinaListo = cocinaListo;
+    cuenta.barListo = barListo;
+    cuenta.puedeCobrar = cocinaListo && barListo;
+  });
+
+  return cuentas;
 };
 
 const agruparItemsCuenta = (itemsMap = new Map()) => {
@@ -1474,31 +1649,65 @@ const obtenerCuentasPorEstados = async (estados, negocioId, opciones = {}) => {
     return [];
   }
 
-  const placeholders = estados.map(() => '?').join(', ');
   const areaFiltro = opciones.area_preparacion || opciones.area || null;
+  const filtrarPorEstadoArea = Boolean(areaFiltro) && opciones.filtrarPorEstadoArea !== false;
+  const incluirSiAreaLista = opciones.incluirSiAreaLista === true;
+  const incluyeListos = estados.includes('listo');
+  const estadosBusqueda = filtrarPorEstadoArea || (incluyeListos && incluirSiAreaLista) ? estadosValidos : estados;
+  const placeholders = estadosBusqueda.map(() => '?').join(', ');
   const soloHoy = opciones.hoy === true || opciones.soloHoy === true;
   const filtroFechaSql = soloHoy ? ' AND DATE(COALESCE(fecha_listo, fecha_creacion)) = CURDATE()' : '';
   const pedidos = await db.all(
     `
       SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
              impuesto, total, fecha_creacion, fecha_listo, fecha_cierre,
-             cocinero_id, cocinero_nombre, negocio_id
+             cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, negocio_id
       FROM pedidos
       WHERE estado IN (${placeholders}) AND negocio_id = ?${filtroFechaSql}
       ORDER BY fecha_creacion ASC
     `,
-    [...estados, negocioId]
+    [...estadosBusqueda, negocioId]
   );
 
   if (!pedidos.length) {
     return [];
   }
 
-  const detalle = await obtenerDetallePedidosPorIds(pedidos.map((pedido) => pedido.id), negocioId, opciones);
+  const pedidoIds = pedidos.map((pedido) => pedido.id);
+  const detalle = await obtenerDetallePedidosPorIds(pedidoIds, negocioId, opciones);
+  const historiales = await obtenerHistorialAreasPorPedidos(pedidoIds, negocioId);
+
+  const pedidosConEstados = pedidos.map((pedido) => {
+    const items = detalle.get(pedido.id) || [];
+    const { estadoCocina, estadoBar } = calcularEstadosAreasPedido(pedido, items, historiales);
+    return { ...pedido, estadoCocina, estadoBar };
+  });
+
+  const estadosAreaFiltro = filtrarPorEstadoArea ? new Set(estados) : null;
   const pedidosFiltrados =
     areaFiltro && detalle
-      ? pedidos.filter((pedido) => (detalle.get(pedido.id) || []).length > 0)
-      : pedidos;
+      ? pedidosConEstados.filter((pedido) => {
+          const items = detalle.get(pedido.id) || [];
+          if (!items.length) {
+            return false;
+          }
+          if (estadosAreaFiltro) {
+            const estadoArea = areaFiltro === 'bar' ? pedido.estadoBar : pedido.estadoCocina;
+            return estadosAreaFiltro.has(estadoArea);
+          }
+          return true;
+        })
+      : pedidosConEstados.filter((pedido) => {
+          const estadoPrincipal = estados.includes(pedido.estado);
+          if (estadoPrincipal) {
+            return true;
+          }
+          if (incluyeListos && incluirSiAreaLista) {
+            return pedido.estadoCocina === 'listo' || pedido.estadoBar === 'listo';
+          }
+          return false;
+        });
+
   return agruparPedidosEnCuentas(pedidosFiltrados, detalle);
 };
 
@@ -1507,7 +1716,7 @@ const obtenerPedidoConDetalle = async (pedidoId, negocioId) => {
     `
       SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
              impuesto, total, fecha_creacion, fecha_listo, fecha_cierre,
-             cocinero_id, cocinero_nombre, cliente_documento, ncf, tipo_comprobante, propina_monto,
+             cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, cliente_documento, ncf, tipo_comprobante, propina_monto,
              descuento_monto
       FROM pedidos
       WHERE id = ? AND negocio_id = ?
@@ -1520,8 +1729,16 @@ const obtenerPedidoConDetalle = async (pedidoId, negocioId) => {
   }
 
   const detalle = await obtenerDetallePedidosPorIds([pedidoId], negocioId);
+  const historiales = await obtenerHistorialAreasPorPedidos([pedidoId], negocioId);
+  const { estadoCocina, estadoBar } = calcularEstadosAreasPedido(
+    pedido,
+    detalle.get(pedidoId) || [],
+    historiales
+  );
   return {
     ...pedido,
+    estadoCocina,
+    estadoBar,
     items: detalle.get(pedidoId) || [],
   };
 };
@@ -2765,6 +2982,17 @@ const actualizarEstadoPedido = async ({ pedidoId, estadoDeseado, usuarioSesion, 
     areaSolicitada ?? (esUsuarioBar(usuarioSesion) ? 'bar' : 'cocina')
   );
 
+  if (estadoDeseado === 'pagado') {
+    const resultadoPago = await db.run(
+      `UPDATE pedidos SET estado = ?, fecha_listo = COALESCE(fecha_listo, CURRENT_TIMESTAMP) WHERE id = ? AND negocio_id = ?`,
+      ['pagado', pedidoId, negocioId]
+    );
+    if (resultadoPago.changes === 0) {
+      return { ok: false, status: 404, error: 'Pedido no encontrado.' };
+    }
+    return { ok: true, estado: 'pagado' };
+  }
+
   if (areaNormalizada === 'bar') {
     const barActivo = await moduloActivoParaNegocio('bar', negocioId);
     if (!barActivo) {
@@ -2772,12 +3000,83 @@ const actualizarEstadoPedido = async ({ pedidoId, estadoDeseado, usuarioSesion, 
     }
   }
 
-  const campos = ['estado = ?', 'cocinero_id = ?', 'cocinero_nombre = ?'];
-  const valores = [estadoDeseado, usuarioSesion.id, usuarioSesion.nombre];
-  const extraFecha = estadoDeseado === 'listo' ? ', fecha_listo = CURRENT_TIMESTAMP' : '';
+  const pedidoActual = await db.get(
+    `SELECT id, estado, cocinero_id, cocinero_nombre, bartender_id, bartender_nombre FROM pedidos WHERE id = ? AND negocio_id = ?`,
+    [pedidoId, negocioId]
+  );
+
+  if (!pedidoActual) {
+    return { ok: false, status: 404, error: 'Pedido no encontrado.' };
+  }
+
+  const detalle = await obtenerDetallePedidosPorIds([pedidoId], negocioId);
+  const items = detalle.get(pedidoId) || [];
+  const requiereCocina = items.some((item) => item.area_preparacion === 'cocina');
+  const requiereBar = items.some((item) => item.area_preparacion === 'bar');
+  const historiales = await obtenerHistorialAreasPorPedidos([pedidoId], negocioId);
+
+  if (areaNormalizada === 'bar' && !requiereBar) {
+    return { ok: false, status: 400, error: 'El pedido no tiene productos de bar.' };
+  }
+
+  if (areaNormalizada === 'cocina' && !requiereCocina) {
+    return { ok: false, status: 400, error: 'El pedido no tiene productos de cocina.' };
+  }
+
+  const pedidoActualizado = {
+    ...pedidoActual,
+    estado: estadoDeseado === 'listo' ? 'listo' : 'preparando',
+  };
+
+  if (areaNormalizada === 'bar') {
+    pedidoActualizado.bartender_id = usuarioSesion.id;
+    pedidoActualizado.bartender_nombre = usuarioSesion.nombre;
+  } else {
+    pedidoActualizado.cocinero_id = usuarioSesion.id;
+    pedidoActualizado.cocinero_nombre = usuarioSesion.nombre;
+  }
+
+  const historialesActualizados = {
+    cocina: new Set(historiales.cocina || []),
+    bar: new Set(historiales.bar || []),
+  };
+
+  if (estadoDeseado === 'listo') {
+    if (areaNormalizada === 'bar') {
+      historialesActualizados.bar.add(Number(pedidoId));
+    } else {
+      historialesActualizados.cocina.add(Number(pedidoId));
+    }
+  }
+
+  let estadosArea = calcularEstadosAreasPedido(pedidoActualizado, items, historialesActualizados);
+  const areasListas =
+    (!requiereCocina || estadosArea.estadoCocina === 'listo') &&
+    (!requiereBar || estadosArea.estadoBar === 'listo');
+
+  const nuevoEstadoGlobal = estadoDeseado === 'listo' && areasListas ? 'listo' : 'preparando';
+  if (pedidoActualizado.estado !== nuevoEstadoGlobal) {
+    pedidoActualizado.estado = nuevoEstadoGlobal;
+    estadosArea = calcularEstadosAreasPedido(pedidoActualizado, items, historialesActualizados);
+  }
+
+  const campos = ['estado = ?'];
+  const valores = [nuevoEstadoGlobal];
+
+  if (areaNormalizada === 'bar') {
+    campos.push('bartender_id = ?', 'bartender_nombre = ?');
+    valores.push(usuarioSesion.id, usuarioSesion.nombre);
+  } else {
+    campos.push('cocinero_id = ?', 'cocinero_nombre = ?');
+    valores.push(usuarioSesion.id, usuarioSesion.nombre);
+  }
+
+  if (nuevoEstadoGlobal === 'listo') {
+    campos.push('fecha_listo = CURRENT_TIMESTAMP');
+  }
 
   const resultado = await db.run(
-    `UPDATE pedidos SET ${campos.join(', ')}${extraFecha} WHERE id = ? AND negocio_id = ?`,
+    `UPDATE pedidos SET ${campos.join(', ')} WHERE id = ? AND negocio_id = ?`,
     [...valores, pedidoId, negocioId]
   );
 
@@ -2793,7 +3092,7 @@ const actualizarEstadoPedido = async ({ pedidoId, estadoDeseado, usuarioSesion, 
     }
   }
 
-  return { ok: true, estado: estadoDeseado };
+  return { ok: true, estado: nuevoEstadoGlobal, ...estadosArea };
 };
 
 app.get('/api/pedidos', (req, res) => {
@@ -2809,8 +3108,12 @@ app.get('/api/pedidos', (req, res) => {
 
     try {
       const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
-      const cuentas = await obtenerCuentasPorEstados([estadoSolicitud], negocioId);
-      res.json(cuentas);
+      const incluirSiAreaLista = estadoSolicitud === 'listo' && usuarioSesion?.rol === 'mesera';
+      const cuentas = await obtenerCuentasPorEstados([estadoSolicitud], negocioId, { incluirSiAreaLista });
+      const cuentasFiltradas = (cuentas || []).filter(
+        (cuenta) => cuenta.estadoCuentaMesera !== 'pagado'
+      );
+      res.json(cuentasFiltradas);
     } catch (error) {
       console.error('Error al obtener pedidos:', error);
       res.status(500).json({ error: 'No se pudieron obtener los pedidos.' });

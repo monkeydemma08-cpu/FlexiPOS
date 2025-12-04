@@ -189,6 +189,8 @@ CREATE TABLE IF NOT EXISTS pedidos (
   fecha_factura DATETIME,
   cocinero_id INT,
   cocinero_nombre VARCHAR(255),
+  bartender_id INT,
+  bartender_nombre VARCHAR(255),
   cierre_id INT,
   insumos_descontados TINYINT DEFAULT 0,
   creado_por INT,
