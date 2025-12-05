@@ -103,6 +103,7 @@ async function ensureTableNegocios() {
       color_boton_secundario VARCHAR(7) NULL,
       color_boton_peligro VARCHAR(7) NULL,
       config_modulos JSON NULL,
+      admin_principal_correo VARCHAR(255) NULL,
       admin_principal_usuario_id BIGINT NULL,
       logo_url VARCHAR(255) NULL,
       titulo_sistema VARCHAR(150) NULL,
@@ -285,6 +286,7 @@ async function ensureNegocioThemeAndModulesColumns() {
   await ensureColumn('negocios', 'color_boton_secundario VARCHAR(7) NULL');
   await ensureColumn('negocios', 'color_boton_peligro VARCHAR(7) NULL');
   await ensureColumn('negocios', 'config_modulos JSON NULL');
+  await ensureColumn('negocios', 'admin_principal_correo VARCHAR(255) NULL');
   await ensureColumn('negocios', 'admin_principal_usuario_id BIGINT NULL');
   const fkCompatible = await columnsCompatibleForFk('negocios', 'admin_principal_usuario_id', 'usuarios', 'id');
   if (fkCompatible) {

@@ -2502,6 +2502,7 @@ const obtenerSesionNegocios = () =>
 const getNegociosDom = () => ({
   section: document.getElementById('kanm-negocios-section'),
   mensaje: document.getElementById('kanm-negocios-mensaje'),
+  inputBuscar: document.getElementById('kanm-negocios-buscar'),
   tablaBody: document.getElementById('kanm-negocios-tbody'),
   btnNuevo: document.getElementById('kanm-negocios-btn-nuevo'),
   modal: document.getElementById('kanm-negocios-modal'),
@@ -2525,6 +2526,7 @@ const getNegociosDom = () => ({
   chkModuloHistorial: document.getElementById('kanm-modulo-historial'),
   inputAdminCorreo: document.getElementById('kanm-negocios-admin-correo'),
   inputAdminUsuario: document.getElementById('kanm-negocios-admin-usuario'),
+  chkCambiarPassword: document.getElementById('kanm-negocios-cambiar-password'),
   inputAdminPassword: document.getElementById('kanm-negocios-admin-password'),
   inputLogoUrl: document.getElementById('kanm-negocios-logo-url'),
   btnCerrar: document.getElementById('kanm-negocios-btn-cerrar'),
@@ -2540,16 +2542,28 @@ const setNegociosMsg = (msg = '', type = 'info') => {
   }
 };
 
-const renderNegociosTabla = (lista = []) => {
+const normalizarTextoNegocio = (valor = '') =>
+  (valor || '')
+    .toString()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+
+const obtenerNombreNegocio = (negocio = {}) => negocio?.nombre || negocio?.titulo_sistema || '';
+
+const renderNegociosTabla = (lista = [], opciones = {}) => {
   const { tablaBody } = getNegociosDom();
   if (!tablaBody) return;
   tablaBody.innerHTML = '';
+  const emptyText = opciones.emptyText || 'No hay negocios registrados.';
   if (!lista.length) {
-    tablaBody.innerHTML = '<tr><td colspan="5">No hay negocios registrados.</td></tr>';
+    tablaBody.innerHTML = `<tr><td colspan="5">${emptyText}</td></tr>`;
     return;
   }
   tablaBody.innerHTML = lista
     .map((neg) => {
+      const nombre = obtenerNombreNegocio(neg) || '-';
       const swatchPrim = `<span class="kanm-color-swatch" style="background:${neg.color_primario || '#ccc'}"></span>`;
       const swatchSec = `<span class="kanm-color-swatch" style="background:${neg.color_secundario || '#ccc'}"></span>`;
       const logo = neg.logo_url
@@ -2557,7 +2571,7 @@ const renderNegociosTabla = (lista = []) => {
         : '<span class="kanm-subtitle">Sin logo</span>';
       return `
         <tr>
-          <td>${neg.nombre || neg.titulo_sistema || '-'}</td>
+          <td>${nombre}</td>
           <td>${neg.slug || '-'}</td>
           <td class="negocios-colores">${swatchPrim} ${swatchSec}</td>
           <td>${logo}</td>
@@ -2576,6 +2590,40 @@ const renderNegociosTabla = (lista = []) => {
     .join('');
 };
 
+const filtrarNegociosPorNombre = (termino = '') => {
+  const filtro = normalizarTextoNegocio(termino);
+  const lista = KANM_NEGOCIOS_CACHE || [];
+  if (!filtro) return [...lista];
+  return lista.filter((neg) => {
+    const nombre = obtenerNombreNegocio(neg) || neg?.slug || '';
+    return normalizarTextoNegocio(nombre).includes(filtro);
+  });
+};
+
+const renderNegociosFiltrados = () => {
+  const dom = getNegociosDom();
+  const termino = dom.inputBuscar?.value || '';
+  const listaFiltrada = filtrarNegociosPorNombre(termino);
+  const hayBusqueda = Boolean(termino?.trim());
+  const emptyText = hayBusqueda
+    ? 'No hay negocios que coincidan con la busqueda.'
+    : 'No hay negocios registrados.';
+  renderNegociosTabla(listaFiltrada, { emptyText });
+};
+
+const setEstadoPasswordAdmin = (habilitar = false) => {
+  const dom = getNegociosDom();
+  if (dom.chkCambiarPassword) {
+    dom.chkCambiarPassword.checked = habilitar;
+  }
+  if (dom.inputAdminPassword) {
+    dom.inputAdminPassword.disabled = !habilitar;
+    if (!habilitar) {
+      dom.inputAdminPassword.value = '';
+    }
+  }
+};
+
 const cargarNegocios = async () => {
   const sesion = obtenerSesionNegocios();
   if (!sesion?.esSuperAdmin) return;
@@ -2588,7 +2636,7 @@ const cargarNegocios = async () => {
     }
     KANM_NEGOCIOS_CACHE = data?.negocios || [];
     KANM_NEGOCIOS_CARGADO = true;
-    renderNegociosTabla(KANM_NEGOCIOS_CACHE);
+    renderNegociosFiltrados();
     setNegociosMsg('', 'info');
   } catch (error) {
     console.error('Error al cargar negocios:', error);
@@ -2607,6 +2655,7 @@ const abrirModalNegocio = async (id = null) => {
       negocioSeleccionado = (KANM_NEGOCIOS_CACHE || []).find((n) => String(n.id) === String(id));
     }
   }
+  const esEdicion = Boolean(negocioSeleccionado?.id);
   dom.form.reset();
   if (dom.mensajeForm) {
     dom.mensajeForm.textContent = '';
@@ -2675,14 +2724,23 @@ const abrirModalNegocio = async (id = null) => {
   if (dom.chkModuloHistorial) dom.chkModuloHistorial.checked = configParsed.historialCocina !== false;
 
   if (dom.inputAdminCorreo) {
-    dom.inputAdminCorreo.value = negocioSeleccionado?.correoAdminPrincipal || negocioSeleccionado?.admin_principal_correo || '';
+    dom.inputAdminCorreo.value =
+      negocioSeleccionado?.correoAdminPrincipal ||
+      negocioSeleccionado?.admin_principal_correo ||
+      negocioSeleccionado?.adminPrincipalCorreo ||
+      '';
   }
   if (dom.inputAdminUsuario) {
-    dom.inputAdminUsuario.value = '';
+    dom.inputAdminUsuario.value =
+      negocioSeleccionado?.adminPrincipalUsuario ||
+      negocioSeleccionado?.admin_principal_usuario ||
+      negocioSeleccionado?.admin_usuario ||
+      '';
   }
   if (dom.inputAdminPassword) {
     dom.inputAdminPassword.value = '';
   }
+  setEstadoPasswordAdmin(!esEdicion);
 
   if (dom.modalTitulo) {
     dom.modalTitulo.textContent = negocioSeleccionado?.id ? 'Editar negocio' : 'Nuevo negocio';
@@ -2713,6 +2771,7 @@ const guardarNegocio = async (event) => {
   const dom = getNegociosDom();
   if (!dom.form) return;
   if (dom.mensajeForm) setMessage(dom.mensajeForm, '', 'info');
+  const esEdicion = Boolean(dom.inputId?.value);
 
   const configModulos = {
     admin: dom.chkModuloAdmin?.checked !== false,
@@ -2722,6 +2781,13 @@ const guardarNegocio = async (event) => {
     caja: dom.chkModuloCaja?.checked !== false,
     historialCocina: dom.chkModuloHistorial?.checked !== false,
   };
+
+  const passwordEditable = dom.chkCambiarPassword?.checked === true;
+  const adminPassword = passwordEditable ? dom.inputAdminPassword?.value || null : null;
+  if (esEdicion && passwordEditable && !adminPassword) {
+    setMessage(dom.mensajeForm, 'Ingresa la nueva contrasena del admin principal.', 'warning');
+    return;
+  }
 
   const payload = {
     nombre: dom.inputNombre?.value?.trim(),
@@ -2737,12 +2803,11 @@ const guardarNegocio = async (event) => {
     configModulos,
     adminPrincipalCorreo: dom.inputAdminCorreo?.value?.trim() || null,
     adminPrincipalUsuario: dom.inputAdminUsuario?.value?.trim() || null,
-    adminPrincipalPassword: dom.inputAdminPassword?.value || null,
+    adminPrincipalPassword: adminPassword,
     logo_url: dom.inputLogoUrl?.value?.trim() || null,
   };
 
   const id = dom.inputId?.value;
-  const esEdicion = Boolean(id);
   const url = esEdicion ? `/api/negocios/${id}` : '/api/negocios';
   const method = esEdicion ? 'PUT' : 'POST';
 
@@ -2801,7 +2866,18 @@ const initNegociosAdmin = () => {
       abrirModalNegocio(null);
     });
   } else {
-    console.warn('Botón Nuevo negocio no encontrado');
+    console.warn('Bot?n Nuevo negocio no encontrado');
+  }
+
+  if (dom.chkCambiarPassword) {
+    dom.chkCambiarPassword.addEventListener('change', (event) => {
+      setEstadoPasswordAdmin(event.target.checked);
+    });
+  }
+
+
+  if (dom.inputBuscar) {
+    dom.inputBuscar.addEventListener('input', () => renderNegociosFiltrados());
   }
 
   if (dom.tablaBody) {

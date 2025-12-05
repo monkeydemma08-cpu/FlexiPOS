@@ -337,6 +337,20 @@ img {
   gap: 8px;
 }
 
+.kanm-negocios-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.kanm-negocios-actions .kanm-input-group {
+  margin: 0;
+  flex: 1;
+  min-width: 220px;
+}
+
 .kanm-card--panel {
   gap: 24px;
 }
@@ -470,6 +484,18 @@ img {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.kanm-input-group .kanm-input-help {
+  font-size: 0.9rem;
+  color: var(--kanm-gray-600);
+  margin-top: 2px;
+}
+
+.kanm-input-toggle {
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .kanm-input-group--inline {

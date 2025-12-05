@@ -236,6 +236,16 @@ function mapNegocioWithDefaults(row = {}) {
       ? null
       : Number(adminPrincipalUsuarioIdRaw);
   const adminPrincipalUsuarioIdFinal = Number.isFinite(adminPrincipalUsuarioId) ? adminPrincipalUsuarioId : null;
+  const adminPrincipalCorreo =
+    normalizarCampoTexto(
+      row.admin_principal_correo ?? row.adminPrincipalCorreo ?? row.correoAdminPrincipal ?? row.correo_admin_principal,
+      null
+    ) || null;
+  const adminPrincipalUsuario =
+    normalizarCampoTexto(
+      row.admin_principal_usuario ?? row.adminPrincipalUsuario ?? row.admin_usuario ?? row.usuarioAdminPrincipal,
+      null
+    ) || null;
   const rawConfigModulos = row.config_modulos ?? row.configModulos;
   const configModulos = parseConfigModulos(rawConfigModulos);
   const configModulosString =
@@ -253,6 +263,8 @@ function mapNegocioWithDefaults(row = {}) {
     color_boton_peligro: colorBotonPeligro,
     config_modulos: configModulosString,
     logoUrl,
+    adminPrincipalCorreo,
+    adminPrincipalUsuario,
     colorHeader,
     colorTexto,
     colorBotonPrimario,
@@ -3665,12 +3677,14 @@ app.get('/api/usuarios', (req, res) => {
 app.get('/api/negocios', (req, res) => {
   requireSuperAdmin(req, res, () => {
     const sql = `
-      SELECT id, nombre, slug, rnc, telefono, direccion, color_primario, color_secundario,
-             color_texto, color_header, color_boton_primario, color_boton_secundario, color_boton_peligro,
-             config_modulos, admin_principal_usuario_id,
-             logo_url, titulo_sistema, activo, creado_en
-      FROM negocios
-      ORDER BY id ASC
+      SELECT n.id, n.nombre, n.slug, n.rnc, n.telefono, n.direccion, n.color_primario, n.color_secundario,
+             n.color_texto, n.color_header, n.color_boton_primario, n.color_boton_secundario, n.color_boton_peligro,
+             n.config_modulos, n.admin_principal_correo, n.admin_principal_usuario_id,
+             u.usuario AS admin_principal_usuario,
+             n.logo_url, n.titulo_sistema, n.activo, n.creado_en
+        FROM negocios n
+        LEFT JOIN usuarios u ON u.id = n.admin_principal_usuario_id
+       ORDER BY n.id ASC
     `;
     db.all(sql, [], (err, rows) => {
       if (err) {
@@ -3736,9 +3750,9 @@ app.post('/api/negocios', (req, res) => {
 
       const insertSql = `
         INSERT INTO negocios (nombre, slug, rnc, telefono, direccion, color_primario, color_secundario, color_texto, color_header,
-                              color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos,
+                              color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos, admin_principal_correo,
                               admin_principal_usuario_id, logo_url, titulo_sistema, activo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       const params = [
@@ -3755,6 +3769,7 @@ app.post('/api/negocios', (req, res) => {
         colorBotonSecundario,
         colorBotonPeligro,
         configModulosJson,
+        adminPrincipalCorreo,
         adminPrincipalUsuarioIdFinal,
         logoUrl,
         tituloSistema,
@@ -3783,6 +3798,8 @@ app.post('/api/negocios', (req, res) => {
           color_boton_peligro: colorBotonPeligro,
           config_modulos: configModulosJson,
           admin_principal_usuario_id: adminPrincipalUsuarioIdFinal,
+          admin_principal_usuario: adminPrincipalUsuario,
+          admin_principal_correo: adminPrincipalCorreo,
           logo_url: logoUrl,
           titulo_sistema: tituloSistema,
           activo,
@@ -3905,6 +3922,10 @@ app.put('/api/negocios/:id', (req, res) => {
       fields.push('config_modulos = ?');
       params.push(stringifyConfigModulos(configModulosProvided));
     }
+    if (payload.adminPrincipalCorreo !== undefined || payload.admin_principal_correo !== undefined) {
+      fields.push('admin_principal_correo = ?');
+      params.push(adminPrincipalCorreo);
+    }
     if (adminPrincipalUsuarioIdProvided !== undefined) {
       const parsedId =
         adminPrincipalUsuarioIdProvided === null || adminPrincipalUsuarioIdProvided === '' ? null : Number(adminPrincipalUsuarioIdProvided);
@@ -3948,8 +3969,8 @@ app.put('/api/negocios/:id', (req, res) => {
         return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
       }
 
-      try {
-        if (adminPrincipalCorreo) {
+            try {
+        if (adminPrincipalCorreo || adminPrincipalUsuario || adminPrincipalPassword) {
           await asegurarAdminPrincipalNegocio({
             negocioId: id,
             negocioNombre: payload.nombre || payload.titulo_sistema || payload.tituloSistema || '',
@@ -3964,15 +3985,17 @@ app.put('/api/negocios/:id', (req, res) => {
         if (admErr?.status === 400) {
           return res.status(400).json({ ok: false, error: admErr.message || 'No se pudo procesar admin principal' });
         }
-        console.warn('No se pudo procesar admin principal en actualización:', admErr?.message || admErr);
+        console.warn('No se pudo procesar admin principal en actualizaci?n:', admErr?.message || admErr);
       }
 
       db.get(
-        `SELECT id, nombre, slug, rnc, telefono, direccion, color_primario, color_secundario, color_texto, color_header,
-                color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos, admin_principal_usuario_id,
-                logo_url, titulo_sistema, activo
-           FROM negocios
-          WHERE id = ?`,
+        `SELECT n.id, n.nombre, n.slug, n.rnc, n.telefono, n.direccion, n.color_primario, n.color_secundario, n.color_texto, n.color_header,
+                n.color_boton_primario, n.color_boton_secundario, n.color_boton_peligro, n.config_modulos, n.admin_principal_correo, n.admin_principal_usuario_id,
+                u.usuario AS admin_principal_usuario,
+                n.logo_url, n.titulo_sistema, n.activo
+           FROM negocios n
+           LEFT JOIN usuarios u ON u.id = n.admin_principal_usuario_id
+          WHERE n.id = ?`,
         [id],
         (selectErr, negocio) => {
           if (selectErr) {
@@ -4059,8 +4082,9 @@ app.post('/api/usuarios', (req, res) => {
     }
 
     const { nombre, usuario, password, rol, activo = 1, negocio_id, es_super_admin } = req.body || {};
+    const usuarioNormalizado = (usuario || '').trim();
 
-    if (!nombre || !usuario || !password || !rol) {
+    if (!nombre || !usuarioNormalizado || !password || !rol) {
       return res.status(400).json({ error: 'Nombre, usuario, contrase\u00f1a y rol son obligatorios' });
     }
 
@@ -4080,9 +4104,14 @@ app.post('/api/usuarios', (req, res) => {
     }
 
     try {
+      const existenteUsuario = await usuariosRepo.findByUsuario(usuarioNormalizado);
+      if (existenteUsuario) {
+        return res.status(400).json({ error: 'Ya existe un usuario con ese nombre de usuario en otro negocio.' });
+      }
+
       const creado = await usuariosRepo.create({
         nombre,
-        usuario,
+        usuario: usuarioNormalizado,
         password,
         rol,
         activo,
@@ -4114,6 +4143,7 @@ app.put('/api/usuarios/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const { id } = req.params;
     const { nombre, usuario, password, rol, activo, negocio_id, es_super_admin } = req.body || {};
+    const usuarioNormalizado = usuario?.trim();
 
     if (Number(id) === 1 || rol === 'admin') {
       return res.status(400).json({ error: 'No se puede modificar el usuario administrador' });
@@ -4136,7 +4166,7 @@ app.put('/api/usuarios/:id', (req, res) => {
         return res.status(403).json({ error: 'Acceso restringido' });
       }
 
-      const payload = { nombre, usuario, password, rol, activo };
+      const payload = { nombre, usuario: usuarioNormalizado, password, rol, activo };
       const negocioDestino = esSuper && negocio_id !== undefined ? negocio_id || NEGOCIO_ID_DEFAULT : existente.negocio_id;
       const rolDestino = rol || existente.rol;
       if (rolDestino === 'bar') {
@@ -4152,6 +4182,13 @@ app.put('/api/usuarios/:id', (req, res) => {
 
       if (esSuper && es_super_admin !== undefined) {
         payload.es_super_admin = es_super_admin ? 1 : 0;
+      }
+
+      if (usuarioNormalizado && usuarioNormalizado !== existente.usuario) {
+        const usuarioEnUso = await usuariosRepo.findByUsuario(usuarioNormalizado);
+        if (usuarioEnUso && Number(usuarioEnUso.id) !== Number(id)) {
+          return res.status(400).json({ error: 'Ya existe un usuario con ese nombre de usuario en otro negocio.' });
+        }
       }
 
       const actualizado = await usuariosRepo.update(id, payload);

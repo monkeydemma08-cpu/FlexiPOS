@@ -26,9 +26,6 @@ const listasPorEstado = {
   preparando: document.getElementById('lista-pedidos-preparando'),
   listo: document.getElementById('lista-pedidos-listos'),
 };
-const btnScrollTop = document.getElementById('mesera-scroll-top');
-const btnScrollBottom = document.getElementById('mesera-scroll-bottom');
-
 const REFRESCO_PEDIDOS_MS = 20000;
 let temporizadorPedidos = null;
 
@@ -1059,20 +1056,6 @@ const detenerRefrescoPedidos = () => {
   }
 };
 
-const scrollSuave = (y) => {
-  window.scrollTo({ top: y, behavior: 'smooth' });
-};
-
-const scrollArriba = () => scrollSuave(0);
-
-const scrollAbajo = () => {
-  const carrito = document.getElementById('carrito');
-  const footer = document.getElementById('mesera-footer');
-  const destino = carrito || footer || document.body;
-  const rect = destino.getBoundingClientRect();
-  const y = window.scrollY + rect.top - 10;
-  scrollSuave(y);
-};
 
 const enviarPedido = async (destino = 'cocina') => {
   if (estado.cargando) return;
@@ -1198,9 +1181,6 @@ const inicializarEventos = () => {
 
   botonEnviar?.addEventListener('click', () => enviarPedido('cocina'));
   botonEnviarCaja?.addEventListener('click', () => enviarPedido('caja'));
-  btnScrollTop?.addEventListener('click', scrollArriba);
-  btnScrollBottom?.addEventListener('click', scrollAbajo);
-
   botonCancelarEdicion?.addEventListener('click', () => {
     cancelarEdicion();
   });

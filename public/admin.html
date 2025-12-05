@@ -1191,14 +1191,23 @@
         <p class="kanm-subtitle">Administra los negocios del sistema (solo super admin).</p>
       </div>
       <div class="kanm-card admin-card">
-        <div class="kanm-card-header kanm-card-header--actions">
-          <div>
-            <h3>Listado</h3>
-            <p class="kanm-subtitle">Solo visible para Super Admin.</p>
+      <div class="kanm-card-header kanm-card-header--actions">
+        <div>
+          <h3>Listado</h3>
+          <p class="kanm-subtitle">Solo visible para Super Admin.</p>
+        </div>
+        <div class="kanm-negocios-actions">
+          <div class="kanm-input-group">
+            <input
+              type="search"
+              id="kanm-negocios-buscar"
+              placeholder="Buscar negocio por nombre..."
+            />
           </div>
           <button type="button" class="kanm-button primary" id="kanm-negocios-btn-nuevo">Nuevo negocio</button>
         </div>
-        <div id="kanm-negocios-mensaje" class="kanm-subtitle"></div>
+      </div>
+      <div id="kanm-negocios-mensaje" class="kanm-subtitle"></div>
         <div class="kanm-table-wrapper">
           <table class="kanm-table" id="kanm-negocios-tabla">
             <thead>
@@ -1326,10 +1335,23 @@
             <div class="kanm-input-group">
               <label for="kanm-negocios-admin-usuario">Usuario admin (opcional)</label>
               <input type="text" id="kanm-negocios-admin-usuario" placeholder="admin.negocio" />
+              <span class="kanm-input-help">Este usuario sera el admin principal del negocio.</span>
+            </div>
+            <div class="kanm-input-group kanm-input-group--inline kanm-input-toggle">
+              <label class="kanm-checkbox" for="kanm-negocios-cambiar-password">
+                <input type="checkbox" id="kanm-negocios-cambiar-password" />
+                <span>Actualizar contrase?a</span>
+              </label>
+              <span class="kanm-input-help">Activa para definir una nueva contrase?a.</span>
             </div>
             <div class="kanm-input-group">
-              <label for="kanm-negocios-admin-password">Contraseña admin (opcional)</label>
-              <input type="password" id="kanm-negocios-admin-password" placeholder="********" />
+              <label for="kanm-negocios-admin-password">Contrase?a admin (opcional)</label>
+              <input
+                type="password"
+                id="kanm-negocios-admin-password"
+                placeholder="Deja vacio para mantener la actual"
+              />
+              <span class="kanm-input-help">Solo se aplica si activas "Actualizar contrase?a".</span>
             </div>
           </div>
         </section>
