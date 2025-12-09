@@ -3,13 +3,17 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const db = require('./db');
 const usuariosRepo = require('./repos/usuarios-mysql');
 const runMultiNegocioMigrations = require('./migrations/mysql-multi-negocio');
+const runChatMigrations = require('./migrations/mysql-chat');
 console.log('server.js cargó correctamente');
 
 const app = express();
+let io = null;
 
 app.use(express.json());
 app.use(cors());
@@ -276,6 +280,7 @@ function mapNegocioWithDefaults(row = {}) {
 }
 
 runMultiNegocioMigrations()
+  .then(() => runChatMigrations())
   .then(() => seedUsuariosIniciales())
   .catch((err) => {
     console.error('Error en migraciones/seed:', err?.message || err);
@@ -355,10 +360,9 @@ const extraerTokenDeHeaders = (req) => {
   return null;
 };
 
-const obtenerUsuarioDesdeHeaders = (req, callback) => {
-  const token = extraerTokenDeHeaders(req);
+async function obtenerUsuarioSesionPorToken(token) {
   if (!token) {
-    return callback(null, null);
+    return null;
   }
 
   const sql = `
@@ -371,55 +375,62 @@ const obtenerUsuarioDesdeHeaders = (req, callback) => {
     LIMIT 1
   `;
 
-  db.get(sql, [token], async (err, row) => {
-    if (err) {
-      return callback(err);
-    }
+  const row = await db.get(sql, [token]);
+  if (!row) {
+    return null;
+  }
 
-    if (!row) {
-      return callback(null, null);
-    }
+  const usuario = await usuariosRepo.findById(row.usuario_id);
+  if (!usuario || usuario.activo === 0) {
+    return null;
+  }
 
-    try {
-      const usuario = await usuariosRepo.findById(row.usuario_id);
-      if (!usuario) {
+  await db.run('UPDATE sesiones_usuarios SET ultimo_uso = CURRENT_TIMESTAMP WHERE id = ?', [row.sesion_id]);
+
+  const negocioId = usuario.negocio_id != null ? usuario.negocio_id : NEGOCIO_ID_DEFAULT;
+  const configModulosSesion = await obtenerConfigModulosNegocio(negocioId);
+
+  return {
+    id: usuario.id,
+    nombre: usuario.nombre,
+    usuario: usuario.usuario,
+    rol: usuario.rol,
+    negocio_id: negocioId,
+    negocioId,
+    es_super_admin: !!usuario.es_super_admin,
+    config_modulos: configModulosSesion,
+    configModulos: configModulosSesion,
+    token,
+  };
+}
+
+const obtenerUsuarioDesdeHeaders = (req, callback) => {
+  const token = extraerTokenDeHeaders(req);
+  if (!token) {
+    return callback(null, null);
+  }
+
+  obtenerUsuarioSesionPorToken(token)
+    .then((usuarioSesion) => {
+      if (!usuarioSesion) {
         return callback(null, null);
       }
 
-      db.run('UPDATE sesiones_usuarios SET ultimo_uso = CURRENT_TIMESTAMP WHERE id = ?', [row.sesion_id], async () => {
-        const negocioId = usuario.negocio_id != null ? usuario.negocio_id : NEGOCIO_ID_DEFAULT;
-        const configModulosSesion = await obtenerConfigModulosNegocio(negocioId);
-        const usuarioSesion = {
-          id: usuario.id,
-          nombre: usuario.nombre,
-          usuario: usuario.usuario,
-          rol: usuario.rol,
-          negocio_id: negocioId,
-          negocioId,
-          es_super_admin: !!usuario.es_super_admin,
-          config_modulos: configModulosSesion,
-          configModulos: configModulosSesion,
-          token,
-        };
+      req.session = req.session || {};
+      req.session.usuario = usuarioSesion;
+      req.usuarioSesion = usuarioSesion;
+      req.sesion = {
+        usuarioId: usuarioSesion.id,
+        rol: usuarioSesion.rol,
+        negocioId: usuarioSesion.negocio_id,
+        esSuperAdmin: !!usuarioSesion.es_super_admin,
+        configModulos: usuarioSesion.config_modulos,
+        token: usuarioSesion.token,
+      };
 
-        req.session = req.session || {};
-        req.session.usuario = usuarioSesion;
-        req.usuarioSesion = usuarioSesion;
-        req.sesion = {
-          usuarioId: usuario.id,
-          rol: usuario.rol,
-          negocioId,
-          esSuperAdmin: !!usuario.es_super_admin,
-          configModulos: configModulosSesion,
-          token,
-        };
-
-        callback(null, usuarioSesion);
-      });
-    } catch (repoError) {
-      callback(repoError);
-    }
-  });
+      callback(null, usuarioSesion);
+    })
+    .catch((err) => callback(err));
 };
 
 const requireUsuarioSesion = (req, res, next) => {
@@ -466,6 +477,543 @@ const requireSuperAdmin = (req, res, next) => {
     next(usuarioSesion);
   });
 };
+
+const CHAT_PAGE_SIZE = 30;
+const CHAT_ROOM_TYPES = ['channel', 'private'];
+const CHAT_SOCKET_EVENTS = {
+  NEW_MESSAGE: 'message:new',
+  PINNED: 'message:pinned',
+  CLEARED: 'chat:cleared',
+  TYPING: 'typing:update',
+  MESSAGES_READ: 'messages:read',
+};
+const getChatRoomChannel = (roomId) => `chat-room-${roomId}`;
+
+const normalizarContenidoMensaje = (texto) => {
+  if (texto === undefined || texto === null) return '';
+  return String(texto).trim();
+};
+
+const extraerUsernamesMencionados = (contenido = '') => {
+  const coincidencias =
+    contenido.match(/@([A-Za-z0-9_]+)/g)?.map((item) => item.slice(1).toLowerCase()) || [];
+  return Array.from(new Set(coincidencias.filter(Boolean)));
+};
+
+const obtenerNegocioIdUsuario = (usuarioSesion) =>
+  usuarioSesion?.negocio_id ?? usuarioSesion?.negocioId ?? NEGOCIO_ID_DEFAULT;
+
+async function obtenerSalaPorId(roomId) {
+  if (!roomId) return null;
+  return db.get(
+    `SELECT id, negocio_id, nombre, tipo, creado_por_usuario_id, created_at
+       FROM chat_rooms
+      WHERE id = ?
+      LIMIT 1`,
+    [roomId]
+  );
+}
+
+async function obtenerRelacionSalaUsuario(roomId, usuarioId) {
+  if (!roomId || !usuarioId) {
+    return { esMiembro: false, esAdminSala: false };
+  }
+
+  const relacion = await db.get(
+    'SELECT id, is_admin FROM chat_room_users WHERE room_id = ? AND usuario_id = ? LIMIT 1',
+    [roomId, usuarioId]
+  );
+
+  return {
+    esMiembro: !!relacion,
+    esAdminSala: !!relacion?.is_admin,
+  };
+}
+
+async function asegurarMembresiaSala(roomId, usuarioId) {
+  if (!roomId || !usuarioId) return null;
+  try {
+    await db.run(
+      'INSERT INTO chat_room_users (room_id, usuario_id, is_admin) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE usuario_id = usuario_id',
+      [roomId, usuarioId]
+    );
+    return true;
+  } catch (error) {
+    console.warn('No se pudo asegurar la membresia en la sala:', error?.message || error);
+    return false;
+  }
+}
+
+async function validarAccesoSala(roomId, usuarioSesion) {
+  const room = await obtenerSalaPorId(roomId);
+  if (!room) {
+    return { error: 'Sala no encontrada', status: 404 };
+  }
+
+  const negocioIdUsuario = obtenerNegocioIdUsuario(usuarioSesion);
+  if (Number(room.negocio_id) !== Number(negocioIdUsuario)) {
+    return { error: 'La sala no pertenece a tu negocio', status: 403 };
+  }
+
+  let { esMiembro, esAdminSala } = await obtenerRelacionSalaUsuario(room.id, usuarioSesion.id);
+  if (room.tipo === 'channel' && !esMiembro) {
+    await asegurarMembresiaSala(room.id, usuarioSesion.id);
+    esMiembro = true;
+  }
+
+  const esAdministradorNegocio = esUsuarioAdmin(usuarioSesion) || esSuperAdmin(usuarioSesion);
+  const puedeVer = room.tipo !== 'private' || esMiembro || esAdministradorNegocio;
+  const puedeAdministrar = esAdministradorNegocio || esAdminSala;
+
+  if (!puedeVer) {
+    return { error: 'No tienes acceso a esta sala', status: 403 };
+  }
+
+  return { room, esMiembro, esAdminSala, puedeVer, puedeAdministrar };
+}
+
+async function obtenerUsuariosMencionados(contenido, negocioId) {
+  const usernames = extraerUsernamesMencionados(contenido);
+  if (!usernames.length) return [];
+
+  const placeholders = usernames.map(() => '?').join(', ');
+  const params = [...usernames, negocioId];
+
+  const rows = await db.all(
+    `SELECT id, nombre, usuario
+       FROM usuarios
+      WHERE LOWER(usuario) IN (${placeholders})
+        AND negocio_id = ?
+        AND activo = 1`,
+    params
+  );
+
+  return rows || [];
+}
+
+async function guardarMenciones(messageId, usuariosMencionados) {
+  if (!messageId || !usuariosMencionados?.length) return [];
+
+  const inserciones = [];
+  const usados = new Set();
+
+  for (const usuario of usuariosMencionados) {
+    if (!usuario?.id || usados.has(usuario.id)) continue;
+    usados.add(usuario.id);
+    try {
+      await db.run('INSERT INTO chat_mentions (message_id, mentioned_usuario_id) VALUES (?, ?)', [
+        messageId,
+        usuario.id,
+      ]);
+      inserciones.push({ usuario_id: usuario.id, nombre: usuario.nombre, usuario: usuario.usuario });
+    } catch (error) {
+      console.warn('No se pudo registrar la mencion en el chat:', error?.message || error);
+    }
+  }
+
+  return inserciones;
+}
+
+async function cargarMensajeCompleto(messageId, usuarioActualId = null) {
+  if (!messageId) return null;
+
+  const mensaje = await db.get(
+    `SELECT m.id, m.room_id, m.negocio_id, m.usuario_id, m.contenido, m.tipo, m.is_pinned,
+            m.reply_to_message_id, m.created_at, m.deleted_at,
+            u.nombre AS usuario_nombre, u.usuario AS usuario_usuario,
+            r.nombre AS room_nombre
+       FROM chat_messages m
+       JOIN usuarios u ON u.id = m.usuario_id
+       LEFT JOIN chat_rooms r ON r.id = m.room_id
+      WHERE m.id = ?
+      LIMIT 1`,
+    [messageId]
+  );
+
+  if (!mensaje) return null;
+
+  const menciones = await db.all(
+    `SELECT cm.mentioned_usuario_id AS usuario_id, u.nombre, u.usuario
+       FROM chat_mentions cm
+       JOIN usuarios u ON u.id = cm.mentioned_usuario_id
+      WHERE cm.message_id = ?`,
+    [messageId]
+  );
+
+  const mencionaActual =
+    usuarioActualId != null &&
+    menciones.some((m) => Number(m.usuario_id) === Number(usuarioActualId));
+
+  return {
+    ...mensaje,
+    menciones: menciones || [],
+    menciona_actual: mencionaActual,
+    es_propietario: Number(mensaje.usuario_id) === Number(usuarioActualId),
+  };
+}
+
+async function obtenerMensajesDeSala({
+  roomId,
+  negocioId,
+  usuarioActualId,
+  page = 1,
+  limit = CHAT_PAGE_SIZE,
+}) {
+  const takeInput = Number(limit);
+  const pageInput = Number(page);
+  const take = Number.isFinite(takeInput)
+    ? Math.max(1, Math.min(Math.trunc(takeInput), 100))
+    : CHAT_PAGE_SIZE;
+  const pageNumber = Number.isFinite(pageInput) ? Math.max(1, Math.trunc(pageInput)) : 1;
+  const offset = Math.max(0, (pageNumber - 1) * take);
+  const roomIdNumber = Number(roomId);
+  const negocioIdNumber = Number(negocioId);
+  const usuarioIdNumber = Number(usuarioActualId) || 0;
+  const limitClause = `LIMIT ${take} OFFSET ${offset}`;
+
+  const rows = await db.all(
+    `SELECT m.id, m.room_id, m.negocio_id, m.usuario_id, m.contenido, m.tipo,
+            m.is_pinned, m.reply_to_message_id, m.created_at, m.deleted_at,
+            u.nombre AS usuario_nombre, u.usuario AS usuario_usuario,
+            CASE WHEN cm.id IS NULL THEN 0 ELSE 1 END AS menciona_actual
+       FROM chat_messages m
+       JOIN usuarios u ON u.id = m.usuario_id
+       LEFT JOIN chat_mentions cm ON cm.message_id = m.id AND cm.mentioned_usuario_id = ?
+      WHERE m.room_id = ?
+        AND m.negocio_id = ?
+        AND m.deleted_at IS NULL
+      ORDER BY m.created_at DESC
+      ${limitClause}`,
+    [usuarioIdNumber, roomIdNumber, negocioIdNumber]
+  );
+
+  const mensajesDesc = rows || [];
+  const ids = mensajesDesc.map((m) => m.id).filter(Boolean);
+  const mensajesOrdenados = [...mensajesDesc].reverse();
+
+  let mencionesPorMensaje = {};
+  if (ids.length) {
+    const placeholders = ids.map(() => '?').join(', ');
+    const menciones = await db.all(
+      `SELECT cm.message_id, cm.mentioned_usuario_id AS usuario_id, u.nombre, u.usuario
+         FROM chat_mentions cm
+         JOIN usuarios u ON u.id = cm.mentioned_usuario_id
+        WHERE cm.message_id IN (${placeholders})`,
+      ids
+    );
+
+    mencionesPorMensaje = (menciones || []).reduce((acc, menc) => {
+      acc[menc.message_id] = acc[menc.message_id] || [];
+      acc[menc.message_id].push({
+        usuario_id: menc.usuario_id,
+        nombre: menc.nombre,
+        usuario: menc.usuario,
+      });
+      return acc;
+    }, {});
+  }
+
+  const mensajes = mensajesOrdenados.map((m) => ({
+    ...m,
+    menciones: mencionesPorMensaje[m.id] || [],
+    menciona_actual: Boolean(m.menciona_actual),
+    es_propietario: Number(m.usuario_id) === Number(usuarioActualId),
+    created_at: m.created_at,
+  }));
+
+  return { mensajes, hasMore: mensajesDesc.length === take };
+}
+
+// Guarda lecturas de mensajes por usuario para soportar estados "visto"
+async function marcarMensajesComoLeidos({ roomId, negocioId, usuarioId, lastVisibleMessageId }) {
+  const roomIdNumber = Number(roomId);
+  const negocioIdNumber = Number(negocioId);
+  const usuarioIdNumber = Number(usuarioId);
+  const lastIdNumber = Number(lastVisibleMessageId);
+
+  if (!roomIdNumber || !negocioIdNumber || !usuarioIdNumber || !lastIdNumber) {
+    return { ok: false, error: 'Parametros incompletos para marcar lectura' };
+  }
+
+  try {
+    // Limitar la cantidad de mensajes a insertar para reducir locking y evitar deadlocks
+    const mensajes = await db.all(
+      `
+        SELECT id
+          FROM chat_messages
+         WHERE room_id = ?
+           AND negocio_id = ?
+           AND deleted_at IS NULL
+           AND id <= ?
+         ORDER BY id DESC
+         LIMIT 200
+      `,
+      [roomIdNumber, negocioIdNumber, lastIdNumber]
+    );
+
+    if (!mensajes || !mensajes.length) {
+      return { ok: true, last_read_message_id: lastIdNumber };
+    }
+
+    const valuesPlaceholders = mensajes.map(() => '(?, ?, CURRENT_TIMESTAMP)').join(', ');
+    const params = mensajes.flatMap((m) => [m.id, usuarioIdNumber]);
+
+    await db.run(
+      `INSERT IGNORE INTO chat_message_reads (message_id, usuario_id, read_at) VALUES ${valuesPlaceholders}`,
+      params
+    );
+
+    return { ok: true, last_read_message_id: lastIdNumber };
+  } catch (error) {
+    console.error('Error marcando mensajes como leidos:', error?.message || error);
+    return { ok: false, error: 'No se pudieron marcar los mensajes como leidos' };
+  }
+}
+
+async function crearMensaje({ room, usuarioSesion, contenido, tipo = 'text' }) {
+  const texto = normalizarContenidoMensaje(contenido);
+  if (!texto) {
+    throw { status: 400, message: 'El mensaje no puede estar vacio' };
+  }
+
+  const resultado = await db.run(
+    'INSERT INTO chat_messages (room_id, negocio_id, usuario_id, contenido, tipo) VALUES (?, ?, ?, ?, ?)',
+    [room.id, room.negocio_id, usuarioSesion.id, texto, tipo || 'text']
+  );
+  const mensajeId = resultado?.lastID || resultado?.lastId || resultado?.insertId;
+
+  const usuariosMencionados = await obtenerUsuariosMencionados(texto, room.negocio_id);
+  await guardarMenciones(mensajeId, usuariosMencionados);
+
+  return cargarMensajeCompleto(mensajeId, usuarioSesion.id);
+}
+
+const emitirNuevoMensaje = (mensaje) => {
+  if (!io || !mensaje?.room_id) return;
+  io.to(getChatRoomChannel(mensaje.room_id)).emit(CHAT_SOCKET_EVENTS.NEW_MESSAGE, mensaje);
+};
+
+const emitirPinMensaje = (roomId, payload) => {
+  if (!io || !roomId) return;
+  io.to(getChatRoomChannel(roomId)).emit(CHAT_SOCKET_EVENTS.PINNED, payload);
+};
+
+const emitirChatVaciado = (roomId, usuarioId) => {
+  if (!io || !roomId) return;
+  io.to(getChatRoomChannel(roomId)).emit(CHAT_SOCKET_EVENTS.CLEARED, {
+    room_id: roomId,
+    vaciado_por: usuarioId || null,
+  });
+};
+
+const emitirLecturas = ({ roomId, usuarioId, lastReadMessageId }) => {
+  if (!io || !roomId || !usuarioId || !lastReadMessageId) return;
+  io.to(getChatRoomChannel(roomId)).emit(CHAT_SOCKET_EVENTS.MESSAGES_READ, {
+    room_id: roomId,
+    usuario_id: usuarioId,
+    last_read_message_id: lastReadMessageId,
+  });
+};
+
+async function listarSalasChat(usuarioSesion, filtros = {}) {
+  const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+  const { tipo, nombre } = filtros;
+  const filtroTipo = CHAT_ROOM_TYPES.includes(tipo) ? tipo : null;
+  const busqueda = nombre ? `%${nombre.trim()}%` : null;
+  const esAdministradorNegocio = esUsuarioAdmin(usuarioSesion) || esSuperAdmin(usuarioSesion);
+  const usuarioId = usuarioSesion.id;
+
+  const condiciones = ['r.negocio_id = ?'];
+  const params = [negocioId];
+
+  if (filtroTipo) {
+    condiciones.push('r.tipo = ?');
+    params.push(filtroTipo);
+  }
+
+  if (busqueda) {
+    condiciones.push('r.nombre LIKE ?');
+    params.push(busqueda);
+  }
+
+  const sql = `
+    SELECT r.id, r.nombre, r.tipo, r.negocio_id, r.creado_por_usuario_id, r.created_at,
+           MAX(COALESCE(cru.is_admin, 0)) AS es_admin_sala,
+           MAX(CASE WHEN cru.id IS NULL THEN 0 ELSE 1 END) AS es_miembro,
+           MIN(CASE WHEN r.tipo = 'private' THEN u2.id END) AS contacto_id,
+           MIN(CASE WHEN r.tipo = 'private' THEN u2.nombre END) AS contacto_nombre,
+           MIN(CASE WHEN r.tipo = 'private' THEN u2.usuario END) AS contacto_usuario,
+           COALESCE(uc.unread_count, 0) AS unread_count,
+           lm.last_message_id,
+           lm.last_message_at
+      FROM chat_rooms r
+      LEFT JOIN chat_room_users cru ON cru.room_id = r.id AND cru.usuario_id = ?
+      LEFT JOIN chat_room_users cru2 ON cru2.room_id = r.id AND cru2.usuario_id != ?
+      LEFT JOIN usuarios u2 ON u2.id = cru2.usuario_id
+      LEFT JOIN (
+        SELECT m.room_id, COUNT(*) AS unread_count
+          FROM chat_messages m
+          JOIN chat_rooms r2 ON r2.id = m.room_id
+          LEFT JOIN chat_message_reads mr ON mr.message_id = m.id AND mr.usuario_id = ?
+         WHERE m.deleted_at IS NULL
+           AND mr.id IS NULL
+           AND m.usuario_id <> ?
+           AND r2.negocio_id = ?
+         GROUP BY m.room_id
+      ) uc ON uc.room_id = r.id
+      LEFT JOIN (
+        SELECT room_id, MAX(id) AS last_message_id, MAX(created_at) AS last_message_at
+          FROM chat_messages
+         WHERE deleted_at IS NULL
+         GROUP BY room_id
+      ) lm ON lm.room_id = r.id
+     WHERE ${condiciones.join(' AND ')}
+       AND (r.tipo != 'private' OR cru.id IS NOT NULL OR ?)
+     GROUP BY r.id
+     ORDER BY COALESCE(uc.unread_count, 0) DESC, lm.last_message_at DESC, r.nombre ASC
+  `;
+
+  const filas = await db.all(sql, [
+    usuarioId,
+    usuarioId,
+    usuarioId,
+    usuarioId,
+    negocioId,
+    ...params,
+    esAdministradorNegocio ? 1 : 0,
+  ]);
+  return (filas || []).map((row) => ({
+    ...row,
+    es_miembro: !!row.es_miembro,
+    es_admin_sala: !!row.es_admin_sala,
+    puede_fijar: esAdministradorNegocio || !!row.es_admin_sala,
+    titulo_privado:
+      row.tipo === 'private'
+        ? row.contacto_nombre || row.contacto_usuario || row.nombre || 'Chat privado'
+        : row.nombre,
+    unread_count: Number(row.unread_count || 0),
+  }));
+}
+
+async function obtenerMensajeConSala(messageId) {
+  if (!messageId) return null;
+  return db.get(
+    `SELECT m.id, m.room_id, m.negocio_id, m.usuario_id, m.is_pinned, m.deleted_at,
+            r.tipo AS room_tipo, r.negocio_id AS room_negocio_id
+       FROM chat_messages m
+       JOIN chat_rooms r ON r.id = m.room_id
+      WHERE m.id = ?
+      LIMIT 1`,
+    [messageId]
+  );
+}
+
+// Busqueda filtrada dentro de una sala concreta (texto, usuario, fechas)
+async function buscarMensajesEnSala({ roomId, negocioId, q, usuarioId, fechaDesde, fechaHasta, page = 1 }) {
+  const take = 30;
+  const pageNumber = Number.isFinite(Number(page)) ? Math.max(1, Math.trunc(Number(page))) : 1;
+  const offset = (pageNumber - 1) * take;
+
+  const condiciones = ['m.room_id = ?', 'm.negocio_id = ?', 'm.deleted_at IS NULL'];
+  const params = [Number(roomId), Number(negocioId)];
+
+  if (q && q.trim()) {
+    condiciones.push('m.contenido LIKE ?');
+    params.push(`%${q.trim()}%`);
+  }
+
+  if (usuarioId) {
+    condiciones.push('m.usuario_id = ?');
+    params.push(Number(usuarioId));
+  }
+
+  if (fechaDesde) {
+    condiciones.push('DATE(m.created_at) >= ?');
+    params.push(fechaDesde);
+  }
+
+  if (fechaHasta) {
+    condiciones.push('DATE(m.created_at) <= ?');
+    params.push(fechaHasta);
+  }
+
+  const sql = `
+    SELECT m.id, m.room_id, m.negocio_id, m.usuario_id, m.contenido, m.tipo,
+           m.is_pinned, m.created_at, u.nombre AS usuario_nombre, u.usuario AS usuario_usuario
+      FROM chat_messages m
+      JOIN usuarios u ON u.id = m.usuario_id
+     WHERE ${condiciones.join(' AND ')}
+     ORDER BY m.created_at DESC
+     LIMIT ${take}
+    OFFSET ${offset}
+  `;
+
+  const rows = await db.all(sql, params);
+  return rows || [];
+}
+
+// Busca o crea una sala privada entre dos usuarios del mismo negocio
+async function obtenerSalaPrivada(usuarioSesion, usuarioObjetivoId) {
+  const usuarioId = Number(usuarioSesion?.id);
+  const objetivoId = Number(usuarioObjetivoId);
+  if (!usuarioId || !objetivoId || usuarioId === objetivoId) {
+    throw { status: 400, message: 'Usuario objetivo invalido' };
+  }
+
+  const usuarioObjetivo = await usuariosRepo.findById(objetivoId);
+  if (!usuarioObjetivo || !usuarioObjetivo.activo) {
+    throw { status: 404, message: 'Usuario destino no encontrado o inactivo' };
+  }
+
+  const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+  if (Number(usuarioObjetivo.negocio_id) !== Number(negocioId)) {
+    throw { status: 403, message: 'El usuario destino pertenece a otro negocio' };
+  }
+
+  // Buscar si ya existe sala privada entre ambos usuarios
+  const existente = await db.get(
+    `
+    SELECT r.id, r.nombre, r.tipo, r.negocio_id
+      FROM chat_rooms r
+      JOIN chat_room_users cru1 ON cru1.room_id = r.id AND cru1.usuario_id = ?
+      JOIN chat_room_users cru2 ON cru2.room_id = r.id AND cru2.usuario_id = ?
+     WHERE r.tipo = 'private'
+       AND r.negocio_id = ?
+     LIMIT 1
+    `,
+    [usuarioId, objetivoId, negocioId]
+  );
+
+  if (existente) {
+    return existente;
+  }
+
+  const nombreSala = `Privado ${usuarioSesion.nombre || usuarioSesion.usuario || usuarioId} - ${
+    usuarioObjetivo.nombre || usuarioObjetivo.usuario || usuarioObjetivo.id
+  }`;
+
+  const insert = await db.run(
+    'INSERT INTO chat_rooms (negocio_id, nombre, tipo, creado_por_usuario_id) VALUES (?, ?, "private", ?)',
+    [negocioId, nombreSala, usuarioId]
+  );
+  const roomId = insert?.lastID || insert?.insertId;
+
+  await db.run(
+    'INSERT INTO chat_room_users (room_id, usuario_id, is_admin) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE usuario_id = usuario_id',
+    [roomId, usuarioId]
+  );
+  await db.run(
+    'INSERT INTO chat_room_users (room_id, usuario_id, is_admin) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE usuario_id = usuario_id',
+    [roomId, objetivoId]
+  );
+
+  return {
+    id: roomId,
+    nombre: nombreSala,
+    tipo: 'private',
+    negocio_id: negocioId,
+  };
+}
 
 const registrarHistorialCocina = (pedidoId, negocioId, callback = () => {}) => {
   if (typeof negocioId === 'function') {
@@ -3532,6 +4080,19 @@ app.get('/api/cocina/pedidos-finalizados', (req, res) => {
       return res.status(403).json({ error: 'Acceso restringido.' });
     }
 
+    try {
+      const cuentas = await obtenerCuentasPorEstados(
+        ['listo', 'pagado', 'cancelado'],
+        usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT,
+        { area_preparacion: 'cocina', hoy: true }
+      );
+      res.json(cuentas);
+    } catch (error) {
+      console.error('Error al obtener pedidos finalizados de cocina:', error);
+      res.status(500).json({ error: 'No se pudieron obtener los pedidos finalizados.' });
+    }
+  });
+});
 
 app.get('/api/bar/pedidos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
@@ -3542,7 +4103,8 @@ app.get('/api/bar/pedidos', (req, res) => {
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
     const barActivo = await moduloActivoParaNegocio('bar', negocioId);
     if (!barActivo) {
-      return res.status(403).json({ error: 'El modulo de bar esta desactivado para este negocio.' });
+      console.warn('Modulo de bar desactivado, devolviendo lista vacia para pedidos activos.');
+      return res.json([]);
     }
 
     try {
@@ -3568,7 +4130,8 @@ app.get('/api/bar/pedidos-finalizados', (req, res) => {
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
     const barActivo = await moduloActivoParaNegocio('bar', negocioId);
     if (!barActivo) {
-      return res.status(403).json({ error: 'El modulo de bar esta desactivado para este negocio.' });
+      console.warn('Modulo de bar desactivado, devolviendo lista vacia para pedidos finalizados.');
+      return res.json([]);
     }
 
     try {
@@ -3628,20 +4191,6 @@ app.post('/api/bar/marcar-listo', (req, res) => {
     }
 
     res.json({ ok: true, estado: resultado.estado });
-  });
-});
-
-    try {
-      const cuentas = await obtenerCuentasPorEstados(
-        ['listo', 'pagado', 'cancelado'],
-        usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT,
-        { area_preparacion: 'cocina', hoy: true }
-      );
-      res.json(cuentas);
-    } catch (error) {
-      console.error('Error al obtener pedidos finalizados de cocina:', error);
-      res.status(500).json({ error: 'No se pudieron obtener los pedidos finalizados.' });
-    }
   });
 });
 
@@ -6500,6 +7049,315 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
   });
 });
 
+// Chat interno
+app.get('/api/chat/rooms', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    try {
+      const filtros = {
+        tipo: req.query?.tipo || null,
+        nombre: req.query?.nombre || req.query?.q || null,
+      };
+      const rooms = await listarSalasChat(usuarioSesion, filtros);
+      res.json({ ok: true, rooms });
+    } catch (error) {
+      console.error('Error al listar salas de chat:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener las salas de chat' });
+    }
+  });
+});
+
+app.get('/api/chat/messages', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const roomId = Number(req.query?.room_id ?? req.query?.roomId);
+    const page = Number(req.query?.pagina ?? req.query?.page ?? 1) || 1;
+    const limit = Number(req.query?.limite ?? req.query?.limit ?? CHAT_PAGE_SIZE) || CHAT_PAGE_SIZE;
+
+    if (!roomId) {
+      return res.status(400).json({ ok: false, error: 'room_id es obligatorio' });
+    }
+
+    try {
+      const acceso = await validarAccesoSala(roomId, usuarioSesion);
+      if (acceso?.error) {
+        const statusCode = acceso.status || 403;
+        return res.status(statusCode).json({ ok: false, error: acceso.error });
+      }
+
+      const { mensajes, hasMore } = await obtenerMensajesDeSala({
+        roomId: acceso.room.id,
+        negocioId: acceso.room.negocio_id,
+        usuarioActualId: usuarioSesion.id,
+        page,
+        limit,
+      });
+
+      res.json({
+        ok: true,
+        room: acceso.room,
+        mensajes,
+        pagina: page,
+        limite: limit,
+        has_more: hasMore,
+      });
+    } catch (error) {
+      console.error('Error al obtener mensajes de chat:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron cargar los mensajes' });
+    }
+  });
+});
+
+app.post('/api/chat/messages/read', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const roomId = Number(req.body?.room_id ?? req.body?.roomId);
+    const lastVisibleMessageId = Number(req.body?.last_visible_message_id ?? req.body?.lastVisibleMessageId);
+
+    if (!roomId || !lastVisibleMessageId) {
+      return res.status(400).json({ ok: false, error: 'room_id y last_visible_message_id son obligatorios' });
+    }
+
+    try {
+      const acceso = await validarAccesoSala(roomId, usuarioSesion);
+      if (acceso?.error) {
+        const statusCode = acceso.status || 403;
+        return res.status(statusCode).json({ ok: false, error: acceso.error });
+      }
+
+      const resultado = await marcarMensajesComoLeidos({
+        roomId: acceso.room.id,
+        negocioId: acceso.room.negocio_id,
+        usuarioId: usuarioSesion.id,
+        lastVisibleMessageId,
+      });
+
+      if (!resultado.ok) {
+        return res.status(500).json({ ok: false, error: resultado.error || 'No se pudieron marcar las lecturas' });
+      }
+
+      emitirLecturas({
+        roomId: acceso.room.id,
+        usuarioId: usuarioSesion.id,
+        lastReadMessageId: lastVisibleMessageId,
+      });
+
+      res.json({ ok: true, last_read_message_id: lastVisibleMessageId });
+    } catch (error) {
+      console.error('Error al marcar mensajes leidos:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron marcar los mensajes como leidos' });
+    }
+  });
+});
+
+app.post('/api/chat/messages', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const roomId = Number(req.body?.room_id ?? req.body?.roomId);
+    const contenido = req.body?.contenido ?? '';
+    const tipo = req.body?.tipo || 'text';
+
+    if (!roomId) {
+      return res.status(400).json({ ok: false, error: 'room_id es obligatorio' });
+    }
+
+    try {
+      const acceso = await validarAccesoSala(roomId, usuarioSesion);
+      if (acceso?.error) {
+        const statusCode = acceso.status || 403;
+        return res.status(statusCode).json({ ok: false, error: acceso.error });
+      }
+
+      const mensaje = await crearMensaje({
+        room: acceso.room,
+        usuarioSesion,
+        contenido,
+        tipo,
+      });
+
+      if (!mensaje) {
+        return res.status(500).json({ ok: false, error: 'No se pudo guardar el mensaje' });
+      }
+
+      emitirNuevoMensaje(mensaje);
+      res.status(201).json({ ok: true, mensaje });
+    } catch (error) {
+      console.error('Error al crear mensaje de chat:', error?.message || error);
+      const statusCode = error?.status || 500;
+      res.status(statusCode).json({ ok: false, error: error?.message || 'No se pudo enviar el mensaje' });
+    }
+  });
+});
+
+app.post('/api/chat/rooms/private', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const usuarioObjetivoId = Number(req.body?.usuario_id ?? req.body?.usuarioId);
+
+    if (!usuarioObjetivoId) {
+      return res.status(400).json({ ok: false, error: 'usuario_id es obligatorio' });
+    }
+
+    try {
+      const room = await obtenerSalaPrivada(usuarioSesion, usuarioObjetivoId);
+      res.status(201).json({ ok: true, room });
+    } catch (error) {
+      const statusCode = error?.status || 500;
+      const mensaje = error?.message || 'No se pudo crear el chat privado';
+      if (statusCode >= 500) {
+        console.error('Error al crear chat privado:', error?.message || error);
+      }
+      res.status(statusCode).json({ ok: false, error: mensaje });
+    }
+  });
+});
+
+app.patch('/api/chat/messages/:id/pin', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const messageId = Number(req.params?.id);
+    const isPinnedRaw = req.body?.is_pinned ?? req.body?.isPinned;
+    const isPinned =
+      typeof isPinnedRaw === 'boolean' ? isPinnedRaw : ['1', 'true', 1, 'on'].includes(isPinnedRaw);
+
+    if (!messageId) {
+      return res.status(400).json({ ok: false, error: 'Mensaje no especificado' });
+    }
+
+    if (isPinnedRaw === undefined) {
+      return res.status(400).json({ ok: false, error: 'Falta el estado is_pinned' });
+    }
+
+    try {
+      const mensajeConSala = await obtenerMensajeConSala(messageId);
+      if (!mensajeConSala) {
+        return res.status(404).json({ ok: false, error: 'Mensaje no encontrado' });
+      }
+
+      const negocioIdUsuario = obtenerNegocioIdUsuario(usuarioSesion);
+      if (Number(mensajeConSala.room_negocio_id) !== Number(negocioIdUsuario)) {
+        return res.status(403).json({ ok: false, error: 'No puedes modificar mensajes de otro negocio' });
+      }
+
+      const acceso = await validarAccesoSala(mensajeConSala.room_id, usuarioSesion);
+      if (acceso?.error) {
+        const statusCode = acceso.status || 403;
+        return res.status(statusCode).json({ ok: false, error: acceso.error });
+      }
+
+      if (!acceso.puedeAdministrar) {
+        return res.status(403).json({ ok: false, error: 'No tienes permisos para fijar mensajes' });
+      }
+
+      await db.run(
+        'UPDATE chat_messages SET is_pinned = ? WHERE id = ? AND room_id = ? AND negocio_id = ?',
+        [isPinned ? 1 : 0, messageId, mensajeConSala.room_id, mensajeConSala.room_negocio_id]
+      );
+
+      const payload = { id: messageId, room_id: mensajeConSala.room_id, is_pinned: isPinned ? 1 : 0 };
+      emitirPinMensaje(mensajeConSala.room_id, payload);
+      res.json({ ok: true, ...payload });
+    } catch (error) {
+      console.error('Error al fijar mensaje de chat:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar el mensaje fijado' });
+    }
+  });
+});
+
+app.post('/api/chat/rooms/:id/clear', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const roomId = Number(req.params?.id);
+    if (!roomId) {
+      return res.status(400).json({ ok: false, error: 'Sala no especificada' });
+    }
+
+    try {
+      const acceso = await validarAccesoSala(roomId, usuarioSesion);
+      if (acceso?.error) {
+        const statusCode = acceso.status || 403;
+        return res.status(statusCode).json({ ok: false, error: acceso.error });
+      }
+
+      if (!acceso.puedeAdministrar) {
+        return res.status(403).json({ ok: false, error: 'No tienes permisos para vaciar el chat' });
+      }
+
+      await db.run(
+        'UPDATE chat_messages SET deleted_at = CURRENT_TIMESTAMP WHERE room_id = ? AND negocio_id = ? AND deleted_at IS NULL',
+        [acceso.room.id, acceso.room.negocio_id]
+      );
+
+      emitirChatVaciado(acceso.room.id, usuarioSesion.id);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al vaciar el chat:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo vaciar el chat' });
+    }
+  });
+});
+
+app.get('/api/chat/mentions/users', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+    const filtro = (req.query?.q || req.query?.busqueda || req.query?.search || '').trim();
+
+    const condiciones = ['negocio_id = ?', 'activo = 1'];
+    const params = [negocioId];
+
+    if (filtro) {
+      condiciones.push('(nombre LIKE ? OR usuario LIKE ?)');
+      params.push(`%${filtro}%`, `%${filtro}%`);
+    }
+
+    try {
+      const usuarios = await db.all(
+        `SELECT id, nombre, usuario, rol
+           FROM usuarios
+          WHERE ${condiciones.join(' AND ')}
+          ORDER BY nombre ASC`,
+        params
+      );
+
+      res.json({ ok: true, usuarios: usuarios || [] });
+    } catch (error) {
+      console.error('Error al listar usuarios para menciones:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener los usuarios para menciones' });
+    }
+  });
+});
+
+app.get('/api/chat/messages/search', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const roomId = Number(req.query?.room_id ?? req.query?.roomId);
+    const termino = req.query?.q || '';
+    const usuarioId = req.query?.usuario_id ? Number(req.query.usuario_id) : null;
+    const fechaDesde = req.query?.fecha_desde || null;
+    const fechaHasta = req.query?.fecha_hasta || null;
+    const pagina = Number(req.query?.pagina ?? 1) || 1;
+
+    if (!roomId) {
+      return res.status(400).json({ ok: false, error: 'room_id es obligatorio' });
+    }
+
+    try {
+      const acceso = await validarAccesoSala(roomId, usuarioSesion);
+      if (acceso?.error) {
+        const statusCode = acceso.status || 403;
+        return res.status(statusCode).json({ ok: false, error: acceso.error });
+      }
+
+      const mensajes = await buscarMensajesEnSala({
+        roomId: acceso.room.id,
+        negocioId: acceso.room.negocio_id,
+        q: termino,
+        usuarioId,
+        fechaDesde,
+        fechaHasta,
+        page: pagina,
+      });
+
+      res.json({ ok: true, resultados: mensajes || [] });
+    } catch (error) {
+      console.error('Error buscando mensajes en sala:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron buscar mensajes en el chat' });
+    }
+  });
+});
+
 app.post('/api/login', async (req, res) => {
   const { usuario, password } = req.body;
 
@@ -6605,6 +7463,184 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 console.log('Preparando para escuchar en el puerto...', { HOST, PORT });
 
-app.listen(PORT, HOST, () => {
+const server = http.createServer(app);
+io = new Server(server, {
+  cors: {
+    origin: '*',
+  },
+});
+
+io.use(async (socket, next) => {
+  try {
+    const token =
+      socket.handshake?.auth?.token ||
+      socket.handshake?.headers?.['x-session-token'] ||
+      socket.handshake?.query?.token;
+    const usuarioSesion = await obtenerUsuarioSesionPorToken(token);
+    if (!usuarioSesion) {
+      return next(new Error('UNAUTHORIZED'));
+    }
+    socket.data.usuarioSesion = usuarioSesion;
+    next();
+  } catch (error) {
+    console.error('Error autenticando socket:', error?.message || error);
+    next(error);
+  }
+});
+
+io.on('connection', (socket) => {
+  const usuarioSesion = socket.data?.usuarioSesion;
+  const safeAck = (ack, payload) => {
+    if (typeof ack === 'function') {
+      ack(payload);
+    }
+  };
+
+  socket.on('joinRoom', async (payload = {}, ack) => {
+    const roomId = Number(payload?.room_id ?? payload?.roomId ?? payload);
+    if (!roomId) {
+      return safeAck(ack, { ok: false, error: 'room_id es obligatorio' });
+    }
+
+    try {
+      const acceso = await validarAccesoSala(roomId, usuarioSesion);
+      if (acceso?.error) {
+        return safeAck(ack, { ok: false, status: acceso.status || 403, error: acceso.error });
+      }
+      socket.join(getChatRoomChannel(roomId));
+      safeAck(ack, { ok: true, room: acceso.room });
+    } catch (error) {
+      console.error('Error al unirse a sala via socket:', error?.message || error);
+      safeAck(ack, { ok: false, error: 'No se pudo unir a la sala' });
+    }
+  });
+
+  socket.on('leaveRoom', (payload = {}) => {
+    const roomId = Number(payload?.room_id ?? payload?.roomId ?? payload);
+    if (roomId) {
+      socket.leave(getChatRoomChannel(roomId));
+    }
+  });
+
+  const procesarLecturasSocket = async (payload = {}, ack) => {
+    const roomId = Number(payload?.room_id ?? payload?.roomId);
+    const lastVisibleMessageId = Number(payload?.last_visible_message_id ?? payload?.lastVisibleMessageId);
+
+    if (!roomId || !lastVisibleMessageId) {
+      return safeAck(ack, { ok: false, error: 'Parametros incompletos' });
+    }
+
+    try {
+      const acceso = await validarAccesoSala(roomId, usuarioSesion);
+      if (acceso?.error) {
+        return safeAck(ack, { ok: false, status: acceso.status || 403, error: acceso.error });
+      }
+
+      const resultado = await marcarMensajesComoLeidos({
+        roomId: acceso.room.id,
+        negocioId: acceso.room.negocio_id,
+        usuarioId: usuarioSesion.id,
+        lastVisibleMessageId,
+      });
+
+      if (!resultado.ok) {
+        return safeAck(ack, { ok: false, error: resultado.error || 'No se pudieron marcar las lecturas' });
+      }
+
+      emitirLecturas({
+        roomId: acceso.room.id,
+        usuarioId: usuarioSesion.id,
+        lastReadMessageId: lastVisibleMessageId,
+      });
+
+      safeAck(ack, { ok: true, last_read_message_id: lastVisibleMessageId });
+    } catch (error) {
+      console.error('Error marcando lecturas via socket:', error?.message || error);
+      safeAck(ack, { ok: false, error: 'No se pudo marcar como leido' });
+    }
+  };
+
+  socket.on('messages:read', procesarLecturasSocket);
+
+  socket.on('typing:start', async (payload = {}, ack) => {
+    const roomId = Number(payload?.room_id ?? payload?.roomId ?? payload);
+    if (!roomId) {
+      return safeAck(ack, { ok: false, error: 'room_id es obligatorio' });
+    }
+
+    try {
+      const acceso = await validarAccesoSala(roomId, usuarioSesion);
+      if (acceso?.error) {
+        return safeAck(ack, { ok: false, status: acceso.status || 403, error: acceso.error });
+      }
+
+      socket.to(getChatRoomChannel(roomId)).emit(CHAT_SOCKET_EVENTS.TYPING, {
+        room_id: roomId,
+        usuario_id: usuarioSesion.id,
+        nombre: usuarioSesion.nombre || usuarioSesion.usuario,
+        typing: true,
+      });
+      safeAck(ack, { ok: true });
+    } catch (error) {
+      console.error('Error enviando typing start:', error?.message || error);
+      safeAck(ack, { ok: false, error: 'No se pudo notificar typing' });
+    }
+  });
+
+  socket.on('typing:stop', async (payload = {}, ack) => {
+    const roomId = Number(payload?.room_id ?? payload?.roomId ?? payload);
+    if (!roomId) {
+      return safeAck(ack, { ok: false, error: 'room_id es obligatorio' });
+    }
+
+    try {
+      const acceso = await validarAccesoSala(roomId, usuarioSesion);
+      if (acceso?.error) {
+        return safeAck(ack, { ok: false, status: acceso.status || 403, error: acceso.error });
+      }
+
+      socket.to(getChatRoomChannel(roomId)).emit(CHAT_SOCKET_EVENTS.TYPING, {
+        room_id: roomId,
+        usuario_id: usuarioSesion.id,
+        nombre: usuarioSesion.nombre || usuarioSesion.usuario,
+        typing: false,
+      });
+      safeAck(ack, { ok: true });
+    } catch (error) {
+      console.error('Error enviando typing stop:', error?.message || error);
+      safeAck(ack, { ok: false, error: 'No se pudo notificar typing' });
+    }
+  });
+
+  socket.on('message:new', async (payload = {}, ack) => {
+    const roomId = Number(payload?.room_id ?? payload?.roomId);
+    const contenido = payload?.contenido ?? '';
+    const tipo = payload?.tipo || 'text';
+
+    if (!roomId) {
+      return safeAck(ack, { ok: false, error: 'room_id es obligatorio' });
+    }
+
+    try {
+      const acceso = await validarAccesoSala(roomId, usuarioSesion);
+      if (acceso?.error) {
+        return safeAck(ack, { ok: false, status: acceso.status || 403, error: acceso.error });
+      }
+
+      const mensaje = await crearMensaje({ room: acceso.room, usuarioSesion, contenido, tipo });
+      if (!mensaje) {
+        return safeAck(ack, { ok: false, error: 'No se pudo crear el mensaje' });
+      }
+
+      emitirNuevoMensaje(mensaje);
+      safeAck(ack, { ok: true, mensaje });
+    } catch (error) {
+      console.error('Error al crear mensaje via socket:', error?.message || error);
+      safeAck(ack, { ok: false, error: 'No se pudo enviar el mensaje' });
+    }
+  });
+});
+
+server.listen(PORT, HOST, () => {
   console.log(`Servidor iniciado en http://${HOST}:${PORT}`);
 });

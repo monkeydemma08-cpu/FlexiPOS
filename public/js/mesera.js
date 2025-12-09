@@ -16,6 +16,8 @@ const identidadMesera = document.getElementById('mesera-identidad');
 const tabsMesera = document.querySelectorAll('.mesera-tab-btn');
 const panelesMesera = document.querySelectorAll('.mesera-tab-panel');
 const footerMesera = document.getElementById('mesera-footer');
+const badgeListosEl = document.getElementById('mesera-listos-badge');
+const LISTOS_BADGE_KEY = 'kanm:mesera:listos-unread';
 const mensajesPorEstado = {
   pendiente: document.getElementById('mesera-pendientes-mensaje'),
   preparando: document.getElementById('mesera-preparando-mensaje'),
@@ -39,12 +41,92 @@ const estado = {
   cuentaReferenciaId: null,
   pedidosActivos: [],
   modoServicio: 'en_local',
+  tabActiva: 'tomar',
+  listosUnread: 0,
 };
 
 let notificationSound;
 let notificationSoundReady = false;
 let notificationSoundUnlocking = null;
 const areaNotificationState = new Map();
+const AREA_STATE_STORAGE_KEY = 'kanm:area-notifications';
+let areaNotificationInitialized = false;
+let listosBadgeInitialized = false;
+
+const cargarEstadoAreasDesdeStorage = () => {
+  try {
+    const raw = localStorage.getItem(AREA_STATE_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      Object.entries(parsed).forEach(([key, value]) => {
+        areaNotificationState.set(key, value);
+      });
+      areaNotificationInitialized = areaNotificationState.size > 0;
+    }
+  } catch (err) {
+    console.warn('No se pudo leer el estado de notificaciones de pedidos:', err);
+  }
+};
+
+const cargarBadgeListosDesdeStorage = () => {
+  try {
+    const raw = localStorage.getItem(LISTOS_BADGE_KEY);
+    const val = Number(raw || 0);
+    estado.listosUnread = Number.isFinite(val) ? val : 0;
+  } catch (err) {
+    estado.listosUnread = 0;
+  }
+  listosBadgeInitialized = true;
+};
+
+const guardarBadgeListosEnStorage = () => {
+  if (!listosBadgeInitialized) return;
+  try {
+    localStorage.setItem(LISTOS_BADGE_KEY, String(estado.listosUnread || 0));
+  } catch (err) {
+    /* ignore */
+  }
+};
+
+const actualizarBadgeListos = () => {
+  if (!badgeListosEl) return;
+  const valor = Number(estado.listosUnread || 0);
+  if (valor > 0) {
+    badgeListosEl.textContent = valor > 99 ? '99+' : valor;
+    badgeListosEl.hidden = false;
+    badgeListosEl.style.display = 'inline-flex';
+  } else {
+    badgeListosEl.textContent = '';
+    badgeListosEl.hidden = true;
+    badgeListosEl.style.display = 'none';
+  }
+};
+
+const reiniciarBadgeListos = () => {
+  estado.listosUnread = 0;
+  actualizarBadgeListos();
+  guardarBadgeListosEnStorage();
+};
+
+const incrementarBadgeListos = (cantidad = 1) => {
+  const inc = Number(cantidad) || 1;
+  estado.listosUnread = Number(estado.listosUnread || 0) + inc;
+  actualizarBadgeListos();
+  guardarBadgeListosEnStorage();
+};
+
+const guardarEstadoAreasEnStorage = () => {
+  try {
+    const obj = {};
+    areaNotificationState.forEach((value, key) => {
+      obj[key] = value;
+    });
+    localStorage.setItem(AREA_STATE_STORAGE_KEY, JSON.stringify(obj));
+  } catch (err) {
+    console.warn('No se pudo guardar el estado de notificaciones de pedidos:', err);
+  }
+};
 
 function deduplicatePedidos(pedidos) {
   if (!Array.isArray(pedidos)) return [];
@@ -249,8 +331,15 @@ const checkAreaNotifications = (cuenta) => {
     const previo = areaNotificationState.get(key);
     areaNotificationState.set(key, estadoNormalizado);
 
+    if (!areaNotificationInitialized) {
+      return; // Evita notificaciones duplicadas al refrescar o entrar por primera vez
+    }
+
     if (estadoNormalizado === 'listo' && previo !== 'listo') {
       notifyAreaReady(cuenta, label);
+      if (estado.tabActiva !== 'listos') {
+        incrementarBadgeListos(1);
+      }
     }
   });
 };
@@ -367,6 +456,7 @@ const aplicarModulosMesera = () => {
 };
 
 const activarTab = (tabId = 'tomar') => {
+  estado.tabActiva = tabId;
   tabsMesera.forEach((boton) => {
     const activo = boton.dataset.tab === tabId;
     boton.classList.toggle('active', activo);
@@ -379,6 +469,10 @@ const activarTab = (tabId = 'tomar') => {
 
   if (footerMesera) {
     footerMesera.style.display = tabId === 'tomar' ? '' : 'none';
+  }
+
+  if (tabId === 'listos') {
+    reiniciarBadgeListos();
   }
 };
 
@@ -947,10 +1041,19 @@ const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVac
   mostrarMensajeTab(mensajeEl, '');
   const fragment = document.createDocumentFragment();
 
+  const preferirRecientes = estadosFiltro.includes('listo');
+  const obtenerMarcaTiempo = (cuenta, usarMaximo) => {
+    const tiempos = (cuenta.pedidos || []).map((p) =>
+      p.fecha_creacion ? new Date(p.fecha_creacion).getTime() : 0
+    );
+    if (!tiempos.length) return 0;
+    return usarMaximo ? Math.max(...tiempos) : Math.min(...tiempos);
+  };
+
   const cuentasOrdenadas = cuentasFiltradas.slice().sort((a, b) => {
-    const primeroA = (a.pedidos?.[0]?.fecha_creacion && new Date(a.pedidos[0].fecha_creacion)) || 0;
-    const primeroB = (b.pedidos?.[0]?.fecha_creacion && new Date(b.pedidos[0].fecha_creacion)) || 0;
-    return primeroA - primeroB;
+    const tiempoA = obtenerMarcaTiempo(a, preferirRecientes);
+    const tiempoB = obtenerMarcaTiempo(b, preferirRecientes);
+    return preferirRecientes ? tiempoB - tiempoA : tiempoA - tiempoB;
   });
 
   cuentasOrdenadas.forEach((cuenta) => {
@@ -1021,6 +1124,17 @@ const cargarPedidosActivos = async (mostrarCarga = true) => {
     });
 
     cuentasAgrupadas.forEach((cuenta) => checkAreaNotifications(cuenta));
+
+    guardarEstadoAreasEnStorage();
+
+    const cuentasListas = cuentasAgrupadas.filter(
+      (cuenta) => cuenta.estadoCuentaMesera === 'listo'
+    );
+    if (!areaNotificationInitialized && estado.tabActiva !== 'listos' && cuentasListas.length) {
+      incrementarBadgeListos(cuentasListas.length);
+    }
+
+    areaNotificationInitialized = true;
 
     estado.pedidosActivos = cuentasAgrupadas;
     renderPedidosPorEstado(['pendiente'], listasPorEstado.pendiente, mensajesPorEstado.pendiente, 'No hay pedidos pendientes.');
@@ -1192,6 +1306,9 @@ const inicializarEventos = () => {
 
 window.addEventListener('DOMContentLoaded', async () => {
   aplicarModulosMesera();
+  cargarEstadoAreasDesdeStorage();
+  cargarBadgeListosDesdeStorage();
+  actualizarBadgeListos();
   registerSoundUnlockOnInteraction();
   const usuario = obtenerUsuarioActual();
   if (identidadMesera && usuario?.nombre) {

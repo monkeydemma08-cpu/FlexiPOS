@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat interno - KANM</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/auth.js" defer></script>
+    <script src="/js/chat.js" defer></script>
+  </head>
+  <body data-role="mesera,cocina,bar,caja,admin">
+    <header class="kanm-header">
+      <div class="kanm-header-left">
+        <div class="kanm-header-logo-container">
+          <img id="kanm-header-logo" alt="" />
+          <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
+        </div>
+        <div class="kanm-header-texts">
+          <div
+            id="kanm-header-negocio-nombre-principal"
+            class="kanm-header-title"
+            data-negocio-titulo
+          ></div>
+          <div id="kanm-header-negocio-subtitulo" class="kanm-header-subtitle">Chat interno</div>
+        </div>
+      </div>
+
+      <div class="kanm-header-right">
+        <div class="kanm-header-actions">
+          <span class="tag-rol">Usuario</span>
+          <a class="kanm-button ghost" id="chat-home-link" href="/">Volver</a>
+          <button class="kanm-button ghost" type="button" onclick="logout()">Cerrar sesion</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="chat-layout" id="chat-layout">
+      <section class="chat-sidebar kanm-card">
+        <div class="chat-sidebar-header">
+          <div>
+            <p class="kanm-subtitle">Mensajeria</p>
+            <h1 class="chat-title">Chat interno</h1>
+          </div>
+          <button class="kanm-button ghost" type="button" id="chat-refresh-rooms">Actualizar</button>
+        </div>
+        <div class="chat-filters">
+          <div class="chat-filter-input">
+            <input
+              type="search"
+              id="chat-room-search"
+              class="kanm-input"
+              placeholder="Buscar sala..."
+              autocomplete="off"
+            />
+          </div>
+          <select id="chat-room-filter" class="kanm-input">
+            <option value="">Todas</option>
+            <option value="channel">Canales</option>
+            <option value="private">Privadas</option>
+          </select>
+        </div>
+        <div class="chat-private-start">
+          <select id="chat-private-user" class="kanm-input">
+            <option value="">Nuevo chat privado...</option>
+          </select>
+          <button class="kanm-button primary" type="button" id="chat-private-start">Crear</button>
+        </div>
+        <div id="chat-room-list" class="chat-room-list"></div>
+      </section>
+
+      <section class="chat-panel kanm-card" id="chat-panel">
+        <div class="chat-room-header">
+          <div class="chat-room-header-left">
+            <button class="kanm-button ghost back-button" id="chat-back-btn" type="button">
+              Volver a salas
+            </button>
+            <div>
+              <div id="chat-room-name" class="chat-room-name">Selecciona una sala</div>
+              <div id="chat-room-meta" class="chat-room-meta"></div>
+            </div>
+          </div>
+          <div class="chat-room-actions">
+            <button class="kanm-button ghost" type="button" id="chat-search-toggle">Buscar</button>
+            <button class="kanm-button danger ghost" type="button" id="chat-clear-btn" hidden>
+              Vaciar chat
+            </button>
+          </div>
+        </div>
+
+        <div class="chat-search-panel hidden" id="chat-search-panel">
+          <div class="chat-search-row">
+            <input
+              type="search"
+              id="chat-search-text"
+              class="kanm-input"
+              placeholder="Buscar en este chat..."
+            />
+            <button class="kanm-button secondary" type="button" id="chat-search-close">Cerrar</button>
+          </div>
+          <div class="chat-search-row">
+            <select id="chat-search-user" class="kanm-input">
+              <option value="">Todos los usuarios</option>
+            </select>
+            <input type="date" id="chat-search-from" class="kanm-input" />
+            <input type="date" id="chat-search-to" class="kanm-input" />
+            <button class="kanm-button primary" type="button" id="chat-search-submit">Buscar</button>
+          </div>
+          <div id="chat-search-results" class="chat-search-results"></div>
+        </div>
+
+        <div id="chat-pinned" class="chat-pinned"></div>
+        <div id="chat-messages" class="chat-messages">
+          <div class="chat-empty" id="chat-empty-state">
+            <p class="kanm-subtitle">Elige una sala para ver el historial y comenzar a escribir.</p>
+          </div>
+        </div>
+
+        <div class="chat-compose">
+          <div class="chat-typing" id="chat-typing-indicator" hidden></div>
+          <div class="chat-mention-box" id="chat-mention-box" hidden></div>
+          <textarea
+            id="chat-input"
+            class="kanm-input"
+            placeholder="Escribe un mensaje... Usa @ para mencionar a alguien"
+            rows="2"
+          ></textarea>
+          <button class="kanm-button primary" id="chat-send-btn" type="button">Enviar</button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

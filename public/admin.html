@@ -94,6 +94,10 @@
     <div class="kanm-header-right">
       <div class="kanm-header-actions">
         <span class="tag-rol">Admin</span>
+        <a class="kanm-button ghost chat-link" href="/chat.html">
+          Chat interno
+          <span id="chat-unread-badge" class="chat-unread-badge"></span>
+        </a>
         <button type="button" class="kanm-button ghost" onclick="logout()">Cerrar sesión</button>
       </div>
     </div>
@@ -1393,6 +1397,8 @@
   <script src="/js/admin-cotizaciones.js"></script>
   <script src="/js/admin-clientes.js"></script>
   <script src="/js/admin-categorias.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/notifications.js" defer></script>
 </body>
 </html>
 
