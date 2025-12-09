@@ -1,0 +1,198 @@
+/* Estilos de impresión tipo ticket 80mm */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 5mm 4mm;
+  }
+}
+
+.factura-body {
+  background: #fff;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.factura-container {
+  max-width: 78mm;
+  margin: 0 auto;
+  padding: 0;
+  box-shadow: none;
+}
+
+.factura-header,
+.factura-datos,
+.factura-resumen,
+.factura-footer {
+  box-shadow: none;
+  border: none;
+  padding: 0;
+  margin: 0 0 8px 0;
+}
+
+.factura-header {
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+.factura-logo img {
+  max-width: 42mm;
+  height: auto;
+}
+
+.factura-info-negocio h1 {
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.factura-info-negocio p,
+.factura-col p,
+.factura-resumen-linea span,
+.factura-resumen-total span,
+.factura-footer p {
+  font-size: 11px;
+  margin: 1px 0;
+}
+
+.factura-acciones {
+  display: none;
+}
+
+.factura-datos {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.factura-col h2 {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.factura-tabla {
+  margin: 6px 0;
+  width: 100%;
+}
+
+.factura-tabla th,
+.factura-tabla td {
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.factura-resumen {
+  padding-top: 4px;
+  border-top: 1px dashed #ccc;
+}
+
+.factura-resumen-linea,
+.factura-resumen-total {
+  display: flex;
+  justify-content: space-between;
+}
+
+.factura-resumen-total {
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 6px;
+}
+
+.factura-footer {
+  text-align: center;
+  margin-top: 8px;
+}
+
+.factura-footer p {
+  font-size: 11px;
+}
+
+@media print {
+  body.factura-body {
+    padding: 0;
+  }
+}
+
+/* Rediseño del detalle para ticket */
+.factura-body .kanm-card {
+  border: none;
+  box-shadow: none;
+  padding: 6px 0;
+  margin: 0 0 6px 0;
+}
+
+.factura-body .kanm-card h2 {
+  font-size: 12px;
+  margin: 0 0 3px 0;
+  color: #111;
+}
+
+.factura-body .kanm-table-wrapper {
+  border: 1px dashed #ccc;
+  border-radius: 6px;
+  padding: 0;
+  overflow: hidden;
+  background: #fff;
+}
+
+.factura-body .kanm-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.factura-body .kanm-table th,
+.factura-body .kanm-table td {
+  padding: 4px 4px 3px 4px;
+  font-size: 11px;
+  line-height: 1.3;
+  border-bottom: 1px dotted #e2e2e2;
+  background: #fff;
+  word-break: break-word;
+}
+
+.factura-body .kanm-table th {
+  background: #f7f7f7;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.factura-body .kanm-table tr:last-child td {
+  border-bottom: none;
+}
+
+.factura-body .kanm-table th:nth-child(1),
+.factura-body .kanm-table td:nth-child(1) {
+  width: 46%;
+  text-align: left;
+}
+
+.factura-body .kanm-table th:nth-child(2),
+.factura-body .kanm-table td:nth-child(2) {
+  width: 12%;
+  text-align: center;
+}
+
+.factura-body .kanm-table th:nth-child(3),
+.factura-body .kanm-table td:nth-child(3),
+.factura-body .kanm-table th:nth-child(4),
+.factura-body .kanm-table td:nth-child(4) {
+  width: 21%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.factura-body .kanm-table td:nth-child(2) {
+  font-weight: 600;
+}
+
+.factura-body .factura-resumen {
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.factura-body .factura-resumen-linea {
+  font-size: 12px;
+}
+
+.factura-body .factura-resumen-total {
+  font-size: 13px;
+}
