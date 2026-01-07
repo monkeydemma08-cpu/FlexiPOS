@@ -86,6 +86,34 @@ async function indexExists(table, column) {
   return rows.length > 0;
 }
 
+async function indexNameExists(table, indexName) {
+  const rows = await query(
+    `SELECT INDEX_NAME
+     FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND INDEX_NAME = ?`,
+    [table, indexName]
+  );
+  return rows.length > 0;
+}
+
+async function ensureIndexByName(table, indexName, columnsDef) {
+  if (!(await tableExists(table))) {
+    return;
+  }
+
+  if (await indexNameExists(table, indexName)) {
+    return;
+  }
+
+  try {
+    await query(`CREATE INDEX ${indexName} ON ${table} ${columnsDef}`);
+  } catch (error) {
+    console.warn(`No se pudo crear indice ${indexName} en ${table}:`, error?.message || error);
+  }
+}
+
 async function ensureTableNegocios() {
   await query(`
     CREATE TABLE IF NOT EXISTS negocios (
@@ -108,6 +136,10 @@ async function ensureTableNegocios() {
       logo_url VARCHAR(255) NULL,
       titulo_sistema VARCHAR(150) NULL,
       activo TINYINT(1) NOT NULL DEFAULT 1,
+      suspendido TINYINT(1) NOT NULL DEFAULT 0,
+      deleted_at DATETIME NULL,
+      motivo_suspension TEXT NULL,
+      updated_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
@@ -129,6 +161,34 @@ async function ensureTableHistorialBar() {
       CONSTRAINT fk_historial_bar_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+}
+
+async function ensureTableGastos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS gastos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      fecha DATE NOT NULL,
+      monto DECIMAL(12,2) NOT NULL,
+      moneda VARCHAR(3) DEFAULT 'DOP',
+      categoria VARCHAR(80),
+      metodo_pago VARCHAR(40),
+      proveedor VARCHAR(120),
+      descripcion TEXT,
+      comprobante_ncf VARCHAR(30),
+      referencia VARCHAR(60),
+      es_recurrente TINYINT(1) NOT NULL DEFAULT 0,
+      frecuencia VARCHAR(20) NULL,
+      tags TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      negocio_id INT NOT NULL,
+      CONSTRAINT fk_gastos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('gastos', 'idx_gastos_negocio_fecha', '(negocio_id, fecha)');
+  await ensureIndexByName('gastos', 'idx_gastos_negocio_categoria_fecha', '(negocio_id, categoria, fecha)');
+  await ensureForeignKey('gastos', 'negocio_id');
 }
 
 async function ensureDefaultNegocio() {
@@ -235,6 +295,67 @@ async function ensureForeignKey(table, column, referencedTable = 'negocios') {
   }
 }
 
+async function dropForeignKeyByColumn(table, column) {
+  if (!(await tableExists(table)) || !(await columnExists(table, column))) {
+    return;
+  }
+
+  const rows = await query(
+    `SELECT CONSTRAINT_NAME
+       FROM information_schema.KEY_COLUMN_USAGE
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND COLUMN_NAME = ?
+        AND REFERENCED_TABLE_NAME IS NOT NULL`,
+    [table, column]
+  );
+
+  for (const row of rows) {
+    try {
+      await query(`ALTER TABLE ${table} DROP FOREIGN KEY ${row.CONSTRAINT_NAME}`);
+    } catch (error) {
+      console.warn(`No se pudo eliminar FK ${row.CONSTRAINT_NAME} en ${table}:`, error?.message || error);
+    }
+  }
+}
+
+async function dropColumn(table, column) {
+  if (!(await tableExists(table)) || !(await columnExists(table, column))) {
+    return;
+  }
+
+  try {
+    await query(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+  } catch (error) {
+    console.warn(`No se pudo eliminar columna ${column} en ${table}:`, error?.message || error);
+  }
+}
+
+async function modifyColumn(table, definition) {
+  const column = definition.split(' ')[0];
+  if (!(await tableExists(table)) || !(await columnExists(table, column))) {
+    return;
+  }
+
+  try {
+    await query(`ALTER TABLE ${table} MODIFY COLUMN ${definition}`);
+  } catch (error) {
+    console.warn(`No se pudo modificar columna ${column} en ${table}:`, error?.message || error);
+  }
+}
+
+async function dropTable(table) {
+  if (!(await tableExists(table))) {
+    return;
+  }
+
+  try {
+    await query(`DROP TABLE ${table}`);
+  } catch (error) {
+    console.warn(`No se pudo eliminar tabla ${table}:`, error?.message || error);
+  }
+}
+
 async function ensurePedidosNcfUniqueIndex() {
   if (!(await tableExists('pedidos'))) {
     return;
@@ -335,9 +456,6 @@ async function addNegocioIdToTables() {
     'usuarios',
     'categorias',
     'productos',
-    'insumos',
-    'recetas',
-    'receta_detalle',
     'clientes',
     'cotizaciones',
     'cotizacion_items',
@@ -348,6 +466,7 @@ async function addNegocioIdToTables() {
     'configuracion',
     'compras',
     'detalle_compra',
+    'gastos',
     'notas_credito_ventas',
     'notas_credito_compras',
     'secuencias_ncf',
@@ -389,9 +508,6 @@ async function addNegocioIdToTables() {
     'usuarios',
     'categorias',
     'productos',
-    'insumos',
-    'recetas',
-    'receta_detalle',
     'clientes',
     'cotizaciones',
     'cotizacion_items',
@@ -401,6 +517,7 @@ async function addNegocioIdToTables() {
     'historial_bar',
     'compras',
     'detalle_compra',
+    'gastos',
     'notas_credito_ventas',
     'notas_credito_compras',
     'secuencias_ncf',
@@ -424,6 +541,115 @@ async function ensureEsSuperAdminColumn() {
   } catch (error) {
     console.warn('No se pudo marcar admin como super admin por defecto:', error?.message || error);
   }
+}
+
+async function ensurePasswordControlColumns() {
+  await ensureColumn('usuarios', 'force_password_change TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('usuarios', 'password_reset_at DATETIME NULL');
+}
+
+async function ensureNegocioStatusColumns() {
+  await ensureColumn('negocios', 'suspendido TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('negocios', 'deleted_at DATETIME NULL');
+  await ensureColumn('negocios', 'motivo_suspension TEXT NULL');
+  await ensureColumn(
+    'negocios',
+    'updated_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+  );
+}
+
+async function ensureTableAdminImpersonations() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS admin_impersonations (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      admin_id INT NOT NULL,
+      negocio_id INT NOT NULL,
+      ip VARCHAR(64) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_admin_impersonations_admin FOREIGN KEY (admin_id) REFERENCES usuarios(id),
+      CONSTRAINT fk_admin_impersonations_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('admin_impersonations', 'idx_admin_impersonations_admin', '(admin_id)');
+  await ensureIndexByName('admin_impersonations', 'idx_admin_impersonations_negocio', '(negocio_id)');
+}
+
+async function ensureTableAdminActions() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS admin_actions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      admin_id INT NOT NULL,
+      negocio_id INT NOT NULL,
+      accion VARCHAR(60) NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_admin_actions_admin FOREIGN KEY (admin_id) REFERENCES usuarios(id),
+      CONSTRAINT fk_admin_actions_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('admin_actions', 'idx_admin_actions_admin', '(admin_id)');
+  await ensureIndexByName('admin_actions', 'idx_admin_actions_negocio', '(negocio_id)');
+  await ensureIndexByName('admin_actions', 'idx_admin_actions_accion', '(accion)');
+}
+
+async function migrateDetalleCompraManual() {
+  if (!(await tableExists('detalle_compra'))) {
+    return;
+  }
+
+  await ensureColumn('detalle_compra', 'descripcion VARCHAR(255) NOT NULL DEFAULT ""');
+  await ensureColumn('detalle_compra', 'precio_unitario DECIMAL(10,2) NULL');
+  await ensureColumn('detalle_compra', 'itbis DECIMAL(10,2) NULL');
+  await ensureColumn('detalle_compra', 'total DECIMAL(10,2) NULL');
+  await modifyColumn('detalle_compra', 'cantidad DECIMAL(10,2) NULL');
+
+  if ((await columnExists('detalle_compra', 'costo_unitario')) && (await columnExists('detalle_compra', 'precio_unitario'))) {
+    try {
+      await query(
+        `UPDATE detalle_compra
+            SET precio_unitario = COALESCE(precio_unitario, costo_unitario)
+          WHERE precio_unitario IS NULL`
+      );
+    } catch (error) {
+      console.warn('No se pudo migrar costo_unitario a precio_unitario:', error?.message || error);
+    }
+  }
+
+  if ((await columnExists('detalle_compra', 'insumo_id')) && (await tableExists('insumos'))) {
+    try {
+      await query(
+        `UPDATE detalle_compra d
+            JOIN insumos i ON i.id = d.insumo_id
+           SET d.descripcion = COALESCE(NULLIF(d.descripcion, ''), i.nombre)
+         WHERE d.descripcion IS NULL OR d.descripcion = ''`
+      );
+    } catch (error) {
+      console.warn('No se pudo completar descripcion desde insumos:', error?.message || error);
+    }
+  }
+
+  try {
+    await query(
+      `UPDATE detalle_compra
+          SET descripcion = 'Detalle manual'
+        WHERE descripcion IS NULL OR descripcion = ''`
+    );
+  } catch (error) {
+    console.warn('No se pudo normalizar descripcion vacia en detalle_compra:', error?.message || error);
+  }
+
+  await dropForeignKeyByColumn('detalle_compra', 'insumo_id');
+  await dropColumn('detalle_compra', 'insumo_id');
+  await dropColumn('detalle_compra', 'costo_unitario');
+}
+
+async function removeInsumosModule() {
+  await migrateDetalleCompraManual();
+  await dropColumn('pedidos', 'insumos_descontados');
+  await dropTable('receta_detalle');
+  await dropTable('recetas');
+  await dropTable('insumos');
 }
 
 async function initializeNegocioThemeAndModulesDefaults() {
@@ -472,21 +698,28 @@ async function normalizeSecuenciasPk() {
 async function runMigrations() {
   await ensureTableNegocios();
   await ensureTableHistorialBar();
+  await ensureTableGastos();
   await ensureColumn('negocios', 'slug VARCHAR(120) UNIQUE');
   await ensureColumn('negocios', 'color_primario VARCHAR(20) NULL');
   await ensureColumn('negocios', 'color_secundario VARCHAR(20) NULL');
   await ensureColumn('negocios', 'logo_url VARCHAR(255) NULL');
   await ensureColumn('negocios', 'titulo_sistema VARCHAR(150) NULL');
   await ensureColumn('categorias', "area_preparacion ENUM('ninguna', 'cocina', 'bar') NOT NULL DEFAULT 'ninguna'");
+  await ensureColumn('productos', 'stock_indefinido TINYINT(1) NOT NULL DEFAULT 0');
   await ensureColumn('pedidos', 'bartender_id INT NULL');
   await ensureColumn('pedidos', 'bartender_nombre VARCHAR(255) NULL');
   await ensureNegocioThemeAndModulesColumns();
   await ensureLogoUrlCapacity();
+  await ensureNegocioStatusColumns();
   await ensureDefaultNegocio();
   await initializeNegocioThemeAndModulesDefaults();
   await addNegocioIdToTables();
+  await removeInsumosModule();
   await ensurePedidosNcfUniqueIndex();
   await ensureEsSuperAdminColumn();
+  await ensurePasswordControlColumns();
+  await ensureTableAdminImpersonations();
+  await ensureTableAdminActions();
   await normalizeConfiguracionKeys();
   await normalizeSecuenciasPk();
 }

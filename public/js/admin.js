@@ -5,12 +5,10 @@ const inputProdId = document.getElementById('prod-id');
 const inputProdNombre = document.getElementById('prod-nombre');
 const inputProdPrecio = document.getElementById('prod-precio');
 const inputProdStock = document.getElementById('prod-stock');
+const inputProdStockIndefinido = document.getElementById('prod-stock-indefinido');
 const inputProdCategoria = document.getElementById('prod-categoria');
 const inputProdActivo = document.getElementById('prod-activo');
 const mensajeProductos = document.getElementById('admin-mensaje');
-const recetaTabla = document.getElementById('receta-rows');
-const recetaAgregarBtn = document.getElementById('receta-agregar');
-const recetaMensaje = document.getElementById('receta-mensaje');
 const filtroCategoriaProductos = document.getElementById('productos-filtro-categoria');
 
 
@@ -40,21 +38,6 @@ const ncfB01Alerta = document.getElementById('ncf-b01-alerta');
 let facturaConfigDirty = false;
 let cacheCategorias = [];
 
-const insumosTabla = document.getElementById('insumos-lista');
-const insumosMensaje = document.getElementById('insumos-mensaje');
-const insumosBuscarInput = document.getElementById('insumos-buscar');
-const insumosBuscarBtn = document.getElementById('insumos-filtrar');
-const insumoForm = document.getElementById('insumo-form');
-const insumoIdInput = document.getElementById('insumo-id');
-const insumoNombreInput = document.getElementById('insumo-nombre');
-const insumoUnidadInput = document.getElementById('insumo-unidad');
-const insumoStockInput = document.getElementById('insumo-stock');
-const insumoCostoInput = document.getElementById('insumo-costo');
-const insumoActivoInput = document.getElementById('insumo-activo');
-const insumoComentariosInput = document.getElementById('insumo-comentarios');
-const insumoMensaje = document.getElementById('insumo-mensaje');
-const insumoNuevoBtn = document.getElementById('insumo-nuevo');
-
 const compraForm = document.getElementById('compra-form');
 const compraProveedorInput = document.getElementById('compra-proveedor');
 const compraRncInput = document.getElementById('compra-rnc');
@@ -73,6 +56,63 @@ const compraMensaje = document.getElementById('compra-mensaje');
 
 const comprasMensaje = document.getElementById('compras-mensaje');
 const comprasTabla = document.getElementById('compras-tabla');
+
+const gastosResumenTotal = document.getElementById('gastos-resumen-total');
+const gastosResumenPromedio = document.getElementById('gastos-resumen-promedio');
+const gastosResumenTop = document.getElementById('gastos-resumen-top');
+const gastoForm = document.getElementById('gasto-form');
+const gastoIdInput = document.getElementById('gasto-id');
+const gastoFechaInput = document.getElementById('gasto-fecha');
+const gastoMontoInput = document.getElementById('gasto-monto');
+const gastoMonedaInput = document.getElementById('gasto-moneda');
+const gastoCategoriaInput = document.getElementById('gasto-categoria');
+const gastoMetodoInput = document.getElementById('gasto-metodo');
+const gastoProveedorInput = document.getElementById('gasto-proveedor');
+const gastoDescripcionInput = document.getElementById('gasto-descripcion');
+const gastoNcfInput = document.getElementById('gasto-ncf');
+const gastoReferenciaInput = document.getElementById('gasto-referencia');
+const gastoRecurrenteInput = document.getElementById('gasto-recurrente');
+const gastoFrecuenciaInput = document.getElementById('gasto-frecuencia');
+const gastoTagsInput = document.getElementById('gasto-tags');
+const gastoCancelarBtn = document.getElementById('gasto-cancelar');
+const gastoMensaje = document.getElementById('gasto-mensaje');
+const gastosDesdeInput = document.getElementById('gastos-desde');
+const gastosHastaInput = document.getElementById('gastos-hasta');
+const gastosCategoriaFiltroInput = document.getElementById('gastos-categoria-filtro');
+const gastosMetodoFiltroInput = document.getElementById('gastos-metodo-filtro');
+const gastosBuscarInput = document.getElementById('gastos-buscar');
+const gastosConsultarBtn = document.getElementById('gastos-consultar');
+const gastosLimpiarBtn = document.getElementById('gastos-limpiar');
+const gastosMensajeLista = document.getElementById('gastos-mensaje-lista');
+const gastosTabla = document.getElementById('gastos-tabla');
+const gastosCategoriasList = document.getElementById('gastos-categorias');
+
+const analisisDesdeInput = document.getElementById('analisis-desde');
+const analisisHastaInput = document.getElementById('analisis-hasta');
+const analisisActualizarBtn = document.getElementById('analisis-actualizar');
+const analisisMensaje = document.getElementById('analisis-mensaje');
+const analisisRangeButtons = Array.from(document.querySelectorAll('[data-analisis-range]'));
+const analisisKpiVentas = document.getElementById('analisis-kpi-ventas');
+const analisisKpiGastos = document.getElementById('analisis-kpi-gastos');
+const analisisKpiGanancia = document.getElementById('analisis-kpi-ganancia');
+const analisisKpiMargen = document.getElementById('analisis-kpi-margen');
+const analisisKpiTicket = document.getElementById('analisis-kpi-ticket');
+const analisisKpiVentasCount = document.getElementById('analisis-kpi-ventas-count');
+const analisisKpiVentasDelta = document.getElementById('analisis-kpi-ventas-delta');
+const analisisKpiGastosDelta = document.getElementById('analisis-kpi-gastos-delta');
+const analisisKpiGananciaDelta = document.getElementById('analisis-kpi-ganancia-delta');
+const analisisKpiTicketDelta = document.getElementById('analisis-kpi-ticket-delta');
+const analisisSerieBody = document.getElementById('analisis-serie-body');
+const analisisTopCantidad = document.getElementById('analisis-top-cantidad');
+const analisisTopIngresos = document.getElementById('analisis-top-ingresos');
+const analisisBottomProductos = document.getElementById('analisis-bottom-productos');
+const analisisTopDias = document.getElementById('analisis-top-dias');
+const analisisTopHoras = document.getElementById('analisis-top-horas');
+const analisisTopDiasMes = document.getElementById('analisis-top-dias-mes');
+const analisisMetodosPago = document.getElementById('analisis-metodos-pago');
+const analisisTopCategorias = document.getElementById('analisis-top-categorias');
+const analisisGastosRecurrentes = document.getElementById('analisis-gastos-recurrentes');
+const analisisAlertas = document.getElementById('analisis-alertas');
 
 const usuariosRolSelect = document.getElementById('usuarios-rol');
 const usuariosTablaBody = document.getElementById('usuarios-tabla-body');
@@ -128,8 +168,8 @@ let paginaHistorialCocina = 1;
 const HIST_COCINA_PAGE_SIZE = 50;
 
 let productos = [];
-let insumos = [];
 let compras = [];
+let gastos = [];
 let datosReporte607 = [];
 let datosReporte606 = [];
 let cierresCaja = [];
@@ -171,6 +211,11 @@ try {
 
 let modalEliminarEstado = null;
 const authApi = window.kanmAuth;
+const puedeImprimirCierres = () => {
+  if (usuarioActual?.rol === 'admin') return true;
+  if (usuarioActual?.es_super_admin || usuarioActual?.esSuperAdmin) return true;
+  return Boolean(authApi?.isSuperAdmin?.());
+};
 
 const obtenerAuthHeaders = () => {
   try {
@@ -409,7 +454,7 @@ const mostrarTabAdmin = (tab = 'productos') => {
   });
 };
 
-const tabsSoloAdmin = ['productos', 'insumos', 'configuracion', 'usuarios', 'compras', 'ventas', 'cuadres', 'historial'];
+const tabsSoloAdmin = ['productos', 'configuracion', 'usuarios', 'compras', 'gastos', 'ventas', 'analisis', 'cuadres', 'historial'];
 const tabsSoloSuperAdmin = ['negocios'];
 
 const aplicarModulosUI = () => {
@@ -593,7 +638,21 @@ const limpiarFormularioProducto = () => {
   formProducto?.reset();
   if (inputProdId) inputProdId.value = '';
   if (inputProdActivo) inputProdActivo.checked = true;
-  limpiarRecetaFormulario();
+  if (inputProdStockIndefinido) inputProdStockIndefinido.checked = false;
+  if (inputProdStock) inputProdStock.disabled = false;
+  refrescarUiStockIndefinido(false);
+};
+
+const esProductoStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
+
+const refrescarUiStockIndefinido = (limpiarValor = false) => {
+  const indefinido = inputProdStockIndefinido?.checked ?? false;
+  if (inputProdStock) {
+    inputProdStock.disabled = indefinido;
+    if (indefinido && limpiarValor) {
+      inputProdStock.value = '';
+    }
+  }
 };
 
 
@@ -614,6 +673,7 @@ const renderProductos = (lista) => {
 
   lista.forEach((producto) => {
     const activo = Number(producto.activo) === 1;
+    const stockEsIndefinido = esProductoStockIndefinido(producto);
     const item = document.createElement('article');
     item.className = 'producto-item';
 
@@ -633,8 +693,9 @@ const renderProductos = (lista) => {
 
     const detalle = document.createElement('div');
     detalle.className = 'producto-detalle';
+    const stockTexto = stockEsIndefinido ? 'Indefinido' : Number(producto.stock ?? 0);
     detalle.innerHTML = `
-      <span><strong>Stock:</strong> ${Number(producto.stock ?? 0)}</span>
+      <span><strong>Stock:</strong> ${stockTexto}</span>
       <span><strong>Categoría:</strong> ${producto.categoria_nombre ?? 'Sin asignar'}</span>
       <span><strong>Estado:</strong> <span class="estado-pill ${
         activo ? '' : 'estado-inactivo'
@@ -649,11 +710,12 @@ const renderProductos = (lista) => {
       if (inputProdId) inputProdId.value = producto.id;
       if (inputProdNombre) inputProdNombre.value = producto.nombre ?? '';
       if (inputProdPrecio) inputProdPrecio.value = producto.precio ?? '';
-      if (inputProdStock) inputProdStock.value = producto.stock ?? '';
+      if (inputProdStockIndefinido) inputProdStockIndefinido.checked = stockEsIndefinido;
+      if (inputProdStock) inputProdStock.value = stockEsIndefinido ? '' : (producto.stock ?? '');
+      refrescarUiStockIndefinido(false);
       if (inputProdCategoria) inputProdCategoria.value = producto.categoria_id ?? '';
       if (inputProdActivo) inputProdActivo.checked = activo;
       setMessage(mensajeProductos, `Editando producto: ${producto.nombre}`, 'info');
-      await cargarRecetaProducto(producto.id);
       inputProdNombre?.focus();
     });
 
@@ -707,178 +769,38 @@ const cargarProductos = async () => {
 
 productosBuscarInput?.addEventListener('input', () => filtrarProductos());
 filtroCategoriaProductos?.addEventListener('change', () => filtrarProductos());
-
-/* =====================
- * Recetas de productos
- * ===================== */
-const limpiarRecetaFormulario = () => {
-  if (recetaTabla) {
-    recetaTabla.innerHTML = '';
-  }
-  setMessage(recetaMensaje, '', 'info');
-};
-
-const crearFilaReceta = (detalle = {}) => {
-  const fila = document.createElement('div');
-  fila.className = 'receta-row';
-
-  const celdaInsumo = document.createElement('div');
-  celdaInsumo.className = 'receta-col receta-col-insumo';
-  const select = document.createElement('select');
-  select.className = 'kanm-input';
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = 'Selecciona un insumo';
-  select.appendChild(placeholder);
-
-  insumos
-    .filter((insumo) => insumo.activo !== 0)
-    .forEach((insumo) => {
-      const option = document.createElement('option');
-      option.value = insumo.id;
-      option.textContent = insumo.nombre;
-      select.appendChild(option);
-    });
-
-  if (detalle.insumo_id) {
-    select.value = String(detalle.insumo_id);
-  }
-
-  celdaInsumo.appendChild(select);
-
-  const celdaCantidad = document.createElement('div');
-  celdaCantidad.className = 'receta-col receta-col-cantidad';
-  const inputCantidad = document.createElement('input');
-  inputCantidad.type = 'number';
-  inputCantidad.className = 'kanm-input';
-  inputCantidad.min = '0.0001';
-  inputCantidad.step = '0.0001';
-  inputCantidad.placeholder = 'Cantidad';
-  inputCantidad.value =
-    detalle.cantidad !== undefined && detalle.cantidad !== null ? Number(detalle.cantidad) : '';
-  celdaCantidad.appendChild(inputCantidad);
-
-  const celdaUnidad = document.createElement('div');
-  celdaUnidad.className = 'receta-col receta-col-unidad';
-  const unidad =
-    detalle.unidad || insumos.find((insumo) => Number(insumo.id) === Number(detalle.insumo_id))?.unidad || '';
-  const unidadBadge = document.createElement('span');
-  unidadBadge.className = 'receta-unidad';
-  unidadBadge.textContent = unidad || '—';
-  celdaUnidad.appendChild(unidadBadge);
-
-  const celdaAcciones = document.createElement('div');
-  celdaAcciones.className = 'receta-col receta-col-acciones';
-  const botonQuitar = document.createElement('button');
-  botonQuitar.type = 'button';
-  botonQuitar.className = 'kanm-button danger sm receta-quitar';
-  botonQuitar.textContent = 'Quitar';
-  botonQuitar.addEventListener('click', () => fila.remove());
-  celdaAcciones.appendChild(botonQuitar);
-
-  fila.appendChild(celdaInsumo);
-  fila.appendChild(celdaCantidad);
-  fila.appendChild(celdaUnidad);
-  fila.appendChild(celdaAcciones);
-
-  select.addEventListener('change', () => {
-    const insumoSeleccionado = insumos.find((item) => Number(item.id) === Number(select.value));
-    unidadBadge.textContent = insumoSeleccionado?.unidad || '—';
-  });
-
-  return fila;
-};
-
-const renderReceta = (ingredientes = []) => {
-  limpiarRecetaFormulario();
-  if (!recetaTabla) return;
-
-  if (!ingredientes.length) {
-    const vacia = document.createElement('div');
-    vacia.className = 'receta-empty';
-    vacia.textContent = 'Este producto no tiene receta configurada.';
-    recetaTabla.appendChild(vacia);
-    return;
-  }
-
-  ingredientes.forEach((item) => {
-    const fila = crearFilaReceta(item);
-    recetaTabla.appendChild(fila);
-  });
-};
-
-const obtenerRecetaFormulario = () => {
-  if (!recetaTabla) return [];
-  const filas = Array.from(recetaTabla.querySelectorAll('.receta-row'));
-  const ingredientes = [];
-
-  filas.forEach((fila) => {
-    const select = fila.querySelector('select');
-    const cantidadInput = fila.querySelector('input');
-    const insumoId = Number(select?.value);
-    const cantidad = Number(cantidadInput?.value);
-
-    if (Number.isFinite(insumoId) && insumoId > 0 && Number.isFinite(cantidad) && cantidad > 0) {
-      ingredientes.push({ insumo_id: insumoId, cantidad });
-    }
-  });
-
-  return ingredientes;
-};
-
-const cargarRecetaProducto = async (productoId) => {
-  if (!productoId) {
-    limpiarRecetaFormulario();
-    return;
-  }
-
-  try {
-    setMessage(recetaMensaje, 'Cargando receta...', 'info');
-    const respuesta = await fetchConAutorizacion(`/api/productos/${productoId}/receta`);
-    if (!respuesta.ok) {
-      throw new Error('No se pudo obtener la receta');
-    }
-    const data = await respuesta.json();
-    renderReceta(Array.isArray(data) ? data : []);
-    setMessage(recetaMensaje, '', 'info');
-  } catch (error) {
-    console.error('Error al cargar la receta:', error);
-    setMessage(recetaMensaje, 'No se pudo cargar la receta del producto.', 'error');
-  }
-};
-
-const guardarRecetaProducto = async (productoId) => {
-  const items = obtenerRecetaFormulario();
-  const respuesta = await fetchJsonAutorizado(`/api/productos/${productoId}/receta`, {
-    method: 'PUT',
-    body: JSON.stringify({ items }),
-  });
-
-  if (!respuesta.ok) {
-    const error = await respuesta.json().catch(() => ({}));
-    throw new Error(error.error || 'No se pudo actualizar la receta');
-  }
-};
+inputProdStockIndefinido?.addEventListener('change', () => refrescarUiStockIndefinido(true));
+refrescarUiStockIndefinido(false);
 
 const obtenerValoresProducto = () => {
   const nombre = inputProdNombre?.value.trim();
   const precio = parseFloat(inputProdPrecio?.value ?? '');
+  const stockIndefinido = inputProdStockIndefinido?.checked ?? false;
   const stockValor = inputProdStock?.value.trim();
-  const stock = stockValor === '' ? null : parseFloat(stockValor);
+  const stock = stockIndefinido ? null : stockValor === '' ? 0 : parseFloat(stockValor);
   const categoriaValor = inputProdCategoria?.value || '';
   const categoriaId = categoriaValor === '' ? null : parseInt(categoriaValor, 10);
   const activo = inputProdActivo?.checked ?? true;
 
-  return { nombre, precio, stock, categoriaId, activo };
+  return { nombre, precio, stock, categoriaId, activo, stockIndefinido };
 };
 
-const validarProducto = ({ nombre, precio }) => {
+const validarProducto = ({ nombre, precio, stock, stockIndefinido }) => {
   if (!nombre) {
     setMessage(mensajeProductos, 'El nombre del producto es obligatorio.', 'error');
     return false;
   }
   if (Number.isNaN(precio)) {
-    setMessage(mensajeProductos, 'El precio del producto es obligatorio y debe ser numérico.', 'error');
+    setMessage(mensajeProductos, 'El precio del producto es obligatorio y debe ser numerico.', 'error');
+    return false;
+  }
+  if (!stockIndefinido) {
+    if (stock === null || Number.isNaN(stock) || stock < 0) {
+      setMessage(mensajeProductos, 'El stock es obligatorio y debe ser mayor o igual a 0.', 'error');
+      return false;
+    }
+  } else if (stock !== null && !Number.isNaN(stock)) {
+    setMessage(mensajeProductos, 'No es necesario capturar stock cuando es indefinido.', 'warning');
     return false;
   }
   return true;
@@ -929,9 +851,14 @@ const cargarCategorias = async () => {
   }
 };
 
-const crearProducto = async ({ nombre, precio, stock, categoriaId }) => {
-  const body = { nombre, precio };
-  if (stock !== null && !Number.isNaN(stock)) body.stock = stock;
+const crearProducto = async ({ nombre, precio, stock, categoriaId, stockIndefinido }) => {
+  const body = { nombre, precio, stock_indefinido: stockIndefinido ? 1 : 0 };
+  if (stockIndefinido) {
+    body.stock = null;
+  } else {
+    const stockEnviar = Number.isNaN(stock) || stock === null ? 0 : stock;
+    body.stock = stockEnviar;
+  }
   if (categoriaId !== null && !Number.isNaN(categoriaId)) body.categoria_id = categoriaId;
 
   const respuesta = await fetchJsonAutorizado('/api/productos', {
@@ -947,13 +874,20 @@ const crearProducto = async ({ nombre, precio, stock, categoriaId }) => {
   return respuesta.json();
 };
 
-const actualizarProducto = async (id, { nombre, precio, stock, categoriaId, activo }) => {
+const actualizarProducto = async (id, { nombre, precio, stock, categoriaId, activo, stockIndefinido }) => {
   const body = {
     nombre,
     precio,
     categoria_id: categoriaId !== null && !Number.isNaN(categoriaId) ? categoriaId : null,
     activo: activo ? 1 : 0,
+    stock_indefinido: stockIndefinido ? 1 : 0,
   };
+  if (stockIndefinido) {
+    body.stock = null;
+  } else {
+    const stockEnviar = Number.isNaN(stock) || stock === null ? 0 : stock;
+    body.stock = stockEnviar;
+  }
 
   const respuesta = await fetchJsonAutorizado(`/api/productos/${id}`, {
     method: 'PUT',
@@ -963,18 +897,6 @@ const actualizarProducto = async (id, { nombre, precio, stock, categoriaId, acti
   if (!respuesta.ok) {
     const error = await respuesta.json().catch(() => ({}));
     throw new Error(error.error || 'No se pudo actualizar el producto');
-  }
-
-  if (stock !== null && !Number.isNaN(stock)) {
-    const stockRespuesta = await fetchJsonAutorizado(`/api/productos/${id}/stock`, {
-      method: 'PUT',
-      body: JSON.stringify({ stock }),
-    });
-
-    if (!stockRespuesta.ok) {
-      const error = await stockRespuesta.json().catch(() => ({}));
-      throw new Error(error.error || 'No se pudo actualizar el stock');
-    }
   }
 };
 
@@ -1095,7 +1017,7 @@ const limpiarTelefonosUI = () => {
 
 const crearFilaTelefono = (valor = '') => {
   const fila = document.createElement('div');
-  fila.className = 'factura-telefono-row kanm-receta-row';
+  fila.className = 'factura-telefono-row';
 
   const input = document.createElement('input');
   input.type = 'text';
@@ -1490,160 +1412,49 @@ const eliminarUsuario = async (id) => {
 };
 
 /* =====================
- * Inventario de insumos
- * ===================== */
-const renderInsumos = (lista) => {
-  if (!insumosTabla) return;
-  insumosTabla.innerHTML = '';
-
-  if (!lista || lista.length === 0) {
-    const fila = document.createElement('tr');
-    const celda = document.createElement('td');
-    celda.colSpan = 6;
-    celda.className = 'tabla-vacia';
-    celda.textContent = 'No hay insumos registrados.';
-    fila.appendChild(celda);
-    insumosTabla.appendChild(fila);
-    return;
-  }
-
-  lista.forEach((insumo) => {
-    const fila = document.createElement('tr');
-
-    const cNombre = document.createElement('td');
-    cNombre.textContent = insumo.nombre;
-
-    const cUnidad = document.createElement('td');
-    cUnidad.textContent = insumo.unidad || '—';
-
-    const cStock = document.createElement('td');
-    cStock.textContent = Number(insumo.stock_actual ?? 0).toFixed(2);
-
-    const cCosto = document.createElement('td');
-    cCosto.textContent = formatCurrency(insumo.costo_unitario_promedio ?? 0);
-
-    const cEstado = document.createElement('td');
-    cEstado.innerHTML = `<span class="estado-pill ${insumo.activo ? '' : 'estado-inactivo'}">${
-      insumo.activo ? 'Activo' : 'Inactivo'
-    }</span>`;
-
-    const cAcciones = document.createElement('td');
-    const botonEditar = document.createElement('button');
-    botonEditar.type = 'button';
-    botonEditar.className = 'kanm-button ghost';
-    botonEditar.textContent = 'Editar';
-    botonEditar.addEventListener('click', () => {
-      if (insumoIdInput) insumoIdInput.value = insumo.id;
-      if (insumoNombreInput) insumoNombreInput.value = insumo.nombre ?? '';
-      if (insumoUnidadInput) insumoUnidadInput.value = insumo.unidad ?? '';
-      if (insumoCategoriaInput) insumoCategoriaInput.value = insumo.categoria ?? '';
-      if (insumoStockInput) insumoStockInput.value = insumo.stock_actual ?? '';
-      if (insumoCostoInput) insumoCostoInput.value = insumo.costo_unitario_promedio ?? '';
-      if (insumoActivoInput) insumoActivoInput.checked = insumo.activo === 1;
-      if (insumoComentariosInput) insumoComentariosInput.value = insumo.comentarios ?? '';
-      setMessage(insumoMensaje, `Editando insumo: ${insumo.nombre}`, 'info');
-    });
-    cAcciones.appendChild(botonEditar);
-
-    fila.appendChild(cNombre);
-    fila.appendChild(cUnidad);
-    fila.appendChild(cStock);
-    fila.appendChild(cCosto);
-    fila.appendChild(cEstado);
-    fila.appendChild(cAcciones);
-    insumosTabla.appendChild(fila);
-  });
-};
-
-const limpiarFormularioInsumo = () => {
-  insumoForm?.reset();
-  if (insumoIdInput) insumoIdInput.value = '';
-  if (insumoActivoInput) insumoActivoInput.checked = true;
-  setMessage(insumoMensaje, '', 'info');
-};
-
-const filtrarInsumos = () => {
-  const termino = (insumosBuscarInput?.value || '').toLowerCase();
-  let lista = Array.isArray(insumos) ? [...insumos] : [];
-  if (termino) {
-    lista = lista.filter(
-      (insumo) =>
-        insumo.nombre?.toLowerCase().includes(termino) ||
-        insumo.unidad?.toLowerCase().includes(termino) ||
-        String(insumo.id || '').includes(termino)
-    );
-  }
-  renderInsumos(lista);
-};
-
-const cargarInsumos = async () => {
-  try {
-    setMessage(insumosMensaje, 'Cargando insumos...', 'info');
-    const respuesta = await fetchConAutorizacion('/api/insumos');
-    if (!respuesta.ok) {
-      throw new Error('No se pudieron obtener los insumos');
-    }
-    const data = await respuesta.json();
-    insumos = Array.isArray(data) ? data : [];
-    filtrarInsumos();
-    setMessage(insumosMensaje, '', 'info');
-  } catch (error) {
-    console.error('Error al cargar insumos:', error);
-    setMessage(insumosMensaje, 'Error al cargar el inventario de insumos.', 'error');
-  }
-};
-
-const guardarInsumo = async (payload, id = null) => {
-  const url = id ? `/api/insumos/${id}` : '/api/insumos';
-  const method = id ? 'PUT' : 'POST';
-
-  const respuesta = await fetchJsonAutorizado(url, {
-    method,
-    body: JSON.stringify(payload),
-  });
-
-  if (!respuesta.ok) {
-    const error = await respuesta.json().catch(() => ({}));
-    throw new Error(error.error || 'No se pudo guardar el insumo');
-  }
-};
-
-/* =====================
- * Compras y detalle de insumos
+ * Compras y detalle manual
  * ===================== */
 const crearFilaDetalle = (detalle = {}) => {
   const fila = document.createElement('div');
   fila.className = 'compra-detalle-row';
 
-  const select = document.createElement('select');
-  select.className = 'compra-detalle-insumo';
-  const opcionPlaceholder = document.createElement('option');
-  opcionPlaceholder.value = '';
-  opcionPlaceholder.textContent = 'Seleccione insumo';
-  select.appendChild(opcionPlaceholder);
-  insumos.forEach((insumo) => {
-    const option = document.createElement('option');
-    option.value = insumo.id;
-    option.textContent = insumo.nombre;
-    select.appendChild(option);
-  });
-  if (detalle.insumo_id) select.value = String(detalle.insumo_id);
+  const descripcion = document.createElement('input');
+  descripcion.type = 'text';
+  descripcion.placeholder = 'Descripcion del producto o servicio';
+  descripcion.className = 'compra-detalle-descripcion';
+  descripcion.value = detalle.descripcion ?? '';
 
   const cantidad = document.createElement('input');
   cantidad.type = 'number';
-  cantidad.min = '0.01';
+  cantidad.min = '0';
   cantidad.step = '0.01';
   cantidad.placeholder = 'Cantidad';
   cantidad.className = 'compra-detalle-cantidad';
   cantidad.value = detalle.cantidad ?? '';
 
-  const costo = document.createElement('input');
-  costo.type = 'number';
-  costo.min = '0';
-  costo.step = '0.01';
-  costo.placeholder = 'Costo unitario';
-  costo.className = 'compra-detalle-costo';
-  costo.value = detalle.costo_unitario ?? '';
+  const precio = document.createElement('input');
+  precio.type = 'number';
+  precio.min = '0';
+  precio.step = '0.01';
+  precio.placeholder = 'Precio unitario';
+  precio.className = 'compra-detalle-precio';
+  precio.value = detalle.precio_unitario ?? '';
+
+  const itbis = document.createElement('input');
+  itbis.type = 'number';
+  itbis.min = '0';
+  itbis.step = '0.01';
+  itbis.placeholder = 'ITBIS';
+  itbis.className = 'compra-detalle-itbis';
+  itbis.value = detalle.itbis ?? '';
+
+  const total = document.createElement('input');
+  total.type = 'number';
+  total.min = '0';
+  total.step = '0.01';
+  total.placeholder = 'Total linea';
+  total.className = 'compra-detalle-total';
+  total.value = detalle.total ?? '';
 
   const remover = document.createElement('button');
   remover.type = 'button';
@@ -1653,9 +1464,11 @@ const crearFilaDetalle = (detalle = {}) => {
     fila.remove();
   });
 
-  fila.appendChild(select);
+  fila.appendChild(descripcion);
   fila.appendChild(cantidad);
-  fila.appendChild(costo);
+  fila.appendChild(precio);
+  fila.appendChild(itbis);
+  fila.appendChild(total);
   fila.appendChild(remover);
 
   return fila;
@@ -1667,17 +1480,27 @@ const obtenerDetallesCompra = () => {
 
   const detalles = [];
   filas.forEach((fila) => {
-    const insumoSelect = fila.querySelector('.compra-detalle-insumo');
+    const descripcionInput = fila.querySelector('.compra-detalle-descripcion');
     const cantidadInput = fila.querySelector('.compra-detalle-cantidad');
-    const costoInput = fila.querySelector('.compra-detalle-costo');
+    const precioInput = fila.querySelector('.compra-detalle-precio');
+    const itbisInput = fila.querySelector('.compra-detalle-itbis');
+    const totalInput = fila.querySelector('.compra-detalle-total');
 
-    const insumoId = insumoSelect?.value ? Number(insumoSelect.value) : null;
-    const cantidad = cantidadInput?.value ? Number(cantidadInput.value) : NaN;
-    const costo = costoInput?.value ? Number(costoInput.value) : NaN;
+    const descripcion = descripcionInput?.value?.trim();
+    if (!descripcion) return;
 
-    if (insumoId && !Number.isNaN(cantidad) && cantidad > 0 && !Number.isNaN(costo) && costo >= 0) {
-      detalles.push({ insumo_id: insumoId, cantidad, costo_unitario: costo });
-    }
+    const cantidadValor = cantidadInput?.value === '' ? null : Number(cantidadInput?.value ?? '');
+    const precioValor = precioInput?.value === '' ? null : Number(precioInput?.value ?? '');
+    const itbisValor = itbisInput?.value === '' ? null : Number(itbisInput?.value ?? '');
+    const totalValor = totalInput?.value === '' ? null : Number(totalInput?.value ?? '');
+
+    detalles.push({
+      descripcion,
+      cantidad: Number.isNaN(cantidadValor) ? null : cantidadValor,
+      precio_unitario: Number.isNaN(precioValor) ? null : precioValor,
+      itbis: Number.isNaN(itbisValor) ? null : itbisValor,
+      total: Number.isNaN(totalValor) ? null : totalValor,
+    });
   });
 
   return detalles;
@@ -1685,15 +1508,20 @@ const obtenerDetallesCompra = () => {
 
 const recalcularMontosCompra = () => {
   const detalles = obtenerDetallesCompra();
-  const totalGravado = detalles.reduce(
-    (acumulado, detalle) => acumulado + detalle.cantidad * detalle.costo_unitario,
-    0
-  );
-  if (compraGravadoInput) compraGravadoInput.value = totalGravado.toFixed(2);
+  const totalGravado = detalles.reduce((acumulado, detalle) => {
+    const cantidad = Number(detalle.cantidad) || 0;
+    const precio = Number(detalle.precio_unitario) || 0;
+    const totalLinea = detalle.total !== null && detalle.total !== undefined ? Number(detalle.total) || 0 : cantidad * precio;
+    return acumulado + totalLinea;
+  }, 0);
 
-  const impuesto = Number(compraImpuestoInput?.value ?? 0) || 0;
+  const impuestoCalculado = detalles.reduce((acumulado, detalle) => acumulado + (Number(detalle.itbis) || 0), 0);
+
+  if (compraGravadoInput) compraGravadoInput.value = totalGravado.toFixed(2);
+  if (compraImpuestoInput) compraImpuestoInput.value = impuestoCalculado.toFixed(2);
+
   const exento = Number(compraExentoInput?.value ?? 0) || 0;
-  const total = totalGravado + impuesto + exento;
+  const total = totalGravado + impuestoCalculado + exento;
   if (compraTotalInput) compraTotalInput.value = total.toFixed(2);
 };
 
@@ -1770,6 +1598,275 @@ const registrarCompra = async (payload) => {
     const error = await respuesta.json().catch(() => ({}));
     throw new Error(error.error || 'No se pudo registrar la compra');
   }
+};
+
+/* =====================
+ * Gastos
+ * ===================== */
+const GASTOS_CATEGORIAS_SUGERIDAS = [
+  'Alquiler',
+  'Nomina',
+  'Luz',
+  'Gas',
+  'Compras',
+  'Marketing',
+  'Transporte',
+  'Mantenimiento',
+  'Servicios',
+];
+
+const actualizarDatalistGastos = (extraCategorias = []) => {
+  if (!gastosCategoriasList) return;
+  const categorias = new Set();
+  GASTOS_CATEGORIAS_SUGERIDAS.forEach((cat) => categorias.add(cat));
+  extraCategorias.forEach((cat) => {
+    const limpio = (cat || '').toString().trim();
+    if (limpio) categorias.add(limpio);
+  });
+  gastosCategoriasList.innerHTML = '';
+  categorias.forEach((cat) => {
+    const option = document.createElement('option');
+    option.value = cat;
+    gastosCategoriasList.appendChild(option);
+  });
+};
+
+const refrescarFrecuenciaGasto = (limpiar = false) => {
+  const activo = gastoRecurrenteInput?.checked ?? false;
+  if (gastoFrecuenciaInput) {
+    gastoFrecuenciaInput.disabled = !activo;
+    if (!activo && limpiar) {
+      gastoFrecuenciaInput.value = '';
+    }
+  }
+};
+
+const limpiarFormularioGasto = () => {
+  gastoForm?.reset();
+  if (gastoIdInput) gastoIdInput.value = '';
+  if (gastoMonedaInput) gastoMonedaInput.value = 'DOP';
+  if (gastoRecurrenteInput) gastoRecurrenteInput.checked = false;
+  if (gastoFechaInput) {
+    gastoFechaInput.value = getLocalDateISO(new Date());
+  }
+  refrescarFrecuenciaGasto(true);
+  setMessage(gastoMensaje, '', 'info');
+};
+
+const cargarGastoEnFormulario = (gasto) => {
+  if (!gasto) return;
+  if (gastoIdInput) gastoIdInput.value = gasto.id;
+  if (gastoFechaInput) gastoFechaInput.value = (gasto.fecha || '').slice(0, 10);
+  if (gastoMontoInput) gastoMontoInput.value = gasto.monto ?? '';
+  if (gastoMonedaInput) gastoMonedaInput.value = gasto.moneda || 'DOP';
+  if (gastoCategoriaInput) gastoCategoriaInput.value = gasto.categoria ?? '';
+  if (gastoMetodoInput) gastoMetodoInput.value = gasto.metodo_pago ?? '';
+  if (gastoProveedorInput) gastoProveedorInput.value = gasto.proveedor ?? '';
+  if (gastoDescripcionInput) gastoDescripcionInput.value = gasto.descripcion ?? '';
+  if (gastoNcfInput) gastoNcfInput.value = gasto.comprobante_ncf ?? '';
+  if (gastoReferenciaInput) gastoReferenciaInput.value = gasto.referencia ?? '';
+  if (gastoRecurrenteInput) gastoRecurrenteInput.checked = Number(gasto.es_recurrente) === 1;
+  if (gastoFrecuenciaInput) gastoFrecuenciaInput.value = gasto.frecuencia ?? '';
+  if (gastoTagsInput) gastoTagsInput.value = gasto.tags ?? '';
+  refrescarFrecuenciaGasto(false);
+  setMessage(gastoMensaje, `Editando gasto #${gasto.id}`, 'info');
+};
+
+const obtenerValoresGasto = () => {
+  const fecha = gastoFechaInput?.value;
+  const monto = parseFloat(gastoMontoInput?.value ?? '');
+  const moneda = gastoMonedaInput?.value || 'DOP';
+  const categoria = gastoCategoriaInput?.value.trim();
+  const metodo_pago = gastoMetodoInput?.value || '';
+  const proveedor = gastoProveedorInput?.value.trim();
+  const descripcion = gastoDescripcionInput?.value.trim();
+  const comprobante_ncf = gastoNcfInput?.value.trim();
+  const referencia = gastoReferenciaInput?.value.trim();
+  const es_recurrente = gastoRecurrenteInput?.checked ?? false;
+  const frecuencia = gastoFrecuenciaInput?.value || '';
+  const tags = gastoTagsInput?.value.trim();
+
+  return {
+    fecha,
+    monto,
+    moneda,
+    categoria,
+    metodo_pago,
+    proveedor,
+    descripcion,
+    comprobante_ncf,
+    referencia,
+    es_recurrente,
+    frecuencia,
+    tags,
+  };
+};
+
+const validarGasto = (gasto) => {
+  if (!gasto.fecha) {
+    setMessage(gastoMensaje, 'La fecha es obligatoria.', 'error');
+    return false;
+  }
+  if (!Number.isFinite(gasto.monto) || gasto.monto <= 0) {
+    setMessage(gastoMensaje, 'El monto debe ser mayor a 0.', 'error');
+    return false;
+  }
+  if (gasto.es_recurrente && !gasto.frecuencia) {
+    setMessage(gastoMensaje, 'Selecciona la frecuencia del gasto recurrente.', 'error');
+    return false;
+  }
+  return true;
+};
+
+const renderResumenGastos = (resumen) => {
+  if (gastosResumenTotal) gastosResumenTotal.textContent = formatCurrency(resumen?.total ?? 0);
+  if (gastosResumenPromedio) gastosResumenPromedio.textContent = formatCurrency(resumen?.promedio_diario ?? 0);
+  if (!gastosResumenTop) return;
+
+  gastosResumenTop.innerHTML = '';
+  const top = resumen?.top_categorias || [];
+  if (!top.length) {
+    gastosResumenTop.textContent = 'Sin datos';
+    return;
+  }
+  top.forEach((item) => {
+    const tag = document.createElement('span');
+    tag.className = 'gastos-tag';
+    tag.textContent = `${item.categoria}: ${formatCurrency(item.total)}`;
+    gastosResumenTop.appendChild(tag);
+  });
+};
+
+const renderGastosTabla = (lista) => {
+  if (!gastosTabla) return;
+  gastosTabla.innerHTML = '';
+
+  if (!Array.isArray(lista) || lista.length === 0) {
+    const fila = document.createElement('tr');
+    const celda = document.createElement('td');
+    celda.colSpan = 8;
+    celda.className = 'tabla-vacia';
+    celda.textContent = 'No hay gastos registrados.';
+    fila.appendChild(celda);
+    gastosTabla.appendChild(fila);
+    return;
+  }
+
+  lista.forEach((gasto) => {
+    const fila = document.createElement('tr');
+
+    const cFecha = document.createElement('td');
+    cFecha.textContent = formatDate(gasto.fecha);
+
+    const cCategoria = document.createElement('td');
+    cCategoria.textContent = gasto.categoria || '--';
+
+    const cMetodo = document.createElement('td');
+    cMetodo.textContent = gasto.metodo_pago || '--';
+
+    const cProveedor = document.createElement('td');
+    cProveedor.textContent = gasto.proveedor || '--';
+
+    const cMonto = document.createElement('td');
+    cMonto.textContent = formatCurrency(gasto.monto ?? 0);
+
+    const cNcf = document.createElement('td');
+    cNcf.textContent = gasto.comprobante_ncf || '--';
+
+    const cRecurrente = document.createElement('td');
+    cRecurrente.textContent = Number(gasto.es_recurrente) === 1 ? 'Si' : 'No';
+
+    const cAcciones = document.createElement('td');
+    cAcciones.className = 'acciones-inline';
+    const btnEditar = document.createElement('button');
+    btnEditar.type = 'button';
+    btnEditar.className = 'kanm-button ghost';
+    btnEditar.textContent = 'Editar';
+    btnEditar.addEventListener('click', () => cargarGastoEnFormulario(gasto));
+
+    const btnEliminar = document.createElement('button');
+    btnEliminar.type = 'button';
+    btnEliminar.className = 'kanm-button ghost';
+    btnEliminar.textContent = 'Eliminar';
+    btnEliminar.addEventListener('click', async () => {
+      const confirmar = window.confirm('Seguro que deseas eliminar este gasto?');
+      if (!confirmar) return;
+      try {
+        await eliminarGasto(gasto.id);
+      } catch (error) {
+        console.error('Error al eliminar gasto:', error);
+        setMessage(gastosMensajeLista, error.message || 'No se pudo eliminar el gasto.', 'error');
+      }
+    });
+
+    cAcciones.appendChild(btnEditar);
+    cAcciones.appendChild(btnEliminar);
+
+    fila.appendChild(cFecha);
+    fila.appendChild(cCategoria);
+    fila.appendChild(cMetodo);
+    fila.appendChild(cProveedor);
+    fila.appendChild(cMonto);
+    fila.appendChild(cNcf);
+    fila.appendChild(cRecurrente);
+    fila.appendChild(cAcciones);
+    gastosTabla.appendChild(fila);
+  });
+};
+
+const cargarGastos = async () => {
+  try {
+    setMessage(gastosMensajeLista, 'Cargando gastos...', 'info');
+    const params = new URLSearchParams();
+    if (gastosDesdeInput?.value) params.set('from', gastosDesdeInput.value);
+    if (gastosHastaInput?.value) params.set('to', gastosHastaInput.value);
+    if (gastosCategoriaFiltroInput?.value) params.set('categoria', gastosCategoriaFiltroInput.value.trim());
+    if (gastosMetodoFiltroInput?.value) params.set('metodo_pago', gastosMetodoFiltroInput.value);
+    if (gastosBuscarInput?.value) params.set('q', gastosBuscarInput.value.trim());
+    params.set('page', '1');
+    params.set('limit', '200');
+
+    const respuesta = await fetchConAutorizacion(`/api/admin/gastos?${params.toString()}`);
+    if (!respuesta.ok) {
+      throw new Error('No se pudieron obtener los gastos');
+    }
+    const data = await respuesta.json();
+    gastos = Array.isArray(data.gastos) ? data.gastos : [];
+    renderGastosTabla(gastos);
+    renderResumenGastos(data.resumen || {});
+
+    const categoriasExtra = gastos.map((gasto) => gasto.categoria).filter(Boolean);
+    actualizarDatalistGastos(categoriasExtra);
+    setMessage(gastosMensajeLista, '', 'info');
+  } catch (error) {
+    console.error('Error al cargar gastos:', error);
+    setMessage(gastosMensajeLista, 'Error al cargar los gastos.', 'error');
+  }
+};
+
+const guardarGasto = async (payload, id = null) => {
+  const endpoint = id ? `/api/admin/gastos/${id}` : '/api/admin/gastos';
+  const respuesta = await fetchJsonAutorizado(endpoint, {
+    method: id ? 'PUT' : 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (!respuesta.ok) {
+    const error = await respuesta.json().catch(() => ({}));
+    throw new Error(error.error || 'No se pudo guardar el gasto');
+  }
+};
+
+const eliminarGasto = async (id) => {
+  const respuesta = await fetchConAutorizacion(`/api/admin/gastos/${id}`, { method: 'DELETE' });
+  if (!respuesta.ok) {
+    const error = await respuesta.json().catch(() => ({}));
+    throw new Error(error.error || 'No se pudo eliminar el gasto');
+  }
+  if (gastoIdInput?.value && Number(gastoIdInput.value) === Number(id)) {
+    limpiarFormularioGasto();
+  }
+  await cargarGastos();
 };
 
 /* =====================
@@ -2021,6 +2118,306 @@ const exportarReporte606 = async () => {
   }
 };
 
+/* =====================
+ * Analisis
+ * ===================== */
+const establecerRangoAnalisis = (desde, hasta) => {
+  if (analisisDesdeInput) analisisDesdeInput.value = desde;
+  if (analisisHastaInput) analisisHastaInput.value = hasta;
+};
+
+const obtenerRangoMes = (offset = 0) => {
+  const base = new Date();
+  const inicio = new Date(base.getFullYear(), base.getMonth() + offset, 1);
+  const fin = new Date(base.getFullYear(), base.getMonth() + offset + 1, 0);
+  return {
+    desde: getLocalDateISO(inicio),
+    hasta: getLocalDateISO(fin),
+  };
+};
+
+const aplicarRangoAnalisis = (tipo) => {
+  const hoy = new Date();
+  if (tipo === 'hoy') {
+    const valor = getLocalDateISO(hoy);
+    establecerRangoAnalisis(valor, valor);
+    cargarAnalisis();
+    return;
+  }
+
+  if (tipo === '7d' || tipo === '30d') {
+    const dias = tipo === '7d' ? 7 : 30;
+    const inicio = new Date(hoy.getTime());
+    inicio.setDate(inicio.getDate() - (dias - 1));
+    establecerRangoAnalisis(getLocalDateISO(inicio), getLocalDateISO(hoy));
+    cargarAnalisis();
+    return;
+  }
+
+  if (tipo === 'mes') {
+    const rango = obtenerRangoMes(0);
+    establecerRangoAnalisis(rango.desde, rango.hasta);
+    cargarAnalisis();
+    return;
+  }
+
+  if (tipo === 'mes-anterior') {
+    const rango = obtenerRangoMes(-1);
+    establecerRangoAnalisis(rango.desde, rango.hasta);
+    cargarAnalisis();
+  }
+};
+
+const renderRankingList = (container, items, formatter) => {
+  if (!container) return;
+  container.innerHTML = '';
+  if (!Array.isArray(items) || items.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'kanm-empty-message';
+    empty.textContent = 'Sin datos';
+    container.appendChild(empty);
+    return;
+  }
+
+  items.forEach((item, index) => {
+    const data = formatter(item, index);
+    const row = document.createElement('div');
+    row.className = 'analisis-ranking-item';
+
+    const pos = document.createElement('span');
+    pos.className = 'ranking-pos';
+    pos.textContent = String(index + 1);
+
+    const label = document.createElement('span');
+    label.className = 'ranking-nombre';
+    label.textContent = data.label;
+
+    const value = document.createElement('span');
+    value.className = 'ranking-valor';
+    value.textContent = data.value;
+
+    row.appendChild(pos);
+    row.appendChild(label);
+    row.appendChild(value);
+    container.appendChild(row);
+  });
+};
+
+const renderAlertasAnalisis = (alertas) => {
+  if (!analisisAlertas) return;
+  analisisAlertas.innerHTML = '';
+  if (!Array.isArray(alertas) || alertas.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'kanm-empty-message';
+    empty.textContent = 'Sin alertas para este periodo.';
+    analisisAlertas.appendChild(empty);
+    return;
+  }
+
+  alertas.forEach((alerta) => {
+    const item = document.createElement('div');
+    const nivel = alerta?.nivel || 'info';
+    item.className = `analisis-alerta analisis-alerta--${nivel}`;
+    item.textContent = alerta?.mensaje || 'Alerta';
+    analisisAlertas.appendChild(item);
+  });
+};
+
+const renderDelta = (element, porcentaje) => {
+  if (!element) return;
+  element.textContent = '';
+  element.classList.remove('delta-positive', 'delta-negative', 'delta-neutral');
+  if (porcentaje === null || porcentaje === undefined) {
+    return;
+  }
+  const valor = Number(porcentaje) * 100;
+  const signo = valor > 0 ? '+' : '';
+  element.textContent = `${signo}${valor.toFixed(1)}% vs periodo anterior`;
+  element.classList.add(valor > 0 ? 'delta-positive' : valor < 0 ? 'delta-negative' : 'delta-neutral');
+};
+
+const renderAnalisisSerie = (ventasSerie, gastosSerie) => {
+  if (!analisisSerieBody) return;
+  analisisSerieBody.innerHTML = '';
+
+  const mapa = new Map();
+  (ventasSerie || []).forEach((row) => {
+    mapa.set(row.fecha, {
+      fecha: row.fecha,
+      ventas: Number(row.total) || 0,
+      gastos: 0,
+    });
+  });
+  (gastosSerie || []).forEach((row) => {
+    const actual = mapa.get(row.fecha) || { fecha: row.fecha, ventas: 0, gastos: 0 };
+    actual.gastos = Number(row.total) || 0;
+    mapa.set(row.fecha, actual);
+  });
+
+  const serie = Array.from(mapa.values()).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+  if (!serie.length) {
+    const fila = document.createElement('tr');
+    const celda = document.createElement('td');
+    celda.colSpan = 4;
+    celda.className = 'tabla-vacia';
+    celda.textContent = 'No hay datos para el periodo seleccionado.';
+    fila.appendChild(celda);
+    analisisSerieBody.appendChild(fila);
+    return;
+  }
+
+  const maxValor = serie.reduce((max, item) => Math.max(max, item.ventas, item.gastos), 0);
+
+  serie.forEach((item) => {
+    const fila = document.createElement('tr');
+    const ganancia = Number((item.ventas - item.gastos).toFixed(2));
+    const ventasPct = maxValor > 0 ? Math.round((item.ventas / maxValor) * 100) : 0;
+    const gastosPct = maxValor > 0 ? Math.round((item.gastos / maxValor) * 100) : 0;
+
+    const cFecha = document.createElement('td');
+    cFecha.textContent = formatDate(item.fecha);
+
+    const cVentas = document.createElement('td');
+    const barVentas = document.createElement('div');
+    barVentas.className = 'analisis-bar analisis-bar--ventas';
+    const barVentasFill = document.createElement('span');
+    barVentasFill.style.width = `${ventasPct}%`;
+    barVentas.appendChild(barVentasFill);
+    const ventasLabel = document.createElement('span');
+    ventasLabel.className = 'analisis-bar-label';
+    ventasLabel.textContent = formatCurrency(item.ventas);
+    cVentas.appendChild(barVentas);
+    cVentas.appendChild(ventasLabel);
+
+    const cGastos = document.createElement('td');
+    const barGastos = document.createElement('div');
+    barGastos.className = 'analisis-bar analisis-bar--gastos';
+    const barGastosFill = document.createElement('span');
+    barGastosFill.style.width = `${gastosPct}%`;
+    barGastos.appendChild(barGastosFill);
+    const gastosLabel = document.createElement('span');
+    gastosLabel.className = 'analisis-bar-label';
+    gastosLabel.textContent = formatCurrency(item.gastos);
+    cGastos.appendChild(barGastos);
+    cGastos.appendChild(gastosLabel);
+
+    const cGanancia = document.createElement('td');
+    cGanancia.textContent = formatCurrency(ganancia);
+
+    fila.appendChild(cFecha);
+    fila.appendChild(cVentas);
+    fila.appendChild(cGastos);
+    fila.appendChild(cGanancia);
+    analisisSerieBody.appendChild(fila);
+  });
+};
+
+const renderAnalisis = (data) => {
+  if (!data) return;
+  const ingresos = data.ingresos || {};
+  const gastosData = data.gastos || {};
+  const ganancias = data.ganancias || {};
+  const comparacion = data.comparacion || {};
+
+  if (analisisKpiVentas) analisisKpiVentas.textContent = formatCurrency(ingresos.total || 0);
+  if (analisisKpiGastos) analisisKpiGastos.textContent = formatCurrency(gastosData.total || 0);
+  if (analisisKpiGanancia) analisisKpiGanancia.textContent = formatCurrency(ganancias.neta || 0);
+  if (analisisKpiMargen) {
+    const margen = Number(ganancias.margen) || 0;
+    analisisKpiMargen.textContent = `${(margen * 100).toFixed(1)}%`;
+  }
+  if (analisisKpiTicket) analisisKpiTicket.textContent = formatCurrency(ingresos.ticket_promedio || 0);
+  if (analisisKpiVentasCount) analisisKpiVentasCount.textContent = String(ingresos.count || 0);
+
+  renderDelta(analisisKpiVentasDelta, comparacion.ventas?.porcentaje);
+  renderDelta(analisisKpiGastosDelta, comparacion.gastos?.porcentaje);
+  renderDelta(analisisKpiGananciaDelta, comparacion.ganancia?.porcentaje);
+  renderDelta(analisisKpiTicketDelta, comparacion.ticket_promedio?.porcentaje);
+
+  renderAnalisisSerie(ingresos.serie_diaria || [], gastosData.serie_diaria || []);
+
+  renderRankingList(analisisTopCantidad, data.rankings?.top_productos_cantidad || [], (item) => ({
+    label: item.nombre || `Producto ${item.id}`,
+    value: `${Number(item.cantidad) || 0} uds`,
+  }));
+
+  renderRankingList(analisisTopIngresos, data.rankings?.top_productos_ingresos || [], (item) => ({
+    label: item.nombre || `Producto ${item.id}`,
+    value: formatCurrency(item.ingresos || 0),
+  }));
+
+  renderRankingList(analisisBottomProductos, data.rankings?.bottom_productos || [], (item) => ({
+    label: item.nombre || `Producto ${item.id}`,
+    value: `${Number(item.cantidad) || 0} uds`,
+  }));
+
+  renderRankingList(analisisTopDias, data.rankings?.top_dias_semana || [], (item) => ({
+    label: item.dia || 'Dia',
+    value: formatCurrency(item.total || 0),
+  }));
+
+  renderRankingList(analisisTopHoras, data.rankings?.top_horas || [], (item) => ({
+    label: item.hora !== undefined ? `${String(item.hora).padStart(2, '0')}:00` : 'Hora',
+    value: formatCurrency(item.total || 0),
+  }));
+
+  renderRankingList(analisisTopDiasMes, data.rankings?.top_dias_mes || [], (item) => ({
+    label: item.dia_mes !== undefined ? `Dia ${item.dia_mes}` : 'Dia',
+    value: formatCurrency(item.total || 0),
+  }));
+
+  renderRankingList(analisisMetodosPago, [
+    { label: 'Efectivo', value: formatCurrency(data.metodos_pago?.efectivo || 0) },
+    { label: 'Tarjeta', value: formatCurrency(data.metodos_pago?.tarjeta || 0) },
+    { label: 'Transferencia', value: formatCurrency(data.metodos_pago?.transferencia || 0) },
+  ], (item) => ({ label: item.label, value: item.value }));
+
+  renderRankingList(analisisTopCategorias, gastosData.top_categorias || [], (item) => ({
+    label: item.categoria || 'Sin categoria',
+    value: formatCurrency(item.total || 0),
+  }));
+
+  const recurrentes = gastosData.recurrentes || [];
+  const montoRecurrente = recurrentes.find((r) => r.es_recurrente)?.total || 0;
+  const montoNoRecurrente = recurrentes.find((r) => !r.es_recurrente)?.total || 0;
+  renderRankingList(
+    analisisGastosRecurrentes,
+    [
+      { label: 'Recurrentes', value: formatCurrency(montoRecurrente) },
+      { label: 'No recurrentes', value: formatCurrency(montoNoRecurrente) },
+    ],
+    (item) => ({ label: item.label, value: item.value })
+  );
+
+  renderAlertasAnalisis(data.alertas || []);
+};
+
+const cargarAnalisis = async () => {
+  if (!analisisDesdeInput || !analisisHastaInput) return;
+  const desde = analisisDesdeInput.value;
+  const hasta = analisisHastaInput.value;
+
+  try {
+    setMessage(analisisMensaje, 'Actualizando analisis...', 'info');
+    const params = new URLSearchParams();
+    if (desde) params.set('from', desde);
+    if (hasta) params.set('to', hasta);
+    const respuesta = await fetchConAutorizacion(`/api/admin/analytics/overview?${params.toString()}`);
+    if (!respuesta.ok) {
+      throw new Error('No se pudo obtener el analisis');
+    }
+    const data = await respuesta.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudo obtener el analisis');
+    }
+    renderAnalisis(data);
+    setMessage(analisisMensaje, '', 'info');
+  } catch (error) {
+    console.error('Error al cargar analisis:', error);
+    setMessage(analisisMensaje, error.message || 'Error al cargar el analisis.', 'error');
+  }
+};
+
 const renderCierresCaja = () => {
   if (!cierresTabla) return;
   cierresTabla.innerHTML = '';
@@ -2087,6 +2484,15 @@ const renderCierresCaja = () => {
     botonDetalle.textContent = 'Ver detalle';
     botonDetalle.dataset.detalleCierre = cierre.id;
     acciones.appendChild(botonDetalle);
+
+    if (puedeImprimirCierres()) {
+      const botonImprimir = document.createElement('button');
+      botonImprimir.type = 'button';
+      botonImprimir.className = 'kanm-button';
+      botonImprimir.textContent = 'Imprimir PDF';
+      botonImprimir.dataset.imprimirCierre = cierre.id;
+      acciones.appendChild(botonImprimir);
+    }
 
     const botonEliminar = document.createElement('button');
     botonEliminar.type = 'button';
@@ -2552,13 +2958,60 @@ const normalizarTextoNegocio = (valor = '') =>
 
 const obtenerNombreNegocio = (negocio = {}) => negocio?.nombre || negocio?.titulo_sistema || '';
 
+const obtenerEstadoNegocio = (neg = {}) => {
+  if (neg.deleted_at) {
+    return { label: 'Eliminado', clase: 'estado-eliminado' };
+  }
+  if (Number(neg.suspendido) === 1) {
+    return {
+      label: 'Suspendido',
+      clase: 'estado-suspendido',
+      motivo: neg.motivo_suspension || neg.motivoSuspension || '',
+    };
+  }
+  if (Number(neg.activo) === 0) {
+    return { label: 'Inactivo', clase: 'estado-inactivo' };
+  }
+  return { label: 'Activo', clase: '' };
+};
+
+const renderEstadoNegocio = (neg = {}) => {
+  const estado = obtenerEstadoNegocio(neg);
+  const clase = estado.clase ? ` ${estado.clase}` : '';
+  const motivo = estado.motivo ? `<div class="negocio-motivo">Motivo: ${estado.motivo}</div>` : '';
+  return `<div><span class="estado-pill${clase}">${estado.label}</span>${motivo}</div>`;
+};
+
+const renderAccionesNegocio = (neg = {}) => {
+  const id = neg.id;
+  const eliminado = Boolean(neg.deleted_at);
+  const activo = Number(neg.activo) !== 0;
+  const suspendido = Number(neg.suspendido) === 1;
+  const disabled = eliminado ? 'disabled' : '';
+
+  const btnEditar = `<button type="button" class="kanm-button ghost kanm-negocios-btn-editar" data-negocio-id="${id}" ${disabled}>Editar</button>`;
+  const btnActivar = activo
+    ? `<button type="button" class="kanm-button ghost" data-negocio-action="desactivar" data-negocio-id="${id}" ${disabled}>Desactivar</button>`
+    : `<button type="button" class="kanm-button ghost" data-negocio-action="activar" data-negocio-id="${id}" ${disabled}>Activar</button>`;
+  const btnSuspender = suspendido
+    ? `<button type="button" class="kanm-button ghost" data-negocio-action="reactivar" data-negocio-id="${id}" ${disabled}>Reactivar</button>`
+    : `<button type="button" class="kanm-button ghost" data-negocio-action="suspender" data-negocio-id="${id}" ${disabled}>Suspender</button>`;
+  const btnReset = `<button type="button" class="kanm-button ghost" data-negocio-action="reset-password" data-negocio-id="${id}" ${disabled}>Resetear password</button>`;
+  const btnForce = `<button type="button" class="kanm-button ghost" data-negocio-action="force-password" data-negocio-id="${id}" ${disabled}>Forzar cambio</button>`;
+  const btnImpersonar = `<button type="button" class="kanm-button ghost" data-negocio-action="impersonar" data-negocio-id="${id}" ${disabled}>Entrar como negocio</button>`;
+  const btnEliminar = `<button type="button" class="kanm-button danger" data-negocio-action="eliminar" data-negocio-id="${id}" ${disabled}>Eliminar</button>`;
+
+  return `${btnEditar}${btnActivar}${btnSuspender}${btnReset}${btnForce}${btnImpersonar}${btnEliminar}`;
+};
+
+
 const renderNegociosTabla = (lista = [], opciones = {}) => {
   const { tablaBody } = getNegociosDom();
   if (!tablaBody) return;
   tablaBody.innerHTML = '';
   const emptyText = opciones.emptyText || 'No hay negocios registrados.';
   if (!lista.length) {
-    tablaBody.innerHTML = `<tr><td colspan="5">${emptyText}</td></tr>`;
+    tablaBody.innerHTML = `<tr><td colspan="6">${emptyText}</td></tr>`;
     return;
   }
   tablaBody.innerHTML = lista
@@ -2569,21 +3022,16 @@ const renderNegociosTabla = (lista = [], opciones = {}) => {
       const logo = neg.logo_url
         ? `<img src="${neg.logo_url}" alt="logo" style="width:36px;height:36px;object-fit:contain;border-radius:6px;" />`
         : '<span class="kanm-subtitle">Sin logo</span>';
+      const estadoHtml = renderEstadoNegocio(neg);
+      const accionesHtml = renderAccionesNegocio(neg);
       return `
         <tr>
           <td>${nombre}</td>
           <td>${neg.slug || '-'}</td>
+          <td>${estadoHtml}</td>
           <td class="negocios-colores">${swatchPrim} ${swatchSec}</td>
           <td>${logo}</td>
-          <td>
-            <button
-              type="button"
-              class="kanm-button ghost kanm-negocios-btn-editar"
-              data-negocio-id="${neg.id}"
-            >
-              Editar
-            </button>
-          </td>
+          <td><div class="negocio-actions">${accionesHtml}</div></td>
         </tr>
       `;
     })
@@ -2641,6 +3089,96 @@ const cargarNegocios = async () => {
   } catch (error) {
     console.error('Error al cargar negocios:', error);
     setNegociosMsg(error.message || 'No se pudieron cargar los negocios', 'error');
+  }
+};
+
+const ejecutarAccionNegocio = async (url, options = {}) => {
+  const resp = await fetchJsonAutorizado(url, options);
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data?.ok === false) {
+    throw new Error(data?.error || 'No se pudo completar la accion');
+  }
+  return data;
+};
+
+const iniciarSesionImpersonada = (data = {}) => {
+  const sessionApi = window.KANMSession;
+  const usuarioId = data.usuario_id ?? data.id ?? null;
+  const sesion = {
+    usuario: data.usuario,
+    nombre: data.nombre,
+    rol: data.rol || 'admin',
+    id: usuarioId,
+    usuarioId,
+    negocioId: data.negocio_id ?? data.negocioId,
+    esSuperAdmin: false,
+    forcePasswordChange: data.force_password_change === true,
+    impersonated: true,
+    token: data.token,
+  };
+
+  if (sessionApi && typeof sessionApi.setUser === 'function') {
+    sessionApi.setUser(sesion);
+  } else {
+    try {
+      sessionStorage.setItem('kanmUser', JSON.stringify(sesion));
+      localStorage.setItem('sesionApp', JSON.stringify(sesion));
+    } catch (error) {
+      console.warn('No se pudo guardar sesion impersonada:', error);
+    }
+  }
+
+  window.APP_SESION = sesion;
+  window.location.href = '/admin.html';
+};
+
+const procesarAccionNegocio = async (accion, id) => {
+  if (!id || !accion) return;
+  try {
+    setNegociosMsg('Procesando accion...', 'info');
+    if (accion === 'activar') {
+      await ejecutarAccionNegocio(`/api/admin/negocios/${id}/activar`, { method: 'PUT' });
+    } else if (accion === 'desactivar') {
+      await ejecutarAccionNegocio(`/api/admin/negocios/${id}/desactivar`, { method: 'PUT' });
+    } else if (accion === 'suspender') {
+      const motivo = prompt('Motivo de suspension (opcional):');
+      if (motivo === null) {
+        setNegociosMsg('', 'info');
+        return;
+      }
+      await ejecutarAccionNegocio(`/api/admin/negocios/${id}/suspender`, {
+        method: 'PUT',
+        body: JSON.stringify({ motivo_suspension: motivo || null }),
+      });
+    } else if (accion === 'reactivar') {
+      await ejecutarAccionNegocio(`/api/admin/negocios/${id}/reactivar`, { method: 'PUT' });
+    } else if (accion === 'reset-password') {
+      const data = await ejecutarAccionNegocio(`/api/admin/negocios/${id}/reset-admin-password`, { method: 'POST' });
+      if (data?.temp_password) {
+        alert(
+          `Password temporal para ${data.admin_usuario || 'admin'}: ${data.temp_password}. Guardalo, no se mostrara de nuevo.`
+        );
+      }
+    } else if (accion === 'force-password') {
+      await ejecutarAccionNegocio(`/api/admin/negocios/${id}/force-password-change`, { method: 'PUT' });
+    } else if (accion === 'impersonar') {
+      const data = await ejecutarAccionNegocio(`/api/admin/negocios/${id}/impersonar`, { method: 'POST' });
+      iniciarSesionImpersonada(data || {});
+      return;
+    } else if (accion === 'eliminar') {
+      const confirmacion = prompt('Escribe ELIMINAR para confirmar la eliminacion. Esta accion es irreversible.');
+      if (confirmacion !== 'ELIMINAR') {
+        setNegociosMsg('Eliminacion cancelada.', 'info');
+        return;
+      }
+      await ejecutarAccionNegocio(`/api/admin/negocios/${id}`, { method: 'DELETE' });
+    }
+
+    await cargarNegocios();
+    setNegociosMsg('Accion completada.', 'info');
+  } catch (error) {
+    console.error('Error procesando accion de negocio:', error);
+    setNegociosMsg(error.message || 'No se pudo completar la accion', 'error');
   }
 };
 
@@ -2887,6 +3425,14 @@ const initNegociosAdmin = () => {
         const id = btnEditar.dataset.negocioId;
         console.log('[Negocios] Click en Editar negocio', id);
         abrirModalNegocio(id);
+        return;
+      }
+
+      const accionBtn = event.target.closest('[data-negocio-action]');
+      if (accionBtn) {
+        const accion = accionBtn.dataset.negocioAction;
+        const id = accionBtn.dataset.negocioId;
+        procesarAccionNegocio(accion, id);
       }
     });
   } else {
@@ -2925,16 +3471,6 @@ document.addEventListener('DOMContentLoaded', () => {
 /* =====================
  * Eventos y acciones
  * ===================== */
-recetaAgregarBtn?.addEventListener('click', () => {
-  if (!recetaTabla) return;
-  if (!insumos || !insumos.length) {
-    setMessage(recetaMensaje, 'Primero registra insumos activos para crear la receta.', 'warning');
-    return;
-  }
-  const fila = crearFilaReceta();
-  recetaTabla.appendChild(fila);
-  setMessage(recetaMensaje, '', 'info');
-});
 
 formProducto?.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -2952,21 +3488,6 @@ formProducto?.addEventListener('submit', async (event) => {
       const creado = await crearProducto(valores);
       productoId = creado?.id;
       setMessage(mensajeProductos, 'Producto creado correctamente.', 'info');
-    }
-
-    if (productoId) {
-      try {
-        await guardarRecetaProducto(productoId);
-        setMessage(recetaMensaje, 'Receta actualizada correctamente.', 'info');
-      } catch (recetaError) {
-        console.error('Error al guardar la receta:', recetaError);
-        setMessage(
-          recetaMensaje,
-          recetaError.message || 'El producto se guardó, pero la receta no pudo actualizarse.',
-          'error'
-        );
-        return;
-      }
     }
 
     limpiarFormularioProducto();
@@ -3044,58 +3565,6 @@ usuariosTablaBody?.addEventListener('click', (event) => {
   }
 });
 
-insumoForm?.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  if (!insumoNombreInput) return;
-
-  const nombre = insumoNombreInput.value.trim();
-  if (!nombre) {
-    setMessage(insumoMensaje, 'El nombre del insumo es obligatorio.', 'error');
-    return;
-  }
-
-  const payload = {
-    nombre,
-    unidad: insumoUnidadInput?.value,
-    stock_actual: insumoStockInput?.value,
-    costo_unitario_promedio: insumoCostoInput?.value,
-    activo: insumoActivoInput?.checked,
-    comentarios: insumoComentariosInput?.value,
-  };
-
-  const id = insumoIdInput?.value;
-  try {
-    await guardarInsumo(payload, id || null);
-    setMessage(insumoMensaje, id ? 'Insumo actualizado correctamente.' : 'Insumo creado correctamente.', 'info');
-    limpiarFormularioInsumo();
-    await cargarInsumos();
-  } catch (error) {
-    console.error('Error al guardar insumo:', error);
-    setMessage(insumoMensaje, error.message || 'No se pudo guardar el insumo.', 'error');
-  }
-});
-
-insumoNombreInput?.addEventListener('input', () => {
-  setMessage(insumoMensaje, '', 'info');
-});
-
-insumosBuscarBtn?.addEventListener('click', (event) => {
-  event.preventDefault();
-  filtrarInsumos();
-});
-
-insumosBuscarInput?.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    filtrarInsumos();
-  }
-});
-
-insumoNuevoBtn?.addEventListener('click', (event) => {
-  event.preventDefault();
-  limpiarFormularioInsumo();
-});
-
 compraAgregarDetalleBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   if (!compraDetallesContainer) return;
@@ -3108,7 +3577,12 @@ compraRecalcularBtn?.addEventListener('click', (event) => {
 });
 
 compraDetallesContainer?.addEventListener('input', (event) => {
-  if (event.target.matches('.compra-detalle-cantidad') || event.target.matches('.compra-detalle-costo')) {
+  if (
+    event.target.matches('.compra-detalle-cantidad') ||
+    event.target.matches('.compra-detalle-precio') ||
+    event.target.matches('.compra-detalle-itbis') ||
+    event.target.matches('.compra-detalle-total')
+  ) {
     recalcularMontosCompra();
   }
 });
@@ -3132,7 +3606,7 @@ compraForm?.addEventListener('submit', async (event) => {
   if (!proveedor || !fecha || detalles.length === 0) {
     setMessage(
       compraMensaje,
-      'Proveedor, fecha y al menos un insumo son obligatorios para registrar la compra.',
+      'Proveedor, fecha y al menos un detalle son obligatorios para registrar la compra.',
       'error'
     );
     return;
@@ -3159,12 +3633,81 @@ compraForm?.addEventListener('submit', async (event) => {
     compraForm.reset();
     compraDetallesContainer.innerHTML = '';
     compraDetallesContainer.appendChild(crearFilaDetalle());
-    await cargarInsumos();
     await cargarCompras();
   } catch (error) {
     console.error('Error al registrar compra:', error);
     setMessage(compraMensaje, error.message || 'No se pudo registrar la compra.', 'error');
   }
+});
+
+gastoRecurrenteInput?.addEventListener('change', () => refrescarFrecuenciaGasto(true));
+
+gastoCancelarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  limpiarFormularioGasto();
+});
+
+gastoForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const valores = obtenerValoresGasto();
+  if (!validarGasto(valores)) {
+    return;
+  }
+
+  const payload = {
+    fecha: valores.fecha,
+    monto: valores.monto,
+    moneda: valores.moneda,
+    categoria: valores.categoria || null,
+    metodo_pago: valores.metodo_pago || null,
+    proveedor: valores.proveedor || null,
+    descripcion: valores.descripcion || null,
+    comprobante_ncf: valores.comprobante_ncf || null,
+    referencia: valores.referencia || null,
+    es_recurrente: valores.es_recurrente ? 1 : 0,
+    frecuencia: valores.es_recurrente ? valores.frecuencia : null,
+    tags: valores.tags || null,
+  };
+
+  try {
+    setMessage(gastoMensaje, 'Guardando gasto...', 'info');
+    const idRaw = gastoIdInput?.value;
+    const idValor = idRaw ? Number(idRaw) : null;
+    const idFinal = Number.isFinite(idValor) ? idValor : null;
+    await guardarGasto(payload, idFinal);
+    setMessage(gastoMensaje, 'Gasto guardado correctamente.', 'info');
+    limpiarFormularioGasto();
+    await cargarGastos();
+  } catch (error) {
+    console.error('Error al guardar gasto:', error);
+    setMessage(gastoMensaje, error.message || 'No se pudo guardar el gasto.', 'error');
+  }
+});
+
+gastosConsultarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  cargarGastos();
+});
+
+gastosLimpiarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  if (gastosDesdeInput) gastosDesdeInput.value = '';
+  if (gastosHastaInput) gastosHastaInput.value = '';
+  if (gastosCategoriaFiltroInput) gastosCategoriaFiltroInput.value = '';
+  if (gastosMetodoFiltroInput) gastosMetodoFiltroInput.value = '';
+  if (gastosBuscarInput) gastosBuscarInput.value = '';
+  cargarGastos();
+});
+
+analisisRangeButtons.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    aplicarRangoAnalisis(btn.dataset.analisisRange || '');
+  });
+});
+
+analisisActualizarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  cargarAnalisis();
 });
 
 reporte607ConsultarBtn?.addEventListener('click', (event) => {
@@ -3204,6 +3747,17 @@ cierresTabla?.addEventListener('click', (event) => {
     const id = Number(botonDetalle.dataset.detalleCierre);
     if (Number.isInteger(id) && id > 0) {
       cargarDetalleCierre(id);
+    }
+    return;
+  }
+
+  const botonImprimir = event.target.closest('[data-imprimir-cierre]');
+  if (botonImprimir) {
+    event.preventDefault();
+    const id = Number(botonImprimir.dataset.imprimirCierre);
+    if (Number.isInteger(id) && id > 0) {
+      const url = `/cuadre-imprimir.html?id=${encodeURIComponent(id)}`;
+      window.open(url, '_blank', 'noopener');
     }
     return;
   }
@@ -3306,6 +3860,22 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (histCocinaFechaInput && !histCocinaFechaInput.value) {
     histCocinaFechaInput.value = fechaHoy;
   }
+  if (gastosHastaInput && !gastosHastaInput.value) {
+    gastosHastaInput.value = fechaHoy;
+  }
+  if (gastosDesdeInput && !gastosDesdeInput.value) {
+    const inicioMes = new Date();
+    inicioMes.setDate(1);
+    gastosDesdeInput.value = getLocalDateISO(inicioMes);
+  }
+  if (analisisHastaInput && !analisisHastaInput.value) {
+    analisisHastaInput.value = fechaHoy;
+  }
+  if (analisisDesdeInput && !analisisDesdeInput.value) {
+    const inicioAnalisis = new Date();
+    inicioAnalisis.setDate(inicioAnalisis.getDate() - 29);
+    analisisDesdeInput.value = getLocalDateISO(inicioAnalisis);
+  }
 
   ocultarTabsNoPermitidos();
   aplicarModulosUI();
@@ -3321,13 +3891,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   await cargarCocinerosHistorial();
 
   registrarListenersFactura();
+  actualizarDatalistGastos();
+  limpiarFormularioGasto();
 
   await Promise.all([
     cargarProductos(),
     cargarImpuesto(),
     cargarConfiguracionFactura(),
-    cargarInsumos(),
     cargarCompras(),
+    cargarGastos(),
+    cargarAnalisis(),
     cargarUsuarios(usuariosRolSelect?.value || 'mesera'),
   ]);
   if (compraDetallesContainer) {

@@ -106,7 +106,6 @@
   <main class="admin-container">
     <div class="admin-tabs" id="admin-tabs">
       <button type="button" class="kanm-tab active" data-admin-tab="productos" data-modulo="admin">Productos</button>
-      <button type="button" class="kanm-tab" data-admin-tab="insumos" data-modulo="admin">Insumos</button>
       <button type="button" class="kanm-tab" data-admin-tab="configuracion" data-modulo="admin">Configuración</button>
       <button type="button" class="kanm-tab" data-admin-tab="usuarios" data-modulo="admin">Usuarios</button>
       <button type="button" class="kanm-tab" data-admin-tab="categorias" data-modulo="admin">Categorías</button>
@@ -115,7 +114,9 @@
         Cotizaciones
       </button>
       <button type="button" class="kanm-tab" data-admin-tab="compras" data-modulo="admin">Compras &amp; 606</button>
+      <button type="button" class="kanm-tab" data-admin-tab="gastos" data-modulo="admin">Gastos</button>
       <button type="button" class="kanm-tab" data-admin-tab="ventas" data-modulo="caja">Ventas &amp; 607</button>
+      <button type="button" class="kanm-tab" data-admin-tab="analisis" data-modulo="admin">Analisis del negocio</button>
       <button type="button" class="kanm-tab" data-admin-tab="cuadres" data-modulo="caja">Cuadres de caja</button>
       <button type="button" class="kanm-tab" data-admin-tab="historial" data-modulo="historialCocina">Historial de cocina</button>
       <button type="button" class="kanm-tab super-admin-only" data-admin-tab="negocios" data-modulo="admin">Negocios</button>
@@ -171,6 +172,14 @@
               </div>
 
               <div class="kanm-input-group">
+                <label class="kanm-input-toggle" for="prod-stock-indefinido">
+                  <span>Stock indefinido</span>
+                  <input type="checkbox" id="prod-stock-indefinido" />
+                </label>
+                <p class="kanm-input-help">Si esta activo, el sistema no controla cantidad.</p>
+              </div>
+
+              <div class="kanm-input-group">
                 <label for="prod-categoria">Categor&iacute;a</label>
                 <select id="prod-categoria">
                   <option value="">Selecciona</option>
@@ -183,30 +192,6 @@
               </div>
             </div>
 
-            <div class="admin-product-recipe">
-              <div class="kanm-card-header">
-                <h4>Receta del producto (insumos)</h4>
-                <p class="kanm-subtitle">
-                  Opcional. Define qué insumos y en qué cantidad se consumen cada vez que se prepara este producto.
-                </p>
-              </div>
-
-              <div class="receta-wrapper">
-                <div class="receta-header">
-                  <span>Insumo</span>
-                  <span>Cantidad</span>
-                  <span>Unidad</span>
-                  <span></span>
-                </div>
-                <div id="receta-rows" class="receta-rows"></div>
-              </div>
-
-              <div class="receta-actions">
-                <button type="button" class="kanm-button secondary" id="receta-agregar">Agregar insumo</button>
-              </div>
-              <div id="receta-mensaje" class="kanm-message"></div>
-            </div>
-
             <div class="admin-form-actions producto-form-actions">
               <button type="submit" class="kanm-button" id="prod-guardar">Guardar producto</button>
             </div>
@@ -217,91 +202,6 @@
     </section>
 
     <!-- Insumos -->
-    <section class="admin-panel hidden" data-admin-section="insumos" id="admin-section-insumos">
-      <div class="kanm-card-header">
-        <h2>Insumos</h2>
-        <p class="kanm-subtitle">Gestiona materia prima y consumibles del negocio.</p>
-      </div>
-      <div class="admin-layout-two-cols">
-        <section class="kanm-card admin-card">
-          <header class="kanm-card-header">
-            <h3>Insumos registrados</h3>
-            <p class="kanm-subtitle">Consulta existencias, costos y estado.</p>
-          </header>
-          <div class="insumos-filtros">
-            <div class="kanm-input-group">
-              <input type="text" id="insumos-buscar" placeholder="Buscar insumo..." />
-            </div>
-            <button type="button" class="kanm-button secondary" id="insumos-filtrar">Buscar</button>
-          </div>
-          <div id="insumos-mensaje" class="kanm-message"></div>
-          <div class="kanm-table-wrapper">
-            <table class="kanm-table">
-              <thead>
-                <tr>
-                  <th>Nombre</th>
-                  <th>Unidad</th>
-                  <th>Stock</th>
-                  <th>Costo</th>
-                  <th>Activo</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody id="insumos-lista"></tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="kanm-card admin-card">
-          <header class="kanm-card-header">
-            <h3>Formulario de insumo</h3>
-            <p class="kanm-subtitle">Crea o edita un insumo y su disponibilidad.</p>
-          </header>
-          <form id="insumo-form" class="kanm-form" novalidate>
-            <input type="hidden" id="insumo-id" />
-
-            <div class="kanm-form-grid">
-              <div class="kanm-input-group">
-                <label for="insumo-nombre">Nombre</label>
-                <input type="text" id="insumo-nombre" placeholder="Ej. Harina" />
-              </div>
-
-              <div class="kanm-input-group">
-                <label for="insumo-unidad">Unidad</label>
-                <input type="text" id="insumo-unidad" placeholder="Kg, L, Caja..." />
-              </div>
-
-              <div class="kanm-input-group">
-                <label for="insumo-stock">Stock actual</label>
-                <input type="number" id="insumo-stock" min="0" step="0.01" placeholder="0" />
-              </div>
-
-              <div class="kanm-input-group">
-                <label for="insumo-costo">Costo unitario promedio</label>
-                <input type="number" id="insumo-costo" min="0" step="0.01" placeholder="0.00" />
-              </div>
-            </div>
-
-            <div class="kanm-input-group">
-              <label for="insumo-comentarios">Notas</label>
-              <textarea id="insumo-comentarios" rows="3" placeholder="Observaciones opcionales"></textarea>
-            </div>
-
-            <div class="kanm-input-group kanm-input-group--inline">
-              <label for="insumo-activo">Activo</label>
-              <input type="checkbox" id="insumo-activo" checked />
-            </div>
-
-            <div class="admin-form-actions">
-              <button type="button" class="kanm-button ghost" id="insumo-nuevo">Nuevo</button>
-              <button type="submit" class="kanm-button" id="insumo-guardar">Guardar insumo</button>
-            </div>
-            <div id="insumo-mensaje" class="kanm-message"></div>
-          </form>
-        </section>
-      </div>
-    </section>
-
     <!-- Configuración -->
     <section class="admin-panel hidden" data-admin-section="configuracion" id="admin-section-config">
       <div class="kanm-card-header">
@@ -519,7 +419,7 @@
     <section class="admin-panel hidden" data-admin-section="categorias" id="admin-section-categorias">
       <div class="kanm-card-header">
         <h2>Categorías</h2>
-        <p class="kanm-subtitle">Organiza las categorías que usarás en productos e insumos.</p>
+        <p class="kanm-subtitle">Organiza las categorías que usarás en productos.</p>
       </div>
       <div class="admin-layout-two-cols categorias-layout">
         <section class="kanm-card admin-card">
@@ -867,7 +767,7 @@
     <section class="admin-panel hidden" data-admin-section="compras" id="admin-section-compras">
       <div class="kanm-card-header">
         <h2>Compras &amp; 606</h2>
-        <p class="kanm-subtitle">Registra compras, actualiza inventario y genera el 606.</p>
+        <p class="kanm-subtitle">Registra compras manuales y genera el 606.</p>
       </div>
 
       <section class="kanm-card admin-card">
@@ -930,10 +830,10 @@
           </div>
 
           <div class="compra-detalle-header">
-            <h4 class="kanm-subheading">Detalle de insumos</h4>
+            <h4 class="kanm-subheading">Detalle de compra</h4>
             <div class="compra-detalle-actions">
               <button type="button" class="kanm-button secondary" id="compra-agregar-detalle">
-                Agregar insumo
+                Agregar linea
               </button>
               <button type="button" class="kanm-button ghost" id="compra-recalcular">Recalcular</button>
             </div>
@@ -1021,6 +921,183 @@
       </section>
     </section>
 
+    <!-- Gastos -->
+    <section class="admin-panel hidden" data-admin-section="gastos" id="admin-section-gastos">
+      <div class="kanm-card-header">
+        <h2>Gastos</h2>
+        <p class="kanm-subtitle">Registra y analiza los gastos operativos del negocio.</p>
+      </div>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Resumen del periodo</h3>
+          <p class="kanm-subtitle">Totales y categorias principales.</p>
+        </header>
+        <div class="admin-resumen-grid gastos-resumen-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">Total gastos</span>
+            <span class="resumen-value" id="gastos-resumen-total">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Promedio diario</span>
+            <span class="resumen-value" id="gastos-resumen-promedio">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Top categorias</span>
+            <div class="gastos-top-categorias" id="gastos-resumen-top"></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="admin-grid-two">
+        <section class="kanm-card admin-card">
+          <header class="kanm-card-header">
+            <h3>Registrar gasto</h3>
+            <p class="kanm-subtitle">Completa el formulario y guarda el gasto.</p>
+          </header>
+          <form id="gasto-form" class="kanm-form" novalidate>
+            <input type="hidden" id="gasto-id" />
+            <div class="kanm-form-grid">
+              <div class="kanm-input-group">
+                <label for="gasto-fecha">Fecha</label>
+                <input type="date" id="gasto-fecha" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="gasto-monto">Monto</label>
+                <input type="number" id="gasto-monto" min="0" step="0.01" placeholder="0.00" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="gasto-moneda">Moneda</label>
+                <select id="gasto-moneda">
+                  <option value="DOP">DOP</option>
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="gasto-categoria">Categoria</label>
+                <input type="text" id="gasto-categoria" list="gastos-categorias" placeholder="Ej. Alquiler" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="gasto-metodo">Metodo de pago</label>
+                <select id="gasto-metodo">
+                  <option value="">Selecciona</option>
+                  <option value="efectivo">Efectivo</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="tarjeta">Tarjeta</option>
+                  <option value="otro">Otro</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="gasto-proveedor">Proveedor</label>
+                <input type="text" id="gasto-proveedor" placeholder="Proveedor o tercero" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="gasto-ncf">Comprobante NCF</label>
+                <input type="text" id="gasto-ncf" placeholder="B01XXXXXXXX" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="gasto-referencia">Referencia</label>
+                <input type="text" id="gasto-referencia" placeholder="#transferencia o factura" />
+              </div>
+            </div>
+
+            <div class="kanm-input-group">
+              <label for="gasto-descripcion">Descripcion</label>
+              <textarea id="gasto-descripcion" rows="2" placeholder="Notas o detalle del gasto"></textarea>
+            </div>
+
+            <div class="kanm-form-grid">
+              <div class="kanm-input-group">
+                <label class="kanm-input-toggle" for="gasto-recurrente">
+                  <span>Gasto recurrente</span>
+                  <input type="checkbox" id="gasto-recurrente" />
+                </label>
+              </div>
+              <div class="kanm-input-group">
+                <label for="gasto-frecuencia">Frecuencia</label>
+                <select id="gasto-frecuencia">
+                  <option value="">Selecciona</option>
+                  <option value="mensual">Mensual</option>
+                  <option value="semanal">Semanal</option>
+                  <option value="quincenal">Quincenal</option>
+                  <option value="anual">Anual</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="gasto-tags">Tags</label>
+                <input type="text" id="gasto-tags" placeholder="marketing, delivery, fijo" />
+              </div>
+            </div>
+
+            <div class="admin-form-actions">
+              <button type="submit" class="kanm-button">Guardar gasto</button>
+              <button type="button" class="kanm-button ghost" id="gasto-cancelar">Cancelar</button>
+            </div>
+            <div id="gasto-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+
+        <section class="kanm-card admin-card">
+          <header class="kanm-card-header">
+            <h3>Listado de gastos</h3>
+            <p class="kanm-subtitle">Filtra por fecha, categoria o texto.</p>
+          </header>
+          <div class="admin-report-controls gastos-filtros">
+            <div class="kanm-input-group">
+              <label for="gastos-desde">Desde</label>
+              <input type="date" id="gastos-desde" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="gastos-hasta">Hasta</label>
+              <input type="date" id="gastos-hasta" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="gastos-categoria-filtro">Categoria</label>
+              <input type="text" id="gastos-categoria-filtro" list="gastos-categorias" placeholder="Todas" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="gastos-metodo-filtro">Metodo pago</label>
+              <select id="gastos-metodo-filtro">
+                <option value="">Todos</option>
+                <option value="efectivo">Efectivo</option>
+                <option value="transferencia">Transferencia</option>
+                <option value="tarjeta">Tarjeta</option>
+                <option value="otro">Otro</option>
+              </select>
+            </div>
+            <div class="kanm-input-group">
+              <label for="gastos-buscar">Buscar</label>
+              <input type="text" id="gastos-buscar" placeholder="Proveedor, descripcion o NCF" />
+            </div>
+            <div class="admin-report-actions">
+              <button type="button" class="kanm-button secondary" id="gastos-consultar">Buscar</button>
+              <button type="button" class="kanm-button ghost" id="gastos-limpiar">Limpiar</button>
+            </div>
+          </div>
+          <div id="gastos-mensaje-lista" class="kanm-message"></div>
+          <div class="kanm-table-wrapper">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Categoria</th>
+                  <th>Metodo</th>
+                  <th>Proveedor</th>
+                  <th>Monto</th>
+                  <th>NCF</th>
+                  <th>Recurrente</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="gastos-tabla"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+      <datalist id="gastos-categorias"></datalist>
+    </section>
+
     <!-- Ventas & 607 -->
     <section class="admin-panel hidden" data-admin-section="ventas" id="admin-section-ventas">
       <div class="kanm-card-header">
@@ -1077,6 +1154,170 @@
             <tbody id="reporte-607-tabla"></tbody>
           </table>
         </div>
+      </section>
+    </section>
+
+    <!-- Analisis -->
+    <section class="admin-panel hidden" data-admin-section="analisis" id="admin-section-analisis">
+      <div class="kanm-card-header">
+        <h2>Analisis del negocio</h2>
+        <p class="kanm-subtitle">KPIs, tendencias y recomendaciones basadas en ventas y gastos.</p>
+      </div>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Periodo de analisis</h3>
+          <p class="kanm-subtitle">Selecciona un rango o un periodo rapido.</p>
+        </header>
+        <div class="analisis-periodo-actions">
+          <button type="button" class="kanm-button ghost" data-analisis-range="hoy">Hoy</button>
+          <button type="button" class="kanm-button ghost" data-analisis-range="7d">7 dias</button>
+          <button type="button" class="kanm-button ghost" data-analisis-range="30d">30 dias</button>
+          <button type="button" class="kanm-button ghost" data-analisis-range="mes">Mes actual</button>
+          <button type="button" class="kanm-button ghost" data-analisis-range="mes-anterior">Mes anterior</button>
+        </div>
+        <div class="analisis-periodo-grid">
+          <div class="kanm-input-group">
+            <label for="analisis-desde">Desde</label>
+            <input type="date" id="analisis-desde" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="analisis-hasta">Hasta</label>
+            <input type="date" id="analisis-hasta" />
+          </div>
+          <div class="admin-report-actions">
+            <button type="button" class="kanm-button" id="analisis-actualizar">Actualizar</button>
+          </div>
+        </div>
+        <div id="analisis-mensaje" class="kanm-message"></div>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>KPIs principales</h3>
+          <p class="kanm-subtitle">Ingresos, gastos y ganancia neta.</p>
+        </header>
+        <div class="admin-resumen-grid analisis-kpi-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">Ventas</span>
+            <span class="resumen-value" id="analisis-kpi-ventas">DOP&nbsp;0.00</span>
+            <span class="resumen-delta" id="analisis-kpi-ventas-delta"></span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Gastos</span>
+            <span class="resumen-value" id="analisis-kpi-gastos">DOP&nbsp;0.00</span>
+            <span class="resumen-delta" id="analisis-kpi-gastos-delta"></span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Ganancia neta</span>
+            <span class="resumen-value" id="analisis-kpi-ganancia">DOP&nbsp;0.00</span>
+            <span class="resumen-delta" id="analisis-kpi-ganancia-delta"></span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Margen neto</span>
+            <span class="resumen-value" id="analisis-kpi-margen">0%</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Ticket promedio</span>
+            <span class="resumen-value" id="analisis-kpi-ticket">DOP&nbsp;0.00</span>
+            <span class="resumen-delta" id="analisis-kpi-ticket-delta"></span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Cantidad de ventas</span>
+            <span class="resumen-value" id="analisis-kpi-ventas-count">0</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Serie diaria</h3>
+          <p class="kanm-subtitle">Ventas, gastos y ganancia por dia.</p>
+        </header>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table analisis-serie-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Ventas</th>
+                <th>Gastos</th>
+                <th>Ganancia</th>
+              </tr>
+            </thead>
+            <tbody id="analisis-serie-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Rankings de productos</h3>
+          <p class="kanm-subtitle">Productos lideres y con baja rotacion.</p>
+        </header>
+        <div class="analisis-rankings-grid">
+          <div>
+            <h4>Top por cantidad</h4>
+            <div class="analisis-ranking-list" id="analisis-top-cantidad"></div>
+          </div>
+          <div>
+            <h4>Top por ingresos</h4>
+            <div class="analisis-ranking-list" id="analisis-top-ingresos"></div>
+          </div>
+          <div>
+            <h4>Bottom / Sin ventas</h4>
+            <div class="analisis-ranking-list" id="analisis-bottom-productos"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Patrones y horarios</h3>
+          <p class="kanm-subtitle">Dias fuertes, horas pico y metodos de pago.</p>
+        </header>
+        <div class="analisis-insights-grid">
+          <div>
+            <h4>Top dias de semana</h4>
+            <div class="analisis-ranking-list" id="analisis-top-dias"></div>
+          </div>
+          <div>
+            <h4>Top horas</h4>
+            <div class="analisis-ranking-list" id="analisis-top-horas"></div>
+          </div>
+          <div>
+            <h4>Top dias del mes</h4>
+            <div class="analisis-ranking-list" id="analisis-top-dias-mes"></div>
+          </div>
+          <div>
+            <h4>Metodos de pago</h4>
+            <div class="analisis-ranking-list" id="analisis-metodos-pago"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Gastos por categoria</h3>
+          <p class="kanm-subtitle">Categorias principales y gastos recurrentes.</p>
+        </header>
+        <div class="analisis-insights-grid">
+          <div>
+            <h4>Top categorias</h4>
+            <div class="analisis-ranking-list" id="analisis-top-categorias"></div>
+          </div>
+          <div>
+            <h4>Recurrentes vs no recurrentes</h4>
+            <div class="analisis-ranking-list" id="analisis-gastos-recurrentes"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Alertas e insights</h3>
+          <p class="kanm-subtitle">Sugerencias accionables basadas en datos.</p>
+        </header>
+        <div id="analisis-alertas" class="analisis-alertas"></div>
       </section>
     </section>
 
@@ -1218,6 +1459,7 @@
               <tr>
                 <th>Nombre</th>
                 <th>Slug</th>
+                <th>Estado</th>
                 <th>Colores</th>
                 <th>Logo</th>
                 <th>Acciones</th>

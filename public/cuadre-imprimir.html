@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cuadre de caja</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script src="/js/auth.js" defer></script>
+    <script src="/js/cuadre-imprimir.js" defer></script>
+  </head>
+  <body class="cotizacion-print cuadre-print" data-role="admin,caja">
+    <main class="cotizacion-print__container">
+      <header class="cotizacion-print__header">
+        <div class="cotizacion-print__brand">
+          <div class="header-logo" data-negocio-titulo>Negocio</div>
+        </div>
+        <div class="cotizacion-print__identity">
+          <p class="cotizacion-print__title">Detalle de cuadre de caja</p>
+          <p class="cotizacion-print__meta" id="cuadre-fecha-operacion">Fecha operacion: --</p>
+          <p class="cotizacion-print__meta" id="cuadre-usuario">Usuario: --</p>
+        </div>
+        <div class="cotizacion-print__actions">
+          <button type="button" class="kanm-button" id="cuadre-imprimir-btn">Imprimir</button>
+        </div>
+      </header>
+
+      <section class="cotizacion-print__panel cotizacion-print__grid">
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Cierre</span>
+          <span class="cotizacion-print__value" id="cuadre-id">--</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Fecha cierre</span>
+          <span class="cotizacion-print__value" id="cuadre-fecha-cierre">--</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Total sistema</span>
+          <span class="cotizacion-print__value" id="cuadre-total-sistema">DOP 0.00</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Total declarado</span>
+          <span class="cotizacion-print__value" id="cuadre-total-declarado">DOP 0.00</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Diferencia</span>
+          <span class="cotizacion-print__value" id="cuadre-diferencia">DOP 0.00</span>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel">
+        <div class="cotizacion-print__section-header">
+          <h2>Detalle de inventario</h2>
+        </div>
+        <div class="cotizacion-print__table-wrapper">
+          <table class="cotizacion-print__table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th class="text-right">Inv inicial</th>
+                <th class="text-right">Compra</th>
+                <th class="text-right">Inv final</th>
+                <th class="text-right">Venta</th>
+                <th class="text-right">Precio</th>
+                <th class="text-right">Valor venta</th>
+              </tr>
+            </thead>
+            <tbody id="cuadre-items"></tbody>
+            <tfoot>
+              <tr>
+                <td colspan="6" class="text-right"><strong>Total</strong></td>
+                <td class="text-right"><strong id="cuadre-total-ventas-footer">DOP 0.00</strong></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel cotizacion-print__totales">
+        <div class="cotizacion-print__totales-linea">
+          <span>Total ventas</span>
+          <span id="cuadre-total-ventas">DOP 0.00</span>
+        </div>
+        <div class="cotizacion-print__totales-linea" id="cuadre-total-salidas-linea">
+          <span>Total salidas de caja</span>
+          <span id="cuadre-total-salidas">DOP 0.00</span>
+        </div>
+        <div class="cotizacion-print__totales-linea" id="cuadre-total-gastos-linea">
+          <span>Total gastos</span>
+          <span id="cuadre-total-gastos">DOP 0.00</span>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel" id="cuadre-salidas-panel" hidden>
+        <div class="cotizacion-print__section-header">
+          <h2>Salidas de caja</h2>
+        </div>
+        <div class="cotizacion-print__table-wrapper">
+          <table class="cotizacion-print__table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Descripcion</th>
+                <th class="text-right">Monto</th>
+                <th>Metodo</th>
+              </tr>
+            </thead>
+            <tbody id="cuadre-salidas-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel" id="cuadre-gastos-panel" hidden>
+        <div class="cotizacion-print__section-header">
+          <h2>Gastos</h2>
+        </div>
+        <div class="cotizacion-print__table-wrapper">
+          <table class="cotizacion-print__table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Descripcion</th>
+                <th>Categoria</th>
+                <th class="text-right">Monto</th>
+              </tr>
+            </thead>
+            <tbody id="cuadre-gastos-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

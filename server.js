@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const http = require('http');
 const { Server } = require('socket.io');
 
@@ -31,6 +32,10 @@ const DEFAULT_CONFIG_MODULOS = {
 const AREAS_PREPARACION = ['ninguna', 'cocina', 'bar'];
 const DEFAULT_COLOR_TEXTO = '#222222';
 const DEFAULT_COLOR_PELIGRO = '#ff4b4b';
+const PASSWORD_HASH_ROUNDS = 10;
+const IMPERSONATION_TOKEN_TTL_SECONDS = 60 * 60;
+const IMPERSONATION_JWT_SECRET =
+  process.env.IMPERSONATION_JWT_SECRET || process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
 
 const seedUsuariosIniciales = async () => {
@@ -53,7 +58,8 @@ const seedUsuariosIniciales = async () => {
     try {
       const existente = await usuariosRepo.findByUsuario(usuario.usuario);
       if (!existente) {
-        await usuariosRepo.create(usuario);
+        const passwordHash = await hashPasswordIfNeeded(usuario.password);
+        await usuariosRepo.create({ ...usuario, password: passwordHash });
       }
     } catch (err) {
       console.error('Error al insertar usuarios iniciales:', err?.message || err);
@@ -64,10 +70,92 @@ const seedUsuariosIniciales = async () => {
 const estadosValidos = ['pendiente', 'preparando', 'listo', 'pagado', 'cancelado'];
 const ADMIN_PASSWORD = 'admin123';
 const SESSION_EXPIRATION_HOURS = 12; // Ventana m?xima para considerar una sesi?n activa
+const ANALYTICS_CACHE_TTL_MS = 2 * 60 * 1000;
+const analyticsCache = new Map();
 
 const usuarioRolesPermitidos = ['mesera', 'cocina', 'bar', 'caja'];
 
 const generarTokenSesion = () => crypto.randomBytes(24).toString('hex');
+const generarPasswordTemporal = (length = 12) => {
+  const bytes = crypto.randomBytes(Math.ceil(length / 2));
+  return bytes.toString('hex').slice(0, length);
+};
+
+const esHashBcrypt = (valor) => typeof valor === 'string' && /^\$2[aby]\$/.test(valor);
+const hashPassword = async (password) => bcrypt.hash(password, PASSWORD_HASH_ROUNDS);
+const hashPasswordIfNeeded = async (password) => {
+  if (!password) return null;
+  if (esHashBcrypt(password)) return password;
+  return hashPassword(password);
+};
+const verificarPassword = async (password, stored) => {
+  if (!stored) return false;
+  if (esHashBcrypt(stored)) {
+    return bcrypt.compare(password, stored);
+  }
+  return password === stored;
+};
+
+const base64UrlEncode = (value) =>
+  Buffer.from(value).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const base64UrlDecode = (value) =>
+  Buffer.from(value.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString();
+
+const crearTokenImpersonacion = (payload = {}) => {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const now = Math.floor(Date.now() / 1000);
+  const body = { ...payload, iat: now, exp: now + IMPERSONATION_TOKEN_TTL_SECONDS };
+  const headerB64 = base64UrlEncode(JSON.stringify(header));
+  const payloadB64 = base64UrlEncode(JSON.stringify(body));
+  const unsigned = `${headerB64}.${payloadB64}`;
+  const signature = crypto
+    .createHmac('sha256', IMPERSONATION_JWT_SECRET)
+    .update(unsigned)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return `${unsigned}.${signature}`;
+};
+
+const verificarTokenImpersonacion = (token) => {
+  if (!token || typeof token !== 'string') {
+    return null;
+  }
+
+  const partes = token.split('.');
+  if (partes.length !== 3) {
+    return null;
+  }
+
+  const [headerB64, payloadB64, firma] = partes;
+  const unsigned = `${headerB64}.${payloadB64}`;
+  const esperado = crypto
+    .createHmac('sha256', IMPERSONATION_JWT_SECRET)
+    .update(unsigned)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  if (firma !== esperado) {
+    return null;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(base64UrlDecode(payloadB64));
+  } catch (error) {
+    return null;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (payload?.exp && now >= payload.exp) {
+    return null;
+  }
+
+  return payload || null;
+};
 
 function normalizarCampoTexto(valor) {
   if (valor === undefined || valor === null) {
@@ -182,23 +270,29 @@ async function asegurarAdminPrincipalNegocio({ negocioId, negocioNombre, payload
       const updates = {};
       if (usuarioExistente.rol !== 'admin') updates.rol = 'admin';
       if (!usuarioExistente.activo) updates.activo = 1;
-      if (adminPassword) updates.password = adminPassword;
+      if (adminPassword) {
+        updates.password = await hashPasswordIfNeeded(adminPassword);
+        updates.password_reset_at = new Date();
+      }
       updates.negocio_id = negocioId;
       await usuariosRepo.update(usuarioExistente.id, updates);
     } else {
       let passwordFinal = adminPassword;
       if (!passwordFinal) {
-        passwordFinal = Math.random().toString(36).slice(2, 12);
+        passwordFinal = generarPasswordTemporal(12);
         passwordGenerada = passwordFinal;
       }
+      const passwordHash = await hashPasswordIfNeeded(passwordFinal);
       const nuevo = await usuariosRepo.create({
         nombre: nombreParaUsuario,
         usuario: adminUsuario,
-        password: passwordFinal,
+        password: passwordHash,
         rol: 'admin',
         activo: 1,
         negocio_id: negocioId,
         es_super_admin: 0,
+        force_password_change: passwordGenerada ? 1 : 0,
+        password_reset_at: passwordGenerada ? new Date() : null,
       });
       usuarioFinalId = nuevo?.id || null;
     }
@@ -255,6 +349,10 @@ function mapNegocioWithDefaults(row = {}) {
   const configModulosString =
     typeof rawConfigModulos === 'string' && rawConfigModulos.trim() ? rawConfigModulos : JSON.stringify(configModulos);
   const logoUrl = normalizarCampoTexto(row.logo_url ?? row.logoUrl, null);
+  const motivoSuspension = normalizarCampoTexto(row.motivo_suspension ?? row.motivoSuspension, null) || null;
+  const deletedAt = row.deleted_at ?? row.deletedAt ?? null;
+  const suspendido = row.suspendido ?? row.suspendido ?? 0;
+  const activo = row.activo ?? 1;
 
   return {
     ...row,
@@ -276,8 +374,99 @@ function mapNegocioWithDefaults(row = {}) {
     colorBotonPeligro,
     configModulos,
     adminPrincipalUsuarioId: adminPrincipalUsuarioIdFinal,
+    motivo_suspension: motivoSuspension,
+    motivoSuspension,
+    deleted_at: deletedAt,
+    suspendido,
+    activo,
   };
 }
+
+const registrarAccionAdmin = async ({ adminId, negocioId, accion }) => {
+  if (!adminId || !negocioId || !accion) {
+    return;
+  }
+  try {
+    await db.run('INSERT INTO admin_actions (admin_id, negocio_id, accion) VALUES (?, ?, ?)', [
+      adminId,
+      negocioId,
+      accion,
+    ]);
+  } catch (error) {
+    console.warn('No se pudo registrar accion admin:', error?.message || error);
+  }
+};
+
+const registrarImpersonacionAdmin = async ({ adminId, negocioId, ip }) => {
+  if (!adminId || !negocioId) {
+    return;
+  }
+  try {
+    await db.run(
+      'INSERT INTO admin_impersonations (admin_id, negocio_id, ip) VALUES (?, ?, ?)',
+      [adminId, negocioId, ip || null]
+    );
+  } catch (error) {
+    console.warn('No se pudo registrar impersonacion admin:', error?.message || error);
+  }
+};
+
+const obtenerAdminPrincipalNegocio = async (negocioId, adminPrincipalId = null) => {
+  if (adminPrincipalId) {
+    const principal = await usuariosRepo.findById(adminPrincipalId);
+    if (principal) {
+      return principal;
+    }
+  }
+
+  const row = await db.get(
+    `SELECT id
+       FROM usuarios
+      WHERE negocio_id = ? AND rol = 'admin'
+      ORDER BY id ASC
+      LIMIT 1`,
+    [negocioId]
+  );
+  if (!row?.id) return null;
+  return usuariosRepo.findById(row.id);
+};
+
+const obtenerEstadoNegocio = async (negocioId) => {
+  if (!negocioId) return null;
+  return db.get(
+    'SELECT id, activo, suspendido, deleted_at, motivo_suspension FROM negocios WHERE id = ? LIMIT 1',
+    [negocioId]
+  );
+};
+
+const validarEstadoNegocio = async (negocioId) => {
+  const negocio = await obtenerEstadoNegocio(negocioId);
+  if (!negocio) {
+    return { ok: false, status: 403, error: 'Negocio no encontrado' };
+  }
+
+  if (negocio.deleted_at) {
+    return { ok: false, status: 403, error: 'El negocio fue eliminado' };
+  }
+
+  if (negocio.activo !== null && Number(negocio.activo) === 0) {
+    return { ok: false, status: 403, error: 'El negocio esta inactivo' };
+  }
+
+  if (Number(negocio.suspendido) === 1) {
+    const motivo = normalizarCampoTexto(negocio.motivo_suspension, null);
+    const mensaje = motivo ? `Negocio suspendido: ${motivo}` : 'El negocio esta suspendido';
+    return { ok: false, status: 403, error: mensaje, motivo_suspension: motivo };
+  }
+
+  return { ok: true, negocio };
+};
+
+const obtenerNegocioAdmin = async (negocioId) =>
+  db.get(
+    'SELECT id, activo, suspendido, deleted_at, motivo_suspension, admin_principal_usuario_id FROM negocios WHERE id = ? LIMIT 1',
+    [negocioId]
+  );
 
 runMultiNegocioMigrations()
   .then(() => runChatMigrations())
@@ -376,28 +565,57 @@ async function obtenerUsuarioSesionPorToken(token) {
   `;
 
   const row = await db.get(sql, [token]);
-  if (!row) {
+
+  if (row) {
+    const usuario = await usuariosRepo.findById(row.usuario_id);
+    if (!usuario || usuario.activo === 0) {
+      return null;
+    }
+
+    await db.run('UPDATE sesiones_usuarios SET ultimo_uso = CURRENT_TIMESTAMP WHERE id = ?', [row.sesion_id]);
+
+    const negocioId = usuario.negocio_id != null ? usuario.negocio_id : NEGOCIO_ID_DEFAULT;
+    const configModulosSesion = await obtenerConfigModulosNegocio(negocioId);
+
+    return {
+      id: usuario.id,
+      nombre: usuario.nombre,
+      usuario: usuario.usuario,
+      rol: usuario.rol,
+      negocio_id: negocioId,
+      negocioId,
+      es_super_admin: !!usuario.es_super_admin,
+      force_password_change: !!usuario.force_password_change,
+      config_modulos: configModulosSesion,
+      configModulos: configModulosSesion,
+      token,
+    };
+  }
+
+  const payload = verificarTokenImpersonacion(token);
+  if (!payload?.impersonated) {
     return null;
   }
 
-  const usuario = await usuariosRepo.findById(row.usuario_id);
+  const usuario = await usuariosRepo.findById(payload.usuario_id);
   if (!usuario || usuario.activo === 0) {
     return null;
   }
 
-  await db.run('UPDATE sesiones_usuarios SET ultimo_uso = CURRENT_TIMESTAMP WHERE id = ?', [row.sesion_id]);
-
-  const negocioId = usuario.negocio_id != null ? usuario.negocio_id : NEGOCIO_ID_DEFAULT;
+  const negocioId = payload.negocio_id ?? usuario.negocio_id ?? NEGOCIO_ID_DEFAULT;
   const configModulosSesion = await obtenerConfigModulosNegocio(negocioId);
 
   return {
     id: usuario.id,
     nombre: usuario.nombre,
     usuario: usuario.usuario,
-    rol: usuario.rol,
+    rol: payload.role || usuario.rol || 'admin',
     negocio_id: negocioId,
     negocioId,
-    es_super_admin: !!usuario.es_super_admin,
+    es_super_admin: false,
+    force_password_change: !!usuario.force_password_change,
+    impersonated: true,
+    impersonated_by: payload.admin_id,
     config_modulos: configModulosSesion,
     configModulos: configModulosSesion,
     token,
@@ -424,6 +642,8 @@ const obtenerUsuarioDesdeHeaders = (req, callback) => {
         rol: usuarioSesion.rol,
         negocioId: usuarioSesion.negocio_id,
         esSuperAdmin: !!usuarioSesion.es_super_admin,
+        impersonated: !!usuarioSesion.impersonated,
+        forcePasswordChange: !!usuarioSesion.force_password_change,
         configModulos: usuarioSesion.config_modulos,
         token: usuarioSesion.token,
       };
@@ -433,8 +653,10 @@ const obtenerUsuarioDesdeHeaders = (req, callback) => {
     .catch((err) => callback(err));
 };
 
+const rutasPermitidasForcePassword = new Set(['/api/usuarios/mi-password', '/api/logout', '/api/negocios/mi-tema']);
+
 const requireUsuarioSesion = (req, res, next) => {
-  obtenerUsuarioDesdeHeaders(req, (sessionErr, usuarioSesion) => {
+  obtenerUsuarioDesdeHeaders(req, async (sessionErr, usuarioSesion) => {
     if (sessionErr) {
       console.error('Error al validar sesi?n:', sessionErr.message || sessionErr);
       return res.status(500).json({ error: 'Error al validar sesi?n' });
@@ -449,6 +671,25 @@ const requireUsuarioSesion = (req, res, next) => {
       return res.status(403).json({ error: 'Acceso restringido: negocio no configurado' });
     }
 
+    const rutaActual = (req.path || req.originalUrl || '').split('?')[0];
+    if (usuarioSesion.force_password_change && !rutasPermitidasForcePassword.has(rutaActual)) {
+      return res
+        .status(403)
+        .json({ error: 'Debes cambiar la contrasena antes de continuar', force_password_change: true });
+    }
+
+    try {
+      const estado = await validarEstadoNegocio(usuarioSesion.negocio_id);
+      if (!estado.ok) {
+        return res
+          .status(estado.status || 403)
+          .json({ error: estado.error || 'Acceso restringido', motivo_suspension: estado.motivo_suspension });
+      }
+    } catch (error) {
+      console.error('Error validando estado del negocio:', error?.message || error);
+      return res.status(500).json({ error: 'Error al validar estado del negocio' });
+    }
+
     req.session = req.session || {};
     req.session.usuario = usuarioSesion;
     req.usuarioSesion = usuarioSesion;
@@ -457,6 +698,8 @@ const requireUsuarioSesion = (req, res, next) => {
       rol: usuarioSesion.rol,
       negocioId: usuarioSesion.negocio_id,
       esSuperAdmin: esSuperAdmin(usuarioSesion),
+      impersonated: !!usuarioSesion.impersonated,
+      forcePasswordChange: !!usuarioSesion.force_password_change,
       token: usuarioSesion.token,
     };
 
@@ -1553,6 +1796,20 @@ const normalizarNumero = (valor, predeterminado = 0) => {
   return Number.isFinite(numero) ? numero : predeterminado;
 };
 
+const normalizarFlag = (valor, predeterminado = 0) => {
+  if (valor === undefined || valor === null) {
+    return predeterminado;
+  }
+  if (typeof valor === 'string') {
+    const limpio = valor.trim().toLowerCase();
+    if (['1', 'true', 'on', 'yes', 'si'].includes(limpio)) return 1;
+    if (['0', 'false', 'off', 'no'].includes(limpio)) return 0;
+  }
+  return valor ? 1 : 0;
+};
+
+const esStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
+
 const ESTADOS_COTIZACION = ['borrador', 'enviada', 'aceptada', 'rechazada', 'facturada', 'vencida'];
 
 const normalizarEstadoCotizacion = (valor, original = 'borrador') => {
@@ -1721,168 +1978,6 @@ const generarCodigoCotizacion = (negocioId, callback) => {
     }
   );
 };
-
-const aplicarAjusteInsumos = (pedidoId, opciones = {}, callback) => {
-  const {
-    signo = -1, // -1 descuenta, +1 repone
-    omitirSiYaAplicado = false,
-    revertirSoloSiMarcado = false,
-    marcarFlag = true,
-    usarTransaccionExistente = false,
-  } = opciones;
-  const negocioId = opciones?.negocio_id || NEGOCIO_ID_DEFAULT;
-
-  if (!pedidoId) return callback(null);
-
-  db.get(
-    'SELECT insumos_descontados FROM pedidos WHERE id = ? AND negocio_id = ?',
-    [pedidoId, negocioId],
-    (pedidoErr, pedido) => {
-    if (pedidoErr) {
-      console.error('Error al validar pedido para ajuste de insumos:', pedidoErr.message);
-      return callback(pedidoErr);
-    }
-
-    if (!pedido) {
-      return callback(new Error('Pedido no encontrado'));
-    }
-
-    const yaDescontado = Number(pedido.insumos_descontados) === 1;
-    if (omitirSiYaAplicado && yaDescontado && signo < 0) {
-      return callback(null);
-    }
-
-    if (revertirSoloSiMarcado && signo > 0 && !yaDescontado) {
-      return callback(null);
-    }
-
-    const sql = `
-      SELECT dp.producto_id, dp.cantidad AS cantidad_vendida, rd.insumo_id, rd.cantidad_por_unidad
-      FROM detalle_pedido dp
-      JOIN recetas r ON r.producto_id = dp.producto_id
-      JOIN receta_detalle rd ON rd.receta_id = r.id
-      WHERE dp.pedido_id = ?
-        AND dp.negocio_id = ?
-    `;
-
-    db.all(sql, [pedidoId, negocioId], (err, rows) => {
-      if (err) {
-        console.error('Error al obtener receta para ajuste de insumos:', err.message);
-        return callback(err);
-      }
-
-      const consumo = new Map();
-
-      (rows || []).forEach((row) => {
-        const total = (Number(row.cantidad_vendida) || 0) * (Number(row.cantidad_por_unidad) || 0);
-        if (!Number.isFinite(total) || total <= 0) return;
-        const acumulado = consumo.get(row.insumo_id) || 0;
-        consumo.set(row.insumo_id, acumulado + total);
-      });
-
-      const entries = Array.from(consumo.entries());
-
-      const finalizarSinTransaccion = (errFinal) => {
-        if (!marcarFlag) return callback(errFinal || null);
-        const flagValor = signo < 0 ? 1 : 0;
-        db.run(
-          'UPDATE pedidos SET insumos_descontados = ? WHERE id = ? AND negocio_id = ?',
-          [flagValor, pedidoId, negocioId],
-          (flagErr) => {
-          if (flagErr && !errFinal) {
-            console.error('Error al actualizar flag de insumos:', flagErr.message);
-            return callback(flagErr);
-          }
-          callback(errFinal || null);
-        });
-      };
-
-      if (!entries.length) {
-        return finalizarSinTransaccion(null);
-      }
-
-      const aplicarActualizacion = () => {
-        const actualizar = (indice) => {
-          if (indice >= entries.length) {
-            if (!marcarFlag) {
-              return (usarTransaccionExistente ? callback : db.run.bind(db, 'COMMIT'))((commitErr) => {
-                if (commitErr) {
-                  console.error('Error al confirmar ajuste de insumos:', commitErr.message);
-                  return callback(commitErr);
-                }
-                return callback(null);
-              });
-            }
-
-            const flagValor = signo < 0 ? 1 : 0;
-            db.run(
-              'UPDATE pedidos SET insumos_descontados = ? WHERE id = ? AND negocio_id = ?',
-              [flagValor, pedidoId, negocioId],
-              (flagErr) => {
-              if (flagErr) {
-                console.error('Error al marcar ajuste de insumos:', flagErr.message);
-                return (usarTransaccionExistente ? callback : db.run.bind(db, 'ROLLBACK'))(() => callback(flagErr));
-              }
-
-              if (usarTransaccionExistente) {
-                return callback(null);
-              }
-
-              db.run('COMMIT', (commitErr) => {
-                if (commitErr) {
-                  console.error('Error al confirmar ajuste de insumos:', commitErr.message);
-                  return callback(commitErr);
-                }
-                return callback(null);
-              });
-            });
-            return;
-          }
-
-          const [insumoId, cantidad] = entries[indice];
-          db.run(
-            'UPDATE insumos SET stock_actual = stock_actual + ? WHERE id = ? AND negocio_id = ?',
-            [cantidad * signo, insumoId, negocioId],
-            (updateErr) => {
-              if (updateErr) {
-                console.warn('No se pudo ajustar insumo:', updateErr.message);
-                return (usarTransaccionExistente ? callback : db.run.bind(db, 'ROLLBACK'))(() => callback(updateErr));
-              }
-              actualizar(indice + 1);
-            }
-          );
-        };
-
-        actualizar(0);
-      };
-
-      if (usarTransaccionExistente) {
-        aplicarActualizacion();
-      } else {
-        db.run('BEGIN TRANSACTION', (beginErr) => {
-          if (beginErr) {
-            console.error('No se pudo iniciar transacci?n de ajuste de insumos:', beginErr.message);
-            return callback(beginErr);
-          }
-          aplicarActualizacion();
-        });
-      }
-    });
-  });
-};
-
-const descontarInsumosPorPedido = (pedidoId, negocioId, callback) =>
-  aplicarAjusteInsumos(
-    pedidoId,
-    {
-      signo: -1,
-      omitirSiYaAplicado: true,
-      revertirSoloSiMarcado: false,
-      marcarFlag: true,
-      negocio_id: negocioId,
-    },
-    callback
-  );
 
 const obtenerDetallePedidosPorIds = async (pedidoIds, negocioId, opciones = {}) => {
   if (!Array.isArray(pedidoIds) || !pedidoIds.length) {
@@ -2305,12 +2400,16 @@ const obtenerPedidoConDetalle = async (pedidoId, negocioId) => {
 
 const ajustarStockPorPedido = async (pedidoId, negocioId, signo = 1) => {
   const detalles = await db.all(
-    'SELECT producto_id, cantidad FROM detalle_pedido WHERE pedido_id = ? AND negocio_id = ?',
-    [pedidoId, negocioId]
+    `SELECT dp.producto_id, dp.cantidad, COALESCE(p.stock_indefinido, 0) AS stock_indefinido
+       FROM detalle_pedido dp
+       LEFT JOIN productos p ON p.id = dp.producto_id AND p.negocio_id = ?
+      WHERE dp.pedido_id = ? AND dp.negocio_id = ?`,
+    [negocioId, pedidoId, negocioId]
   );
   for (const detalle of detalles || []) {
     const cantidad = Number(detalle.cantidad) || 0;
     if (!cantidad) continue;
+    if (esStockIndefinido(detalle)) continue;
     await db.run('UPDATE productos SET stock = stock + ? WHERE id = ? AND negocio_id = ?', [
       cantidad * signo,
       detalle.producto_id,
@@ -2753,19 +2852,7 @@ const cerrarCuentaYRegistrarPago = (pedidosEntrada, opciones, callback) => {
             );
           }
 
-          descontarInsumosPorPedido(p.id, negocioIdOperacion, (consumoErr) => {
-            if (consumoErr) {
-              console.error('Error al descontar insumos del pedido:', consumoErr.message);
-              return db.run('ROLLBACK', () =>
-                callback({
-                  status: 500,
-                  message: 'El pedido se cerro, pero no se pudieron descontar insumos',
-                })
-              );
-            }
-
-            actualizarPedido(indice + 1);
-          });
+          actualizarPedido(indice + 1);
         });
       };
 
@@ -3082,6 +3169,52 @@ const normalizarRangoCierres = (desde, hasta) => {
   };
 };
 
+const parseFechaISO = (valor) => {
+  if (!esFechaISOValida(valor)) {
+    return null;
+  }
+  return new Date(`${valor}T00:00:00`);
+};
+
+const calcularDiasIncluidos = (desde, hasta) => {
+  const ms = hasta.getTime() - desde.getTime();
+  return Math.max(1, Math.round(ms / 86400000) + 1);
+};
+
+const normalizarRangoAnalisis = (desdeInput, hastaInput, diasDefecto = 30) => {
+  let fechaHasta = parseFechaISO(hastaInput) || new Date();
+  let fechaDesde = parseFechaISO(desdeInput);
+
+  if (!fechaDesde) {
+    const inicio = new Date(fechaHasta.getTime());
+    inicio.setDate(inicio.getDate() - Math.max(diasDefecto - 1, 0));
+    fechaDesde = inicio;
+  }
+
+  if (fechaDesde > fechaHasta) {
+    [fechaDesde, fechaHasta] = [fechaHasta, fechaDesde];
+  }
+
+  const dias = calcularDiasIncluidos(fechaDesde, fechaHasta);
+  return {
+    desde: obtenerFechaLocalISO(fechaDesde),
+    hasta: obtenerFechaLocalISO(fechaHasta),
+    dias,
+  };
+};
+
+const obtenerRangoAnterior = (desde, dias) => {
+  const fechaDesde = parseFechaISO(desde) || new Date();
+  const finAnterior = new Date(fechaDesde.getTime());
+  finAnterior.setDate(finAnterior.getDate() - 1);
+  const inicioAnterior = new Date(finAnterior.getTime());
+  inicioAnterior.setDate(inicioAnterior.getDate() - Math.max(dias - 1, 0));
+  return {
+    desde: obtenerFechaLocalISO(inicioAnterior),
+    hasta: obtenerFechaLocalISO(finAnterior),
+  };
+};
+
 app.post('/api/caja/cierres', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     try {
@@ -3354,6 +3487,180 @@ app.delete('/api/admin/eliminar/cierre-caja/:id', (req, res) => {
   });
 });
 
+app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const cierreId = Number(req.params.id);
+    if (!Number.isInteger(cierreId) || cierreId <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de cierre invalido' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    const normalizarClaveCompra = (valor) => {
+      if (!valor) return '';
+      return String(valor).trim().toLowerCase().replace(/\s+/g, ' ');
+    };
+
+    const normalizarFechaConsulta = (valor) => {
+      if (!valor) return obtenerFechaLocalISO(new Date());
+      if (typeof valor === 'string') {
+        const match = valor.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+        if (match) return match[1];
+        const fecha = new Date(valor);
+        return Number.isNaN(fecha.getTime()) ? obtenerFechaLocalISO(new Date()) : obtenerFechaLocalISO(fecha);
+      }
+      if (valor instanceof Date) {
+        return obtenerFechaLocalISO(valor);
+      }
+      const fecha = new Date(valor);
+      return Number.isNaN(fecha.getTime()) ? obtenerFechaLocalISO(new Date()) : obtenerFechaLocalISO(fecha);
+    };
+
+    try {
+      const cierre = await db.get(
+        `SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol, total_sistema, total_declarado, diferencia
+         FROM cierres_caja
+         WHERE id = ? AND negocio_id = ?`,
+        [cierreId, negocioId]
+      );
+
+      if (!cierre) {
+        return res.status(404).json({ ok: false, error: 'Cierre no encontrado' });
+      }
+
+      const fechaOperacion = normalizarFechaConsulta(cierre.fecha_operacion || cierre.fecha_cierre);
+
+      const [productos, ventasRows, comprasRows] = await Promise.all([
+        db.all(
+          `SELECT id, nombre, precio, stock, stock_indefinido
+           FROM productos
+           WHERE negocio_id = ?
+           ORDER BY nombre ASC`,
+          [negocioId]
+        ),
+        db.all(
+          `SELECT dp.producto_id,
+                  SUM(dp.cantidad) AS venta_cantidad,
+                  SUM(dp.cantidad * dp.precio_unitario) AS venta_bruta,
+                  SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS venta_neta,
+                  SUM(COALESCE(dp.descuento_monto, 0)) AS descuento_total
+             FROM detalle_pedido dp
+             JOIN pedidos p ON p.id = dp.pedido_id
+            WHERE p.negocio_id = ?
+              AND p.cierre_id = ?
+              AND p.estado = 'pagado'
+            GROUP BY dp.producto_id`,
+          [negocioId, cierreId]
+        ),
+        db.all(
+          `SELECT dc.descripcion, dc.cantidad
+             FROM detalle_compra dc
+             JOIN compras c ON c.id = dc.compra_id
+            WHERE c.negocio_id = ?
+              AND DATE(c.fecha) = ?`,
+          [negocioId, fechaOperacion]
+        ),
+      ]);
+
+      const ventasMap = new Map();
+      (ventasRows || []).forEach((row) => {
+        const productoId = Number(row.producto_id);
+        if (!productoId) return;
+        const ventaCantidad = Number(row.venta_cantidad) || 0;
+        const ventaBruta = Number(row.venta_bruta) || 0;
+        const ventaNeta = Number(row.venta_neta) || 0;
+        const precioUnitario = ventaCantidad > 0 ? ventaBruta / ventaCantidad : 0;
+        ventasMap.set(productoId, {
+          ventaCantidad,
+          ventaBruta,
+          ventaNeta,
+          descuentoTotal: Number(row.descuento_total) || 0,
+          precioUnitario,
+        });
+      });
+
+      const comprasMap = new Map();
+      (comprasRows || []).forEach((row) => {
+        const key = normalizarClaveCompra(row?.descripcion);
+        if (!key) return;
+        const cantidad = Number(row.cantidad) || 0;
+        if (!cantidad) return;
+        comprasMap.set(key, (comprasMap.get(key) || 0) + cantidad);
+      });
+
+      const detalleProductos = (productos || []).map((producto) => {
+        const stockIndefinido = Number(producto.stock_indefinido) === 1;
+        const venta = ventasMap.get(Number(producto.id)) || {};
+        const compraCantidad = stockIndefinido
+          ? null
+          : comprasMap.get(normalizarClaveCompra(producto.nombre)) || 0;
+        const ventaCantidad = Number(venta.ventaCantidad) || 0;
+        const ventaValor = Number(venta.ventaNeta) || 0;
+        const precioUnitario = ventaCantidad > 0 ? venta.precioUnitario : Number(producto.precio) || 0;
+        const stockFinal = stockIndefinido ? null : Number(producto.stock) || 0;
+        const stockInicial =
+          stockIndefinido || stockFinal === null
+            ? null
+            : Number((stockFinal + ventaCantidad - (compraCantidad || 0)).toFixed(2));
+
+        return {
+          producto_id: producto.id,
+          nombre: producto.nombre,
+          precio: Number(producto.precio) || 0,
+          stock: stockFinal,
+          stock_indefinido: stockIndefinido ? 1 : 0,
+          inv_inicial: stockInicial,
+          compra: compraCantidad,
+          inv_final: stockFinal,
+          venta: ventaCantidad,
+          precio_unitario: Number(precioUnitario) || 0,
+          valor_venta: Number(ventaValor.toFixed(2)),
+        };
+      });
+
+      const totalValorVenta = detalleProductos.reduce((acc, item) => acc + (Number(item.valor_venta) || 0), 0);
+
+      const salidasData = await new Promise((resolve, reject) => {
+        obtenerSalidasPorFecha(fechaOperacion, negocioId, (err, data) => {
+          if (err) return reject(err);
+          resolve(data || {});
+        });
+      });
+
+      let gastos = [];
+      let totalGastos = 0;
+      if (tienePermisoAdmin(usuarioSesion)) {
+        gastos = await db.all(
+          `SELECT id, fecha, monto, moneda, categoria, metodo_pago, proveedor, descripcion
+             FROM gastos
+            WHERE negocio_id = ?
+              AND DATE(fecha) = ?
+            ORDER BY fecha ASC, id ASC`,
+          [negocioId, fechaOperacion]
+        );
+        totalGastos = (gastos || []).reduce((acc, gasto) => acc + (Number(gasto.monto) || 0), 0);
+      }
+
+      res.json({
+        ok: true,
+        cierre,
+        fecha_operacion: fechaOperacion,
+        productos: detalleProductos,
+        totales: {
+          total_venta: Number(totalValorVenta.toFixed(2)),
+          total_salidas: Number((salidasData?.total || 0).toFixed(2)),
+          total_gastos: Number(totalGastos.toFixed(2)),
+        },
+        salidas: salidasData?.salidas || [],
+        gastos,
+      });
+    } catch (error) {
+      console.error('Error al generar hoja de detalle de cierre:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo generar la hoja de detalle' });
+    }
+  });
+});
+
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
@@ -3459,7 +3766,7 @@ app.get('/api/productos', (req, res) => {
         : 'LEFT JOIN categorias c ON p.categoria_id = c.id';
 
       const sql = `
-        SELECT p.id, p.nombre, p.precio, p.stock, p.activo, p.categoria_id,
+        SELECT p.id, p.nombre, p.precio, p.stock, p.stock_indefinido, p.activo, p.categoria_id,
                c.nombre AS categoria_nombre
         FROM productos p
         ${joinCond}
@@ -3838,7 +4145,7 @@ app.post('/api/pedidos', (req, res) => {
         }
 
         const producto = await db.get(
-          `SELECT p.id, p.nombre, p.precio, p.stock, COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
+          `SELECT p.id, p.nombre, p.precio, p.stock, p.stock_indefinido, COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
            FROM productos p
            LEFT JOIN categorias c ON c.id = p.categoria_id
            WHERE p.id = ? AND p.negocio_id = ?`,
@@ -3849,11 +4156,14 @@ app.post('/api/pedidos', (req, res) => {
           return res.status(404).json({ error: `Producto ${productoId} no encontrado.` });
         }
 
-        const stockDisponible = Number(producto.stock) || 0;
-        if (cantidad > stockDisponible) {
-          return res
-            .status(400)
-            .json({ error: `Stock insuficiente para ${producto.nombre || `el producto ${productoId}`}.` });
+        const stockIndefinido = esStockIndefinido(producto);
+        if (!stockIndefinido) {
+          const stockDisponible = Number(producto.stock) || 0;
+          if (cantidad > stockDisponible) {
+            return res
+              .status(400)
+              .json({ error: `Stock insuficiente para ${producto.nombre || `el producto ${productoId}`}.` });
+          }
         }
 
         itemsProcesados.push({
@@ -3861,6 +4171,7 @@ app.post('/api/pedidos', (req, res) => {
           cantidad,
           precio_unitario: Number(producto.precio) || 0,
           nombre: producto.nombre,
+          stock_indefinido: stockIndefinido ? 1 : 0,
           area_preparacion: normalizarAreaPreparacion(producto.area_preparacion),
         });
       }
@@ -3918,22 +4229,18 @@ app.post('/api/pedidos', (req, res) => {
           'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id) VALUES (?, ?, ?, ?, ?)',
           [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId]
         );
-        const stockResult = await db.run(
-          'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
-          [item.cantidad, item.producto_id, negocioId, item.cantidad]
-        );
-        if (stockResult.changes === 0) {
-          throw new Error(`No se pudo actualizar el stock del producto ${item.producto_id}.`);
+        if (!item.stock_indefinido) {
+          const stockResult = await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+            [item.cantidad, item.producto_id, negocioId, item.cantidad]
+          );
+          if (stockResult.changes === 0) {
+            throw new Error(`No se pudo actualizar el stock del producto ${item.producto_id}.`);
+          }
         }
       }
 
       await db.run('COMMIT');
-
-      descontarInsumosPorPedido(pedidoId, negocioId, (insumoErr) => {
-        if (insumoErr) {
-          console.error('Error al descontar insumos del pedido creado:', insumoErr.message);
-        }
-      });
 
       return res.status(201).json({
         ok: true,
@@ -4023,12 +4330,6 @@ app.put('/api/pedidos/:id/cancelar', (req, res) => {
       console.error('Error al cancelar el pedido:', error);
       return res.status(500).json({ error: 'No se pudo cancelar el pedido.' });
     }
-
-    aplicarAjusteInsumos(
-      pedidoId,
-      { signo: 1, revertirSoloSiMarcado: true, marcarFlag: false, negocio_id: negocioId },
-      () => {}
-    );
 
     res.json({ ok: true });
   });
@@ -4230,7 +4531,8 @@ app.get('/api/negocios', (req, res) => {
              n.color_texto, n.color_header, n.color_boton_primario, n.color_boton_secundario, n.color_boton_peligro,
              n.config_modulos, n.admin_principal_correo, n.admin_principal_usuario_id,
              u.usuario AS admin_principal_usuario,
-             n.logo_url, n.titulo_sistema, n.activo, n.creado_en
+             n.logo_url, n.titulo_sistema, n.activo, n.suspendido, n.deleted_at, n.motivo_suspension, n.updated_at,
+             n.creado_en
         FROM negocios n
         LEFT JOIN usuarios u ON u.id = n.admin_principal_usuario_id
        ORDER BY n.id ASC
@@ -4352,6 +4654,9 @@ app.post('/api/negocios', (req, res) => {
           logo_url: logoUrl,
           titulo_sistema: tituloSistema,
           activo,
+          suspendido: 0,
+          deleted_at: null,
+          motivo_suspension: null,
         });
 
         const responsePayload = { ok: true, negocio: negocioCreado };
@@ -4541,7 +4846,7 @@ app.put('/api/negocios/:id', (req, res) => {
         `SELECT n.id, n.nombre, n.slug, n.rnc, n.telefono, n.direccion, n.color_primario, n.color_secundario, n.color_texto, n.color_header,
                 n.color_boton_primario, n.color_boton_secundario, n.color_boton_peligro, n.config_modulos, n.admin_principal_correo, n.admin_principal_usuario_id,
                 u.usuario AS admin_principal_usuario,
-                n.logo_url, n.titulo_sistema, n.activo
+                n.logo_url, n.titulo_sistema, n.activo, n.suspendido, n.deleted_at, n.motivo_suspension, n.updated_at
            FROM negocios n
            LEFT JOIN usuarios u ON u.id = n.admin_principal_usuario_id
           WHERE n.id = ?`,
@@ -4624,6 +4929,310 @@ app.get('/api/negocios/mi-tema', (req, res) => {
     );
   });
 });
+
+app.put('/api/admin/negocios/:id/activar', (req, res) => {
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      if (negocio.deleted_at) {
+        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
+      }
+
+      await db.run('UPDATE negocios SET activo = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'activar' });
+      res.json({ ok: true, activo: 1 });
+    } catch (error) {
+      console.error('Error activando negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo activar el negocio' });
+    }
+  });
+});
+
+app.put('/api/admin/negocios/:id/desactivar', (req, res) => {
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      if (negocio.deleted_at) {
+        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
+      }
+
+      await db.run('UPDATE negocios SET activo = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'desactivar' });
+      res.json({ ok: true, activo: 0 });
+    } catch (error) {
+      console.error('Error desactivando negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo desactivar el negocio' });
+    }
+  });
+});
+
+app.put('/api/admin/negocios/:id/suspender', (req, res) => {
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    const motivo = normalizarCampoTexto(
+      req.body?.motivo_suspension ?? req.body?.motivo ?? req.body?.motivoSuspension,
+      null
+    );
+
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      if (negocio.deleted_at) {
+        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
+      }
+
+      await db.run(
+        'UPDATE negocios SET suspendido = 1, motivo_suspension = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [motivo, id]
+      );
+      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'suspender' });
+      res.json({ ok: true, suspendido: 1, motivo_suspension: motivo });
+    } catch (error) {
+      console.error('Error suspendiendo negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo suspender el negocio' });
+    }
+  });
+});
+
+app.put('/api/admin/negocios/:id/reactivar', (req, res) => {
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      if (negocio.deleted_at) {
+        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
+      }
+
+      await db.run(
+        'UPDATE negocios SET suspendido = 0, motivo_suspension = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [id]
+      );
+      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'reactivar' });
+      res.json({ ok: true, suspendido: 0 });
+    } catch (error) {
+      console.error('Error reactivando negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo reactivar el negocio' });
+    }
+  });
+});
+
+app.delete('/api/admin/negocios/:id', (req, res) => {
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      if (negocio.deleted_at) {
+        return res.status(400).json({ ok: false, error: 'El negocio ya esta eliminado' });
+      }
+
+      await db.run(
+        'UPDATE negocios SET deleted_at = CURRENT_TIMESTAMP, activo = 0, suspendido = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [id]
+      );
+      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'eliminar' });
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error eliminando negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo eliminar el negocio' });
+    }
+  });
+});
+
+app.post('/api/admin/negocios/:id/reset-admin-password', (req, res) => {
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      if (negocio.deleted_at) {
+        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
+      }
+
+      const adminUsuario = await obtenerAdminPrincipalNegocio(id, negocio.admin_principal_usuario_id);
+      if (!adminUsuario) {
+        return res.status(404).json({ ok: false, error: 'Admin principal no encontrado' });
+      }
+
+      const tempPassword = generarPasswordTemporal(12);
+      const passwordHash = await hashPasswordIfNeeded(tempPassword);
+      await usuariosRepo.update(adminUsuario.id, {
+        password: passwordHash,
+        force_password_change: 1,
+        password_reset_at: new Date(),
+      });
+
+      cerrarSesionesActivasDeUsuario(adminUsuario.id, () => {});
+      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'reset_password' });
+
+      res.json({
+        ok: true,
+        admin_usuario: adminUsuario.usuario,
+        temp_password: tempPassword,
+      });
+    } catch (error) {
+      console.error('Error reseteando password admin:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo resetear la contrasena' });
+    }
+  });
+});
+
+app.put('/api/admin/negocios/:id/force-password-change', (req, res) => {
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      if (negocio.deleted_at) {
+        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
+      }
+
+      const adminUsuario = await obtenerAdminPrincipalNegocio(id, negocio.admin_principal_usuario_id);
+      if (!adminUsuario) {
+        return res.status(404).json({ ok: false, error: 'Admin principal no encontrado' });
+      }
+
+      await usuariosRepo.update(adminUsuario.id, { force_password_change: 1 });
+      await registrarAccionAdmin({
+        adminId: usuarioSesion.id,
+        negocioId: id,
+        accion: 'force_password_change',
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error forzando cambio de password:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo forzar el cambio de contrasena' });
+    }
+  });
+});
+
+app.post('/api/admin/negocios/:id/impersonar', (req, res) => {
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      if (negocio.deleted_at) {
+        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
+      }
+
+      const adminUsuario = await obtenerAdminPrincipalNegocio(id, negocio.admin_principal_usuario_id);
+      if (!adminUsuario) {
+        return res.status(404).json({ ok: false, error: 'Admin principal no encontrado' });
+      }
+
+      const token = crearTokenImpersonacion({
+        role: 'admin',
+        impersonated: true,
+        negocio_id: id,
+        usuario_id: adminUsuario.id,
+        admin_id: usuarioSesion.id,
+      });
+
+      await registrarImpersonacionAdmin({ adminId: usuarioSesion.id, negocioId: id, ip: req.ip || null });
+      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'impersonar' });
+
+      res.json({
+        ok: true,
+        token,
+        rol: 'admin',
+        usuario_id: adminUsuario.id,
+        usuario: adminUsuario.usuario,
+        nombre: adminUsuario.nombre,
+        negocio_id: id,
+        force_password_change: !!adminUsuario.force_password_change,
+        impersonated: true,
+        expires_in: IMPERSONATION_TOKEN_TTL_SECONDS,
+      });
+    } catch (error) {
+      console.error('Error impersonando negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo impersonar el negocio' });
+    }
+  });
+});
+app.put('/api/usuarios/mi-password', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const nuevaPassword = (req.body?.password || '').toString().trim();
+
+    if (!nuevaPassword || nuevaPassword.length < 8) {
+      return res
+        .status(400)
+        .json({ ok: false, error: 'La contrasena debe tener al menos 8 caracteres' });
+    }
+
+    try {
+      const passwordHash = await hashPasswordIfNeeded(nuevaPassword);
+      const actualizado = await usuariosRepo.update(usuarioSesion.id, {
+        password: passwordHash,
+        force_password_change: 0,
+        password_reset_at: new Date(),
+      });
+
+      if (!actualizado) {
+        return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+      }
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('Error al actualizar contrasena:', err?.message || err);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar la contrasena' });
+    }
+  });
+});
+
 app.post('/api/usuarios', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     if (!tienePermisoAdmin(usuarioSesion)) {
@@ -4658,10 +5267,11 @@ app.post('/api/usuarios', (req, res) => {
         return res.status(400).json({ error: 'Ya existe un usuario con ese nombre de usuario en otro negocio.' });
       }
 
+      const passwordHash = await hashPasswordIfNeeded(password);
       const creado = await usuariosRepo.create({
         nombre,
         usuario: usuarioNormalizado,
-        password,
+        password: passwordHash,
         rol,
         activo,
         negocio_id: negocioDestino,
@@ -4715,7 +5325,10 @@ app.put('/api/usuarios/:id', (req, res) => {
         return res.status(403).json({ error: 'Acceso restringido' });
       }
 
-      const payload = { nombre, usuario: usuarioNormalizado, password, rol, activo };
+      const payload = { nombre, usuario: usuarioNormalizado, rol, activo };
+      if (password !== undefined) {
+        payload.password = await hashPasswordIfNeeded(password);
+      }
       const negocioDestino = esSuper && negocio_id !== undefined ? negocio_id || NEGOCIO_ID_DEFAULT : existente.negocio_id;
       const rolDestino = rol || existente.rol;
       if (rolDestino === 'bar') {
@@ -4753,6 +5366,7 @@ app.put('/api/usuarios/:id', (req, res) => {
     }
   });
 });
+
 
 app.put('/api/usuarios/:id/activar', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
@@ -5129,16 +5743,32 @@ app.put('/api/categorias/:id', (req, res) => {
 app.post('/api/productos', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const { nombre, precio, stock, categoria_id } = req.body;
+    const stockIndefinido = normalizarFlag(req.body.stock_indefinido ?? req.body.stockIndefinido, 0);
+    const precioValor = Number(precio);
+    const categoriaId = categoria_id ?? req.body.categoriaId ?? null;
+    const stockValor =
+      stock === undefined || stock === null || stock === ''
+        ? null
+        : Number(stock);
 
-    if (!nombre || precio === undefined || precio === null) {
-      return res.status(400).json({ error: 'Nombre y precio son obligatorios' });
+    if (!nombre || !Number.isFinite(precioValor)) {
+      return res.status(400).json({ error: 'Nombre y precio numerico son obligatorios' });
     }
 
+    if (!stockIndefinido) {
+      const stockValidacion = stockValor === null ? 0 : stockValor;
+      if (!Number.isFinite(stockValidacion) || stockValidacion < 0) {
+        return res.status(400).json({ error: 'El stock debe ser un numero mayor o igual a 0' });
+      }
+    }
+
+    const stockFinal = stockIndefinido ? null : Number.isFinite(stockValor) ? stockValor : 0;
+
     const sql = `
-      INSERT INTO productos (nombre, precio, stock, categoria_id, activo, negocio_id)
-      VALUES (?, ?, COALESCE(?, 0), ?, 1, ?)
+      INSERT INTO productos (nombre, precio, stock, stock_indefinido, categoria_id, activo, negocio_id)
+      VALUES (?, ?, ?, ?, ?, 1, ?)
     `;
-    const params = [nombre, precio, stock, categoria_id, usuarioSesion.negocio_id];
+    const params = [nombre, precioValor, stockFinal, stockIndefinido, categoriaId, usuarioSesion.negocio_id];
 
     db.run(sql, params, function (err) {
       if (err) {
@@ -5149,9 +5779,10 @@ app.post('/api/productos', (req, res) => {
       res.status(201).json({
         id: this.lastID,
         nombre,
-        precio,
-        stock: stock !== undefined && stock !== null ? stock : 0,
-        categoria_id: categoria_id || null,
+        precio: precioValor,
+        stock: stockIndefinido ? null : stockFinal,
+        stock_indefinido: stockIndefinido,
+        categoria_id: categoriaId || null,
         activo: 1,
       });
     });
@@ -5162,366 +5793,163 @@ app.put('/api/productos/:id', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const { id } = req.params;
     const { nombre = null, precio = null, categoria_id = null, activo = null } = req.body;
+    const stockIndefinidoEntrada = req.body.stock_indefinido ?? req.body.stockIndefinido;
+    const stockEntrada = req.body.stock;
 
-    const sql = `
-      UPDATE productos
-      SET nombre = COALESCE(?, nombre),
-          precio = COALESCE(?, precio),
-          categoria_id = COALESCE(?, categoria_id),
-          activo = COALESCE(?, activo)
-      WHERE id = ? AND negocio_id = ?
-    `;
-    const params = [nombre, precio, categoria_id, activo, id, usuarioSesion.negocio_id];
+    db.get(
+      'SELECT stock, stock_indefinido FROM productos WHERE id = ? AND negocio_id = ?',
+      [id, usuarioSesion.negocio_id],
+      (productoErr, productoActual) => {
+        if (productoErr) {
+          console.error('Error al obtener producto para actualizar:', productoErr.message);
+          return res.status(500).json({ error: 'Error al actualizar producto' });
+        }
 
-    db.run(sql, params, function (err) {
-      if (err) {
-        console.error('Error al actualizar producto:', err.message);
-        return res.status(500).json({ error: 'Error al actualizar producto' });
+        if (!productoActual) {
+          return res.status(404).json({ error: 'Producto no encontrado' });
+        }
+
+        const stockIndefinido = normalizarFlag(
+          stockIndefinidoEntrada,
+          Number(productoActual.stock_indefinido) || 0
+        );
+
+        let stockValor = undefined;
+        let stockProporcionado = false;
+        if (stockEntrada !== undefined) {
+          stockProporcionado = true;
+          stockValor =
+            stockEntrada === null || stockEntrada === ''
+              ? null
+              : Number(stockEntrada);
+          if (!stockIndefinido) {
+            if (!Number.isFinite(stockValor) || stockValor < 0) {
+              return res
+                .status(400)
+                .json({ error: 'El stock debe ser un numero mayor o igual a 0' });
+            }
+          }
+        }
+
+        if (!stockIndefinido) {
+          const stockParaValidar =
+            stockProporcionado && stockValor !== null && stockValor !== undefined
+              ? stockValor
+              : productoActual.stock;
+          if (!Number.isFinite(stockParaValidar) || stockParaValidar < 0) {
+            return res
+              .status(400)
+              .json({ error: 'Se requiere stock numerico para productos con control de inventario' });
+          }
+        } else if (!stockProporcionado) {
+          stockValor = null;
+          stockProporcionado = true;
+        }
+
+        if (stockIndefinido) {
+          stockValor = null;
+          stockProporcionado = true;
+        }
+
+        const campos = [
+          'nombre = COALESCE(?, nombre)',
+          'precio = COALESCE(?, precio)',
+          'categoria_id = COALESCE(?, categoria_id)',
+          'activo = COALESCE(?, activo)',
+          'stock_indefinido = ?',
+        ];
+        const params = [nombre, precio, categoria_id, activo, stockIndefinido];
+
+        if (stockProporcionado) {
+          campos.push('stock = ?');
+          params.push(stockValor);
+        }
+
+        const sql = `
+          UPDATE productos
+          SET ${campos.join(', ')}
+          WHERE id = ? AND negocio_id = ?
+        `;
+
+        params.push(id, usuarioSesion.negocio_id);
+
+        db.run(sql, params, function (err) {
+          if (err) {
+            console.error('Error al actualizar producto:', err.message);
+            return res.status(500).json({ error: 'Error al actualizar producto' });
+          }
+
+          if (this.changes === 0) {
+            return res.status(404).json({ error: 'Producto no encontrado' });
+          }
+
+          res.json({
+            ok: true,
+            message: 'Producto actualizado correctamente',
+            stock_indefinido: stockIndefinido,
+            stock: stockProporcionado ? stockValor : productoActual.stock,
+          });
+        });
       }
-
-      if (this.changes === 0) {
-        return res.status(404).json({ error: 'Producto no encontrado' });
-      }
-
-      res.json({ message: 'Producto actualizado correctamente' });
-    });
+    );
   });
 });
 
 app.put('/api/productos/:id/stock', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const { id } = req.params;
-    const { stock } = req.body;
+    const stockEntrada = req.body.stock;
+    const negocioId = usuarioSesion.negocio_id;
 
-    if (stock === undefined || stock === null) {
-      return res.status(400).json({ error: 'El stock es obligatorio' });
-    }
-
-    const sql = 'UPDATE productos SET stock = ? WHERE id = ? AND negocio_id = ?';
-    const params = [stock, id, usuarioSesion.negocio_id];
-
-    db.run(sql, params, function (err) {
+    db.get('SELECT stock_indefinido FROM productos WHERE id = ? AND negocio_id = ?', [id, negocioId], (err, producto) => {
       if (err) {
-        console.error('Error al actualizar stock:', err.message);
+        console.error('Error al validar producto:', err.message);
         return res.status(500).json({ error: 'Error al actualizar stock' });
       }
 
-      if (this.changes === 0) {
-        return res.status(404).json({ error: 'Producto no encontrado' });
-      }
-
-      res.json({ message: 'Stock actualizado correctamente' });
-    });
-  });
-});
-
-app.get('/api/productos/:id/receta', (req, res) => {
-  requireUsuarioSesion(req, res, (usuarioSesion) => {
-    const { id } = req.params;
-
-    db.get('SELECT id FROM productos WHERE id = ? AND negocio_id = ?', [id, usuarioSesion.negocio_id], (productoErr, producto) => {
-      if (productoErr) {
-        console.error('Error al validar producto:', productoErr.message);
-        return res.status(500).json({ error: 'Error al obtener receta' });
-      }
-
       if (!producto) {
         return res.status(404).json({ error: 'Producto no encontrado' });
       }
 
-      const sql = `
-        SELECT rd.id, rd.insumo_id, i.nombre AS insumo_nombre, i.unidad, rd.cantidad_por_unidad AS cantidad
-        FROM recetas r
-        JOIN receta_detalle rd ON rd.receta_id = r.id
-        JOIN insumos i ON i.id = rd.insumo_id
-        WHERE r.producto_id = ? AND r.negocio_id = ?
-        ORDER BY rd.id ASC
-      `;
-
-      db.all(sql, [id, usuarioSesion.negocio_id], (err, rows) => {
-        if (err) {
-          console.error('Error al obtener receta:', err.message);
-          return res.status(500).json({ error: 'Error al obtener receta' });
-        }
-
-        res.json(rows || []);
-      });
-    });
-  });
-});
-
-app.put('/api/productos/:id/receta', (req, res) => {
-  requireUsuarioSesion(req, res, (usuarioSesion) => {
-    const { id } = req.params;
-    const ingredientes = Array.isArray(req.body?.items) ? req.body.items : [];
-
-    db.get('SELECT id FROM productos WHERE id = ? AND negocio_id = ?', [id, usuarioSesion.negocio_id], (productoErr, producto) => {
-      if (productoErr) {
-        console.error('Error al validar producto:', productoErr.message);
-        return res.status(500).json({ error: 'Error al guardar receta' });
-      }
-
-      if (!producto) {
-        return res.status(404).json({ error: 'Producto no encontrado' });
-      }
-
-      if (!Array.isArray(ingredientes)) {
-        return res.status(400).json({ error: 'La receta debe ser una lista de insumos' });
-      }
-
-      const insumosIds = ingredientes.map((item) => Number(item?.insumo_id)).filter(Number.isFinite);
-      const insumosUnicos = Array.from(new Set(insumosIds));
-      const cantidadesValidas = ingredientes.every(
-        (item) => item && Number.isFinite(Number(item.insumo_id)) && Number(item.cantidad) > 0
-      );
-
-      if (!cantidadesValidas) {
-        return res.status(400).json({ error: 'Cada ingrediente debe incluir insumo_id y cantidad' });
-      }
-
-      if (!ingredientes.length) {
-        db.serialize(() => {
-          db.run('BEGIN TRANSACTION');
-          db.get('SELECT id FROM recetas WHERE producto_id = ? AND negocio_id = ?', [id, usuarioSesion.negocio_id], (buscarErr, receta) => {
-            if (buscarErr) {
-              console.error('Error al limpiar receta:', buscarErr.message);
-              db.run('ROLLBACK');
-              return res.status(500).json({ error: 'Error al guardar receta' });
+      if (esStockIndefinido(producto)) {
+        db.run(
+          'UPDATE productos SET stock = NULL WHERE id = ? AND negocio_id = ?',
+          [id, negocioId],
+          function (updateErr) {
+            if (updateErr) {
+              console.error('Error al limpiar stock indefinido:', updateErr.message);
+              return res.status(500).json({ error: 'Error al actualizar stock' });
             }
-
-            if (!receta) {
-              db.run('COMMIT');
-              return res.json({ ok: true });
-            }
-
-            db.run('DELETE FROM receta_detalle WHERE receta_id = ?', [receta.id], (delDetErr) => {
-              if (delDetErr) {
-                console.error('Error al limpiar detalle de receta:', delDetErr.message);
-                db.run('ROLLBACK');
-                return res.status(500).json({ error: 'Error al guardar receta' });
-              }
-
-              db.run('DELETE FROM recetas WHERE id = ?', [receta.id], (delRecErr) => {
-                if (delRecErr) {
-                  console.error('Error al limpiar receta:', delRecErr.message);
-                  db.run('ROLLBACK');
-                  return res.status(500).json({ error: 'Error al guardar receta' });
-                }
-
-                db.run('COMMIT', (commitErr) => {
-                  if (commitErr) {
-                    console.error('Error al confirmar cambios de receta:', commitErr.message);
-                    return res.status(500).json({ error: 'Error al guardar receta' });
-                  }
-
-                  res.json({ ok: true });
-                });
-              });
-            });
-          });
-        });
+            return res.json({ message: 'Stock marcado como indefinido; no se controla cantidad.' });
+          }
+        );
         return;
       }
 
-      db.serialize(() => {
-        db.run('BEGIN TRANSACTION');
+      if (stockEntrada === undefined || stockEntrada === null) {
+        return res.status(400).json({ error: 'El stock es obligatorio' });
+      }
 
-        db.get('SELECT id FROM recetas WHERE producto_id = ? AND negocio_id = ?', [id, usuarioSesion.negocio_id], (buscarErr, receta) => {
-          if (buscarErr) {
-            console.error('Error al buscar receta:', buscarErr.message);
-            db.run('ROLLBACK');
-            return res.status(500).json({ error: 'Error al guardar receta' });
-          }
+      const stockValor = Number(stockEntrada);
+      if (!Number.isFinite(stockValor) || stockValor < 0) {
+        return res.status(400).json({ error: 'El stock debe ser un numero mayor o igual a 0' });
+      }
 
-          const finalizarConError = (mensaje, errorObj) => {
-            if (errorObj) {
-              console.error(mensaje, errorObj.message);
-            } else {
-              console.error(mensaje);
-            }
-            db.run('ROLLBACK', (rollbackErr) => {
-              if (rollbackErr) {
-                console.error('Error al revertir cambios de receta:', rollbackErr.message);
-              }
-              res.status(500).json({ error: 'Error al guardar receta' });
-            });
-          };
+      const sql = 'UPDATE productos SET stock = ? WHERE id = ? AND negocio_id = ?';
+      const params = [stockValor, id, negocioId];
 
-          const upsertReceta = (recetaIdExistente, continuar) => {
-            if (recetaIdExistente) {
-              return continuar(recetaIdExistente);
-            }
+      db.run(sql, params, function (updateErr) {
+        if (updateErr) {
+          console.error('Error al actualizar stock:', updateErr.message);
+          return res.status(500).json({ error: 'Error al actualizar stock' });
+        }
 
-            db.run(
-              'INSERT INTO recetas (producto_id, negocio_id) VALUES (?, ?)',
-              [id, usuarioSesion.negocio_id],
-              function (crearErr) {
-                if (crearErr) {
-                  return finalizarConError('Error al crear receta', crearErr);
-                }
-                continuar(this.lastID);
-              }
-            );
-          };
+        if (this.changes === 0) {
+          return res.status(404).json({ error: 'Producto no encontrado' });
+        }
 
-          upsertReceta(receta?.id, (recetaIdUsar) => {
-            db.run('DELETE FROM receta_detalle WHERE receta_id = ?', [recetaIdUsar], (delErr) => {
-              if (delErr) {
-                return finalizarConError('Error al limpiar detalle de receta', delErr);
-              }
-
-              const stmt = db.prepare(
-                `INSERT INTO receta_detalle (receta_id, insumo_id, cantidad_por_unidad, negocio_id) VALUES (?, ?, ?, ?)`
-              );
-
-              const insertarDetalle = (indice) => {
-                if (indice >= ingredientes.length) {
-                  return stmt.finalize(() => {
-                    db.run('COMMIT', (commitErr) => {
-                      if (commitErr) {
-                        console.error('Error al confirmar cambios de receta:', commitErr.message);
-                        return res.status(500).json({ error: 'Error al guardar receta' });
-                      }
-
-                      res.json({ ok: true });
-                    });
-                  });
-                }
-
-                const ing = ingredientes[indice];
-                stmt.run(recetaIdUsar, ing.insumo_id, ing.cantidad, usuarioSesion.negocio_id, (stmtErr) => {
-                  if (stmtErr) {
-                    return finalizarConError('Error al insertar detalle de receta', stmtErr);
-                  }
-                  insertarDetalle(indice + 1);
-                });
-              };
-
-              insertarDetalle(0);
-            });
-          });
-        });
+        res.json({ message: 'Stock actualizado correctamente' });
       });
-    });
-  });
-});
-app.get('/api/insumos', (req, res) => {
-  requireUsuarioSesion(req, res, (usuarioSesion) => {
-    const { activos } = req.query || {};
-    const soloActivos = activos === '1' || activos === 'true';
-
-    const sqlBase = `
-      SELECT id, nombre, unidad, categoria, stock_actual, costo_unitario_promedio, activo, comentarios,
-             creado_en, actualizado_en
-      FROM insumos
-      WHERE negocio_id = ?
-    `;
-
-    const params = [usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT];
-    const sql = soloActivos ? `${sqlBase} AND activo = 1 ORDER BY nombre ASC` : `${sqlBase} ORDER BY nombre ASC`;
-
-    db.all(sql, params, (err, rows) => {
-      if (err) {
-        console.error('Error al obtener insumos:', err.message);
-        return res.status(500).json({ error: 'Error al obtener insumos' });
-      }
-
-      res.json(rows);
-    });
-  });
-});
-
-app.post('/api/insumos', (req, res) => {
-  requireUsuarioSesion(req, res, (usuarioSesion) => {
-    const { nombre, unidad, categoria, stock_actual, costo_unitario_promedio, activo = 1, comentarios } =
-      req.body || {};
-
-    if (!nombre || typeof nombre !== 'string' || !nombre.trim()) {
-      return res.status(400).json({ error: 'El nombre del insumo es obligatorio' });
-    }
-
-    const stock = normalizarNumero(stock_actual, 0);
-    const costo = normalizarNumero(costo_unitario_promedio, 0);
-    const activoValor = activo ? 1 : 0;
-
-    const sql = `
-      INSERT INTO insumos (nombre, unidad, categoria, stock_actual, costo_unitario_promedio, activo, comentarios, negocio_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    const params = [
-      nombre.trim(),
-      normalizarCampoTexto(unidad, null),
-      normalizarCampoTexto(categoria, null),
-      stock,
-      costo,
-      activoValor,
-      normalizarCampoTexto(comentarios, null),
-      usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT,
-    ];
-
-    db.run(sql, params, function (err) {
-      if (err) {
-        console.error('Error al crear insumo:', err.message);
-        return res.status(500).json({ error: 'Error al crear insumo' });
-      }
-
-      res.status(201).json({
-        id: this.lastID,
-        nombre: nombre.trim(),
-        unidad: normalizarCampoTexto(unidad, null),
-        categoria: normalizarCampoTexto(categoria, null),
-        stock_actual: stock,
-        costo_unitario_promedio: costo,
-        activo: activoValor,
-        comentarios: normalizarCampoTexto(comentarios, null),
-      });
-    });
-  });
-});
-
-app.put('/api/insumos/:id', (req, res) => {
-  requireUsuarioSesion(req, res, (usuarioSesion) => {
-    const { id } = req.params;
-    const { nombre, unidad, categoria, stock_actual, costo_unitario_promedio, activo, comentarios } =
-      req.body || {};
-
-    const sql = `
-      UPDATE insumos
-      SET nombre = COALESCE(?, nombre),
-          unidad = COALESCE(?, unidad),
-          categoria = COALESCE(?, categoria),
-          stock_actual = COALESCE(?, stock_actual),
-          costo_unitario_promedio = COALESCE(?, costo_unitario_promedio),
-          activo = COALESCE(?, activo),
-          comentarios = COALESCE(?, comentarios),
-          actualizado_en = CURRENT_TIMESTAMP
-      WHERE id = ? AND negocio_id = ?
-    `;
-
-    const params = [
-      nombre && nombre.trim() ? nombre.trim() : null,
-      normalizarCampoTexto(unidad, null),
-      normalizarCampoTexto(categoria, null),
-      stock_actual !== undefined ? normalizarNumero(stock_actual, null) : null,
-      costo_unitario_promedio !== undefined ? normalizarNumero(costo_unitario_promedio, null) : null,
-      activo !== undefined ? (activo ? 1 : 0) : null,
-      normalizarCampoTexto(comentarios, null),
-      id,
-      usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT,
-    ];
-
-    db.run(sql, params, function (err) {
-      if (err) {
-        console.error('Error al actualizar insumo:', err.message);
-        return res.status(500).json({ error: 'Error al actualizar insumo' });
-      }
-
-      if (this.changes === 0) {
-        return res.status(404).json({ error: 'Insumo no encontrado' });
-      }
-
-      res.json({ message: 'Insumo actualizado correctamente' });
     });
   });
 });
@@ -5579,13 +6007,12 @@ app.get('/api/compras/:id', (req, res) => {
       }
 
       const detalleSql = `
-        SELECT d.id, d.insumo_id, i.nombre, d.cantidad, d.costo_unitario
-        FROM detalle_compra d
-        JOIN insumos i ON i.id = d.insumo_id
-        WHERE d.compra_id = ? AND d.negocio_id = ? AND i.negocio_id = ?
+        SELECT id, descripcion, cantidad, precio_unitario, itbis, total
+        FROM detalle_compra
+        WHERE compra_id = ? AND negocio_id = ?
       `;
 
-      db.all(detalleSql, [id, negocioId, negocioId], (detalleErr, detalles) => {
+      db.all(detalleSql, [id, negocioId], (detalleErr, detalles) => {
         if (detalleErr) {
           console.error('Error al obtener detalle de compra:', detalleErr.message);
           return res.status(500).json({ error: 'Error al obtener compra' });
@@ -5620,23 +6047,64 @@ app.post('/api/compras', (req, res) => {
 
     const detallesLimpios = [];
     for (const item of items) {
-      const insumoId = item?.insumo_id;
-      const cantidad = normalizarNumero(item?.cantidad, 0);
-      const costoUnitario = normalizarNumero(item?.costo_unitario, 0);
-
-      if (!insumoId || cantidad <= 0 || costoUnitario < 0) {
-        return res
-          .status(400)
-          .json({ error: 'Cada detalle debe incluir un insumo v?lido, cantidad > 0 y costo unitario' });
+      const descripcion = normalizarCampoTexto(item?.descripcion);
+      if (!descripcion) {
+        return res.status(400).json({ error: 'Cada detalle debe incluir una descripcion' });
+      }
+      if (descripcion.length > 255) {
+        return res.status(400).json({ error: 'La descripcion no puede superar 255 caracteres' });
       }
 
-      detallesLimpios.push({ insumo_id: insumoId, cantidad, costo_unitario: costoUnitario });
+      const cantidadValor =
+        item?.cantidad === undefined || item?.cantidad === null || item?.cantidad === ''
+          ? null
+          : normalizarNumero(item?.cantidad, null);
+      const precioUnitarioValor =
+        item?.precio_unitario === undefined || item?.precio_unitario === null || item?.precio_unitario === ''
+          ? null
+          : normalizarNumero(item?.precio_unitario, null);
+      const itbisValor =
+        item?.itbis === undefined || item?.itbis === null || item?.itbis === ''
+          ? null
+          : normalizarNumero(item?.itbis, null);
+      let totalValor =
+        item?.total === undefined || item?.total === null || item?.total === ''
+          ? null
+          : normalizarNumero(item?.total, null);
+
+      if (cantidadValor !== null && cantidadValor < 0) {
+        return res.status(400).json({ error: 'La cantidad debe ser mayor o igual a 0' });
+      }
+      if (precioUnitarioValor !== null && precioUnitarioValor < 0) {
+        return res.status(400).json({ error: 'El precio unitario debe ser mayor o igual a 0' });
+      }
+      if (itbisValor !== null && itbisValor < 0) {
+        return res.status(400).json({ error: 'El itbis debe ser mayor o igual a 0' });
+      }
+      if (totalValor !== null && totalValor < 0) {
+        return res.status(400).json({ error: 'El total de linea debe ser mayor o igual a 0' });
+      }
+
+      if (totalValor === null && cantidadValor !== null && precioUnitarioValor !== null) {
+        totalValor = Number((cantidadValor * precioUnitarioValor).toFixed(2));
+      }
+
+      detallesLimpios.push({
+        descripcion,
+        cantidad: cantidadValor,
+        precio_unitario: precioUnitarioValor,
+        itbis: itbisValor,
+        total: totalValor,
+      });
     }
 
     const montoGravadoValor = normalizarNumero(monto_gravado, 0);
     const impuestoValor = normalizarNumero(impuesto, 0);
     const totalValor = normalizarNumero(total, montoGravadoValor + impuestoValor);
     const montoExentoValor = normalizarNumero(monto_exento, 0);
+    if (montoGravadoValor < 0 || impuestoValor < 0 || totalValor < 0 || montoExentoValor < 0) {
+      return res.status(400).json({ error: 'Los montos de la compra deben ser mayores o iguales a 0' });
+    }
 
     db.run('BEGIN TRANSACTION', (beginErr) => {
       if (beginErr) {
@@ -5666,13 +6134,21 @@ app.post('/api/compras', (req, res) => {
 
         const detalle = detallesLimpios[indice];
         const sql = `
-        INSERT INTO detalle_compra (compra_id, insumo_id, cantidad, costo_unitario, negocio_id)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO detalle_compra (compra_id, descripcion, cantidad, precio_unitario, itbis, total, negocio_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `;
 
         db.run(
           sql,
-          [compraId, detalle.insumo_id, detalle.cantidad, detalle.costo_unitario, negocioId],
+          [
+            compraId,
+            detalle.descripcion,
+            detalle.cantidad,
+            detalle.precio_unitario,
+            detalle.itbis,
+            detalle.total,
+            negocioId,
+          ],
           (detalleErr) => {
             if (detalleErr) {
               return finalizarConError('Error al guardar el detalle de compra', detalleErr);
@@ -5682,66 +6158,25 @@ app.post('/api/compras', (req, res) => {
         );
       };
 
-      const actualizarInsumos = (compraId, indice) => {
-        if (indice >= detallesLimpios.length) {
-          return db.run('COMMIT', (commitErr) => {
-            if (commitErr) {
-              return finalizarConError('Error al confirmar la compra', commitErr);
-            }
-
-            res.status(201).json({
-              id: compraId,
-              proveedor: proveedor.trim(),
-              rnc: normalizarCampoTexto(rnc, null),
-              fecha,
-              tipo_comprobante: normalizarCampoTexto(tipo_comprobante, null),
-              ncf: normalizarCampoTexto(ncf, null),
-              monto_gravado: montoGravadoValor,
-              impuesto: impuestoValor,
-              total: totalValor,
-              monto_exento: montoExentoValor,
-            });
-          });
-        }
-
-        const detalle = detallesLimpios[indice];
-
-        db.get(
-          'SELECT stock_actual, costo_unitario_promedio FROM insumos WHERE id = ? AND negocio_id = ?',
-          [detalle.insumo_id, negocioId],
-          (insumoErr, insumo) => {
-            if (insumoErr) {
-              return finalizarConError('Error al consultar insumo', insumoErr);
-            }
-
-            if (!insumo) {
-              return finalizarConError('Insumo no encontrado al registrar compra');
-            }
-
-            const stockActual = Number(insumo.stock_actual) || 0;
-            const costoActual = Number(insumo.costo_unitario_promedio) || 0;
-            const nuevoStock = stockActual + detalle.cantidad;
-            let nuevoCosto = costoActual;
-            if (nuevoStock > 0) {
-              nuevoCosto = (stockActual * costoActual + detalle.cantidad * detalle.costo_unitario) / nuevoStock;
-            }
-
-            const updateSql = `
-          UPDATE insumos
-          SET stock_actual = ?,
-              costo_unitario_promedio = ?,
-              actualizado_en = CURRENT_TIMESTAMP
-          WHERE id = ? AND negocio_id = ?
-        `;
-
-            db.run(updateSql, [nuevoStock, nuevoCosto, detalle.insumo_id, negocioId], (updateErr) => {
-              if (updateErr) {
-                return finalizarConError('Error al actualizar inventario de insumos', updateErr);
-              }
-              actualizarInsumos(compraId, indice + 1);
-            });
+      const finalizarCompra = (compraId) => {
+        return db.run('COMMIT', (commitErr) => {
+          if (commitErr) {
+            return finalizarConError('Error al confirmar la compra', commitErr);
           }
-        );
+
+          res.status(201).json({
+            id: compraId,
+            proveedor: proveedor.trim(),
+            rnc: normalizarCampoTexto(rnc, null),
+            fecha,
+            tipo_comprobante: normalizarCampoTexto(tipo_comprobante, null),
+            ncf: normalizarCampoTexto(ncf, null),
+            monto_gravado: montoGravadoValor,
+            impuesto: impuestoValor,
+            total: totalValor,
+            monto_exento: montoExentoValor,
+          });
+        });
       };
 
       const insertarCompra = () => {
@@ -5769,12 +6204,893 @@ app.post('/api/compras', (req, res) => {
           }
 
           const compraId = this.lastID;
-          insertarDetalles(compraId, 0, () => actualizarInsumos(compraId, 0));
+          insertarDetalles(compraId, 0, () => finalizarCompra(compraId));
         });
       };
 
       insertarCompra();
     });
+  });
+});
+
+app.get('/api/admin/gastos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const page = Math.max(parseInt(req.query?.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query?.limit, 10) || 50, 1), 200);
+    const offset = (page - 1) * limit;
+
+    const desde = esFechaISOValida(req.query?.from) ? req.query.from : null;
+    const hasta = esFechaISOValida(req.query?.to) ? req.query.to : null;
+    const categoria = normalizarCampoTexto(req.query?.categoria, null);
+    const metodoPago = normalizarCampoTexto(req.query?.metodo_pago ?? req.query?.metodoPago, null);
+    const q = normalizarCampoTexto(req.query?.q, null);
+
+    const filtros = ['negocio_id = ?'];
+    const params = [negocioId];
+
+    if (desde) {
+      filtros.push('DATE(fecha) >= ?');
+      params.push(desde);
+    }
+    if (hasta) {
+      filtros.push('DATE(fecha) <= ?');
+      params.push(hasta);
+    }
+    if (categoria) {
+      filtros.push('categoria = ?');
+      params.push(categoria);
+    }
+    if (metodoPago) {
+      filtros.push('metodo_pago = ?');
+      params.push(metodoPago);
+    }
+    if (q) {
+      const termino = `%${q.toLowerCase()}%`;
+      filtros.push(
+        '(LOWER(proveedor) LIKE ? OR LOWER(descripcion) LIKE ? OR LOWER(comprobante_ncf) LIKE ? OR LOWER(referencia) LIKE ? OR LOWER(categoria) LIKE ?)'
+      );
+      params.push(termino, termino, termino, termino, termino);
+    }
+
+    const whereClause = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
+
+    try {
+      const listadoSql = `
+        SELECT id, fecha, monto, moneda, categoria, metodo_pago, proveedor, descripcion,
+               comprobante_ncf, referencia, es_recurrente, frecuencia, tags, created_at, updated_at
+        FROM gastos
+        ${whereClause}
+        ORDER BY fecha DESC, id DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+      const gastos = await db.all(listadoSql, params);
+
+      const conteoSql = `SELECT COUNT(1) AS total FROM gastos ${whereClause}`;
+      const countRow = await db.get(conteoSql, params);
+      const total = Number(countRow?.total) || 0;
+
+      const resumenSql = `
+        SELECT SUM(monto) AS total, COUNT(DISTINCT DATE(fecha)) AS dias
+        FROM gastos
+        ${whereClause}
+      `;
+      const resumenRow = await db.get(resumenSql, params);
+      const totalGastos = Number(resumenRow?.total) || 0;
+
+      let diasPromedio = Number(resumenRow?.dias) || 0;
+      if (desde && hasta) {
+        const inicio = parseFechaISO(desde);
+        const fin = parseFechaISO(hasta);
+        if (inicio && fin) {
+          diasPromedio = calcularDiasIncluidos(inicio, fin);
+        }
+      }
+      const promedioDiario = diasPromedio > 0 ? Number((totalGastos / diasPromedio).toFixed(2)) : 0;
+
+      const filtrosCategorias = [...filtros, "categoria IS NOT NULL", "categoria <> ''"];
+      const whereCategorias = `WHERE ${filtrosCategorias.join(' AND ')}`;
+      const topCategorias = await db.all(
+        `
+          SELECT categoria, SUM(monto) AS total
+          FROM gastos
+          ${whereCategorias}
+          GROUP BY categoria
+          ORDER BY total DESC
+          LIMIT 3
+        `,
+        params
+      );
+
+      res.json({
+        ok: true,
+        gastos: gastos || [],
+        total,
+        page,
+        limit,
+        resumen: {
+          total: totalGastos,
+          promedio_diario: promedioDiario,
+          top_categorias: topCategorias || [],
+        },
+      });
+    } catch (error) {
+      console.error('Error al obtener gastos:', error?.message || error);
+      res.status(500).json({ error: 'Error al obtener los gastos' });
+    }
+  });
+});
+
+app.post('/api/admin/gastos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const payload = req.body || {};
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    const fecha = normalizarCampoTexto(payload.fecha, null);
+    if (!fecha || !esFechaISOValida(fecha)) {
+      return res.status(400).json({ error: 'La fecha del gasto es obligatoria y debe ser valida' });
+    }
+
+    const montoValor = normalizarNumero(payload.monto, null);
+    if (montoValor === null || montoValor <= 0) {
+      return res.status(400).json({ error: 'El monto debe ser mayor a 0' });
+    }
+
+    const moneda = (normalizarCampoTexto(payload.moneda, null) || 'DOP').toUpperCase();
+    if (moneda.length > 3) {
+      return res.status(400).json({ error: 'La moneda debe tener maximo 3 caracteres' });
+    }
+
+    const categoria = normalizarCampoTexto(payload.categoria, null);
+    if (categoria && categoria.length > 80) {
+      return res.status(400).json({ error: 'La categoria no puede superar 80 caracteres' });
+    }
+
+    const metodoPago = normalizarCampoTexto(payload.metodo_pago ?? payload.metodoPago, null);
+    if (metodoPago && metodoPago.length > 40) {
+      return res.status(400).json({ error: 'El metodo de pago no puede superar 40 caracteres' });
+    }
+
+    const proveedor = normalizarCampoTexto(payload.proveedor, null);
+    if (proveedor && proveedor.length > 120) {
+      return res.status(400).json({ error: 'El proveedor no puede superar 120 caracteres' });
+    }
+
+    const descripcion = normalizarCampoTexto(payload.descripcion, null);
+    const comprobanteNCF = normalizarCampoTexto(payload.comprobante_ncf ?? payload.comprobanteNCF, null);
+    if (comprobanteNCF && comprobanteNCF.length > 30) {
+      return res.status(400).json({ error: 'El comprobante NCF no puede superar 30 caracteres' });
+    }
+
+    const referencia = normalizarCampoTexto(payload.referencia, null);
+    if (referencia && referencia.length > 60) {
+      return res.status(400).json({ error: 'La referencia no puede superar 60 caracteres' });
+    }
+
+    const esRecurrente = normalizarFlag(payload.es_recurrente ?? payload.esRecurrente, 0);
+    const frecuencia = normalizarCampoTexto(payload.frecuencia, null);
+    if (frecuencia && frecuencia.length > 20) {
+      return res.status(400).json({ error: 'La frecuencia no puede superar 20 caracteres' });
+    }
+    if (esRecurrente && !frecuencia) {
+      return res.status(400).json({ error: 'La frecuencia es obligatoria para gastos recurrentes' });
+    }
+
+    let tagsEntrada = payload.tags;
+    if (Array.isArray(tagsEntrada)) {
+      tagsEntrada = tagsEntrada.map((tag) => String(tag).trim()).filter(Boolean).join(',');
+    } else if (tagsEntrada && typeof tagsEntrada === 'object') {
+      tagsEntrada = JSON.stringify(tagsEntrada);
+    }
+    const tags = normalizarCampoTexto(tagsEntrada, null);
+
+    try {
+      const sql = `
+        INSERT INTO gastos (
+          fecha, monto, moneda, categoria, metodo_pago, proveedor, descripcion,
+          comprobante_ncf, referencia, es_recurrente, frecuencia, tags, negocio_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      const params = [
+        fecha,
+        montoValor,
+        moneda,
+        categoria,
+        metodoPago,
+        proveedor,
+        descripcion,
+        comprobanteNCF,
+        referencia,
+        esRecurrente ? 1 : 0,
+        frecuencia,
+        tags,
+        negocioId,
+      ];
+
+      const result = await db.run(sql, params);
+      res.status(201).json({
+        ok: true,
+        gasto: {
+          id: result.lastID,
+          fecha,
+          monto: montoValor,
+          moneda,
+          categoria,
+          metodo_pago: metodoPago,
+          proveedor,
+          descripcion,
+          comprobante_ncf: comprobanteNCF,
+          referencia,
+          es_recurrente: esRecurrente ? 1 : 0,
+          frecuencia,
+          tags,
+        },
+      });
+    } catch (error) {
+      console.error('Error al registrar gasto:', error?.message || error);
+      res.status(500).json({ error: 'Error al registrar el gasto' });
+    }
+  });
+});
+
+app.put('/api/admin/gastos/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'ID de gasto invalido' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    let existente;
+    try {
+      existente = await db.get('SELECT * FROM gastos WHERE id = ? AND negocio_id = ?', [id, negocioId]);
+    } catch (error) {
+      console.error('Error al obtener gasto:', error?.message || error);
+      return res.status(500).json({ error: 'Error al actualizar el gasto' });
+    }
+    if (!existente) {
+      return res.status(404).json({ error: 'Gasto no encontrado' });
+    }
+
+    const payload = req.body || {};
+    const updates = [];
+    const params = [];
+
+    if (payload.fecha !== undefined) {
+      const fecha = normalizarCampoTexto(payload.fecha, null);
+      if (!fecha || !esFechaISOValida(fecha)) {
+        return res.status(400).json({ error: 'La fecha del gasto es obligatoria y debe ser valida' });
+      }
+      updates.push('fecha = ?');
+      params.push(fecha);
+    }
+
+    if (payload.monto !== undefined) {
+      const montoValor = normalizarNumero(payload.monto, null);
+      if (montoValor === null || montoValor <= 0) {
+        return res.status(400).json({ error: 'El monto debe ser mayor a 0' });
+      }
+      updates.push('monto = ?');
+      params.push(montoValor);
+    }
+
+    if (payload.moneda !== undefined) {
+      const moneda = (normalizarCampoTexto(payload.moneda, null) || 'DOP').toUpperCase();
+      if (moneda.length > 3) {
+        return res.status(400).json({ error: 'La moneda debe tener maximo 3 caracteres' });
+      }
+      updates.push('moneda = ?');
+      params.push(moneda);
+    }
+
+    if (payload.categoria !== undefined) {
+      const categoria = normalizarCampoTexto(payload.categoria, null);
+      if (categoria && categoria.length > 80) {
+        return res.status(400).json({ error: 'La categoria no puede superar 80 caracteres' });
+      }
+      updates.push('categoria = ?');
+      params.push(categoria);
+    }
+
+    if (payload.metodo_pago !== undefined || payload.metodoPago !== undefined) {
+      const metodoPago = normalizarCampoTexto(payload.metodo_pago ?? payload.metodoPago, null);
+      if (metodoPago && metodoPago.length > 40) {
+        return res.status(400).json({ error: 'El metodo de pago no puede superar 40 caracteres' });
+      }
+      updates.push('metodo_pago = ?');
+      params.push(metodoPago);
+    }
+
+    if (payload.proveedor !== undefined) {
+      const proveedor = normalizarCampoTexto(payload.proveedor, null);
+      if (proveedor && proveedor.length > 120) {
+        return res.status(400).json({ error: 'El proveedor no puede superar 120 caracteres' });
+      }
+      updates.push('proveedor = ?');
+      params.push(proveedor);
+    }
+
+    if (payload.descripcion !== undefined) {
+      updates.push('descripcion = ?');
+      params.push(normalizarCampoTexto(payload.descripcion, null));
+    }
+
+    if (payload.comprobante_ncf !== undefined || payload.comprobanteNCF !== undefined) {
+      const comprobante = normalizarCampoTexto(payload.comprobante_ncf ?? payload.comprobanteNCF, null);
+      if (comprobante && comprobante.length > 30) {
+        return res.status(400).json({ error: 'El comprobante NCF no puede superar 30 caracteres' });
+      }
+      updates.push('comprobante_ncf = ?');
+      params.push(comprobante);
+    }
+
+    if (payload.referencia !== undefined) {
+      const referencia = normalizarCampoTexto(payload.referencia, null);
+      if (referencia && referencia.length > 60) {
+        return res.status(400).json({ error: 'La referencia no puede superar 60 caracteres' });
+      }
+      updates.push('referencia = ?');
+      params.push(referencia);
+    }
+
+    let esRecurrenteValor;
+    if (payload.es_recurrente !== undefined || payload.esRecurrente !== undefined) {
+      esRecurrenteValor = normalizarFlag(payload.es_recurrente ?? payload.esRecurrente, 0);
+      updates.push('es_recurrente = ?');
+      params.push(esRecurrenteValor ? 1 : 0);
+    }
+
+    let frecuenciaEntrada;
+    if (payload.frecuencia !== undefined) {
+      frecuenciaEntrada = normalizarCampoTexto(payload.frecuencia, null);
+      if (frecuenciaEntrada && frecuenciaEntrada.length > 20) {
+        return res.status(400).json({ error: 'La frecuencia no puede superar 20 caracteres' });
+      }
+      updates.push('frecuencia = ?');
+      params.push(frecuenciaEntrada);
+    }
+
+    if (payload.tags !== undefined) {
+      let tagsEntrada = payload.tags;
+      if (Array.isArray(tagsEntrada)) {
+        tagsEntrada = tagsEntrada.map((tag) => String(tag).trim()).filter(Boolean).join(',');
+      } else if (tagsEntrada && typeof tagsEntrada === 'object') {
+        tagsEntrada = JSON.stringify(tagsEntrada);
+      }
+      updates.push('tags = ?');
+      params.push(normalizarCampoTexto(tagsEntrada, null));
+    }
+
+    const esRecurrenteFinal =
+      esRecurrenteValor !== undefined ? esRecurrenteValor : Number(existente.es_recurrente) || 0;
+    const frecuenciaFinal = payload.frecuencia !== undefined ? frecuenciaEntrada : existente.frecuencia;
+
+    if (esRecurrenteFinal && !frecuenciaFinal) {
+      return res.status(400).json({ error: 'La frecuencia es obligatoria para gastos recurrentes' });
+    }
+
+    if (esRecurrenteValor === 0 && payload.frecuencia === undefined && existente.frecuencia) {
+      updates.push('frecuencia = NULL');
+    }
+
+    if (!updates.length) {
+      return res.json({ ok: true, gasto: existente });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(id, negocioId);
+
+    try {
+      const sql = `UPDATE gastos SET ${updates.join(', ')} WHERE id = ? AND negocio_id = ?`;
+      const result = await db.run(sql, params);
+      if (result.changes === 0) {
+        return res.status(404).json({ error: 'Gasto no encontrado' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al actualizar gasto:', error?.message || error);
+      res.status(500).json({ error: 'Error al actualizar el gasto' });
+    }
+  });
+});
+
+app.delete('/api/admin/gastos/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'ID de gasto invalido' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    try {
+      const result = await db.run('DELETE FROM gastos WHERE id = ? AND negocio_id = ?', [id, negocioId]);
+      if (result.changes === 0) {
+        return res.status(404).json({ error: 'Gasto no encontrado' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al eliminar gasto:', error?.message || error);
+      res.status(500).json({ error: 'Error al eliminar el gasto' });
+    }
+  });
+});
+
+app.get('/api/admin/analytics/overview', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const rango = normalizarRangoAnalisis(req.query?.from ?? req.query?.desde, req.query?.to ?? req.query?.hasta);
+    const cacheKey = `${negocioId}:${rango.desde}:${rango.hasta}`;
+    const cached = analyticsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.json(cached.data);
+    }
+
+    const fechaBaseRaw = 'COALESCE(fecha_factura, fecha_cierre, fecha_creacion)';
+    const fechaBase = `DATE(${fechaBaseRaw})`;
+    const paramsBase = [negocioId, rango.desde, rango.hasta];
+
+    try {
+      const ventasResumen = await db.get(
+        `
+          SELECT COUNT(DISTINCT COALESCE(cuenta_id, id)) AS total_ventas,
+                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+
+      const ingresosTotal = Number(ventasResumen?.total) || 0;
+      const ventasCount = Number(ventasResumen?.total_ventas) || 0;
+      const ticketPromedio = ventasCount > 0 ? Number((ingresosTotal / ventasCount).toFixed(2)) : 0;
+
+      const ventasSerie = await db.all(
+        `
+          SELECT ${fechaBase} AS fecha,
+                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total,
+                 COUNT(DISTINCT COALESCE(cuenta_id, id)) AS ventas
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+          GROUP BY fecha
+          ORDER BY fecha ASC
+        `,
+        paramsBase
+      );
+
+      const ventasPorDiaSemana = await db.all(
+        `
+          SELECT DAYOFWEEK(${fechaBaseRaw}) AS dia_semana,
+                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total,
+                 COUNT(DISTINCT COALESCE(cuenta_id, id)) AS ventas
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+          GROUP BY dia_semana
+          ORDER BY total DESC
+        `,
+        paramsBase
+      );
+
+      const ventasPorHora = await db.all(
+        `
+          SELECT HOUR(${fechaBaseRaw}) AS hora,
+                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total,
+                 COUNT(DISTINCT COALESCE(cuenta_id, id)) AS ventas
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+          GROUP BY hora
+          ORDER BY total DESC
+        `,
+        paramsBase
+      );
+
+      const topProductosCantidad = await db.all(
+        `
+          SELECT p.id, p.nombre,
+                 SUM(dp.cantidad) AS cantidad,
+                 SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos
+          FROM detalle_pedido dp
+          JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
+          JOIN productos p ON p.id = dp.producto_id
+          WHERE dp.negocio_id = ?
+            AND pe.estado = 'pagado'
+            AND ${fechaBase} BETWEEN ? AND ?
+          GROUP BY p.id, p.nombre
+          ORDER BY cantidad DESC
+          LIMIT 10
+        `,
+        [negocioId, negocioId, rango.desde, rango.hasta]
+      );
+
+      const topProductosIngresos = await db.all(
+        `
+          SELECT p.id, p.nombre,
+                 SUM(dp.cantidad) AS cantidad,
+                 SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos
+          FROM detalle_pedido dp
+          JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
+          JOIN productos p ON p.id = dp.producto_id
+          WHERE dp.negocio_id = ?
+            AND pe.estado = 'pagado'
+            AND ${fechaBase} BETWEEN ? AND ?
+          GROUP BY p.id, p.nombre
+          ORDER BY ingresos DESC
+          LIMIT 10
+        `,
+        [negocioId, negocioId, rango.desde, rango.hasta]
+      );
+
+      const bottomProductos = await db.all(
+        `
+          SELECT p.id, p.nombre,
+                 COALESCE(s.cantidad, 0) AS cantidad,
+                 COALESCE(s.ingresos, 0) AS ingresos
+          FROM productos p
+          LEFT JOIN (
+            SELECT dp.producto_id,
+                   SUM(dp.cantidad) AS cantidad,
+                   SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos
+            FROM detalle_pedido dp
+            JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
+            WHERE dp.negocio_id = ?
+              AND pe.estado = 'pagado'
+              AND ${fechaBase} BETWEEN ? AND ?
+            GROUP BY dp.producto_id
+          ) s ON s.producto_id = p.id
+          WHERE p.negocio_id = ?
+          ORDER BY cantidad ASC, ingresos ASC
+          LIMIT 10
+        `,
+        [negocioId, negocioId, rango.desde, rango.hasta, negocioId]
+      );
+
+      const topCategoriasVentas = await db.all(
+        `
+          SELECT COALESCE(c.nombre, 'Sin categoria') AS categoria,
+                 SUM(dp.cantidad) AS cantidad,
+                 SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos
+          FROM detalle_pedido dp
+          JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
+          JOIN productos p ON p.id = dp.producto_id
+          LEFT JOIN categorias c ON c.id = p.categoria_id AND c.negocio_id = ?
+          WHERE dp.negocio_id = ?
+            AND pe.estado = 'pagado'
+            AND ${fechaBase} BETWEEN ? AND ?
+          GROUP BY categoria
+          ORDER BY ingresos DESC
+          LIMIT 5
+        `,
+        [negocioId, negocioId, negocioId, rango.desde, rango.hasta]
+      );
+
+      const ventasPorDiaMes = await db.all(
+        `
+          SELECT DAY(${fechaBaseRaw}) AS dia_mes,
+                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+          GROUP BY dia_mes
+          ORDER BY total DESC
+        `,
+        paramsBase
+      );
+
+      const metodosPago = await db.get(
+        `
+          SELECT SUM(pago_efectivo) AS efectivo,
+                 SUM(pago_tarjeta) AS tarjeta,
+                 SUM(pago_transferencia) AS transferencia
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+
+      const gastosResumen = await db.get(
+        `
+          SELECT SUM(monto) AS total
+          FROM gastos
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+      const gastosTotal = Number(gastosResumen?.total) || 0;
+
+      const gastosSerie = await db.all(
+        `
+          SELECT DATE(fecha) AS fecha, SUM(monto) AS total
+          FROM gastos
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+          GROUP BY fecha
+          ORDER BY fecha ASC
+        `,
+        paramsBase
+      );
+
+      const gastosTopCategorias = await db.all(
+        `
+          SELECT categoria, SUM(monto) AS total
+          FROM gastos
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+            AND categoria IS NOT NULL
+            AND categoria <> ''
+          GROUP BY categoria
+          ORDER BY total DESC
+          LIMIT 5
+        `,
+        paramsBase
+      );
+
+      const gastosRecurrentes = await db.all(
+        `
+          SELECT es_recurrente, SUM(monto) AS total
+          FROM gastos
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+          GROUP BY es_recurrente
+        `,
+        paramsBase
+      );
+
+      const gananciaNeta = Number((ingresosTotal - gastosTotal).toFixed(2));
+      const margenNeto = ingresosTotal > 0 ? Number((gananciaNeta / ingresosTotal).toFixed(4)) : 0;
+
+      const rangoAnterior = obtenerRangoAnterior(rango.desde, rango.dias);
+      const ventasAnterior = await db.get(
+        `
+          SELECT COUNT(DISTINCT COALESCE(cuenta_id, id)) AS total_ventas,
+                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+        `,
+        [negocioId, rangoAnterior.desde, rangoAnterior.hasta]
+      );
+      const gastosAnterior = await db.get(
+        `
+          SELECT SUM(monto) AS total
+          FROM gastos
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+        `,
+        [negocioId, rangoAnterior.desde, rangoAnterior.hasta]
+      );
+
+      const ventasTotalAnterior = Number(ventasAnterior?.total) || 0;
+      const ventasCountAnterior = Number(ventasAnterior?.total_ventas) || 0;
+      const ticketPromedioAnterior =
+        ventasCountAnterior > 0 ? Number((ventasTotalAnterior / ventasCountAnterior).toFixed(2)) : 0;
+      const gastosTotalAnterior = Number(gastosAnterior?.total) || 0;
+      const gananciaAnterior = Number((ventasTotalAnterior - gastosTotalAnterior).toFixed(2));
+
+      const comparacion = {
+        periodo_anterior: rangoAnterior,
+        ventas: {
+          total: ventasTotalAnterior,
+          delta: Number((ingresosTotal - ventasTotalAnterior).toFixed(2)),
+          porcentaje:
+            ventasTotalAnterior > 0
+              ? Number(((ingresosTotal - ventasTotalAnterior) / ventasTotalAnterior).toFixed(4))
+              : null,
+        },
+        gastos: {
+          total: gastosTotalAnterior,
+          delta: Number((gastosTotal - gastosTotalAnterior).toFixed(2)),
+          porcentaje:
+            gastosTotalAnterior > 0
+              ? Number(((gastosTotal - gastosTotalAnterior) / gastosTotalAnterior).toFixed(4))
+              : null,
+        },
+        ganancia: {
+          total: gananciaAnterior,
+          delta: Number((gananciaNeta - gananciaAnterior).toFixed(2)),
+          porcentaje:
+            gananciaAnterior !== 0
+              ? Number(((gananciaNeta - gananciaAnterior) / gananciaAnterior).toFixed(4))
+              : null,
+        },
+        ticket_promedio: {
+          total: ticketPromedioAnterior,
+          delta: Number((ticketPromedio - ticketPromedioAnterior).toFixed(2)),
+          porcentaje:
+            ticketPromedioAnterior > 0
+              ? Number(((ticketPromedio - ticketPromedioAnterior) / ticketPromedioAnterior).toFixed(4))
+              : null,
+        },
+      };
+
+      const alertas = [];
+      if (comparacion.gastos.porcentaje !== null && comparacion.gastos.porcentaje > 0.2) {
+        if (comparacion.ventas.porcentaje === null || comparacion.ventas.porcentaje <= 0) {
+          alertas.push({
+            nivel: 'warning',
+            mensaje: 'Los gastos subieron en el periodo sin un aumento equivalente de ingresos.',
+          });
+        }
+      }
+
+      if (comparacion.ticket_promedio.porcentaje !== null && comparacion.ticket_promedio.porcentaje < -0.15) {
+        alertas.push({
+          nivel: 'warning',
+          mensaje: 'El ticket promedio cayo frente al periodo anterior. Revisa promociones o precios.',
+        });
+      }
+
+      const productosCero = (bottomProductos || []).filter((item) => Number(item.cantidad) === 0).length;
+      if (productosCero > 0) {
+        alertas.push({
+          nivel: 'info',
+          mensaje: `Hay ${productosCero} productos sin ventas en el periodo. Considera promociones o ajustes al menu.`,
+        });
+      }
+
+      const diasSemanaTotales = ventasPorDiaSemana || [];
+      if (diasSemanaTotales.length >= 3) {
+        const promedioSemana =
+          diasSemanaTotales.reduce((acc, item) => acc + (Number(item.total) || 0), 0) / diasSemanaTotales.length;
+        const diaFlojo = diasSemanaTotales.reduce((min, item) =>
+          Number(item.total) < Number(min.total) ? item : min
+        );
+        if (promedioSemana > 0 && Number(diaFlojo.total) < promedioSemana * 0.5) {
+          alertas.push({
+            nivel: 'info',
+            mensaje: 'Hay un dia de la semana con ventas muy bajas. Considera promociones especificas.',
+          });
+        }
+      }
+
+      const conteoProductos = await db.get(
+        `
+          SELECT COUNT(DISTINCT dp.producto_id) AS total
+          FROM detalle_pedido dp
+          JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
+          WHERE dp.negocio_id = ?
+            AND pe.estado = 'pagado'
+            AND ${fechaBase} BETWEEN ? AND ?
+        `,
+        [negocioId, negocioId, rango.desde, rango.hasta]
+      );
+      const totalProductosConVentas = Number(conteoProductos?.total) || 0;
+      if (totalProductosConVentas > 0 && ingresosTotal > 0) {
+        const topN = Math.max(1, Math.ceil(totalProductosConVentas * 0.2));
+        const paretoRows = await db.all(
+          `
+            SELECT dp.producto_id,
+                   SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos
+            FROM detalle_pedido dp
+            JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
+            WHERE dp.negocio_id = ?
+              AND pe.estado = 'pagado'
+              AND ${fechaBase} BETWEEN ? AND ?
+            GROUP BY dp.producto_id
+            ORDER BY ingresos DESC
+            LIMIT ${topN}
+          `,
+          [negocioId, negocioId, rango.desde, rango.hasta]
+        );
+        const ingresosTop = paretoRows.reduce((acc, row) => acc + (Number(row.ingresos) || 0), 0);
+        if (ingresosTop / ingresosTotal >= 0.8) {
+          alertas.push({
+            nivel: 'success',
+            mensaje: 'El 20% de los productos genera mas del 80% de los ingresos (efecto Pareto).',
+          });
+        }
+      }
+
+      const nombresDias = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+      const ventasDiaSemanaFormateadas = (ventasPorDiaSemana || []).map((item) => ({
+        dia: nombresDias[(Number(item.dia_semana) || 1) - 1] || 'domingo',
+        total: Number(item.total) || 0,
+        ventas: Number(item.ventas) || 0,
+      }));
+
+      const ventasHoraFormateadas = (ventasPorHora || []).map((item) => ({
+        hora: Number(item.hora),
+        total: Number(item.total) || 0,
+        ventas: Number(item.ventas) || 0,
+      }));
+
+      const responsePayload = {
+        ok: true,
+        rango,
+        ingresos: {
+          total: ingresosTotal,
+          count: ventasCount,
+          ticket_promedio: ticketPromedio,
+          serie_diaria: (ventasSerie || []).map((row) => ({
+            fecha: row.fecha,
+            total: Number(row.total) || 0,
+            ventas: Number(row.ventas) || 0,
+          })),
+          por_dia_semana: ventasDiaSemanaFormateadas,
+          por_hora: ventasHoraFormateadas,
+        },
+        gastos: {
+          total: gastosTotal,
+          top_categorias: (gastosTopCategorias || []).map((row) => ({
+            categoria: row.categoria,
+            total: Number(row.total) || 0,
+          })),
+          serie_diaria: (gastosSerie || []).map((row) => ({
+            fecha: row.fecha,
+            total: Number(row.total) || 0,
+          })),
+          recurrentes: (gastosRecurrentes || []).map((row) => ({
+            es_recurrente: Number(row.es_recurrente) === 1,
+            total: Number(row.total) || 0,
+          })),
+        },
+        ganancias: {
+          neta: gananciaNeta,
+          margen: margenNeto,
+        },
+        rankings: {
+          top_productos_cantidad: topProductosCantidad || [],
+          top_productos_ingresos: topProductosIngresos || [],
+          bottom_productos: bottomProductos || [],
+          top_categorias: topCategoriasVentas || [],
+          top_dias_semana: ventasDiaSemanaFormateadas.slice(0, 3),
+          top_horas: ventasHoraFormateadas.slice(0, 5),
+          top_dias_mes: (ventasPorDiaMes || []).slice(0, 5).map((row) => ({
+            dia_mes: Number(row.dia_mes),
+            total: Number(row.total) || 0,
+          })),
+        },
+        comparacion,
+        metodos_pago: {
+          efectivo: Number(metodosPago?.efectivo) || 0,
+          tarjeta: Number(metodosPago?.tarjeta) || 0,
+          transferencia: Number(metodosPago?.transferencia) || 0,
+        },
+        alertas,
+      };
+
+      analyticsCache.set(cacheKey, {
+        expiresAt: Date.now() + ANALYTICS_CACHE_TTL_MS,
+        data: responsePayload,
+      });
+
+      res.json(responsePayload);
+    } catch (error) {
+      console.error('Error al generar analisis:', error?.message || error);
+      res.status(500).json({ error: 'Error al generar el analisis' });
+    }
   });
 });
 
@@ -6816,7 +8132,7 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
       const itemsSql = `
         SELECT ci.id, ci.producto_id, ci.descripcion, ci.cantidad, ci.precio_unitario,
                ci.descuento_porcentaje, ci.descuento_monto, ci.subtotal_linea, ci.impuesto_linea, ci.total_linea,
-               p.stock AS stock_producto
+               p.stock AS stock_producto, p.stock_indefinido
         FROM cotizacion_items ci
         LEFT JOIN productos p ON p.id = ci.producto_id AND p.negocio_id = ?
         WHERE ci.cotizacion_id = ? AND ci.negocio_id = ?
@@ -6837,9 +8153,13 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
           if (!item?.producto_id) {
             return res.status(400).json({ error: 'Todos los items deben estar vinculados a un producto para facturar' });
           }
+          const esIndefinido = esStockIndefinido(item);
           const cantidad = normalizarNumero(item.cantidad, 0);
           if (cantidad <= 0) {
             return res.status(400).json({ error: 'Hay items sin cantidad v?lida en la cotizaci?n' });
+          }
+          if (esIndefinido) {
+            continue;
           }
           const acumulado = cantidades.get(item.producto_id) || 0;
           cantidades.set(item.producto_id, acumulado + cantidad);
@@ -6981,56 +8301,42 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
                         if (updateCotErr) {
                           return rollback('Error al actualizar la cotizaci?n a facturada', updateCotErr);
                         }
-
-                        aplicarAjusteInsumos(
-                          pedidoId,
-                          {
-                            signo: -1,
-                            marcarFlag: true,
-                            omitirSiYaAplicado: false,
-                            usarTransaccionExistente: true,
-                            negocio_id: negocioIdFactura,
-                          },
-                          (insumoErr) => {
-                            if (insumoErr) {
-                              return rollback('Error al descontar insumos del pedido creado', insumoErr);
-                            }
-
-                            db.run('COMMIT', (commitErr) => {
-                              if (commitErr) {
-                                return rollback('Error al confirmar pedido generado', commitErr);
-                              }
-
-                              res.status(201).json({
-                                ok: true,
-                                pedido: {
-                                  id: pedidoId,
-                                  cuenta_id: cuentaAsignada,
-                                  estado: 'listo',
-                                  subtotal: totales.subtotal,
-                                  impuesto: totales.impuesto,
-                                  total: totales.total,
-                                  descuento_porcentaje: cotizacion.descuento_porcentaje || 0,
-                                  descuento_monto: totales.descuento_global,
-                                  cliente: cotizacion.cliente_nombre || null,
-                                  cliente_documento: cotizacion.cliente_documento || null,
-                                  fecha_listo: fechaListo,
-                                },
-                              });
-                            });
+                        db.run('COMMIT', (commitErr) => {
+                          if (commitErr) {
+                            return rollback('Error al confirmar pedido generado', commitErr);
                           }
-                        );
+
+                          res.status(201).json({
+                            ok: true,
+                            pedido: {
+                              id: pedidoId,
+                              cuenta_id: cuentaAsignada,
+                              estado: 'listo',
+                              subtotal: totales.subtotal,
+                              impuesto: totales.impuesto,
+                              total: totales.total,
+                              descuento_porcentaje: cotizacion.descuento_porcentaje || 0,
+                              descuento_monto: totales.descuento_global,
+                              cliente: cotizacion.cliente_nombre || null,
+                              cliente_documento: cotizacion.cliente_documento || null,
+                              fecha_listo: fechaListo,
+                            },
+                          });
+                        });
                       }
                     );
                   }
 
                   const [productoId, cantidad] = cantidadesEntries[indice];
                   db.run(
-                    'UPDATE productos SET stock = stock - ? WHERE id = ?',
-                    [cantidad, productoId],
-                    (stockErr) => {
+                    'UPDATE productos SET stock = stock - ? WHERE id = ? AND negocio_id = ?',
+                    [cantidad, productoId, negocioIdFactura],
+                    function (stockErr) {
                       if (stockErr) {
                         return rollback('Error al actualizar stock de productos', stockErr);
+                      }
+                      if (this.changes === 0) {
+                        return rollback('Error al actualizar stock de productos');
                       }
                       actualizarStock(indice + 1);
                     }
@@ -7362,7 +8668,7 @@ app.post('/api/login', async (req, res) => {
   const { usuario, password } = req.body;
 
   if (!usuario || !password) {
-    return res.status(400).json({ ok: false, error: 'Usuario y contraseña son obligatorios' });
+    return res.status(400).json({ ok: false, error: 'Usuario y contrasena son obligatorios' });
   }
 
   let row;
@@ -7370,7 +8676,7 @@ app.post('/api/login', async (req, res) => {
     row = await usuariosRepo.findByUsuario(usuario);
   } catch (err) {
     console.error('Error al buscar usuario:', err?.message || err);
-    return res.status(500).json({ ok: false, error: 'Error al iniciar sesión' });
+    return res.status(500).json({ ok: false, error: 'Error al iniciar sesion' });
   }
 
   if (!row) {
@@ -7378,14 +8684,22 @@ app.post('/api/login', async (req, res) => {
   }
 
   if (!row.activo) {
-    return res.status(403).json({ ok: false, error: 'El usuario está inactivo' });
-  }
-
-  if (row.password !== password) {
-    return res.status(400).json({ ok: false, error: 'Contraseña incorrecta' });
+    return res.status(403).json({ ok: false, error: 'El usuario esta inactivo' });
   }
 
   const negocioId = row.negocio_id || NEGOCIO_ID_DEFAULT;
+  const passwordValido = await verificarPassword(password, row.password);
+  if (!passwordValido) {
+    return res.status(400).json({ ok: false, error: 'Contrasena incorrecta' });
+  }
+
+  const estadoNegocio = await validarEstadoNegocio(negocioId);
+  if (!estadoNegocio.ok) {
+    return res
+      .status(estadoNegocio.status || 403)
+      .json({ ok: false, error: estadoNegocio.error, motivo_suspension: estadoNegocio.motivo_suspension });
+  }
+
   const configModulosLogin = await obtenerConfigModulosNegocio(negocioId);
   if (row.rol === 'bar' && configModulosLogin.bar === false) {
     return res.status(403).json({ ok: false, error: 'El modulo de Bar esta desactivado para este negocio.' });
@@ -7400,8 +8714,8 @@ app.post('/api/login', async (req, res) => {
         [row.id, token, req.get('user-agent') || '', req.ip || '', negocioId],
         (insertErr) => {
           if (insertErr) {
-            console.error('Error al registrar sesión:', insertErr.message);
-            return res.status(500).json({ ok: false, error: 'Error al iniciar sesión' });
+            console.error('Error al registrar sesion:', insertErr.message);
+            return res.status(500).json({ ok: false, error: 'Error al iniciar sesion' });
           }
 
           res.json({
@@ -7413,6 +8727,7 @@ app.post('/api/login', async (req, res) => {
             negocio_id: negocioId,
             es_super_admin: esSuperAdminUsuario,
             activo: row.activo,
+            force_password_change: !!row.force_password_change,
             token,
           });
         }
@@ -7479,6 +8794,13 @@ io.use(async (socket, next) => {
     const usuarioSesion = await obtenerUsuarioSesionPorToken(token);
     if (!usuarioSesion) {
       return next(new Error('UNAUTHORIZED'));
+    }
+    if (usuarioSesion.force_password_change) {
+      return next(new Error('FORCE_PASSWORD_CHANGE'));
+    }
+    const estado = await validarEstadoNegocio(usuarioSesion.negocio_id);
+    if (!estado.ok) {
+      return next(new Error('NEGOCIO_BLOQUEADO'));
     }
     socket.data.usuarioSesion = usuarioSesion;
     next();

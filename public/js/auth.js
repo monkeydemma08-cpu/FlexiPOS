@@ -8,6 +8,7 @@ const roleRoutes = {
 
 const STORAGE_KEY = 'kanmUser';
 const STORAGE_APP_KEY = 'sesionApp';
+const FORCE_PASSWORD_PATH = '/force-password.html';
 const DEFAULT_THEME = {
   colorPrimario: '#ff6699',
   colorSecundario: '#ff99bb',
@@ -25,6 +26,8 @@ const redirectTo = (path) => {
 };
 
 const isSuperAdminUser = (user) => Boolean(user?.esSuperAdmin || user?.es_super_admin);
+const hasForcePasswordChange = (user) => Boolean(user?.forcePasswordChange || user?.force_password_change);
+const isImpersonatedUser = (user) => Boolean(user?.impersonated);
 
 const migrateLegacySession = () => {
   if (typeof window === 'undefined') {
@@ -70,7 +73,7 @@ const migrateLegacySession = () => {
           return legacy;
         }
       } catch (error) {
-        console.warn('No se pudo migrar la sesión desde localStorage:', error);
+        console.warn('No se pudo migrar la sesion desde localStorage:', error);
       }
       return null;
     },
@@ -109,6 +112,25 @@ const applyUserBadge = (user) => {
   });
 };
 
+const applyImpersonationBanner = (user) => {
+  if (typeof document === 'undefined') return;
+  const existing = document.getElementById('kanm-impersonation-banner');
+  if (!isImpersonatedUser(user)) {
+    if (existing) {
+      existing.remove();
+    }
+    return;
+  }
+
+  if (existing) return;
+
+  const banner = document.createElement('div');
+  banner.id = 'kanm-impersonation-banner';
+  banner.className = 'kanm-impersonation-banner';
+  banner.textContent = 'Estas operando como ADMIN MASTER.';
+  document.body.prepend(banner);
+};
+
 const getStoredUser = () => {
   if (typeof window === 'undefined') {
     return null;
@@ -128,12 +150,14 @@ const getStoredUser = () => {
         usuarioId: parsed.usuarioId ?? parsed.id,
         negocioId: parsed.negocioId ?? parsed.negocio_id,
         esSuperAdmin: isSuperAdminUser(parsed),
+        forcePasswordChange: hasForcePasswordChange(parsed),
+        impersonated: isImpersonatedUser(parsed),
       };
       window.APP_SESION = normalizado;
       return normalizado;
     }
   } catch (error) {
-    console.error('Error al parsear la sesión almacenada:', error);
+    console.error('Error al parsear la sesion almacenada:', error);
   }
 
   return null;
@@ -160,7 +184,7 @@ const setStoredUser = (user) => {
       localStorage.removeItem(STORAGE_KEY);
     }
   } catch (error) {
-    console.warn('No se pudo guardar la sesión en sessionStorage:', error);
+    console.warn('No se pudo guardar la sesion en sessionStorage:', error);
   }
 };
 
@@ -173,7 +197,7 @@ const clearStoredUser = () => {
     sessionStorage.removeItem(STORAGE_APP_KEY);
     sessionStorage.removeItem(STORAGE_KEY);
   } catch (error) {
-    console.warn('No se pudo limpiar la sesión de sessionStorage:', error);
+    console.warn('No se pudo limpiar la sesion de sessionStorage:', error);
   }
 
   try {
@@ -186,7 +210,7 @@ const clearStoredUser = () => {
   window.APP_SESION = null;
 };
 
-// Devuelve los encabezados de autenticación a partir de la sesión guardada
+// Devuelve los encabezados de autenticacion a partir de la sesion guardada
 const getAuthHeaders = () => {
   const usuario = getStoredUser();
 
@@ -261,7 +285,7 @@ const applyTemaNegocio = (tema) => {
   }
   const headerSubtitulo = document.getElementById('kanm-header-negocio-subtitulo');
   if (headerSubtitulo && !headerSubtitulo.textContent) {
-    headerSubtitulo.textContent = 'Panel de administración';
+    headerSubtitulo.textContent = 'Panel de administracion';
   }
 
   const logoEl = document.getElementById('kanm-header-logo');
@@ -386,6 +410,24 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
+  const forceChange = hasForcePasswordChange(user);
+  const isForcePage = window.location.pathname === FORCE_PASSWORD_PATH;
+
+  if (forceChange && !isForcePage) {
+    redirectTo(FORCE_PASSWORD_PATH);
+    return;
+  }
+
+  if (!forceChange && isForcePage) {
+    const destination = roleRoutes[user.rol];
+    if (destination) {
+      redirectTo(destination);
+    } else {
+      handleUnauthorized();
+    }
+    return;
+  }
+
   const allowBySuper = isSuperAdminUser(user);
   const allowByRole = requiredRoles.includes(user.rol);
 
@@ -401,6 +443,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   applyUserBadge(user);
+  applyImpersonationBanner(user);
   cargarTemaNegocio();
 });
 
@@ -433,7 +476,7 @@ window.KANMSession = {
   setUser: setStoredUser,
   clearUser: clearStoredUser,
 };
-// Helpers de autenticación reutilizables en los módulos
+// Helpers de autenticacion reutilizables en los modulos
 window.kanmAuth = {
   getAuthHeaders,
   handleUnauthorized,

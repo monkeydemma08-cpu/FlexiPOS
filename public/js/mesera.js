@@ -45,6 +45,15 @@ const estado = {
   listosUnread: 0,
 };
 
+const esProductoStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
+const obtenerStockDisponible = (producto) => {
+  if (esProductoStockIndefinido(producto)) return Infinity;
+  const valor = Number(producto?.stock);
+  return Number.isFinite(valor) ? valor : 0;
+};
+const obtenerEtiquetaStock = (producto) =>
+  esProductoStockIndefinido(producto) ? 'Indefinido' : obtenerStockDisponible(producto);
+
 let notificationSound;
 let notificationSoundReady = false;
 let notificationSoundUnlocking = null;
@@ -553,7 +562,8 @@ const actualizarCarritoUI = () => {
       return;
     }
 
-    const stockDisponible = Number(producto.stock) || 0;
+    const stockDisponible = obtenerStockDisponible(producto);
+    const stockIndefinido = esProductoStockIndefinido(producto);
     const precioUnitario = Number(producto.precio) || 0;
     const subtotalLinea = precioUnitario * item.cantidad;
 
@@ -563,7 +573,7 @@ const actualizarCarritoUI = () => {
     const info = document.createElement('div');
     info.innerHTML = `
       <h3>${producto.nombre}</h3>
-      <p class="producto-meta">Precio: ${formatCurrency(precioUnitario)} · Stock disponible: ${stockDisponible}</p>
+      <p class="producto-meta">Precio: ${formatCurrency(precioUnitario)} · Stock disponible: ${obtenerEtiquetaStock(producto)}</p>
       <p class="producto-meta subtotal-linea">Subtotal: ${formatCurrency(subtotalLinea)}</p>
     `;
 
@@ -574,7 +584,7 @@ const actualizarCarritoUI = () => {
     const botonMas = crearBotonCantidad(
       '+',
       () => ajustarCantidad(producto.id, item.cantidad + 1),
-      item.cantidad >= stockDisponible
+      !stockIndefinido && item.cantidad >= stockDisponible
     );
 
     const inputCantidad = document.createElement('input');
@@ -631,12 +641,14 @@ const renderProductos = () => {
     card.className = 'producto-card';
 
     const contenido = document.createElement('div');
-    const stockDisponible = Number(producto.stock) || 0;
+    const stockDisponible = obtenerStockDisponible(producto);
+    const stockTexto = obtenerEtiquetaStock(producto);
+    const stockIndefinido = esProductoStockIndefinido(producto);
 
     contenido.innerHTML = `
       <h3>${producto.nombre}</h3>
       <p class="producto-meta">
-        Precio: ${formatCurrency(producto.precio)} · Stock: ${stockDisponible} · ${
+        Precio: ${formatCurrency(producto.precio)} · Stock: ${stockTexto} · ${
           producto.categoria_nombre ? `Categoría: ${producto.categoria_nombre}` : 'Sin categoría'
         }
       </p>
@@ -648,8 +660,8 @@ const renderProductos = () => {
     const botonAgregar = document.createElement('button');
     botonAgregar.type = 'button';
     botonAgregar.className = 'kanm-button';
-    botonAgregar.textContent = stockDisponible > 0 ? 'Agregar' : 'Sin stock';
-    botonAgregar.disabled = !producto.activo || stockDisponible <= 0;
+    botonAgregar.textContent = stockIndefinido || stockDisponible > 0 ? 'Agregar' : 'Sin stock';
+    botonAgregar.disabled = !producto.activo || (!stockIndefinido && stockDisponible <= 0);
     botonAgregar.addEventListener('click', () => agregarAlCarrito(producto));
 
     acciones.appendChild(botonAgregar);
@@ -666,12 +678,13 @@ const agregarAlCarrito = (producto) => {
   limpiarMensaje();
 
   if (!producto || !producto.id) {
-    mostrarMensaje('Producto inválido.', 'error');
+    mostrarMensaje('Producto invalido.', 'error');
     return;
   }
 
-  const stockDisponible = Number(producto.stock) || 0;
-  if (stockDisponible <= 0) {
+  const stockDisponible = obtenerStockDisponible(producto);
+  const stockIndefinido = esProductoStockIndefinido(producto);
+  if (!stockIndefinido && stockDisponible <= 0) {
     mostrarMensaje('Este producto no tiene stock disponible.', 'error');
     return;
   }
@@ -679,8 +692,8 @@ const agregarAlCarrito = (producto) => {
   const itemActual = estado.carrito.get(producto.id) || { cantidad: 0 };
   const nuevaCantidad = itemActual.cantidad + 1;
 
-  if (nuevaCantidad > stockDisponible) {
-    mostrarMensaje('No puedes agregar más unidades que el stock disponible.', 'error');
+  if (!stockIndefinido && nuevaCantidad > stockDisponible) {
+    mostrarMensaje('No puedes agregar mas unidades que el stock disponible.', 'error');
     return;
   }
 
@@ -717,9 +730,10 @@ const ajustarCantidad = (productoId, cantidadDeseada) => {
     return false;
   }
 
-  const stockDisponible = Number(producto.stock) || 0;
-  if (cantidad > stockDisponible) {
-    mostrarMensaje('No puedes solicitar más unidades que el stock disponible.', 'error');
+  const stockDisponible = obtenerStockDisponible(producto);
+  const stockIndefinido = esProductoStockIndefinido(producto);
+  if (!stockIndefinido && cantidad > stockDisponible) {
+    mostrarMensaje('No puedes solicitar mas unidades que el stock disponible.', 'error');
     actualizarCarritoUI();
     return false;
   }
@@ -762,7 +776,7 @@ const validarPedido = () => {
 
   for (const item of estado.carrito.values()) {
     if (!item || !item.producto_id) {
-      mostrarMensaje('Hay un producto inválido en el carrito.', 'error');
+      mostrarMensaje('Hay un producto invalido en el carrito.', 'error');
       return false;
     }
 
@@ -772,8 +786,9 @@ const validarPedido = () => {
     }
 
     const producto = estado.productos.find((p) => p.id === item.producto_id);
-    const stockDisponible = Number(producto?.stock) || 0;
-    if (item.cantidad > stockDisponible) {
+    const stockIndefinido = esProductoStockIndefinido(producto);
+    const stockDisponible = obtenerStockDisponible(producto);
+    if (!stockIndefinido && item.cantidad > stockDisponible) {
       mostrarMensaje('Hay productos cuya cantidad supera el stock disponible.', 'error');
       return false;
     }

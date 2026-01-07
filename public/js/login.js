@@ -42,6 +42,8 @@ const handleSuccess = (payload) => {
     usuarioId: payload.id ?? payload.usuarioId,
     negocioId: payload.negocioId,
     esSuperAdmin: payload.esSuperAdmin === true,
+    forcePasswordChange: payload.forcePasswordChange === true || payload.force_password_change === true,
+    impersonated: payload.impersonated === true,
     token: payload.token,
   };
 
@@ -57,6 +59,11 @@ const handleSuccess = (payload) => {
   }
 
   window.APP_SESION = sesion;
+
+  if (sesion.forcePasswordChange) {
+    window.location.href = '/force-password.html';
+    return;
+  }
 
   const redirectUrl = roleRoutes[sesion.rol];
   if (redirectUrl) {
@@ -99,7 +106,7 @@ form?.addEventListener('submit', async (event) => {
     }
 
     if (!response.ok || !data.ok) {
-      showError(data?.error || 'No fue posible iniciar sesión.');
+      showError(data?.error || 'No fue posible iniciar sesion.');
       return;
     }
 
@@ -111,6 +118,7 @@ form?.addEventListener('submit', async (event) => {
       token: data.token,
       negocioId: data.negocio_id ?? data.negocioId,
       esSuperAdmin: data.es_super_admin ?? data.esSuperAdmin,
+      forcePasswordChange: data.force_password_change ?? data.forcePasswordChange,
     });
   } catch (error) {
     console.error('Error en el proceso de login:', error);

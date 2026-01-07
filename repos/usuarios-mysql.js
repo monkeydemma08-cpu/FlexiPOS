@@ -1,13 +1,13 @@
 const { query } = require('../db-mysql');
 
-const baseColumns = 'id, nombre, usuario, password, rol, activo, negocio_id, es_super_admin';
+const authColumns =
+  'id, nombre, usuario, password, rol, activo, negocio_id, es_super_admin, force_password_change, password_reset_at';
+const publicColumns =
+  'id, nombre, usuario, rol, activo, negocio_id, es_super_admin, force_password_change, password_reset_at';
 
 async function findByUsuario(usuario) {
   try {
-    const rows = await query(
-      `SELECT ${baseColumns} FROM usuarios WHERE usuario = ? LIMIT 1`,
-      [usuario]
-    );
+    const rows = await query(`SELECT ${authColumns} FROM usuarios WHERE usuario = ? LIMIT 1`, [usuario]);
     return rows[0] || null;
   } catch (error) {
     console.error('Error buscando usuario por nombre de usuario:', error);
@@ -17,7 +17,7 @@ async function findByUsuario(usuario) {
 
 async function findById(id) {
   try {
-    const rows = await query(`SELECT ${baseColumns} FROM usuarios WHERE id = ? LIMIT 1`, [id]);
+    const rows = await query(`SELECT ${authColumns} FROM usuarios WHERE id = ? LIMIT 1`, [id]);
     return rows[0] || null;
   } catch (error) {
     console.error('Error buscando usuario por ID:', error);
@@ -46,7 +46,7 @@ async function getAll(options = {}) {
       params.push(negocioId);
     }
 
-    let sql = `SELECT ${baseColumns} FROM usuarios`;
+    let sql = `SELECT ${publicColumns} FROM usuarios`;
     if (condiciones.length) {
       sql += ` WHERE ${condiciones.join(' AND ')}`;
     }
@@ -69,10 +69,24 @@ async function create(usuarioData) {
       activo = 1,
       negocio_id = 1,
       es_super_admin = 0,
+      force_password_change = 0,
+      password_reset_at = null,
     } = usuarioData;
     const result = await query(
-      'INSERT INTO usuarios (nombre, usuario, password, rol, activo, negocio_id, es_super_admin) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [nombre, usuario, password, rol, activo ? 1 : 0, negocio_id || 1, es_super_admin ? 1 : 0]
+      `INSERT INTO usuarios (
+        nombre, usuario, password, rol, activo, negocio_id, es_super_admin, force_password_change, password_reset_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        nombre,
+        usuario,
+        password,
+        rol,
+        activo ? 1 : 0,
+        negocio_id || 1,
+        es_super_admin ? 1 : 0,
+        force_password_change ? 1 : 0,
+        password_reset_at,
+      ]
     );
     const newId = result.insertId || result.lastInsertId;
     return newId ? await findById(newId) : null;
@@ -114,6 +128,14 @@ async function update(id, usuarioData) {
     if (usuarioData.es_super_admin !== undefined) {
       fields.push('es_super_admin = ?');
       params.push(usuarioData.es_super_admin ? 1 : 0);
+    }
+    if (usuarioData.force_password_change !== undefined) {
+      fields.push('force_password_change = ?');
+      params.push(usuarioData.force_password_change ? 1 : 0);
+    }
+    if (usuarioData.password_reset_at !== undefined) {
+      fields.push('password_reset_at = ?');
+      params.push(usuarioData.password_reset_at);
     }
 
     if (!fields.length) {
