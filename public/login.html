@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FlexiPOS - Iniciar sesión</title>
+    <title>POSIUM - Iniciar sesion</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600&family=Playfair+Display:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="css/styles.css" />
@@ -20,112 +20,201 @@
       body {
         margin: 0;
         min-height: 100vh;
-        font-family: 'Poppins', sans-serif;
-        background: radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--color-primario, #7b5bff) 18%, transparent), transparent),
-          radial-gradient(circle at 80% 10%, color-mix(in srgb, var(--color-secundario, #5de0e6) 20%, transparent), transparent),
-          linear-gradient(135deg, color-mix(in srgb, var(--color-secundario, #5de0e6) 12%, #f6f8fb),
-          color-mix(in srgb, var(--color-primario, #7b5bff) 10%, #f6f8fb));
-        color: var(--color-texto, #1f2937);
+        font-family: 'Manrope', sans-serif;
+        --posium-ink: #122428;
+        --posium-ink-deep: #0f1e22;
+        --posium-ink-glow: rgba(20, 37, 42, 0.12);
+        --posium-ink-glow-strong: rgba(20, 37, 42, 0.2);
+        --posium-gold: #c9a46b;
+        --posium-gold-strong: rgba(201, 164, 107, 0.7);
+        --posium-gold-glow: rgba(201, 164, 107, 0.22);
+        --posium-gold-glow-soft: rgba(201, 164, 107, 0.2);
+        --posium-gold-soft: rgba(201, 164, 107, 0.35);
+        --posium-cloud: #f7f3ed;
+        --posium-mist: #edf1f2;
+        --posium-ice: #f4f7f9;
+        --posium-line: rgba(15, 30, 34, 0.12);
+        --posium-shadow: rgba(15, 30, 34, 0.12);
+        --posium-shadow-strong: rgba(15, 30, 34, 0.18);
+        --posium-shadow-deep: rgba(15, 30, 34, 0.24);
+        --posium-shadow-press: rgba(15, 30, 34, 0.2);
+        --posium-gold-shadow: rgba(201, 164, 107, 0.15);
+        --posium-cream: #f8f4ec;
+        --posium-ink-soft: rgba(18, 36, 40, 0.72);
+        --posium-ink-muted: rgba(18, 36, 40, 0.85);
+        --posium-inset: rgba(15, 30, 34, 0.06);
+        --posium-error: #b4233b;
+        --posium-ink-button: #1c2f35;
+        --posium-ink-button-alt: #2d434a;
+        color: var(--posium-ink);
+        background: radial-gradient(1200px circle at 12% 12%, var(--posium-ink-glow), transparent 60%),
+          radial-gradient(900px circle at 88% 6%, var(--posium-gold-glow), transparent 55%),
+          linear-gradient(135deg, var(--posium-cloud) 0%, var(--posium-mist) 45%, var(--posium-ice) 100%);
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 24px;
+        padding: 32px 24px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      body::before,
+      body::after {
+        content: '';
+        position: absolute;
+        border-radius: 50%;
+        pointer-events: none;
+      }
+
+      body::before {
+        width: 420px;
+        height: 420px;
+        right: -160px;
+        top: -180px;
+        background: radial-gradient(circle, var(--posium-gold-soft), transparent 70%);
+        filter: blur(2px);
+      }
+
+      body::after {
+        width: 520px;
+        height: 520px;
+        left: -220px;
+        bottom: -240px;
+        background: radial-gradient(circle, var(--posium-ink-glow-strong), transparent 70%);
       }
 
       .login-shell {
         width: 100%;
-        max-width: 520px;
+        max-width: 560px;
         display: flex;
         flex-direction: column;
-        gap: 18px;
+        gap: 22px;
         align-items: center;
+        position: relative;
+        z-index: 1;
       }
 
       .login-brand {
-        font-weight: 700;
-        font-size: 1.8rem;
-        letter-spacing: 0.04em;
-        color: var(--color-primario, #7b5bff);
+        font-family: 'Playfair Display', serif;
+        font-weight: 600;
+        font-size: 2.3rem;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        background: linear-gradient(120deg, var(--posium-ink-deep), var(--posium-gold));
+        -webkit-background-clip: text;
+        color: transparent;
+        -webkit-text-fill-color: transparent;
         text-align: center;
+        opacity: 0;
+        transform: translateY(8px);
+        animation: fadeUp 0.6s ease forwards;
+        animation-delay: 0.05s;
       }
 
       .login-card {
         width: 100%;
-        background: rgba(255, 255, 255, 0.88);
-        border-radius: 24px;
-        padding: 36px 32px;
-        box-shadow: 0 25px 60px rgba(0, 0, 0, 0.08);
-        backdrop-filter: blur(12px);
-        border: 1px solid color-mix(in srgb, var(--color-primario, #7b5bff) 8%, transparent);
+        background: rgba(255, 255, 255, 0.92);
+        border-radius: 28px;
+        padding: 40px 38px;
+        box-shadow: 0 30px 60px var(--posium-shadow), 0 10px 22px var(--posium-gold-shadow);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--posium-line);
+        opacity: 0;
+        transform: translateY(16px) scale(0.98);
+        animation: cardReveal 0.8s ease-out forwards;
+        animation-delay: 0.15s;
       }
 
       .login-card h1 {
-        margin: 0 0 16px;
-        font-size: 1.6rem;
+        margin: 0 0 12px;
+        font-size: 1.8rem;
         font-weight: 600;
+        font-family: 'Playfair Display', serif;
         text-align: center;
-        color: var(--color-primario, #7b5bff);
+        color: var(--posium-ink);
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fadeUp 0.6s ease forwards;
+        animation-delay: 0.25s;
       }
 
       .login-card p {
-        margin: 0 0 26px;
+        margin: 0 0 28px;
         text-align: center;
-        font-size: 0.95rem;
-        color: color-mix(in srgb, var(--color-texto, #1f2937) 80%, transparent);
+        font-size: 1rem;
+        color: var(--posium-ink-soft);
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fadeUp 0.6s ease forwards;
+        animation-delay: 0.35s;
       }
 
       .form-group {
         display: flex;
         flex-direction: column;
-        gap: 6px;
-        margin-bottom: 20px;
+        gap: 8px;
+        margin-bottom: 18px;
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fadeUp 0.6s ease forwards;
       }
 
       label {
         font-size: 0.9rem;
-        font-weight: 500;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        color: var(--posium-ink-muted);
       }
 
       input[type='text'],
       input[type='password'] {
         padding: 14px 16px;
         border-radius: 14px;
-        border: 1px solid color-mix(in srgb, var(--color-primario, #7b5bff) 20%, transparent);
-        background-color: rgba(255, 255, 255, 0.9);
+        border: 1px solid var(--posium-line);
+        background-color: rgba(255, 255, 255, 0.92);
         font-size: 1rem;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        color: var(--posium-ink);
+        box-shadow: inset 0 1px 2px var(--posium-inset);
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
       }
 
       input[type='text']:focus,
       input[type='password']:focus {
         outline: none;
-        border-color: var(--color-primario, #7b5bff);
-        box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primario, #7b5bff) 20%, transparent);
+        border-color: var(--posium-gold-strong);
+        box-shadow: 0 0 0 4px var(--posium-gold-glow-soft);
+        transform: translateY(-1px);
       }
 
       button[type='submit'] {
         width: 100%;
-        margin-top: 8px;
-        padding: 16px;
-        border: none;
-        border-radius: 18px;
-        background: linear-gradient(135deg, var(--color-primario, #7b5bff), color-mix(in srgb, var(--color-secundario, #5de0e6) 60%, transparent));
-        color: #ffffff;
+        margin-top: 12px;
+        padding: 15px 16px;
+        border: 1px solid var(--posium-gold-strong);
+        border-radius: 16px;
+        background: linear-gradient(135deg, var(--posium-ink-button), var(--posium-ink-button-alt));
+        color: var(--posium-cream);
         font-size: 1.05rem;
         font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
         cursor: pointer;
-        box-shadow: 0 16px 30px color-mix(in srgb, var(--color-primario, #7b5bff) 25%, transparent);
+        box-shadow: 0 18px 35px var(--posium-shadow-strong);
         transition: transform 0.15s ease, box-shadow 0.15s ease;
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fadeUp 0.6s ease forwards;
+        animation-delay: 0.65s;
       }
 
       button[type='submit']:hover {
         transform: translateY(-2px);
-        box-shadow: 0 18px 34px color-mix(in srgb, var(--color-primario, #7b5bff) 32%, transparent);
+        box-shadow: 0 24px 42px var(--posium-shadow-deep);
       }
 
       button[type='submit']:active {
         transform: translateY(0);
-        box-shadow: 0 12px 20px color-mix(in srgb, var(--color-primario, #7b5bff) 24%, transparent);
+        box-shadow: 0 14px 24px var(--posium-shadow-press);
       }
 
       #login-error {
@@ -133,37 +222,85 @@
         min-height: 20px;
         font-size: 0.9rem;
         text-align: center;
-        color: #d93050;
+        color: var(--posium-error);
         font-weight: 500;
+      }
+
+      .login-card .form-group:nth-of-type(1) {
+        animation-delay: 0.45s;
+      }
+
+      .login-card .form-group:nth-of-type(2) {
+        animation-delay: 0.55s;
+      }
+
+      @keyframes cardReveal {
+        from {
+          opacity: 0;
+          transform: translateY(16px) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .login-brand,
+        .login-card,
+        .login-card h1,
+        .login-card p,
+        .login-card .form-group,
+        .login-card button[type='submit'] {
+          animation: none !important;
+          opacity: 1 !important;
+          transform: none !important;
+        }
       }
 
       @media (max-width: 480px) {
         .login-card {
-          padding: 30px 22px;
+          padding: 32px 24px;
         }
 
         .login-card h1 {
           font-size: 1.5rem;
+        }
+
+        .login-brand {
+          font-size: 1.9rem;
+          letter-spacing: 0.2em;
         }
       }
     </style>
   </head>
   <body>
     <div class="login-shell">
-      <div class="login-brand">FlexiPOS</div>
+      <div class="login-brand">POSIUM</div>
       <div class="login-card">
-        <h1>Bienvenido a FlexiPOS</h1>
-        <p>La plataforma inteligente para administrar ventas, pedidos e inventario.</p>
+        <h1>Bienvenido a POSIUM</h1>
+        <p>La suite premium para ventas, caja e inventario en tiempo real.</p>
         <form id="login-form" novalidate>
           <div class="form-group">
             <label for="usuario">Usuario</label>
             <input type="text" id="usuario" name="usuario" autocomplete="username" />
           </div>
           <div class="form-group">
-            <label for="password">Contraseña</label>
+            <label for="password">Contrasena</label>
             <input type="password" id="password" name="password" autocomplete="current-password" />
           </div>
-          <button type="submit">Iniciar sesión</button>
+          <button type="submit">Entrar a POSIUM</button>
         </form>
         <div id="login-error"></div>
       </div>

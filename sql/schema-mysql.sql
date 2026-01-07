@@ -1,4 +1,4 @@
--- MySQL schema for FlexiPOS (generated from existing SQLite definitions)
+-- MySQL schema for POSIUM (generated from existing SQLite definitions)
 CREATE TABLE IF NOT EXISTS negocios (
   id INT AUTO_INCREMENT PRIMARY KEY,
   nombre VARCHAR(150) NOT NULL,

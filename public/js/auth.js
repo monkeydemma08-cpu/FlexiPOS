@@ -450,18 +450,26 @@ document.addEventListener('DOMContentLoaded', () => {
 function logout() {
   const usuario = getStoredUser();
   const token = usuario?.token;
+  const usuarioId = usuario?.usuarioId ?? usuario?.id;
 
   if (token) {
-    fetch('/api/logout', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-session-token': token,
-      },
-      body: JSON.stringify({ token }),
-    }).catch(() => {
-      /* silencio errores de red en logout */
-    });
+    const payload = JSON.stringify({ token, usuario_id: usuarioId });
+
+    if (navigator.sendBeacon) {
+      const blob = new Blob([payload], { type: 'application/json' });
+      navigator.sendBeacon('/api/logout', blob);
+    } else {
+      fetch('/api/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {
+        /* silencio errores de red en logout */
+      });
+    }
   }
 
   clearStoredUser();

@@ -4495,10 +4495,10 @@ app.post('/api/bar/marcar-listo', (req, res) => {
   });
 });
 
-// Gesti?n de usuarios (solo roles operativos)
-app.get('/api/usuarios', (req, res) => {
-  requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!tienePermisoAdmin(usuarioSesion)) {
+  // Gesti?n de usuarios (solo roles operativos)
+  app.get('/api/usuarios', (req, res) => {
+    requireUsuarioSesion(req, res, async (usuarioSesion) => {
+      if (!tienePermisoAdmin(usuarioSesion)) {
       return res.status(403).json({ error: 'Acceso restringido' });
     }
 
@@ -4508,19 +4508,94 @@ app.get('/api/usuarios', (req, res) => {
     const negocioId = esSuper && negocioFiltro ? Number(negocioFiltro) || null : usuarioSesion.negocio_id;
     const incluirTodos = esSuper && !negocioFiltro;
 
-    try {
-      const rows = await usuariosRepo.getAll({
-        rol: filtroRol,
-        soloActivos: false,
-        negocioId,
-        incluirTodosNegocios: incluirTodos,
-      });
-      res.json(rows || []);
-    } catch (err) {
-      console.error('Error al obtener usuarios:', err?.message || err);
-      res.status(500).json({ error: 'Error al obtener usuarios' });
-    }
-  });
+      try {
+        const rows = await usuariosRepo.getAll({
+          rol: filtroRol,
+          soloActivos: false,
+          negocioId,
+          incluirTodosNegocios: incluirTodos,
+        });
+        const usuarios = rows || [];
+        if (!usuarios.length) {
+          return res.json([]);
+        }
+
+        const ids = usuarios
+          .map((usuario) => Number(usuario.id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+
+        if (!ids.length) {
+          return res.json(usuarios);
+        }
+
+        const placeholders = ids.map(() => '?').join(', ');
+        const activeSql = `
+          SELECT usuario_id, creado_en, ultimo_uso
+          FROM sesiones_usuarios
+          WHERE usuario_id IN (${placeholders})
+            AND cerrado_en IS NULL
+            AND DATE_ADD(creado_en, INTERVAL ${SESSION_EXPIRATION_HOURS} HOUR) > CURRENT_TIMESTAMP
+        `;
+        const lastSql = `
+          SELECT s.usuario_id, s.creado_en, s.ultimo_uso, s.cerrado_en
+          FROM sesiones_usuarios s
+          JOIN (
+            SELECT usuario_id, MAX(id) AS max_id
+            FROM sesiones_usuarios
+            WHERE usuario_id IN (${placeholders})
+            GROUP BY usuario_id
+          ) ult ON s.id = ult.max_id
+        `;
+
+        const [activeRows, lastRows] = await Promise.all([
+          db.all(activeSql, ids),
+          db.all(lastSql, ids),
+        ]);
+
+        const activeMap = new Map();
+        (activeRows || []).forEach((row) => {
+          const key = Number(row.usuario_id);
+          if (!key) return;
+          const current = activeMap.get(key);
+          if (!current) {
+            activeMap.set(key, row);
+            return;
+          }
+          const currentDate = current?.creado_en ? new Date(current.creado_en) : null;
+          const nextDate = row?.creado_en ? new Date(row.creado_en) : null;
+          if (!currentDate || (nextDate && nextDate > currentDate)) {
+            activeMap.set(key, row);
+          }
+        });
+
+        const lastMap = new Map();
+        (lastRows || []).forEach((row) => {
+          const key = Number(row.usuario_id);
+          if (!key) return;
+          lastMap.set(key, row);
+        });
+
+        const resultado = usuarios.map((usuario) => {
+          const id = Number(usuario.id);
+          const active = activeMap.get(id) || null;
+          const last = lastMap.get(id) || null;
+          const enLinea = Boolean(active);
+          const conectadoEn = active?.creado_en || last?.creado_en || null;
+          const desconectadoEn = enLinea ? null : last?.cerrado_en || last?.ultimo_uso || null;
+          return {
+            ...usuario,
+            en_linea: enLinea,
+            conectado_en: conectadoEn,
+            desconectado_en: desconectadoEn,
+          };
+        });
+
+        res.json(resultado);
+      } catch (err) {
+        console.error('Error al obtener usuarios:', err?.message || err);
+        res.status(500).json({ error: 'Error al obtener usuarios' });
+      }
+    });
 });
 
 // Gestión de negocios (solo super admin)

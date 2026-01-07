@@ -1195,7 +1195,7 @@ const renderUsuarios = (lista) => {
   if (!lista.length) {
     const fila = document.createElement('tr');
     const celda = document.createElement('td');
-    celda.colSpan = 6;
+    celda.colSpan = 9;
     celda.textContent = 'No hay usuarios registrados para este rol.';
     fila.appendChild(celda);
     usuariosTablaBody.appendChild(fila);
@@ -1221,9 +1221,29 @@ const renderUsuarios = (lista) => {
 
     const celdaEstado = document.createElement('td');
     const badge = document.createElement('span');
-    badge.className = `kanm-badge ${usuario.activo ? 'estado-activo' : 'estado-inactivo'}`;
+    badge.className = usuario.activo ? 'estado-pill' : 'estado-pill estado-inactivo';
     badge.textContent = usuario.activo ? 'Activo' : 'Inactivo';
     celdaEstado.appendChild(badge);
+
+    const enLineaRaw = usuario.en_linea ?? usuario.enLinea;
+    const enLinea =
+      enLineaRaw === true ||
+      enLineaRaw === 1 ||
+      enLineaRaw === '1';
+    const conectadoEn = usuario.conectado_en ?? usuario.conectadoEn ?? null;
+    const desconectadoEn = enLinea ? null : usuario.desconectado_en ?? usuario.desconectadoEn ?? null;
+
+    const celdaLinea = document.createElement('td');
+    const badgeLinea = document.createElement('span');
+    badgeLinea.className = enLinea ? 'estado-pill' : 'estado-pill estado-inactivo';
+    badgeLinea.textContent = enLinea ? 'En linea' : 'Fuera';
+    celdaLinea.appendChild(badgeLinea);
+
+    const celdaConectado = document.createElement('td');
+    celdaConectado.textContent = conectadoEn ? formatDateTime(conectadoEn) : '--';
+
+    const celdaDesconectado = document.createElement('td');
+    celdaDesconectado.textContent = desconectadoEn ? formatDateTime(desconectadoEn) : '--';
 
     const celdaAcciones = document.createElement('td');
     const contenedor = document.createElement('div');
@@ -1263,6 +1283,9 @@ const renderUsuarios = (lista) => {
     fila.appendChild(celdaUsuario);
     fila.appendChild(celdaRol);
     fila.appendChild(celdaEstado);
+    fila.appendChild(celdaLinea);
+    fila.appendChild(celdaConectado);
+    fila.appendChild(celdaDesconectado);
     fila.appendChild(celdaAcciones);
 
     fragment.appendChild(fila);
