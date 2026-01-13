@@ -407,6 +407,9 @@ async function ensureNegocioThemeAndModulesColumns() {
   await ensureColumn('negocios', 'color_boton_secundario VARCHAR(7) NULL');
   await ensureColumn('negocios', 'color_boton_peligro VARCHAR(7) NULL');
   await ensureColumn('negocios', 'config_modulos JSON NULL');
+  await ensureColumn('negocios', 'permitir_b01 TINYINT(1) NOT NULL DEFAULT 1');
+  await ensureColumn('negocios', 'permitir_b02 TINYINT(1) NOT NULL DEFAULT 1');
+  await ensureColumn('negocios', 'permitir_b14 TINYINT(1) NOT NULL DEFAULT 1');
   await ensureColumn('negocios', 'admin_principal_correo VARCHAR(255) NULL');
   await ensureColumn('negocios', 'admin_principal_usuario_id BIGINT NULL');
   const fkCompatible = await columnsCompatibleForFk('negocios', 'admin_principal_usuario_id', 'usuarios', 'id');

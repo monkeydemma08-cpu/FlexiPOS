@@ -34,8 +34,14 @@ const ncfB01InicioInput = document.getElementById('ncf-b01-inicio');
 const ncfB01FinInput = document.getElementById('ncf-b01-fin');
 const ncfB01Restante = document.getElementById('ncf-b01-restante');
 const ncfB01Alerta = document.getElementById('ncf-b01-alerta');
+const permitirB01Input = document.getElementById('permitir-b01');
+const permitirB02Input = document.getElementById('permitir-b02');
+const permitirB14Input = document.getElementById('permitir-b14');
+const secuenciasGuardarBtn = document.getElementById('secuencias-guardar');
+const secuenciasMensaje = document.getElementById('secuencias-mensaje');
 
 let facturaConfigDirty = false;
+let secuenciasConfigDirty = false;
 let cacheCategorias = [];
 
 const compraForm = document.getElementById('compra-form');
@@ -993,6 +999,33 @@ const pintarRango = (inicioInput, finInput, restanteEl, alertaEl, datos, umbral)
   }
 };
 
+const normalizarFlagUI = (valor, predeterminado = true) => {
+  if (valor === undefined || valor === null) {
+    return predeterminado;
+  }
+  if (typeof valor === 'string') {
+    const limpio = valor.trim().toLowerCase();
+    if (['1', 'true', 'on', 'yes', 'si'].includes(limpio)) return true;
+    if (['0', 'false', 'off', 'no'].includes(limpio)) return false;
+  }
+  return Boolean(valor);
+};
+
+const aplicarConfigSecuencias = (config = {}) => {
+  const permitirB01 = normalizarFlagUI(config.permitir_b01 ?? config.permitirB01, true);
+  const permitirB02 = normalizarFlagUI(config.permitir_b02 ?? config.permitirB02, true);
+  const permitirB14 = normalizarFlagUI(config.permitir_b14 ?? config.permitirB14, true);
+
+  if (permitirB01Input) permitirB01Input.checked = permitirB01;
+  if (permitirB02Input) permitirB02Input.checked = permitirB02;
+  if (permitirB14Input) permitirB14Input.checked = permitirB14;
+};
+
+const marcarSecuenciasDirty = () => {
+  secuenciasConfigDirty = true;
+  setMessage(secuenciasMensaje, '');
+};
+
 const normalizarTelefonos = (valor) => {
   if (Array.isArray(valor)) {
     return valor.map((t) => String(t || '').trim()).filter(Boolean);
@@ -1003,6 +1036,70 @@ const normalizarTelefonos = (valor) => {
     .split(/[|,/;]+/)
     .map((t) => t.trim())
     .filter(Boolean);
+};
+
+const cargarConfigSecuencias = async (options = {}) => {
+  const { force = false } = options;
+  if ((!permitirB01Input && !permitirB02Input && !permitirB14Input) || (secuenciasConfigDirty && !force)) {
+    return;
+  }
+
+  try {
+    setMessage(secuenciasMensaje, '', 'info');
+    const respuesta = await fetchConAutorizacion('/api/admin/negocio/config');
+    if (!respuesta.ok) {
+      throw new Error('No se pudo obtener la configuracion de secuencias fiscales');
+    }
+    const data = await respuesta.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudo obtener la configuracion de secuencias fiscales');
+    }
+    aplicarConfigSecuencias(data);
+    secuenciasConfigDirty = false;
+    setMessage(secuenciasMensaje, '');
+  } catch (error) {
+    console.error('Error al cargar configuracion de secuencias fiscales:', error);
+    setMessage(secuenciasMensaje, 'No se pudo cargar la configuracion de secuencias fiscales.', 'error');
+  }
+};
+
+const guardarConfigSecuencias = async () => {
+  if (!permitirB01Input && !permitirB02Input && !permitirB14Input) return;
+
+  const payload = {
+    permitir_b01: permitirB01Input?.checked ? 1 : 0,
+    permitir_b02: permitirB02Input?.checked ? 1 : 0,
+    permitir_b14: permitirB14Input?.checked ? 1 : 0,
+  };
+
+  try {
+    setMessage(secuenciasMensaje, '', 'info');
+    if (secuenciasGuardarBtn) {
+      secuenciasGuardarBtn.disabled = true;
+      secuenciasGuardarBtn.classList.add('is-loading');
+    }
+
+    const respuesta = await fetchJsonAutorizado('/api/admin/negocio/config', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    const data = await respuesta.json().catch(() => ({ ok: false }));
+    if (!respuesta.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo guardar la configuracion de secuencias fiscales');
+    }
+
+    aplicarConfigSecuencias(data);
+    secuenciasConfigDirty = false;
+    setMessage(secuenciasMensaje, 'Secuencias fiscales actualizadas correctamente.', 'info');
+  } catch (error) {
+    console.error('Error al guardar configuracion de secuencias fiscales:', error);
+    setMessage(secuenciasMensaje, error.message || 'No se pudo guardar la configuracion de secuencias.', 'error');
+  } finally {
+    if (secuenciasGuardarBtn) {
+      secuenciasGuardarBtn.disabled = false;
+      secuenciasGuardarBtn.classList.remove('is-loading');
+    }
+  }
 };
 
 const marcarFacturaDirty = () => {
@@ -3539,6 +3636,15 @@ facturaGuardarBtn?.addEventListener('click', (event) => {
   guardarConfiguracionFactura();
 });
 
+secuenciasGuardarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  guardarConfigSecuencias();
+});
+
+permitirB01Input?.addEventListener('change', marcarSecuenciasDirty);
+permitirB02Input?.addEventListener('change', marcarSecuenciasDirty);
+permitirB14Input?.addEventListener('change', marcarSecuenciasDirty);
+
 facturaTelefonoAgregarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   agregarTelefonoUI('');
@@ -3921,6 +4027,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     cargarProductos(),
     cargarImpuesto(),
     cargarConfiguracionFactura(),
+    cargarConfigSecuencias(),
     cargarCompras(),
     cargarGastos(),
     cargarAnalisis(),

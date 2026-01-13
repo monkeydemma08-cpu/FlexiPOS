@@ -94,6 +94,20 @@
     return limpio || fallback;
   };
 
+  const normalizarTipoComprobante = (valor) => {
+    if (valor === undefined || valor === null) return '';
+    const texto = String(valor).trim();
+    if (!texto) return '';
+    const lower = texto.toLowerCase();
+    if (['sin comprobante', 'sin_comprobante', 'sin'].includes(lower)) {
+      return 'Sin comprobante';
+    }
+    if (['b01', 'b02', 'b14'].includes(lower)) {
+      return lower.toUpperCase();
+    }
+    return texto;
+  };
+
   const obtenerNombreNegocio = () =>
     configuracionFactura?.nombre ||
     temaNegocio?.titulo ||
@@ -219,7 +233,16 @@
     if (pedidoSpan) pedidoSpan.textContent = `#${pedido.id}`;
     if (clienteSpan) clienteSpan.textContent = pedido.cliente || 'Consumidor final';
     if (documentoSpan) documentoSpan.textContent = pedido.cliente_documento || '00000000000';
-    if (tipoSpan) tipoSpan.textContent = pedido.tipo_comprobante || 'B02';
+    if (tipoSpan) {
+      const tipoTexto = normalizarTipoComprobante(pedido.tipo_comprobante || 'B02');
+      const filaTipo = tipoSpan.closest('p');
+      if (tipoTexto.toLowerCase() === 'sin comprobante') {
+        if (filaTipo) filaTipo.style.display = 'none';
+      } else {
+        if (filaTipo) filaTipo.style.display = '';
+        tipoSpan.textContent = tipoTexto || 'B02';
+      }
+    }
 
     if (subtotalSpan) subtotalSpan.textContent = formatCurrency(pedido.subtotal);
     if (impuestoSpan) impuestoSpan.textContent = formatCurrency(pedido.impuesto);

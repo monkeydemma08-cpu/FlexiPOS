@@ -267,14 +267,39 @@
                 <label for="factura-pie">Mensaje de pie</label>
                 <textarea id="factura-pie" rows="2" placeholder="Gracias por su compra"></textarea>
               </div>
-            </div>
+              </div>
 
-            <div class="factura-rangos">
-              <div class="kanm-card kanm-card--subsection">
-                <div class="kanm-card-header">
-                  <h4>Secuencia B02 (Consumidor final)</h4>
-                  <p class="kanm-subtitle">Define el rango disponible para comprobantes B02.</p>
+              <div class="factura-rangos">
+                <div class="kanm-card kanm-card--subsection">
+                  <div class="kanm-card-header">
+                    <h4>Secuencias fiscales activas</h4>
+                    <p class="kanm-subtitle">Activa o desactiva las secuencias B01, B02 y B14.</p>
+                  </div>
+                  <div class="factura-rango-grid">
+                    <label class="kanm-input-toggle" for="permitir-b01">
+                      <span>Permitir secuencia B01</span>
+                      <input type="checkbox" id="permitir-b01" checked />
+                    </label>
+                    <label class="kanm-input-toggle" for="permitir-b02">
+                      <span>Permitir secuencia B02</span>
+                      <input type="checkbox" id="permitir-b02" checked />
+                    </label>
+                    <label class="kanm-input-toggle" for="permitir-b14">
+                      <span>Permitir secuencia B14</span>
+                      <input type="checkbox" id="permitir-b14" checked />
+                    </label>
+                  </div>
+                  <div class="admin-form-actions">
+                    <button type="button" class="kanm-button" id="secuencias-guardar">Guardar secuencias</button>
+                  </div>
+                  <div id="secuencias-mensaje" class="kanm-message"></div>
                 </div>
+
+                <div class="kanm-card kanm-card--subsection">
+                  <div class="kanm-card-header">
+                    <h4>Secuencia B02 (Consumidor final)</h4>
+                    <p class="kanm-subtitle">Define el rango disponible para comprobantes B02.</p>
+                  </div>
                 <div class="factura-rango-grid">
                   <div class="kanm-input-group">
                     <label for="ncf-b02-inicio">Inicio</label>

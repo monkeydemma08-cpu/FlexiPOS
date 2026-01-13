@@ -122,6 +122,12 @@ const panelCobros = document.getElementById('panel-cobros');
 
 const panelCuadre = document.getElementById('panel-cuadre');
 
+let secuenciasConfig = {
+  permitir_b01: 1,
+  permitir_b02: 1,
+  permitir_b14: 1,
+};
+
 
 
 const obtenerUsuarioActual = () => {
@@ -187,6 +193,143 @@ const fetchAutorizadoCaja = async (url, options = {}) => {
   }
 
   return respuesta;
+};
+
+const normalizarFlagUI = (valor, predeterminado = 1) => {
+  if (valor === undefined || valor === null) {
+    return predeterminado;
+  }
+  if (typeof valor === 'string') {
+    const limpio = valor.trim().toLowerCase();
+    if (['1', 'true', 'on', 'yes', 'si'].includes(limpio)) return 1;
+    if (['0', 'false', 'off', 'no'].includes(limpio)) return 0;
+  }
+  return valor ? 1 : 0;
+};
+
+const normalizarTipoComprobante = (valor) => {
+  if (valor === undefined || valor === null) {
+    return '';
+  }
+  const texto = String(valor).trim();
+  if (!texto) {
+    return '';
+  }
+  const lower = texto.toLowerCase();
+  if (['sin comprobante', 'sin_comprobante', 'sin'].includes(lower)) {
+    return 'Sin comprobante';
+  }
+  if (['b01', 'b02', 'b14'].includes(lower)) {
+    return lower.toUpperCase();
+  }
+  return texto;
+};
+
+const esSinComprobante = (valor) => normalizarTipoComprobante(valor).toLowerCase() === 'sin comprobante';
+
+const resolverConfigSecuencias = (tema = {}) => ({
+  permitir_b01: normalizarFlagUI(tema?.permitir_b01 ?? tema?.permitirB01, 1),
+  permitir_b02: normalizarFlagUI(tema?.permitir_b02 ?? tema?.permitirB02, 1),
+  permitir_b14: normalizarFlagUI(tema?.permitir_b14 ?? tema?.permitirB14, 1),
+});
+
+const actualizarEstadoNcfManual = (tipoComprobante) => {
+  if (!inputNcfManual) return;
+  const sinComprobante = esSinComprobante(tipoComprobante);
+  inputNcfManual.disabled = sinComprobante;
+  if (sinComprobante) {
+    inputNcfManual.value = '';
+  }
+};
+
+const obtenerOpcionDisponible = () => {
+  if (!selectTipoComprobante) return null;
+  const opciones = Array.from(selectTipoComprobante.options || []);
+  return opciones.find((opt) => !opt.disabled && !opt.hidden) || null;
+};
+
+const seleccionarTipoComprobantePermitido = (preferido) => {
+  if (!selectTipoComprobante) return;
+  const valorPreferido = normalizarTipoComprobante(preferido || 'B02');
+  const valorPreferidoUpper = valorPreferido.toUpperCase();
+  const permitirB01 = Number(secuenciasConfig.permitir_b01) !== 0;
+  const permitirB02 = Number(secuenciasConfig.permitir_b02) !== 0;
+  const permitirB14 = Number(secuenciasConfig.permitir_b14) !== 0;
+
+  let valorFinal = valorPreferido;
+  if (valorPreferidoUpper === 'B01' && !permitirB01) {
+    valorFinal = null;
+  }
+  if (valorPreferidoUpper === 'B02' && !permitirB02) {
+    valorFinal = null;
+  }
+  if (valorPreferidoUpper === 'B14' && !permitirB14) {
+    valorFinal = null;
+  }
+
+  if (!valorFinal) {
+    const fallback = obtenerOpcionDisponible();
+    valorFinal = fallback?.value || valorPreferido;
+  }
+
+  selectTipoComprobante.value = valorFinal;
+  actualizarEstadoNcfManual(valorFinal);
+};
+
+const aplicarConfigSecuencias = (config = {}) => {
+  secuenciasConfig = {
+    ...secuenciasConfig,
+    permitir_b01: normalizarFlagUI(config.permitir_b01 ?? config.permitirB01, 1),
+    permitir_b02: normalizarFlagUI(config.permitir_b02 ?? config.permitirB02, 1),
+    permitir_b14: normalizarFlagUI(config.permitir_b14 ?? config.permitirB14, 1),
+  };
+
+  if (!selectTipoComprobante) return;
+
+  const permitirB01 = Number(secuenciasConfig.permitir_b01) !== 0;
+  const permitirB02 = Number(secuenciasConfig.permitir_b02) !== 0;
+  const permitirB14 = Number(secuenciasConfig.permitir_b14) !== 0;
+  const opciones = Array.from(selectTipoComprobante.options || []);
+
+  opciones.forEach((opt) => {
+    if (opt.value === 'B01') {
+      opt.hidden = !permitirB01;
+      opt.disabled = !permitirB01;
+    }
+    if (opt.value === 'B02') {
+      opt.hidden = !permitirB02;
+      opt.disabled = !permitirB02;
+    }
+    if (opt.value === 'B14') {
+      opt.hidden = !permitirB14;
+      opt.disabled = !permitirB14;
+    }
+  });
+
+  seleccionarTipoComprobantePermitido(selectTipoComprobante.value || 'B02');
+};
+
+const cargarConfigSecuencias = async () => {
+  if (!selectTipoComprobante) return;
+
+  try {
+    const temaActual = window.APP_TEMA_NEGOCIO;
+    if (temaActual) {
+      aplicarConfigSecuencias(resolverConfigSecuencias(temaActual));
+      return;
+    }
+
+    const respuesta = await fetchAutorizadoCaja('/api/negocios/mi-tema');
+    if (!respuesta.ok) {
+      return;
+    }
+    const data = await respuesta.json().catch(() => ({}));
+    if (data?.ok && data.tema) {
+      aplicarConfigSecuencias(resolverConfigSecuencias(data.tema));
+    }
+  } catch (error) {
+    console.warn('No se pudo cargar configuracion de secuencias fiscales:', error);
+  }
 };
 
 const renderOpcionesClientes = (lista = []) => {
@@ -1187,7 +1330,7 @@ const limpiarSeleccion = () => {
 
   resetPagosFormulario(0);
 
-  if (selectTipoComprobante) selectTipoComprobante.value = 'B02';
+  seleccionarTipoComprobantePermitido('B02');
 
   if (inputNcfManual) inputNcfManual.value = '';
 
@@ -1444,7 +1587,7 @@ const renderDetallePedido = () => {
 
   if (inputClienteDocumento) inputClienteDocumento.value = encabezado?.cliente_documento || '';
 
-  if (selectTipoComprobante) selectTipoComprobante.value = encabezado?.tipo_comprobante || 'B02';
+  seleccionarTipoComprobantePermitido(encabezado?.tipo_comprobante || 'B02');
 
   if (inputNcfManual) inputNcfManual.value = encabezado?.ncf || '';
 
@@ -2832,6 +2975,12 @@ const cerrarCuenta = async () => {
 
 
 
+    const tipoComprobante = normalizarTipoComprobante(selectTipoComprobante?.value || '');
+    const sinComprobante = esSinComprobante(tipoComprobante);
+    const ncfManual = sinComprobante ? null : inputNcfManual?.value;
+
+
+
     const usuario = obtenerUsuarioActual();
 
     const respuesta = await fetchAutorizadoCaja(`/api/cuentas/${cuentaSeleccionada.cuenta_id}/cerrar`, {
@@ -2856,9 +3005,11 @@ const cerrarCuenta = async () => {
 
         cliente_documento: inputClienteDocumento?.value,
 
-        tipo_comprobante: selectTipoComprobante?.value,
+        tipo_comprobante: tipoComprobante || 'B02',
 
-        ncf: inputNcfManual?.value,
+        ncf: ncfManual,
+
+        generar_ncf: !sinComprobante,
 
         comentarios: inputComentarios?.value,
 
@@ -3052,6 +3203,10 @@ const inicializarEventos = () => {
 
     if (!clientesSugeridos.length) buscarClientes('');
 
+  });
+
+  selectTipoComprobante?.addEventListener('change', (event) => {
+    actualizarEstadoNcfManual(event.target.value);
   });
 
 
@@ -3407,6 +3562,8 @@ const inicializarCuadre = () => {
 
 
 window.addEventListener('DOMContentLoaded', () => {
+
+  cargarConfigSecuencias();
 
   recargarEstadoCaja(true);
 

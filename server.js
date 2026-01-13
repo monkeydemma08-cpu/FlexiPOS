@@ -1808,6 +1808,24 @@ const normalizarFlag = (valor, predeterminado = 0) => {
   return valor ? 1 : 0;
 };
 
+const obtenerConfiguracionSecuenciasNegocio = async (negocioId) => {
+  const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  try {
+    const row = await db.get(
+      'SELECT permitir_b01, permitir_b02, permitir_b14 FROM negocios WHERE id = ? LIMIT 1',
+      [negocio]
+    );
+    return {
+      permitir_b01: normalizarFlag(row?.permitir_b01 ?? row?.permitirB01, 1),
+      permitir_b02: normalizarFlag(row?.permitir_b02 ?? row?.permitirB02, 1),
+      permitir_b14: normalizarFlag(row?.permitir_b14 ?? row?.permitirB14, 1),
+    };
+  } catch (error) {
+    console.warn('No se pudo obtener configuracion de secuencias fiscales:', error?.message || error);
+    return { permitir_b01: 1, permitir_b02: 1, permitir_b14: 1 };
+  }
+};
+
 const esStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
 
 const ESTADOS_COTIZACION = ['borrador', 'enviada', 'aceptada', 'rechazada', 'facturada', 'vencida'];
@@ -2481,7 +2499,7 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
 
 // Cierra uno o varios pedidos aplicando descuentos, pagos y registro en caja.
 // Devuelve via callback un objeto { factura, totales } o un error con status/message.
-const cerrarCuentaYRegistrarPago = (pedidosEntrada, opciones, callback) => {
+const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) => {
   const pedidosActivos = Array.isArray(pedidosEntrada)
     ? pedidosEntrada.filter((p) => p && p.estado !== 'cancelado')
     : [];
@@ -2528,6 +2546,22 @@ const cerrarCuentaYRegistrarPago = (pedidosEntrada, opciones, callback) => {
   const tipoFinal = normalizarCampoTexto(tipo_comprobante, 'B02') || 'B02';
   const comentariosFinal = normalizarCampoTexto(comentarios, null);
   const ncfManualNormalizado = normalizarCampoTexto(ncfManual, null);
+
+  try {
+    const permisosSecuencias = await obtenerConfiguracionSecuenciasNegocio(negocioIdOperacion);
+    if (tipoFinal === 'B01' && Number(permisosSecuencias.permitir_b01) === 0) {
+      return callback({ status: 400, message: 'B01 desactivado para este negocio' });
+    }
+    if (tipoFinal === 'B02' && Number(permisosSecuencias.permitir_b02) === 0) {
+      return callback({ status: 400, message: 'B02 desactivado para este negocio' });
+    }
+    if (tipoFinal === 'B14' && Number(permisosSecuencias.permitir_b14) === 0) {
+      return callback({ status: 400, message: 'B14 desactivado para este negocio' });
+    }
+  } catch (error) {
+    console.error('Error al validar secuencias fiscales:', error?.message || error);
+    return callback({ status: 500, message: 'No se pudo validar la secuencia fiscal' });
+  }
 
   const descuentosPorDetalle = new Map();
   if (Array.isArray(detalle_descuentos)) {
@@ -3755,6 +3789,49 @@ app.put('/api/configuracion/factura', (req, res) => {
   });
 });
 
+app.get('/api/admin/negocio/config', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const configuracion = await obtenerConfiguracionSecuenciasNegocio(negocioId);
+      res.json({ ok: true, ...configuracion });
+    } catch (error) {
+      console.error('Error al obtener configuracion de secuencias fiscales:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener la configuracion de secuencias fiscales' });
+    }
+  });
+});
+
+app.put('/api/admin/negocio/config', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const payload = req.body || {};
+    const permitirB01 = normalizarFlag(payload.permitir_b01 ?? payload.permitirB01, 1);
+    const permitirB02 = normalizarFlag(payload.permitir_b02 ?? payload.permitirB02, 1);
+    const permitirB14 = normalizarFlag(payload.permitir_b14 ?? payload.permitirB14, 1);
+
+    try {
+      await db.run(
+        'UPDATE negocios SET permitir_b01 = ?, permitir_b02 = ?, permitir_b14 = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [permitirB01, permitirB02, permitirB14, negocioId]
+      );
+      const configuracion = await obtenerConfiguracionSecuenciasNegocio(negocioId);
+      res.json({ ok: true, ...configuracion });
+    } catch (error) {
+      console.error('Error al guardar configuracion de secuencias fiscales:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo guardar la configuracion de secuencias fiscales' });
+    }
+  });
+});
+
 app.get('/api/productos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const negocioId = usuarioSesion.negocio_id ?? NEGOCIO_ID_DEFAULT;
@@ -4965,11 +5042,11 @@ app.get('/api/negocios/mi-tema', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || usuarioSesion?.negocioId || NEGOCIO_ID_DEFAULT;
     db.get(
-      `SELECT id, slug, nombre, titulo_sistema, color_primario, color_secundario, color_texto, color_header,
-              color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos, admin_principal_usuario_id,
-              logo_url, activo
-       FROM negocios
-       WHERE id = ?`,
+        `SELECT id, slug, nombre, titulo_sistema, color_primario, color_secundario, color_texto, color_header,
+                color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos, admin_principal_usuario_id,
+                logo_url, permitir_b01, permitir_b02, permitir_b14, activo
+         FROM negocios
+         WHERE id = ?`,
       [negocioId],
       (err, row) => {
         if (err) {
@@ -4980,13 +5057,16 @@ app.get('/api/negocios/mi-tema', (req, res) => {
           return res.status(404).json({ ok: false, error: 'Negocio no encontrado para la sesión actual' });
         }
 
-        const negocioTema = mapNegocioWithDefaults(row);
-        res.json({
-          ok: true,
-          tema: {
-            id: negocioTema.id,
-            slug: negocioTema.slug,
-            titulo: negocioTema.titulo_sistema || negocioTema.nombre,
+          const negocioTema = mapNegocioWithDefaults(row);
+          const permitirB01 = normalizarFlag(negocioTema.permitir_b01 ?? negocioTema.permitirB01, 1);
+          const permitirB02 = normalizarFlag(negocioTema.permitir_b02 ?? negocioTema.permitirB02, 1);
+          const permitirB14 = normalizarFlag(negocioTema.permitir_b14 ?? negocioTema.permitirB14, 1);
+          res.json({
+            ok: true,
+            tema: {
+              id: negocioTema.id,
+              slug: negocioTema.slug,
+              titulo: negocioTema.titulo_sistema || negocioTema.nombre,
             colorPrimario: negocioTema.colorPrimario,
             colorSecundario: negocioTema.colorSecundario,
             colorHeader: negocioTema.colorHeader,
@@ -4994,12 +5074,18 @@ app.get('/api/negocios/mi-tema', (req, res) => {
             colorBotonPrimario: negocioTema.colorBotonPrimario,
             colorBotonSecundario: negocioTema.colorBotonSecundario,
             colorBotonPeligro: negocioTema.colorBotonPeligro,
-            configModulos: negocioTema.configModulos,
-            adminPrincipalUsuarioId: negocioTema.adminPrincipalUsuarioId,
-            logoUrl: negocioTema.logoUrl || negocioTema.logo_url,
-            activo: negocioTema.activo,
-          },
-        });
+              configModulos: negocioTema.configModulos,
+              adminPrincipalUsuarioId: negocioTema.adminPrincipalUsuarioId,
+              logoUrl: negocioTema.logoUrl || negocioTema.logo_url,
+              permitirB01,
+              permitirB02,
+              permitirB14,
+              permitir_b01: permitirB01,
+              permitir_b02: permitirB02,
+              permitir_b14: permitirB14,
+              activo: negocioTema.activo,
+            },
+          });
       }
     );
   });
