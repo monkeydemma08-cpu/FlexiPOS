@@ -717,6 +717,21 @@ img {
   align-items: center;
 }
 
+.producto-precio-selector {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.producto-precio-label {
+  font-size: 0.85rem;
+  color: var(--kanm-gray-600);
+}
+
+.producto-precio-select {
+  min-width: 180px;
+}
+
 .busqueda-productos {
   display: flex;
   flex-direction: column;
@@ -2301,6 +2316,27 @@ img {
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 16px;
+}
+
+.product-form-grid .producto-precios-group {
+  grid-column: 1 / -1;
+}
+
+.producto-precios-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.producto-precio-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(120px, 160px) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.producto-precio-row input {
+  width: 100%;
 }
 
 .product-form-grid .kanm-input-group:nth-child(2),

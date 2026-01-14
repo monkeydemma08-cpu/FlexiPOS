@@ -161,13 +161,26 @@
                 <input type="text" id="prod-nombre" placeholder="Ej. Cheesecake de fresa" />
               </div>
 
-              <div class="kanm-input-group">
-                <label for="prod-precio">Precio</label>
-                <input type="number" id="prod-precio" step="0.01" min="0" placeholder="0.00" />
-              </div>
+                <div class="kanm-input-group">
+                  <label for="prod-precio">Precio</label>
+                  <input type="number" id="prod-precio" step="0.01" min="0" placeholder="0.00" />
+                </div>
 
-              <div class="kanm-input-group">
-                <label for="prod-stock">Stock</label>
+                <div class="kanm-input-group producto-precios-group">
+                  <label>Precios adicionales</label>
+                  <div id="prod-precios-lista" class="producto-precios-lista"></div>
+                  <button
+                    type="button"
+                    id="prod-precio-agregar"
+                    class="kanm-button ghost kanm-button--sm"
+                  >
+                    Agregar precio
+                  </button>
+                  <span class="kanm-input-help">Agrega etiquetas opcionales para cada precio.</span>
+                </div>
+
+                <div class="kanm-input-group">
+                  <label for="prod-stock">Stock</label>
                 <input type="number" id="prod-stock" min="0" placeholder="Cantidad en inventario" />
               </div>
 

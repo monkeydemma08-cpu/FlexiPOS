@@ -1796,6 +1796,56 @@ const normalizarNumero = (valor, predeterminado = 0) => {
   return Number.isFinite(numero) ? numero : predeterminado;
 };
 
+const normalizarListaPrecios = (entrada) => {
+  if (entrada === undefined || entrada === null || entrada === '') {
+    return [];
+  }
+
+  let lista = entrada;
+  if (typeof lista === 'string') {
+    try {
+      lista = JSON.parse(lista);
+    } catch (error) {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(lista)) {
+    return [];
+  }
+
+  const resultado = [];
+  const vistos = new Set();
+
+  lista.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return;
+    const valor = normalizarNumero(item.valor ?? item.precio ?? item.price ?? item.value, null);
+    if (valor === null || valor < 0) return;
+    const etiqueta =
+      normalizarCampoTexto(item.label ?? item.nombre ?? item.name ?? item.etiqueta, null) || `Precio ${index + 1}`;
+    const valorRedondeado = Number(valor.toFixed(2));
+    const key = `${etiqueta}|${valorRedondeado}`;
+    if (vistos.has(key)) return;
+    vistos.add(key);
+    resultado.push({ label: etiqueta, valor: valorRedondeado });
+  });
+
+  return resultado;
+};
+
+const construirOpcionesPrecioProducto = (producto) => {
+  const base = normalizarNumero(producto?.precio, 0);
+  const extras = normalizarListaPrecios(producto?.precios);
+  const opciones = [{ label: 'Base', valor: Number(base.toFixed(2)) }, ...extras];
+  const vistos = new Set();
+  return opciones.filter((opcion) => {
+    const key = `${opcion.label}|${Number(opcion.valor).toFixed(2)}`;
+    if (vistos.has(key)) return false;
+    vistos.add(key);
+    return true;
+  });
+};
+
 const normalizarFlag = (valor, predeterminado = 0) => {
   if (valor === undefined || valor === null) {
     return predeterminado;
@@ -3566,7 +3616,7 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
 
       const [productos, ventasRows, comprasRows] = await Promise.all([
         db.all(
-          `SELECT id, nombre, precio, stock, stock_indefinido
+          `SELECT id, nombre, precio, precios, stock, stock_indefinido
            FROM productos
            WHERE negocio_id = ?
            ORDER BY nombre ASC`,
@@ -3574,6 +3624,7 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
         ),
         db.all(
           `SELECT dp.producto_id,
+                  dp.precio_unitario,
                   SUM(dp.cantidad) AS venta_cantidad,
                   SUM(dp.cantidad * dp.precio_unitario) AS venta_bruta,
                   SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS venta_neta,
@@ -3583,7 +3634,7 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
             WHERE p.negocio_id = ?
               AND p.cierre_id = ?
               AND p.estado = 'pagado'
-            GROUP BY dp.producto_id`,
+            GROUP BY dp.producto_id, dp.precio_unitario`,
           [negocioId, cierreId]
         ),
         db.all(
@@ -3603,14 +3654,33 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
         const ventaCantidad = Number(row.venta_cantidad) || 0;
         const ventaBruta = Number(row.venta_bruta) || 0;
         const ventaNeta = Number(row.venta_neta) || 0;
-        const precioUnitario = ventaCantidad > 0 ? ventaBruta / ventaCantidad : 0;
-        ventasMap.set(productoId, {
-          ventaCantidad,
-          ventaBruta,
-          ventaNeta,
-          descuentoTotal: Number(row.descuento_total) || 0,
-          precioUnitario,
-        });
+        const precioUnitario = normalizarNumero(row.precio_unitario, 0);
+        const existente = ventasMap.get(productoId) || {
+          ventaCantidad: 0,
+          ventaBruta: 0,
+          ventaNeta: 0,
+          descuentoTotal: 0,
+          precios: [],
+        };
+
+        existente.ventaCantidad += ventaCantidad;
+        existente.ventaBruta += ventaBruta;
+        existente.ventaNeta += ventaNeta;
+        existente.descuentoTotal += Number(row.descuento_total) || 0;
+        if (ventaCantidad > 0) {
+          existente.precios.push({
+            precio_unitario: Number(precioUnitario.toFixed(2)),
+            cantidad: ventaCantidad,
+            venta_bruta: Number(ventaBruta.toFixed(2)),
+            venta_neta: Number(ventaNeta.toFixed(2)),
+          });
+        }
+        ventasMap.set(productoId, existente);
+      });
+      ventasMap.forEach((venta) => {
+        if (Array.isArray(venta.precios)) {
+          venta.precios.sort((a, b) => a.precio_unitario - b.precio_unitario);
+        }
       });
 
       const comprasMap = new Map();
@@ -3630,17 +3700,22 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
           : comprasMap.get(normalizarClaveCompra(producto.nombre)) || 0;
         const ventaCantidad = Number(venta.ventaCantidad) || 0;
         const ventaValor = Number(venta.ventaNeta) || 0;
-        const precioUnitario = ventaCantidad > 0 ? venta.precioUnitario : Number(producto.precio) || 0;
+        const precioUnitario =
+          ventaCantidad > 0 ? Number(venta.ventaBruta || 0) / ventaCantidad : Number(producto.precio) || 0;
         const stockFinal = stockIndefinido ? null : Number(producto.stock) || 0;
         const stockInicial =
           stockIndefinido || stockFinal === null
             ? null
             : Number((stockFinal + ventaCantidad - (compraCantidad || 0)).toFixed(2));
+        const preciosConfigurados = construirOpcionesPrecioProducto(producto);
+        const preciosVendidos = Array.isArray(venta.precios) ? venta.precios : [];
 
         return {
           producto_id: producto.id,
           nombre: producto.nombre,
           precio: Number(producto.precio) || 0,
+          precios_configurados: preciosConfigurados,
+          precios_vendidos: preciosVendidos,
           stock: stockFinal,
           stock_indefinido: stockIndefinido ? 1 : 0,
           inv_inicial: stockInicial,
@@ -3842,14 +3917,14 @@ app.get('/api/productos', (req, res) => {
         ? 'LEFT JOIN categorias c ON p.categoria_id = c.id AND c.negocio_id = ?'
         : 'LEFT JOIN categorias c ON p.categoria_id = c.id';
 
-      const sql = `
-        SELECT p.id, p.nombre, p.precio, p.stock, p.stock_indefinido, p.activo, p.categoria_id,
-               c.nombre AS categoria_nombre
-        FROM productos p
-        ${joinCond}
-        WHERE p.negocio_id = ?
-        ORDER BY p.nombre ASC
-      `;
+        const sql = `
+          SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo, p.categoria_id,
+                 c.nombre AS categoria_nombre
+          FROM productos p
+          ${joinCond}
+          WHERE p.negocio_id = ?
+          ORDER BY p.nombre ASC
+        `;
 
       const params = [];
       if (tieneNegocioId) {
@@ -3857,14 +3932,18 @@ app.get('/api/productos', (req, res) => {
       }
       params.push(negocioId);
 
-      db.all(sql, params, (err, rows) => {
-        if (err) {
-          console.error('Error al obtener productos:', err.message);
-          return res.status(500).json({ error: 'Error al obtener productos' });
-        }
+        db.all(sql, params, (err, rows) => {
+          if (err) {
+            console.error('Error al obtener productos:', err.message);
+            return res.status(500).json({ error: 'Error al obtener productos' });
+          }
 
-        res.json(rows);
-      });
+          const productos = (rows || []).map((row) => ({
+            ...row,
+            precios: normalizarListaPrecios(row.precios),
+          }));
+          res.json(productos);
+        });
     } catch (error) {
       console.error('Error al construir consulta de productos:', error?.message || error);
       res.status(500).json({ error: 'Error al obtener productos' });
@@ -4222,7 +4301,8 @@ app.post('/api/pedidos', (req, res) => {
         }
 
         const producto = await db.get(
-          `SELECT p.id, p.nombre, p.precio, p.stock, p.stock_indefinido, COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
+          `SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido,
+                  COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
            FROM productos p
            LEFT JOIN categorias c ON c.id = p.categoria_id
            WHERE p.id = ? AND p.negocio_id = ?`,
@@ -4243,10 +4323,30 @@ app.post('/api/pedidos', (req, res) => {
           }
         }
 
+        const opcionesPrecio = construirOpcionesPrecioProducto(producto);
+        const precioSolicitadoRaw = item?.precio_unitario ?? item?.precioUnitario ?? null;
+        let precioUnitario = opcionesPrecio.length ? opcionesPrecio[0].valor : 0;
+        if (precioSolicitadoRaw !== null && precioSolicitadoRaw !== undefined && precioSolicitadoRaw !== '') {
+          const precioSolicitado = normalizarNumero(precioSolicitadoRaw, null);
+          if (precioSolicitado === null || precioSolicitado < 0) {
+            return res.status(400).json({ error: `Precio invalido para ${producto.nombre || productoId}.` });
+          }
+          const precioRedondeado = Number(precioSolicitado.toFixed(2));
+          const permitido = opcionesPrecio.some(
+            (opcion) => Number(opcion.valor).toFixed(2) === precioRedondeado.toFixed(2)
+          );
+          if (!permitido) {
+            return res
+              .status(400)
+              .json({ error: `Precio no permitido para ${producto.nombre || productoId}.` });
+          }
+          precioUnitario = precioRedondeado;
+        }
+
         itemsProcesados.push({
           producto_id: producto.id,
           cantidad,
-          precio_unitario: Number(producto.precio) || 0,
+          precio_unitario: precioUnitario,
           nombre: producto.nombre,
           stock_indefinido: stockIndefinido ? 1 : 0,
           area_preparacion: normalizarAreaPreparacion(producto.area_preparacion),
@@ -5904,8 +6004,11 @@ app.put('/api/categorias/:id', (req, res) => {
 app.post('/api/productos', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const { nombre, precio, stock, categoria_id } = req.body;
+    const preciosEntrada = req.body.precios ?? req.body.preciosLista ?? req.body.precios_lista;
     const stockIndefinido = normalizarFlag(req.body.stock_indefinido ?? req.body.stockIndefinido, 0);
     const precioValor = Number(precio);
+    const preciosLista = normalizarListaPrecios(preciosEntrada);
+    const preciosJson = preciosLista.length ? JSON.stringify(preciosLista) : null;
     const categoriaId = categoria_id ?? req.body.categoriaId ?? null;
     const stockValor =
       stock === undefined || stock === null || stock === ''
@@ -5926,10 +6029,18 @@ app.post('/api/productos', (req, res) => {
     const stockFinal = stockIndefinido ? null : Number.isFinite(stockValor) ? stockValor : 0;
 
     const sql = `
-      INSERT INTO productos (nombre, precio, stock, stock_indefinido, categoria_id, activo, negocio_id)
-      VALUES (?, ?, ?, ?, ?, 1, ?)
+      INSERT INTO productos (nombre, precio, precios, stock, stock_indefinido, categoria_id, activo, negocio_id)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?)
     `;
-    const params = [nombre, precioValor, stockFinal, stockIndefinido, categoriaId, usuarioSesion.negocio_id];
+    const params = [
+      nombre,
+      precioValor,
+      preciosJson,
+      stockFinal,
+      stockIndefinido,
+      categoriaId,
+      usuarioSesion.negocio_id,
+    ];
 
     db.run(sql, params, function (err) {
       if (err) {
@@ -5941,6 +6052,7 @@ app.post('/api/productos', (req, res) => {
         id: this.lastID,
         nombre,
         precio: precioValor,
+        precios: preciosLista,
         stock: stockIndefinido ? null : stockFinal,
         stock_indefinido: stockIndefinido,
         categoria_id: categoriaId || null,
@@ -5954,6 +6066,10 @@ app.put('/api/productos/:id', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const { id } = req.params;
     const { nombre = null, precio = null, categoria_id = null, activo = null } = req.body;
+    const preciosKeys = ['precios', 'preciosLista', 'precios_lista'];
+    const preciosKey = preciosKeys.find((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
+    const preciosEntrada = preciosKey ? req.body[preciosKey] : undefined;
+    const preciosFueEnviado = Boolean(preciosKey);
     const stockIndefinidoEntrada = req.body.stock_indefinido ?? req.body.stockIndefinido;
     const stockEntrada = req.body.stock;
 
@@ -6020,6 +6136,13 @@ app.put('/api/productos/:id', (req, res) => {
           'stock_indefinido = ?',
         ];
         const params = [nombre, precio, categoria_id, activo, stockIndefinido];
+
+        if (preciosFueEnviado) {
+          const preciosLista = normalizarListaPrecios(preciosEntrada);
+          const preciosJson = preciosLista.length ? JSON.stringify(preciosLista) : null;
+          campos.push('precios = ?');
+          params.push(preciosJson);
+        }
 
         if (stockProporcionado) {
           campos.push('stock = ?');

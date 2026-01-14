@@ -362,6 +362,57 @@ const formatCurrency = (valor) => {
   }).format(numero);
 };
 
+const normalizarOpcionesPrecioProducto = (producto = {}) => {
+  const opciones = [];
+  const baseValor = Number(producto.precio) || 0;
+  opciones.push({ label: 'Base', valor: Number(baseValor.toFixed(2)) });
+
+  const extras = Array.isArray(producto.precios) ? producto.precios : [];
+  extras.forEach((extra, index) => {
+    if (!extra) return;
+    const valor = Number(extra.valor);
+    if (!Number.isFinite(valor) || valor < 0) return;
+    const label = (extra.label || '').toString().trim() || `Precio ${index + 1}`;
+    opciones.push({ label, valor: Number(valor.toFixed(2)) });
+  });
+
+  return opciones;
+};
+
+const construirClaveCarrito = (productoId, precioLabel, precioValor) =>
+  `${productoId}::${precioLabel || 'precio'}::${Number(precioValor).toFixed(2)}`;
+
+const obtenerCantidadProductoEnCarrito = (productoId, excluirClave = null) => {
+  let total = 0;
+  estado.carrito.forEach((item, key) => {
+    if (item.producto_id !== productoId) return;
+    if (excluirClave && key === excluirClave) return;
+    total += Number(item.cantidad) || 0;
+  });
+  return total;
+};
+
+const resolverPrecioSeleccionado = (producto, selectEl = null) => {
+  const opciones = normalizarOpcionesPrecioProducto(producto);
+  const base = opciones[0] || { label: 'Base', valor: 0 };
+
+  if (!selectEl) {
+    return base;
+  }
+
+  const seleccion = selectEl.selectedOptions?.[0];
+  const valorSeleccionado = Number(seleccion?.value);
+  if (!Number.isFinite(valorSeleccionado)) {
+    return base;
+  }
+
+  const labelSeleccionado = (seleccion?.dataset?.label || seleccion?.textContent || '').trim();
+  return {
+    label: labelSeleccionado || base.label,
+    valor: Number(valorSeleccionado.toFixed(2)),
+  };
+};
+
 const parseFechaLocal = (valor) => {
   if (!valor) return null;
   const base = typeof valor === 'string' ? valor.replace(' ', 'T') : valor;
@@ -513,9 +564,7 @@ const actualizarContador = () => {
 const calcularResumen = () => {
   let subtotal = 0;
   estado.carrito.forEach((item) => {
-    const producto = estado.productos.find((p) => p.id === item.producto_id);
-    if (!producto) return;
-    const precio = Number(producto.precio) || 0;
+    const precio = Number(item.precio_unitario) || 0;
     subtotal += precio * item.cantidad;
   });
   const impuesto = subtotal * (estado.impuestoPorcentaje / 100);
@@ -556,35 +605,45 @@ const actualizarCarritoUI = () => {
 
   const fragment = document.createDocumentFragment();
 
-  estado.carrito.forEach((item, productoId) => {
-    const producto = estado.productos.find((p) => p.id === productoId);
+  estado.carrito.forEach((item, itemKey) => {
+    const producto = estado.productos.find((p) => p.id === item.producto_id);
     if (!producto) {
       return;
     }
 
     const stockDisponible = obtenerStockDisponible(producto);
     const stockIndefinido = esProductoStockIndefinido(producto);
-    const precioUnitario = Number(producto.precio) || 0;
+    const totalEnCarrito = obtenerCantidadProductoEnCarrito(producto.id);
+    const precioUnitario = Number(item.precio_unitario) || 0;
     const subtotalLinea = precioUnitario * item.cantidad;
+    const opcionesPrecio = normalizarOpcionesPrecioProducto(producto);
+    const mostrarEtiquetaPrecio = opcionesPrecio.length > 1;
+    const etiquetaPrecio = mostrarEtiquetaPrecio && item.precio_label ? ` (${item.precio_label})` : '';
 
     const card = document.createElement('article');
     card.className = 'carrito-item';
 
     const info = document.createElement('div');
-    info.innerHTML = `
-      <h3>${producto.nombre}</h3>
-      <p class="producto-meta">Precio: ${formatCurrency(precioUnitario)} · Stock disponible: ${obtenerEtiquetaStock(producto)}</p>
-      <p class="producto-meta subtotal-linea">Subtotal: ${formatCurrency(subtotalLinea)}</p>
-    `;
+    const titulo = document.createElement('h3');
+    titulo.textContent = producto.nombre;
+    const meta = document.createElement('p');
+    meta.className = 'producto-meta';
+    meta.textContent = `Precio: ${formatCurrency(precioUnitario)}${etiquetaPrecio} | Stock disponible: ${obtenerEtiquetaStock(producto)}`;
+    const subtotal = document.createElement('p');
+    subtotal.className = 'producto-meta subtotal-linea';
+    subtotal.textContent = `Subtotal: ${formatCurrency(subtotalLinea)}`;
+    info.appendChild(titulo);
+    info.appendChild(meta);
+    info.appendChild(subtotal);
 
     const controles = document.createElement('div');
     controles.className = 'carrito-controles';
 
-    const botonMenos = crearBotonCantidad('−', () => ajustarCantidad(producto.id, item.cantidad - 1));
+    const botonMenos = crearBotonCantidad('-', () => ajustarCantidad(itemKey, item.cantidad - 1));
     const botonMas = crearBotonCantidad(
       '+',
-      () => ajustarCantidad(producto.id, item.cantidad + 1),
-      !stockIndefinido && item.cantidad >= stockDisponible
+      () => ajustarCantidad(itemKey, item.cantidad + 1),
+      !stockIndefinido && totalEnCarrito >= stockDisponible
     );
 
     const inputCantidad = document.createElement('input');
@@ -593,14 +652,14 @@ const actualizarCarritoUI = () => {
     inputCantidad.value = item.cantidad;
     inputCantidad.addEventListener('change', (event) => {
       const valor = Number(event.target.value);
-      ajustarCantidad(producto.id, valor);
+      ajustarCantidad(itemKey, valor);
     });
 
     const botonEliminar = document.createElement('button');
     botonEliminar.type = 'button';
     botonEliminar.className = 'kanm-button ghost';
     botonEliminar.textContent = 'Eliminar';
-    botonEliminar.addEventListener('click', () => eliminarDelCarrito(producto.id));
+    botonEliminar.addEventListener('click', () => eliminarDelCarrito(itemKey));
 
     controles.appendChild(botonMenos);
     controles.appendChild(inputCantidad);
@@ -644,6 +703,8 @@ const renderProductos = () => {
     const stockDisponible = obtenerStockDisponible(producto);
     const stockTexto = obtenerEtiquetaStock(producto);
     const stockIndefinido = esProductoStockIndefinido(producto);
+    const opcionesPrecio = normalizarOpcionesPrecioProducto(producto);
+    let selectorPrecio = null;
 
     contenido.innerHTML = `
       <h3>${producto.nombre}</h3>
@@ -654,6 +715,30 @@ const renderProductos = () => {
       </p>
     `;
 
+    if (opcionesPrecio.length > 1) {
+      const selectorWrap = document.createElement('div');
+      selectorWrap.className = 'producto-precio-selector';
+
+      const etiqueta = document.createElement('span');
+      etiqueta.className = 'producto-precio-label';
+      etiqueta.textContent = 'Precio a usar';
+
+      selectorPrecio = document.createElement('select');
+      selectorPrecio.className = 'kanm-input producto-precio-select';
+      selectorPrecio.setAttribute('aria-label', 'Precio a usar');
+      opcionesPrecio.forEach((opcion) => {
+        const option = document.createElement('option');
+        option.value = opcion.valor;
+        option.dataset.label = opcion.label;
+        option.textContent = `${opcion.label} - ${formatCurrency(opcion.valor)}`;
+        selectorPrecio.appendChild(option);
+      });
+
+      selectorWrap.appendChild(etiqueta);
+      selectorWrap.appendChild(selectorPrecio);
+      contenido.appendChild(selectorWrap);
+    }
+
     const acciones = document.createElement('div');
     acciones.className = 'producto-acciones';
 
@@ -662,7 +747,7 @@ const renderProductos = () => {
     botonAgregar.className = 'kanm-button';
     botonAgregar.textContent = stockIndefinido || stockDisponible > 0 ? 'Agregar' : 'Sin stock';
     botonAgregar.disabled = !producto.activo || (!stockIndefinido && stockDisponible <= 0);
-    botonAgregar.addEventListener('click', () => agregarAlCarrito(producto));
+    botonAgregar.addEventListener('click', () => agregarAlCarrito(producto, selectorPrecio));
 
     acciones.appendChild(botonAgregar);
 
@@ -674,7 +759,7 @@ const renderProductos = () => {
   listaProductos.appendChild(fragment);
 };
 
-const agregarAlCarrito = (producto) => {
+const agregarAlCarrito = (producto, selectPrecio = null) => {
   limpiarMensaje();
 
   if (!producto || !producto.id) {
@@ -689,30 +774,36 @@ const agregarAlCarrito = (producto) => {
     return;
   }
 
-  const itemActual = estado.carrito.get(producto.id) || { cantidad: 0 };
+  const seleccion = resolverPrecioSeleccionado(producto, selectPrecio);
+  const itemKey = construirClaveCarrito(producto.id, seleccion.label, seleccion.valor);
+  const totalEnCarrito = obtenerCantidadProductoEnCarrito(producto.id);
+  const itemActual = estado.carrito.get(itemKey) || { cantidad: 0 };
   const nuevaCantidad = itemActual.cantidad + 1;
+  const totalNuevo = totalEnCarrito + 1;
 
-  if (!stockIndefinido && nuevaCantidad > stockDisponible) {
+  if (!stockIndefinido && totalNuevo > stockDisponible) {
     mostrarMensaje('No puedes agregar mas unidades que el stock disponible.', 'error');
     return;
   }
 
-  estado.carrito.set(producto.id, {
+  estado.carrito.set(itemKey, {
     producto_id: producto.id,
     cantidad: nuevaCantidad,
+    precio_unitario: seleccion.valor,
+    precio_label: seleccion.label,
   });
   actualizarCarritoUI();
 };
 
-const eliminarDelCarrito = (productoId) => {
-  estado.carrito.delete(productoId);
+const eliminarDelCarrito = (itemKey) => {
+  estado.carrito.delete(itemKey);
   actualizarCarritoUI();
 };
 
-const ajustarCantidad = (productoId, cantidadDeseada) => {
+const ajustarCantidad = (itemKey, cantidadDeseada) => {
   limpiarMensaje();
 
-  if (!estado.carrito.has(productoId)) {
+  if (!estado.carrito.has(itemKey)) {
     return false;
   }
 
@@ -723,6 +814,8 @@ const ajustarCantidad = (productoId, cantidadDeseada) => {
     return false;
   }
 
+  const itemActual = estado.carrito.get(itemKey);
+  const productoId = itemActual?.producto_id;
   const producto = estado.productos.find((p) => p.id === productoId);
   if (!producto) {
     mostrarMensaje('No se pudo encontrar el producto seleccionado.', 'error');
@@ -732,23 +825,29 @@ const ajustarCantidad = (productoId, cantidadDeseada) => {
 
   const stockDisponible = obtenerStockDisponible(producto);
   const stockIndefinido = esProductoStockIndefinido(producto);
-  if (!stockIndefinido && cantidad > stockDisponible) {
+  const totalOtros = obtenerCantidadProductoEnCarrito(productoId, itemKey);
+  const totalNuevo = totalOtros + cantidad;
+  if (!stockIndefinido && totalNuevo > stockDisponible) {
     mostrarMensaje('No puedes solicitar mas unidades que el stock disponible.', 'error');
     actualizarCarritoUI();
     return false;
   }
 
-  estado.carrito.set(productoId, {
-    producto_id: productoId,
-    cantidad,
-  });
+  estado.carrito.set(itemKey, { ...itemActual, cantidad });
   actualizarCarritoUI();
   return true;
 };
 
 const obtenerPayloadPedido = (destino = 'cocina') => {
   const mesa = campoMesa?.value.trim();
-  const items = Array.from(estado.carrito.values());
+  const items = Array.from(estado.carrito.values()).map((item) => {
+    const precioUnitario = Number(item.precio_unitario);
+    return {
+      producto_id: item.producto_id,
+      cantidad: item.cantidad,
+      precio_unitario: Number.isFinite(precioUnitario) ? precioUnitario : 0,
+    };
+  });
   const modoServicioSeleccionado = selectServicio?.value || 'en_local';
   const nota = notaInput?.value?.trim() || '';
 
@@ -774,6 +873,8 @@ const validarPedido = () => {
     return false;
   }
 
+  const cantidadesPorProducto = new Map();
+
   for (const item of estado.carrito.values()) {
     if (!item || !item.producto_id) {
       mostrarMensaje('Hay un producto invalido en el carrito.', 'error');
@@ -786,9 +887,19 @@ const validarPedido = () => {
     }
 
     const producto = estado.productos.find((p) => p.id === item.producto_id);
-    const stockIndefinido = esProductoStockIndefinido(producto);
-    const stockDisponible = obtenerStockDisponible(producto);
-    if (!stockIndefinido && item.cantidad > stockDisponible) {
+    if (!producto) {
+      mostrarMensaje('Hay un producto invalido en el carrito.', 'error');
+      return false;
+    }
+    const registro = cantidadesPorProducto.get(item.producto_id) || { total: 0, producto };
+    registro.total += item.cantidad;
+    cantidadesPorProducto.set(item.producto_id, registro);
+  }
+
+  for (const registro of cantidadesPorProducto.values()) {
+    const stockIndefinido = esProductoStockIndefinido(registro.producto);
+    const stockDisponible = obtenerStockDisponible(registro.producto);
+    if (!stockIndefinido && registro.total > stockDisponible) {
       mostrarMensaje('Hay productos cuya cantidad supera el stock disponible.', 'error');
       return false;
     }

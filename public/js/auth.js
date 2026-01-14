@@ -29,6 +29,22 @@ const isSuperAdminUser = (user) => Boolean(user?.esSuperAdmin || user?.es_super_
 const hasForcePasswordChange = (user) => Boolean(user?.forcePasswordChange || user?.force_password_change);
 const isImpersonatedUser = (user) => Boolean(user?.impersonated);
 
+const syncSessionStorage = (value) => {
+  if (!value) return;
+  try {
+    sessionStorage.setItem(STORAGE_APP_KEY, value);
+    sessionStorage.setItem(STORAGE_KEY, value);
+  } catch (error) {
+    console.warn('No se pudo sincronizar sessionStorage:', error);
+  }
+  try {
+    localStorage.setItem(STORAGE_APP_KEY, value);
+    localStorage.setItem(STORAGE_KEY, value);
+  } catch (error) {
+    console.warn('No se pudo sincronizar localStorage:', error);
+  }
+};
+
 const migrateLegacySession = () => {
   if (typeof window === 'undefined') {
     return null;
@@ -37,7 +53,9 @@ const migrateLegacySession = () => {
   const readers = [
     () => {
       try {
-        return sessionStorage.getItem(STORAGE_APP_KEY);
+        const value = sessionStorage.getItem(STORAGE_APP_KEY);
+        if (value) syncSessionStorage(value);
+        return value;
       } catch (error) {
         console.warn('No se pudo leer sessionStorage (sesionApp):', error);
         return null;
@@ -45,7 +63,9 @@ const migrateLegacySession = () => {
     },
     () => {
       try {
-        return sessionStorage.getItem(STORAGE_KEY);
+        const value = sessionStorage.getItem(STORAGE_KEY);
+        if (value) syncSessionStorage(value);
+        return value;
       } catch (error) {
         console.warn('No se pudo leer sessionStorage (kanmUser):', error);
         return null;
@@ -55,8 +75,7 @@ const migrateLegacySession = () => {
       try {
         const legacy = localStorage.getItem(STORAGE_APP_KEY);
         if (legacy) {
-          sessionStorage.setItem(STORAGE_APP_KEY, legacy);
-          localStorage.removeItem(STORAGE_APP_KEY);
+          syncSessionStorage(legacy);
           return legacy;
         }
       } catch (error) {
@@ -68,8 +87,7 @@ const migrateLegacySession = () => {
       try {
         const legacy = localStorage.getItem(STORAGE_KEY);
         if (legacy) {
-          sessionStorage.setItem(STORAGE_APP_KEY, legacy);
-          localStorage.removeItem(STORAGE_KEY);
+          syncSessionStorage(legacy);
           return legacy;
         }
       } catch (error) {

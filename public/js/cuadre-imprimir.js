@@ -131,7 +131,59 @@ const renderDetalle = (data) => {
         const compra = item.stock_indefinido ? 'N/A' : formatNumber(item.compra);
         const invFinal = item.stock_indefinido ? 'N/A' : formatNumber(item.inv_final);
         const venta = formatNumber(item.venta);
-        const precio = formatCurrency(item.precio_unitario || item.precio || 0);
+        const preciosConfigurados = Array.isArray(item.precios_configurados)
+          ? item.precios_configurados
+          : [];
+        const preciosVendidos = Array.isArray(item.precios_vendidos) ? item.precios_vendidos : [];
+        const ventasPorPrecio = new Map();
+
+        preciosVendidos.forEach((ventaItem) => {
+          const valor = Number(ventaItem?.precio_unitario);
+          if (!Number.isFinite(valor)) return;
+          const key = Number(valor.toFixed(2)).toFixed(2);
+          const cantidad = Number(ventaItem?.cantidad) || 0;
+          ventasPorPrecio.set(key, (ventasPorPrecio.get(key) || 0) + cantidad);
+        });
+
+        const precioLineas = [];
+        const preciosConfiguradosKeys = new Set();
+        preciosConfigurados.forEach((precioItem) => {
+          if (!precioItem) return;
+          const valor = Number(precioItem.valor);
+          if (!Number.isFinite(valor)) return;
+          const key = Number(valor.toFixed(2)).toFixed(2);
+          preciosConfiguradosKeys.add(key);
+          const cantidad = ventasPorPrecio.get(key) || 0;
+          const etiqueta = (precioItem.label || '').toString().trim();
+          const baseTexto = etiqueta ? `${etiqueta}: ${formatCurrency(valor)}` : `${formatCurrency(valor)}`;
+          if (cantidad > 0) {
+            precioLineas.push(`${baseTexto} (x${cantidad})`);
+          } else {
+            precioLineas.push(baseTexto);
+          }
+        });
+
+        const extrasVendidos = [];
+        preciosVendidos.forEach((ventaItem) => {
+          const valor = Number(ventaItem?.precio_unitario);
+          if (!Number.isFinite(valor)) return;
+          const key = Number(valor.toFixed(2)).toFixed(2);
+          if (preciosConfiguradosKeys.has(key)) return;
+          const cantidad = Number(ventaItem?.cantidad) || 0;
+          if (!cantidad) return;
+          extrasVendidos.push({ valor, cantidad });
+        });
+        extrasVendidos.sort((a, b) => a.valor - b.valor);
+        extrasVendidos.forEach((extra) => {
+          precioLineas.push(`${formatCurrency(extra.valor)} (x${extra.cantidad})`);
+        });
+
+        if (!precioLineas.length) {
+          const precioBase = Number(item.precio_unitario || item.precio || 0);
+          precioLineas.push(formatCurrency(precioBase));
+        }
+
+        const precio = precioLineas.join('<br>');
         const valorVenta = formatCurrency(item.valor_venta || 0);
 
         fila.innerHTML = `

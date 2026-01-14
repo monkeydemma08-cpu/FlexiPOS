@@ -4,6 +4,8 @@ const formProducto = document.getElementById('prod-form');
 const inputProdId = document.getElementById('prod-id');
 const inputProdNombre = document.getElementById('prod-nombre');
 const inputProdPrecio = document.getElementById('prod-precio');
+const prodPreciosLista = document.getElementById('prod-precios-lista');
+const prodPrecioAgregarBtn = document.getElementById('prod-precio-agregar');
 const inputProdStock = document.getElementById('prod-stock');
 const inputProdStockIndefinido = document.getElementById('prod-stock-indefinido');
 const inputProdCategoria = document.getElementById('prod-categoria');
@@ -646,6 +648,7 @@ const limpiarFormularioProducto = () => {
   if (inputProdActivo) inputProdActivo.checked = true;
   if (inputProdStockIndefinido) inputProdStockIndefinido.checked = false;
   if (inputProdStock) inputProdStock.disabled = false;
+  setPreciosProductoUI([]);
   refrescarUiStockIndefinido(false);
 };
 
@@ -659,6 +662,81 @@ const refrescarUiStockIndefinido = (limpiarValor = false) => {
       inputProdStock.value = '';
     }
   }
+};
+
+const limpiarPreciosProductoUI = () => {
+  if (prodPreciosLista) {
+    prodPreciosLista.innerHTML = '';
+  }
+};
+
+const crearFilaPrecioProducto = (precio = {}) => {
+  const fila = document.createElement('div');
+  fila.className = 'producto-precio-row';
+
+  const inputEtiqueta = document.createElement('input');
+  inputEtiqueta.type = 'text';
+  inputEtiqueta.placeholder = 'Etiqueta (opcional)';
+  inputEtiqueta.value = precio.label ?? '';
+
+  const inputValor = document.createElement('input');
+  inputValor.type = 'number';
+  inputValor.min = '0';
+  inputValor.step = '0.01';
+  inputValor.placeholder = '0.00';
+  if (precio.valor !== undefined && precio.valor !== null && precio.valor !== '') {
+    inputValor.value = precio.valor;
+  }
+
+  const botonEliminar = document.createElement('button');
+  botonEliminar.type = 'button';
+  botonEliminar.className = 'kanm-button ghost kanm-button--sm';
+  botonEliminar.textContent = 'Quitar';
+  botonEliminar.addEventListener('click', () => {
+    fila.remove();
+  });
+
+  fila.appendChild(inputEtiqueta);
+  fila.appendChild(inputValor);
+  fila.appendChild(botonEliminar);
+  return fila;
+};
+
+const agregarPrecioProductoUI = (precio = {}) => {
+  if (!prodPreciosLista) return;
+  prodPreciosLista.appendChild(crearFilaPrecioProducto(precio));
+};
+
+const setPreciosProductoUI = (lista = []) => {
+  limpiarPreciosProductoUI();
+  const precios = Array.isArray(lista) ? lista : [];
+  if (!precios.length) {
+    agregarPrecioProductoUI();
+    return;
+  }
+  precios.forEach((precio) => agregarPrecioProductoUI(precio));
+};
+
+const leerPreciosProductoUI = () => {
+  if (!prodPreciosLista) return { precios: [], invalido: false };
+  const filas = Array.from(prodPreciosLista.querySelectorAll('.producto-precio-row'));
+  const precios = [];
+  let invalido = false;
+
+  filas.forEach((fila) => {
+    const inputs = fila.querySelectorAll('input');
+    const etiqueta = inputs[0]?.value?.trim() || '';
+    const valorTexto = inputs[1]?.value?.trim() || '';
+    if (!valorTexto) return;
+    const valor = Number(valorTexto);
+    if (!Number.isFinite(valor) || valor < 0) {
+      invalido = true;
+      return;
+    }
+    precios.push({ label: etiqueta, valor });
+  });
+
+  return { precios, invalido };
 };
 
 
@@ -680,6 +758,10 @@ const renderProductos = (lista) => {
   lista.forEach((producto) => {
     const activo = Number(producto.activo) === 1;
     const stockEsIndefinido = esProductoStockIndefinido(producto);
+    const preciosExtra = Array.isArray(producto.precios) ? producto.precios : [];
+    const preciosTexto = preciosExtra.length
+      ? preciosExtra.map((p) => `${p.label || 'Precio'}: ${formatCurrency(p.valor)}`).join(' | ')
+      : '';
     const item = document.createElement('article');
     item.className = 'producto-item';
 
@@ -707,6 +789,9 @@ const renderProductos = (lista) => {
         activo ? '' : 'estado-inactivo'
       }">${activo ? 'Activo' : 'Inactivo'}</span></span>
     `;
+    if (preciosTexto) {
+      detalle.innerHTML += `<span><strong>Precios:</strong> ${preciosTexto}</span>`;
+    }
 
     const botonEditar = document.createElement('button');
     botonEditar.type = 'button';
@@ -721,6 +806,7 @@ const renderProductos = (lista) => {
       refrescarUiStockIndefinido(false);
       if (inputProdCategoria) inputProdCategoria.value = producto.categoria_id ?? '';
       if (inputProdActivo) inputProdActivo.checked = activo;
+      setPreciosProductoUI(producto.precios || []);
       setMessage(mensajeProductos, `Editando producto: ${producto.nombre}`, 'info');
       inputProdNombre?.focus();
     });
@@ -777,6 +863,12 @@ productosBuscarInput?.addEventListener('input', () => filtrarProductos());
 filtroCategoriaProductos?.addEventListener('change', () => filtrarProductos());
 inputProdStockIndefinido?.addEventListener('change', () => refrescarUiStockIndefinido(true));
 refrescarUiStockIndefinido(false);
+setPreciosProductoUI([]);
+
+prodPrecioAgregarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  agregarPrecioProductoUI();
+});
 
 const obtenerValoresProducto = () => {
   const nombre = inputProdNombre?.value.trim();
@@ -787,8 +879,9 @@ const obtenerValoresProducto = () => {
   const categoriaValor = inputProdCategoria?.value || '';
   const categoriaId = categoriaValor === '' ? null : parseInt(categoriaValor, 10);
   const activo = inputProdActivo?.checked ?? true;
+  const { precios } = leerPreciosProductoUI();
 
-  return { nombre, precio, stock, categoriaId, activo, stockIndefinido };
+  return { nombre, precio, precios, stock, categoriaId, activo, stockIndefinido };
 };
 
 const validarProducto = ({ nombre, precio, stock, stockIndefinido }) => {
@@ -798,6 +891,11 @@ const validarProducto = ({ nombre, precio, stock, stockIndefinido }) => {
   }
   if (Number.isNaN(precio)) {
     setMessage(mensajeProductos, 'El precio del producto es obligatorio y debe ser numerico.', 'error');
+    return false;
+  }
+  const { invalido } = leerPreciosProductoUI();
+  if (invalido) {
+    setMessage(mensajeProductos, 'Los precios adicionales deben ser numericos y mayores o iguales a 0.', 'error');
     return false;
   }
   if (!stockIndefinido) {
@@ -857,8 +955,13 @@ const cargarCategorias = async () => {
   }
 };
 
-const crearProducto = async ({ nombre, precio, stock, categoriaId, stockIndefinido }) => {
-  const body = { nombre, precio, stock_indefinido: stockIndefinido ? 1 : 0 };
+const crearProducto = async ({ nombre, precio, precios, stock, categoriaId, stockIndefinido }) => {
+  const body = {
+    nombre,
+    precio,
+    precios: Array.isArray(precios) ? precios : [],
+    stock_indefinido: stockIndefinido ? 1 : 0,
+  };
   if (stockIndefinido) {
     body.stock = null;
   } else {
@@ -880,10 +983,11 @@ const crearProducto = async ({ nombre, precio, stock, categoriaId, stockIndefini
   return respuesta.json();
 };
 
-const actualizarProducto = async (id, { nombre, precio, stock, categoriaId, activo, stockIndefinido }) => {
+const actualizarProducto = async (id, { nombre, precio, precios, stock, categoriaId, activo, stockIndefinido }) => {
   const body = {
     nombre,
     precio,
+    precios: Array.isArray(precios) ? precios : [],
     categoria_id: categoriaId !== null && !Number.isNaN(categoriaId) ? categoriaId : null,
     activo: activo ? 1 : 0,
     stock_indefinido: stockIndefinido ? 1 : 0,
@@ -2704,7 +2808,9 @@ const cargarDetalleCierre = async (cierreId) => {
 const consultarCierresCaja = async (mostrarCarga = true) => {
   if (!cierresMensaje) return;
 
-  limpiarDetalleCierre();
+  if (mostrarCarga || !detalleCierreActivo) {
+    limpiarDetalleCierre();
+  }
 
   let desde = cierresDesdeInput?.value || getLocalDateISO();
   let hasta = cierresHastaInput?.value || desde;
@@ -2742,6 +2848,13 @@ const consultarCierresCaja = async (mostrarCarga = true) => {
     }
 
     renderCierresCaja();
+    if (detalleCierreActivo) {
+      const detalleId = Number(detalleCierreActivo);
+      const existeDetalle = cierresCaja.some((item) => Number(item.id) === detalleId);
+      if (!existeDetalle) {
+        limpiarDetalleCierre();
+      }
+    }
     setMessage(cierresMensaje, '', 'info');
   } catch (error) {
     console.error('Error al consultar cierres de caja:', error);

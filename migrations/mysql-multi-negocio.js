@@ -709,6 +709,7 @@ async function runMigrations() {
   await ensureColumn('negocios', 'titulo_sistema VARCHAR(150) NULL');
   await ensureColumn('categorias', "area_preparacion ENUM('ninguna', 'cocina', 'bar') NOT NULL DEFAULT 'ninguna'");
   await ensureColumn('productos', 'stock_indefinido TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('productos', 'precios JSON NULL');
   await ensureColumn('pedidos', 'bartender_id INT NULL');
   await ensureColumn('pedidos', 'bartender_nombre VARCHAR(255) NULL');
   await ensureNegocioThemeAndModulesColumns();
