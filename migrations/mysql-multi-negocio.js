@@ -591,7 +591,7 @@ async function ensureEsSuperAdminColumn() {
   await ensureColumn('usuarios', 'es_super_admin TINYINT(1) NOT NULL DEFAULT 0');
   try {
     await query(
-      'UPDATE usuarios SET es_super_admin = 1 WHERE (usuario = "admin" OR id = 1) AND es_super_admin = 0'
+      `UPDATE usuarios SET es_super_admin = 1 WHERE (usuario = 'admin' OR id = 1) AND es_super_admin = 0`
     );
   } catch (error) {
     console.warn('No se pudo marcar admin como super admin por defecto:', error?.message || error);
