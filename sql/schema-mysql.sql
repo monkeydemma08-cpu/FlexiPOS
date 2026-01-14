@@ -291,6 +291,37 @@ CREATE TABLE IF NOT EXISTS gastos (
   CONSTRAINT fk_gastos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS compras_inventario (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  fecha DATETIME NOT NULL,
+  proveedor VARCHAR(255) NOT NULL,
+  origen_fondos VARCHAR(20) NOT NULL DEFAULT 'negocio',
+  metodo_pago VARCHAR(40) NULL,
+  total DECIMAL(12,2) NOT NULL DEFAULT 0,
+  observaciones TEXT NULL,
+  creado_por INT NULL,
+  compra_id INT NULL,
+  gasto_id INT NULL,
+  salida_id INT NULL,
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_compras_inventario_compra FOREIGN KEY (compra_id) REFERENCES compras(id),
+  CONSTRAINT fk_compras_inventario_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS compras_inventario_detalle (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  compra_id INT NOT NULL,
+  producto_id INT NOT NULL,
+  cantidad DECIMAL(10,2) NOT NULL,
+  costo_unitario DECIMAL(10,2) NOT NULL,
+  total_linea DECIMAL(10,2) NOT NULL,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_compra_inv_detalle_compra FOREIGN KEY (compra_id) REFERENCES compras_inventario(id),
+  CONSTRAINT fk_compra_inv_detalle_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
+  CONSTRAINT fk_compra_inv_detalle_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS notas_credito_ventas (
   id INT AUTO_INCREMENT PRIMARY KEY,
   pedido_id INT NOT NULL,
@@ -375,6 +406,11 @@ CREATE INDEX idx_historial_cocina_completed ON historial_cocina (completed_at);
 CREATE INDEX idx_historial_bar_completed ON historial_bar (completed_at);
 CREATE INDEX idx_cierres_caja_fecha ON cierres_caja (negocio_id, fecha_operacion);
 CREATE INDEX idx_salidas_caja_fecha ON salidas_caja (negocio_id, fecha);
+CREATE INDEX idx_compras_inventario_negocio_fecha ON compras_inventario (negocio_id, fecha);
+CREATE INDEX idx_compras_inventario_compra ON compras_inventario (compra_id);
+CREATE INDEX idx_compra_inv_detalle_compra ON compras_inventario_detalle (compra_id);
+CREATE INDEX idx_compra_inv_detalle_producto ON compras_inventario_detalle (producto_id);
+CREATE INDEX idx_compra_inv_detalle_negocio ON compras_inventario_detalle (negocio_id);
 CREATE INDEX idx_sesiones_usuario ON sesiones_usuarios (usuario_id);
 CREATE INDEX idx_pedidos_cierre_id ON pedidos (cierre_id);
 CREATE INDEX idx_cotizaciones_estado ON cotizaciones (negocio_id, estado, fecha_creacion);

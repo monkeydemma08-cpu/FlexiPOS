@@ -191,6 +191,58 @@ async function ensureTableGastos() {
   await ensureForeignKey('gastos', 'negocio_id');
 }
 
+async function ensureTableComprasInventario() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS compras_inventario (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      fecha DATETIME NOT NULL,
+      proveedor VARCHAR(255) NOT NULL,
+      origen_fondos VARCHAR(20) NOT NULL DEFAULT 'negocio',
+      metodo_pago VARCHAR(40) NULL,
+      total DECIMAL(12,2) NOT NULL DEFAULT 0,
+      observaciones TEXT NULL,
+      creado_por INT NULL,
+      compra_id INT NULL,
+      gasto_id INT NULL,
+      salida_id INT NULL,
+      creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+      negocio_id INT NOT NULL,
+      CONSTRAINT fk_compras_inventario_compra FOREIGN KEY (compra_id) REFERENCES compras(id),
+      CONSTRAINT fk_compras_inventario_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('compras_inventario', 'idx_compras_inventario_negocio_fecha', '(negocio_id, fecha)');
+  await ensureIndexByName('compras_inventario', 'idx_compras_inventario_negocio', '(negocio_id)');
+  await ensureIndexByName('compras_inventario', 'idx_compras_inventario_compra', '(compra_id)');
+  await ensureForeignKey('compras_inventario', 'negocio_id');
+  await ensureForeignKey('compras_inventario', 'compra_id', 'compras');
+}
+
+async function ensureTableComprasInventarioDetalle() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS compras_inventario_detalle (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      compra_id INT NOT NULL,
+      producto_id INT NOT NULL,
+      cantidad DECIMAL(10,2) NOT NULL,
+      costo_unitario DECIMAL(10,2) NOT NULL,
+      total_linea DECIMAL(10,2) NOT NULL,
+      negocio_id INT NOT NULL,
+      CONSTRAINT fk_compra_inv_detalle_compra FOREIGN KEY (compra_id) REFERENCES compras_inventario(id),
+      CONSTRAINT fk_compra_inv_detalle_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
+      CONSTRAINT fk_compra_inv_detalle_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('compras_inventario_detalle', 'idx_compra_inv_detalle_compra', '(compra_id)');
+  await ensureIndexByName('compras_inventario_detalle', 'idx_compra_inv_detalle_producto', '(producto_id)');
+  await ensureIndexByName('compras_inventario_detalle', 'idx_compra_inv_detalle_negocio', '(negocio_id)');
+  await ensureForeignKey('compras_inventario_detalle', 'negocio_id');
+  await ensureForeignKey('compras_inventario_detalle', 'compra_id', 'compras_inventario');
+  await ensureForeignKey('compras_inventario_detalle', 'producto_id', 'productos');
+}
+
 async function ensureDefaultNegocio() {
   await query(
     `INSERT INTO negocios (
@@ -702,6 +754,8 @@ async function runMigrations() {
   await ensureTableNegocios();
   await ensureTableHistorialBar();
   await ensureTableGastos();
+  await ensureTableComprasInventario();
+  await ensureTableComprasInventarioDetalle();
   await ensureColumn('negocios', 'slug VARCHAR(120) UNIQUE');
   await ensureColumn('negocios', 'color_primario VARCHAR(20) NULL');
   await ensureColumn('negocios', 'color_secundario VARCHAR(20) NULL');

@@ -62,6 +62,23 @@ const compraAgregarDetalleBtn = document.getElementById('compra-agregar-detalle'
 const compraRecalcularBtn = document.getElementById('compra-recalcular');
 const compraMensaje = document.getElementById('compra-mensaje');
 
+const abastecimientoForm = document.getElementById('abastecimiento-form');
+const abastecimientoProveedorInput = document.getElementById('abastecimiento-proveedor');
+const abastecimientoFechaInput = document.getElementById('abastecimiento-fecha');
+const abastecimientoOrigenInput = document.getElementById('abastecimiento-origen');
+const abastecimientoMetodoInput = document.getElementById('abastecimiento-metodo');
+const abastecimientoObservacionesInput = document.getElementById('abastecimiento-observaciones');
+const abastecimientoDetallesContainer = document.getElementById('abastecimiento-detalles');
+const abastecimientoAgregarDetalleBtn = document.getElementById('abastecimiento-agregar-detalle');
+const abastecimientoTotalSpan = document.getElementById('abastecimiento-total');
+const abastecimientoMensaje = document.getElementById('abastecimiento-mensaje');
+const abastecimientoListaMensaje = document.getElementById('abastecimiento-lista-mensaje');
+const abastecimientoTabla = document.getElementById('abastecimiento-tabla');
+const abastecimientoDetalleWrapper = document.getElementById('abastecimiento-detalle-wrapper');
+const abastecimientoDetalleTabla = document.getElementById('abastecimiento-detalle-tabla');
+const abastecimientoDetalleTitulo = document.getElementById('abastecimiento-detalle-titulo');
+const abastecimientoDetalleSubtitulo = document.getElementById('abastecimiento-detalle-subtitulo');
+
 const comprasMensaje = document.getElementById('compras-mensaje');
 const comprasTabla = document.getElementById('compras-tabla');
 
@@ -177,11 +194,13 @@ const HIST_COCINA_PAGE_SIZE = 50;
 
 let productos = [];
 let compras = [];
+let comprasInventario = [];
 let gastos = [];
 let datosReporte607 = [];
 let datosReporte606 = [];
 let cierresCaja = [];
 let detalleCierreActivo = null;
+let detalleAbastecimientoActivo = null;
 let usuarios = [];
 
 const REFRESH_INTERVAL_ADMIN = 15000;
@@ -275,6 +294,12 @@ const formatCurrency = (value) => {
     currency: 'DOP',
     minimumFractionDigits: 2,
   }).format(number);
+};
+
+const formatNumber = (value) => {
+  const number = Number(value);
+  if (Number.isNaN(number)) return '--';
+  return new Intl.NumberFormat('es-DO', { maximumFractionDigits: 2 }).format(number);
 };
 
 const formatCurrencySigned = (value) => {
@@ -462,7 +487,18 @@ const mostrarTabAdmin = (tab = 'productos') => {
   });
 };
 
-const tabsSoloAdmin = ['productos', 'configuracion', 'usuarios', 'compras', 'gastos', 'ventas', 'analisis', 'cuadres', 'historial'];
+const tabsSoloAdmin = [
+  'productos',
+  'configuracion',
+  'usuarios',
+  'compras',
+  'abastecimiento',
+  'gastos',
+  'ventas',
+  'analisis',
+  'cuadres',
+  'historial',
+];
 const tabsSoloSuperAdmin = ['negocios'];
 
 const aplicarModulosUI = () => {
@@ -605,11 +641,8 @@ const ejecutarEliminacionAdmin = async () => {
   }
 
   try {
-    const respuesta = await fetch(modalEliminarEstado.endpoint, {
+    const respuesta = await fetchJsonAutorizado(modalEliminarEstado.endpoint, {
       method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify(payload),
     });
 
@@ -853,6 +886,7 @@ const cargarProductos = async () => {
     const data = await respuesta.json();
     productos = Array.isArray(data) ? data : [];
     filtrarProductos();
+    refrescarSelectsAbastecimiento();
   } catch (error) {
     console.error('Error al cargar productos:', error);
     setMessage(mensajeProductos, 'Error al cargar los productos.', 'error');
@@ -1821,6 +1855,377 @@ const registrarCompra = async (payload) => {
   if (!respuesta.ok) {
     const error = await respuesta.json().catch(() => ({}));
     throw new Error(error.error || 'No se pudo registrar la compra');
+  }
+};
+
+/* =====================
+ * Abastecimiento (compras inventario)
+ * ===================== */
+const construirOpcionesProductos = (select, seleccionado = null) => {
+  if (!select) return;
+  const valorActual = seleccionado ?? select.value;
+  select.innerHTML = '';
+
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Selecciona producto';
+  select.appendChild(placeholder);
+
+  (productos || []).forEach((producto) => {
+    const option = document.createElement('option');
+    option.value = producto.id;
+    option.textContent = producto.nombre;
+    select.appendChild(option);
+  });
+
+  if (valorActual) {
+    select.value = String(valorActual);
+  }
+};
+
+const refrescarSelectsAbastecimiento = () => {
+  if (!abastecimientoDetallesContainer) return;
+  const selects = abastecimientoDetallesContainer.querySelectorAll('.abastecimiento-detalle-producto');
+  selects.forEach((select) => {
+    construirOpcionesProductos(select);
+  });
+};
+
+const crearFilaAbastecimientoDetalle = (detalle = {}) => {
+  const fila = document.createElement('div');
+  fila.className = 'compra-detalle-row abastecimiento-detalle-row';
+
+  const producto = document.createElement('select');
+  producto.className = 'abastecimiento-detalle-producto';
+  construirOpcionesProductos(producto, detalle.producto_id);
+
+  const cantidad = document.createElement('input');
+  cantidad.type = 'number';
+  cantidad.min = '0';
+  cantidad.step = '0.01';
+  cantidad.placeholder = 'Cantidad';
+  cantidad.className = 'abastecimiento-detalle-cantidad';
+  cantidad.value = detalle.cantidad ?? '';
+
+  const costo = document.createElement('input');
+  costo.type = 'number';
+  costo.min = '0';
+  costo.step = '0.01';
+  costo.placeholder = 'Costo unitario';
+  costo.className = 'abastecimiento-detalle-costo';
+  costo.value = detalle.costo_unitario ?? '';
+
+  const total = document.createElement('input');
+  total.type = 'number';
+  total.min = '0';
+  total.step = '0.01';
+  total.placeholder = 'Total linea';
+  total.className = 'abastecimiento-detalle-total';
+  total.readOnly = true;
+  total.value = detalle.total_linea ?? '';
+
+  const remover = document.createElement('button');
+  remover.type = 'button';
+  remover.className = 'kanm-button ghost';
+  remover.textContent = 'Quitar';
+  remover.addEventListener('click', () => {
+    fila.remove();
+    recalcularAbastecimientoTotales();
+  });
+
+  fila.appendChild(producto);
+  fila.appendChild(cantidad);
+  fila.appendChild(costo);
+  fila.appendChild(total);
+  fila.appendChild(remover);
+
+  return fila;
+};
+
+const recalcularAbastecimientoTotales = () => {
+  const filas = abastecimientoDetallesContainer?.querySelectorAll('.abastecimiento-detalle-row');
+  if (!filas || !filas.length) {
+    if (abastecimientoTotalSpan) abastecimientoTotalSpan.textContent = formatCurrency(0);
+    return;
+  }
+
+  let total = 0;
+  filas.forEach((fila) => {
+    const cantidadInput = fila.querySelector('.abastecimiento-detalle-cantidad');
+    const costoInput = fila.querySelector('.abastecimiento-detalle-costo');
+    const totalInput = fila.querySelector('.abastecimiento-detalle-total');
+
+    const cantidad = Number(cantidadInput?.value ?? '');
+    const costo = Number(costoInput?.value ?? '');
+    if (!Number.isFinite(cantidad) || cantidad <= 0 || !Number.isFinite(costo) || costo < 0) {
+      if (totalInput) totalInput.value = '';
+      return;
+    }
+
+    const totalLinea = Number((cantidad * costo).toFixed(2));
+    if (totalInput) totalInput.value = totalLinea.toFixed(2);
+    total += totalLinea;
+  });
+
+  if (abastecimientoTotalSpan) {
+    abastecimientoTotalSpan.textContent = formatCurrency(total);
+  }
+};
+
+const obtenerDetallesAbastecimiento = () => {
+  const filas = abastecimientoDetallesContainer?.querySelectorAll('.abastecimiento-detalle-row');
+  if (!filas || filas.length === 0) {
+    return { detalles: [], invalido: true, total: 0 };
+  }
+
+  const detalles = [];
+  let total = 0;
+  let invalido = false;
+
+  filas.forEach((fila) => {
+    const productoInput = fila.querySelector('.abastecimiento-detalle-producto');
+    const cantidadInput = fila.querySelector('.abastecimiento-detalle-cantidad');
+    const costoInput = fila.querySelector('.abastecimiento-detalle-costo');
+
+    const productoId = Number(productoInput?.value ?? '');
+    const cantidad = Number(cantidadInput?.value ?? '');
+    const costo = Number(costoInput?.value ?? '');
+
+    const filaVacia =
+      !productoInput?.value && (cantidadInput?.value ?? '') === '' && (costoInput?.value ?? '') === '';
+
+    if (filaVacia) {
+      return;
+    }
+
+    if (!Number.isFinite(productoId) || productoId <= 0) {
+      invalido = true;
+      return;
+    }
+    if (!Number.isFinite(cantidad) || cantidad <= 0) {
+      invalido = true;
+      return;
+    }
+    if (!Number.isFinite(costo) || costo < 0) {
+      invalido = true;
+      return;
+    }
+
+    const totalLinea = Number((cantidad * costo).toFixed(2));
+    total += totalLinea;
+    detalles.push({
+      producto_id: productoId,
+      cantidad,
+      costo_unitario: Number(costo.toFixed(2)),
+      total_linea: totalLinea,
+    });
+  });
+
+  return { detalles, invalido, total: Number(total.toFixed(2)) };
+};
+
+const limpiarFormularioAbastecimiento = () => {
+  abastecimientoForm?.reset();
+  if (abastecimientoFechaInput) {
+    abastecimientoFechaInput.value = getLocalDateISO(new Date());
+  }
+  if (abastecimientoOrigenInput) abastecimientoOrigenInput.value = 'negocio';
+  if (abastecimientoMetodoInput) abastecimientoMetodoInput.value = '';
+  if (abastecimientoObservacionesInput) abastecimientoObservacionesInput.value = '';
+  if (abastecimientoDetallesContainer) {
+    abastecimientoDetallesContainer.innerHTML = '';
+    abastecimientoDetallesContainer.appendChild(crearFilaAbastecimientoDetalle());
+  }
+  if (abastecimientoTotalSpan) abastecimientoTotalSpan.textContent = formatCurrency(0);
+  setMessage(abastecimientoMensaje, '', 'info');
+};
+
+const renderComprasInventario = (lista) => {
+  if (!abastecimientoTabla) return;
+  abastecimientoTabla.innerHTML = '';
+
+  if (!Array.isArray(lista) || lista.length === 0) {
+    const fila = document.createElement('tr');
+    const celda = document.createElement('td');
+    celda.colSpan = 6;
+    celda.className = 'tabla-vacia';
+    celda.textContent = 'No hay compras de inventario registradas.';
+    fila.appendChild(celda);
+    abastecimientoTabla.appendChild(fila);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  lista.forEach((compra) => {
+    const fila = document.createElement('tr');
+
+    const fecha = document.createElement('td');
+    fecha.textContent = formatDate(compra.fecha);
+
+    const proveedor = document.createElement('td');
+    proveedor.textContent = compra.proveedor || '--';
+
+    const origen = document.createElement('td');
+    origen.textContent = compra.origen_fondos === 'caja' ? 'Caja' : 'Negocio';
+
+    const items = document.createElement('td');
+    const itemsValor = Number(compra.items) || 0;
+    items.textContent = itemsValor ? itemsValor.toString() : '--';
+
+    const total = document.createElement('td');
+    total.textContent = formatCurrency(compra.total || 0);
+
+    const acciones = document.createElement('td');
+    const botonDetalle = document.createElement('button');
+    botonDetalle.type = 'button';
+    botonDetalle.className = 'kanm-button secondary';
+    botonDetalle.textContent = 'Ver detalle';
+    botonDetalle.dataset.detalleAbastecimiento = compra.id;
+    acciones.appendChild(botonDetalle);
+
+    fila.appendChild(fecha);
+    fila.appendChild(proveedor);
+    fila.appendChild(origen);
+    fila.appendChild(items);
+    fila.appendChild(total);
+    fila.appendChild(acciones);
+
+    fragment.appendChild(fila);
+  });
+
+  abastecimientoTabla.appendChild(fragment);
+};
+
+const limpiarDetalleAbastecimiento = () => {
+  detalleAbastecimientoActivo = null;
+  if (abastecimientoDetalleTabla) abastecimientoDetalleTabla.innerHTML = '';
+  if (abastecimientoDetalleWrapper) abastecimientoDetalleWrapper.hidden = true;
+  if (abastecimientoDetalleSubtitulo) abastecimientoDetalleSubtitulo.textContent = '';
+};
+
+const renderDetalleAbastecimiento = (compra, detalles) => {
+  if (!abastecimientoDetalleWrapper || !abastecimientoDetalleTabla) return;
+  abastecimientoDetalleTabla.innerHTML = '';
+
+  if (abastecimientoDetalleTitulo) {
+    abastecimientoDetalleTitulo.textContent = `Detalle compra #${compra?.id || ''}`;
+  }
+  if (abastecimientoDetalleSubtitulo) {
+    const proveedor = compra?.proveedor || '';
+    const total = formatCurrency(compra?.total || 0);
+    abastecimientoDetalleSubtitulo.textContent = `${proveedor} · ${total}`;
+  }
+
+  if (!Array.isArray(detalles) || detalles.length === 0) {
+    const fila = document.createElement('tr');
+    const celda = document.createElement('td');
+    celda.colSpan = 4;
+    celda.className = 'tabla-vacia';
+    celda.textContent = 'No hay detalle para esta compra.';
+    fila.appendChild(celda);
+    abastecimientoDetalleTabla.appendChild(fila);
+    abastecimientoDetalleWrapper.hidden = false;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  detalles.forEach((detalle) => {
+    const fila = document.createElement('tr');
+    const producto = document.createElement('td');
+    producto.textContent = detalle.producto_nombre || `Producto ${detalle.producto_id}`;
+
+    const cantidad = document.createElement('td');
+    cantidad.textContent = formatNumber(detalle.cantidad);
+    cantidad.className = 'text-right';
+
+    const costo = document.createElement('td');
+    costo.textContent = formatCurrency(detalle.costo_unitario || 0);
+    costo.className = 'text-right';
+
+    const total = document.createElement('td');
+    total.textContent = formatCurrency(detalle.total_linea || 0);
+    total.className = 'text-right';
+
+    fila.appendChild(producto);
+    fila.appendChild(cantidad);
+    fila.appendChild(costo);
+    fila.appendChild(total);
+    fragment.appendChild(fila);
+  });
+
+  abastecimientoDetalleTabla.appendChild(fragment);
+  abastecimientoDetalleWrapper.hidden = false;
+};
+
+const cargarDetalleAbastecimiento = async (id) => {
+  if (!id) return;
+  try {
+    setMessage(abastecimientoListaMensaje, 'Cargando detalle...', 'info');
+    const respuesta = await fetchConAutorizacion(`/api/inventario/compras/${id}`);
+    if (!respuesta.ok) {
+      throw new Error('No se pudo obtener el detalle de la compra.');
+    }
+    const data = await respuesta.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudo obtener el detalle de la compra.');
+    }
+
+    detalleAbastecimientoActivo = id;
+    renderDetalleAbastecimiento(data.compra, data.detalles || []);
+    setMessage(abastecimientoListaMensaje, '', 'info');
+  } catch (error) {
+    console.error('Error al cargar detalle de compra de inventario:', error);
+    setMessage(abastecimientoListaMensaje, error.message || 'No se pudo cargar el detalle.', 'error');
+    limpiarDetalleAbastecimiento();
+  }
+};
+
+const cargarComprasInventario = async () => {
+  if (!abastecimientoListaMensaje) return;
+  if (!abastecimientoTabla) return;
+
+  try {
+    setMessage(abastecimientoListaMensaje, 'Cargando abastecimiento...', 'info');
+    const respuesta = await fetchConAutorizacion('/api/inventario/compras');
+    if (!respuesta.ok) {
+      throw new Error('No se pudieron obtener las compras de inventario.');
+    }
+    const data = await respuesta.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudieron obtener las compras de inventario.');
+    }
+    comprasInventario = Array.isArray(data.compras) ? data.compras : [];
+    renderComprasInventario(comprasInventario);
+    if (detalleAbastecimientoActivo) {
+      const detalleExiste = comprasInventario.some(
+        (item) => Number(item.id) === Number(detalleAbastecimientoActivo)
+      );
+      if (!detalleExiste) {
+        limpiarDetalleAbastecimiento();
+      }
+    }
+    setMessage(abastecimientoListaMensaje, '', 'info');
+  } catch (error) {
+    console.error('Error al cargar compras de inventario:', error);
+    setMessage(
+      abastecimientoListaMensaje,
+      error.message || 'Error al cargar compras de inventario.',
+      'error'
+    );
+    comprasInventario = [];
+    renderComprasInventario(comprasInventario);
+  }
+};
+
+const registrarCompraInventario = async (payload) => {
+  const respuesta = await fetchJsonAutorizado('/api/inventario/compras', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (!respuesta.ok) {
+    const error = await respuesta.json().catch(() => ({}));
+    throw new Error(error.error || 'No se pudo registrar la compra de inventario.');
   }
 };
 
@@ -3055,6 +3460,10 @@ const recargarEstadoAdmin = async (mostrarCarga = false) => {
       tareas.push(consultarCierresCaja(mostrarCarga));
     }
 
+    if (abastecimientoTabla) {
+      tareas.push(cargarComprasInventario());
+    }
+
     if (usuariosTablaBody) {
       tareas.push(cargarUsuarios(usuariosRolSelect?.value));
     }
@@ -3882,6 +4291,83 @@ compraForm?.addEventListener('submit', async (event) => {
   }
 });
 
+abastecimientoAgregarDetalleBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  if (!abastecimientoDetallesContainer) return;
+  abastecimientoDetallesContainer.appendChild(crearFilaAbastecimientoDetalle());
+});
+
+abastecimientoDetallesContainer?.addEventListener('input', (event) => {
+  if (
+    event.target.matches('.abastecimiento-detalle-cantidad') ||
+    event.target.matches('.abastecimiento-detalle-costo') ||
+    event.target.matches('.abastecimiento-detalle-producto')
+  ) {
+    recalcularAbastecimientoTotales();
+  }
+});
+
+abastecimientoForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  const proveedor = abastecimientoProveedorInput?.value.trim() || '';
+  const fecha = abastecimientoFechaInput?.value;
+  const origenFondos = abastecimientoOrigenInput?.value || 'negocio';
+  const metodoPago = abastecimientoMetodoInput?.value || '';
+  const observaciones = abastecimientoObservacionesInput?.value.trim();
+
+  const { detalles, invalido } = obtenerDetallesAbastecimiento();
+
+  if (!proveedor || !fecha || detalles.length === 0 || invalido) {
+    setMessage(
+      abastecimientoMensaje,
+      'Proveedor, fecha y al menos un producto valido son obligatorios.',
+      'error'
+    );
+    return;
+  }
+
+  if (origenFondos === 'caja' && !metodoPago) {
+    setMessage(abastecimientoMensaje, 'Selecciona el metodo de pago cuando el origen es caja.', 'error');
+    return;
+  }
+
+  const payload = {
+    proveedor,
+    fecha,
+    origen_fondos: origenFondos,
+    metodo_pago: metodoPago || null,
+    observaciones: observaciones || null,
+    items: detalles,
+  };
+
+  try {
+    setMessage(abastecimientoMensaje, 'Registrando compra...', 'info');
+    await registrarCompraInventario(payload);
+    setMessage(abastecimientoMensaje, 'Compra registrada y stock actualizado.', 'info');
+    limpiarFormularioAbastecimiento();
+    await cargarComprasInventario();
+    await cargarProductos();
+  } catch (error) {
+    console.error('Error al registrar compra de inventario:', error);
+    setMessage(
+      abastecimientoMensaje,
+      error.message || 'No se pudo registrar la compra de inventario.',
+      'error'
+    );
+  }
+});
+
+abastecimientoTabla?.addEventListener('click', (event) => {
+  const boton = event.target.closest('[data-detalle-abastecimiento]');
+  if (!boton) return;
+  event.preventDefault();
+  const id = Number(boton.dataset.detalleAbastecimiento);
+  if (Number.isFinite(id) && id > 0) {
+    cargarDetalleAbastecimiento(id);
+  }
+});
+
 gastoRecurrenteInput?.addEventListener('change', () => refrescarFrecuenciaGasto(true));
 
 gastoCancelarBtn?.addEventListener('click', (event) => {
@@ -4099,6 +4585,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (cierresHastaInput && !cierresHastaInput.value) {
     cierresHastaInput.value = fechaHoy;
   }
+  if (abastecimientoFechaInput && !abastecimientoFechaInput.value) {
+    abastecimientoFechaInput.value = fechaHoy;
+  }
   if (histCocinaFechaInput && !histCocinaFechaInput.value) {
     histCocinaFechaInput.value = fechaHoy;
   }
@@ -4142,12 +4631,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     cargarConfiguracionFactura(),
     cargarConfigSecuencias(),
     cargarCompras(),
+    cargarComprasInventario(),
     cargarGastos(),
     cargarAnalisis(),
     cargarUsuarios(usuariosRolSelect?.value || 'mesera'),
   ]);
   if (compraDetallesContainer) {
     compraDetallesContainer.appendChild(crearFilaDetalle());
+  }
+  if (abastecimientoDetallesContainer) {
+    abastecimientoDetallesContainer.appendChild(crearFilaAbastecimientoDetalle());
+    recalcularAbastecimientoTotales();
   }
   await consultarReporte607();
   await consultarReporte606();

@@ -659,11 +659,11 @@ const requireUsuarioSesion = (req, res, next) => {
   obtenerUsuarioDesdeHeaders(req, async (sessionErr, usuarioSesion) => {
     if (sessionErr) {
       console.error('Error al validar sesi?n:', sessionErr.message || sessionErr);
-      return res.status(500).json({ error: 'Error al validar sesi?n' });
+      return res.status(500).json({ error: 'Error al validar sesion' });
     }
 
     if (!usuarioSesion) {
-      return res.status(401).json({ error: 'Sesi?n no v?lida. Inicia sesi?n nuevamente.' });
+      return res.status(401).json({ error: 'Sesion no valida. Inicia sesion nuevamente.' });
     }
 
     if (usuarioSesion.negocio_id == null) {
@@ -6494,6 +6494,307 @@ app.post('/api/compras', (req, res) => {
 
       insertarCompra();
     });
+  });
+});
+
+app.get('/api/inventario/compras', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioIdRaw = usuarioSesion?.negocio_id ?? NEGOCIO_ID_DEFAULT;
+    const negocioId = Number(negocioIdRaw);
+    const negocioIdFinal = Number.isFinite(negocioId) ? negocioId : NEGOCIO_ID_DEFAULT;
+    const limitRaw = Number.parseInt(req.query?.limit, 10);
+    const limitBase = Number.isFinite(limitRaw) ? limitRaw : 100;
+    const limit = Math.min(Math.max(limitBase, 1), 300);
+
+    try {
+      const rows = await db.all(
+        `
+        SELECT ci.id, ci.fecha, ci.proveedor, ci.origen_fondos, ci.metodo_pago, ci.total, ci.observaciones,
+               ci.creado_en, u.nombre AS creado_por,
+               (SELECT COUNT(1) FROM compras_inventario_detalle cid WHERE cid.compra_id = ci.id) AS lineas,
+               (SELECT SUM(cid.cantidad) FROM compras_inventario_detalle cid WHERE cid.compra_id = ci.id) AS items
+          FROM compras_inventario ci
+          LEFT JOIN usuarios u ON u.id = ci.creado_por
+         WHERE ci.negocio_id = ?
+         ORDER BY ci.fecha DESC, ci.id DESC
+         LIMIT ${limit}
+      `,
+        [negocioIdFinal]
+      );
+
+      res.json({ ok: true, compras: rows || [] });
+    } catch (error) {
+      console.error('Error al obtener compras de inventario:', error?.message || error);
+      res.status(500).json({ error: 'No se pudieron obtener las compras de inventario.' });
+    }
+  });
+});
+
+app.get('/api/inventario/compras/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const compraId = Number(req.params.id);
+    if (!Number.isInteger(compraId) || compraId <= 0) {
+      return res.status(400).json({ error: 'ID invalido.' });
+    }
+
+    try {
+      const compra = await db.get(
+        `
+        SELECT ci.id, ci.fecha, ci.proveedor, ci.origen_fondos, ci.metodo_pago, ci.total, ci.observaciones,
+               ci.creado_en, u.nombre AS creado_por
+          FROM compras_inventario ci
+          LEFT JOIN usuarios u ON u.id = ci.creado_por
+         WHERE ci.id = ? AND ci.negocio_id = ?
+        `,
+        [compraId, negocioId]
+      );
+
+      if (!compra) {
+        return res.status(404).json({ error: 'Compra no encontrada.' });
+      }
+
+      const detalles = await db.all(
+        `
+        SELECT cid.id, cid.producto_id, p.nombre AS producto_nombre, cid.cantidad,
+               cid.costo_unitario, cid.total_linea
+          FROM compras_inventario_detalle cid
+          LEFT JOIN productos p ON p.id = cid.producto_id
+         WHERE cid.compra_id = ? AND cid.negocio_id = ?
+         ORDER BY cid.id ASC
+        `,
+        [compraId, negocioId]
+      );
+
+      res.json({ ok: true, compra, detalles: detalles || [] });
+    } catch (error) {
+      console.error('Error al obtener detalle de compra de inventario:', error?.message || error);
+      res.status(500).json({ error: 'No se pudo obtener el detalle de la compra.' });
+    }
+  });
+});
+
+app.post('/api/inventario/compras', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const proveedor = normalizarCampoTexto(req.body?.proveedor);
+    const fecha = req.body?.fecha;
+    const origenFondosRaw =
+      normalizarCampoTexto(req.body?.origen_fondos ?? req.body?.origenFondos) || 'negocio';
+    const origenFondos = origenFondosRaw === 'caja' ? 'caja' : 'negocio';
+    const metodoPago = normalizarCampoTexto(req.body?.metodo_pago ?? req.body?.metodoPago);
+    const observaciones = normalizarCampoTexto(req.body?.observaciones ?? req.body?.comentarios);
+    const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
+
+    if (!proveedor || !esFechaISOValida(fecha)) {
+      return res.status(400).json({ error: 'Proveedor y fecha son obligatorios.' });
+    }
+
+    if (!itemsEntrada.length) {
+      return res.status(400).json({ error: 'Agrega al menos un producto a la compra.' });
+    }
+
+    const productoIds = Array.from(
+      new Set(
+        itemsEntrada
+          .map((item) => Number(item?.producto_id))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
+    );
+
+    if (!productoIds.length) {
+      return res.status(400).json({ error: 'Selecciona productos validos.' });
+    }
+
+    try {
+      const placeholders = productoIds.map(() => '?').join(',');
+      const productos = await db.all(
+        `SELECT id, nombre, stock_indefinido FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
+        [negocioId, ...productoIds]
+      );
+      const productosMap = new Map((productos || []).map((producto) => [Number(producto.id), producto]));
+
+      const detalles = [];
+      let total = 0;
+
+      for (const item of itemsEntrada) {
+        const productoId = Number(item?.producto_id);
+        if (!Number.isFinite(productoId) || productoId <= 0 || !productosMap.has(productoId)) {
+          return res.status(400).json({ error: 'Hay productos invalidos en la compra.' });
+        }
+
+        const cantidad = normalizarNumero(item?.cantidad, null);
+        const costoUnitario = normalizarNumero(item?.costo_unitario ?? item?.costoUnitario, null);
+
+        if (cantidad === null || cantidad <= 0) {
+          return res.status(400).json({ error: 'La cantidad debe ser mayor a 0.' });
+        }
+        if (costoUnitario === null || costoUnitario < 0) {
+          return res.status(400).json({ error: 'El costo unitario debe ser mayor o igual a 0.' });
+        }
+
+        const totalLinea = Number((cantidad * costoUnitario).toFixed(2));
+        total += totalLinea;
+        detalles.push({
+          producto_id: productoId,
+          cantidad,
+          costo_unitario: Number(costoUnitario.toFixed(2)),
+          total_linea: totalLinea,
+        });
+      }
+
+      total = Number(total.toFixed(2));
+
+      await db.run('BEGIN');
+
+      const insertCompra = await db.run(
+        `
+          INSERT INTO compras_inventario
+            (fecha, proveedor, origen_fondos, metodo_pago, total, observaciones, creado_por, negocio_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [fecha, proveedor, origenFondos, metodoPago, total, observaciones, usuarioSesion.id, negocioId]
+      );
+
+      const compraId = insertCompra?.lastID;
+      if (!compraId) {
+        throw new Error('No se pudo registrar la compra de inventario.');
+      }
+
+      for (const detalle of detalles) {
+        await db.run(
+          `
+            INSERT INTO compras_inventario_detalle
+              (compra_id, producto_id, cantidad, costo_unitario, total_linea, negocio_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+          [
+            compraId,
+            detalle.producto_id,
+            detalle.cantidad,
+            detalle.costo_unitario,
+            detalle.total_linea,
+            negocioId,
+          ]
+        );
+
+        const producto = productosMap.get(detalle.producto_id);
+        if (!esStockIndefinido(producto)) {
+          const updateResult = await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?',
+            [detalle.cantidad, detalle.producto_id, negocioId]
+          );
+          if ((updateResult?.changes || 0) === 0) {
+            throw new Error(`No se pudo actualizar el stock del producto ${detalle.producto_id}.`);
+          }
+        }
+      }
+
+      const compraComentarios = `Compra inventario #${compraId}`;
+      const compraInsert = await db.run(
+        `
+          INSERT INTO compras
+            (proveedor, rnc, fecha, tipo_comprobante, ncf, monto_gravado, impuesto, total, monto_exento, comentarios, negocio_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [proveedor, null, fecha, null, null, total, 0, total, 0, compraComentarios, negocioId]
+      );
+      const compra606Id = compraInsert?.lastID || null;
+
+      if (compra606Id) {
+        for (const detalle of detalles) {
+          const producto = productosMap.get(detalle.producto_id);
+          await db.run(
+            `
+              INSERT INTO detalle_compra
+                (compra_id, descripcion, cantidad, precio_unitario, itbis, total, negocio_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `,
+            [
+              compra606Id,
+              producto?.nombre || `Producto ${detalle.producto_id}`,
+              detalle.cantidad,
+              detalle.costo_unitario,
+              0,
+              detalle.total_linea,
+              negocioId,
+            ]
+          );
+        }
+      }
+
+      const descripcionGasto = `Compra inventario #${compraId}${observaciones ? ` - ${observaciones}` : ''}`;
+      const gastoInsert = await db.run(
+        `
+          INSERT INTO gastos
+            (fecha, monto, moneda, categoria, metodo_pago, proveedor, descripcion, referencia, es_recurrente, negocio_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          fecha,
+          total,
+          'DOP',
+          'Compras inventario',
+          metodoPago,
+          proveedor,
+          descripcionGasto,
+          `INV-${compraId}`,
+          0,
+          negocioId,
+        ]
+      );
+
+      const gastoId = gastoInsert?.lastID || null;
+      let salidaId = null;
+
+      if (origenFondos === 'caja') {
+        const descripcionSalida = `Compra inventario #${compraId} - ${proveedor}`;
+        const salidaInsert = await db.run(
+          `
+            INSERT INTO salidas_caja (negocio_id, fecha, descripcion, monto, metodo)
+            VALUES (?, ?, ?, ?, ?)
+          `,
+          [negocioId, fecha, descripcionSalida, total, metodoPago || 'efectivo']
+        );
+        salidaId = salidaInsert?.lastID || null;
+      }
+
+      await db.run(
+        `
+          UPDATE compras_inventario
+             SET compra_id = ?, gasto_id = ?, salida_id = ?
+           WHERE id = ? AND negocio_id = ?
+        `,
+        [compra606Id, gastoId, salidaId, compraId, negocioId]
+      );
+
+      await db.run('COMMIT');
+
+      res.status(201).json({
+        ok: true,
+        id: compraId,
+        total,
+        compra_id: compra606Id,
+        gasto_id: gastoId,
+        salida_id: salidaId,
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al registrar compra de inventario:', error?.message || error);
+      res.status(500).json({ error: error?.message || 'No se pudo registrar la compra de inventario.' });
+    }
   });
 });
 

@@ -2430,6 +2430,40 @@ img {
   width: 100%;
 }
 
+.abastecimiento-detalle-row .kanm-button {
+  width: 100%;
+}
+
+.abastecimiento-resumen {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--kanm-gray-100);
+  border: 1px solid var(--tone-12);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.abastecimiento-resumen span {
+  color: var(--kanm-gray-600);
+  font-weight: 500;
+}
+
+.abastecimiento-detalle-wrapper {
+  margin-top: 18px;
+}
+
+.abastecimiento-detalle-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
 .admin-form-actions {
   display: flex;
   gap: 12px;
