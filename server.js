@@ -3008,11 +3008,15 @@ const obtenerPedidosPendientesDeCierre = (fecha, negocioId, opcionesOrCallback, 
   }
 
   const soloPendientes = opciones?.soloPendientes !== false;
-  const filtros = [
-    "estado = 'pagado'",
-    `DATE(${FECHA_BASE_PEDIDOS_SQL}) = ?`,
-    'negocio_id = ?',
-  ];
+  const ignorarFecha = opciones?.ignorarFecha === true;
+  const filtros = ["estado = 'pagado'"];
+  const params = [];
+  if (!ignorarFecha) {
+    filtros.push(`DATE(${FECHA_BASE_PEDIDOS_SQL}) = ?`);
+    params.push(fecha);
+  }
+  filtros.push('negocio_id = ?');
+  params.push(negocioId || NEGOCIO_ID_DEFAULT);
   if (soloPendientes) {
     filtros.push('(cierre_id IS NULL)');
   }
@@ -3038,7 +3042,7 @@ const obtenerPedidosPendientesDeCierre = (fecha, negocioId, opcionesOrCallback, 
     GROUP BY id
   `;
 
-  db.all(sql, [fecha, negocioId || NEGOCIO_ID_DEFAULT], (err, rows) => {
+  db.all(sql, params, (err, rows) => {
     if (err) {
       return callback(err);
     }
@@ -3047,21 +3051,67 @@ const obtenerPedidosPendientesDeCierre = (fecha, negocioId, opcionesOrCallback, 
   });
 };
 
-const obtenerSalidasPorFecha = (fecha, negocioId, callback) => {
-  if (typeof negocioId === 'function') {
-    callback = negocioId;
+const obtenerUltimoCierreCaja = (negocioId, callback) => {
+  const sql = `
+    SELECT fecha_cierre
+    FROM cierres_caja
+    WHERE negocio_id = ?
+    ORDER BY fecha_cierre DESC
+    LIMIT 1
+  `;
+  db.get(sql, [negocioId || NEGOCIO_ID_DEFAULT], (err, row) => {
+    if (err) {
+      return callback(err);
+    }
+    callback(null, row?.fecha_cierre || null);
+  });
+};
+
+const obtenerSalidasPorFecha = (fecha, negocioIdOrCallback, opcionesOrCallback, maybeCallback) => {
+  let negocioId = negocioIdOrCallback;
+  let opciones = {};
+  let callback = maybeCallback;
+
+  if (typeof negocioIdOrCallback === 'function') {
+    callback = negocioIdOrCallback;
     negocioId = NEGOCIO_ID_DEFAULT;
+  } else if (typeof opcionesOrCallback === 'function') {
+    callback = opcionesOrCallback;
+  } else {
+    opciones = opcionesOrCallback || {};
+  }
+
+  const ignorarFecha = opciones?.ignorarFecha === true;
+  const desde = opciones?.desde || null;
+  const hasta = opciones?.hasta || null;
+  const filtros = [];
+  const params = [];
+
+  if (!ignorarFecha) {
+    filtros.push('DATE(fecha) = ?');
+    params.push(fecha);
+  }
+
+  filtros.push('negocio_id = ?');
+  params.push(negocioId || NEGOCIO_ID_DEFAULT);
+
+  if (ignorarFecha && desde) {
+    filtros.push('created_at >= ?');
+    params.push(desde);
+  }
+  if (ignorarFecha && hasta) {
+    filtros.push('created_at <= ?');
+    params.push(hasta);
   }
 
   const sql = `
     SELECT id, negocio_id, fecha, descripcion, monto, metodo, created_at
     FROM salidas_caja
-    WHERE DATE(fecha) = ?
-      AND negocio_id = ?
+    WHERE ${filtros.join('\n      AND ')}
     ORDER BY created_at ASC
   `;
 
-  db.all(sql, [fecha, negocioId || NEGOCIO_ID_DEFAULT], (err, rows) => {
+  db.all(sql, params, (err, rows) => {
     if (err) {
       return callback(err);
     }
@@ -3098,19 +3148,27 @@ const calcularResumenCajaPorFecha = (
     throw new TypeError('callback debe ser una funci?n');
   }
 
-  const soloPendientes = opciones?.soloPendientes !== false;
+  const ignorarFecha = opciones?.ignorarFecha === true;
+  const soloPendientes = ignorarFecha ? true : opciones?.soloPendientes !== false;
 
-  obtenerPedidosPendientesDeCierre(fecha, negocioId, { soloPendientes }, (err, pedidos) => {
+  obtenerPedidosPendientesDeCierre(
+    fecha,
+    negocioId,
+    { soloPendientes, ignorarFecha },
+    (err, pedidos) => {
     if (err) {
       return callback(err);
     }
 
     const obtenerDescuentosLineas = (hecho) => {
-      const filtros = [
-        "p.estado = 'pagado'",
-        `DATE(${FECHA_BASE_PEDIDOS_ALIAS_SQL}) = ?`,
-        'p.negocio_id = ?',
-      ];
+      const filtros = ["p.estado = 'pagado'"];
+      const params = [];
+      if (!ignorarFecha) {
+        filtros.push(`DATE(${FECHA_BASE_PEDIDOS_ALIAS_SQL}) = ?`);
+        params.push(fecha);
+      }
+      filtros.push('p.negocio_id = ?');
+      params.push(negocioId);
       if (soloPendientes) {
         filtros.push('p.cierre_id IS NULL');
       }
@@ -3120,13 +3178,23 @@ const calcularResumenCajaPorFecha = (
         JOIN pedidos p ON p.id = d.pedido_id
         WHERE ${filtros.join('\n          AND ')}
       `;
-      db.get(sql, [fecha, negocioId], (descErr, row) => {
+      db.get(sql, params, (descErr, row) => {
         if (descErr) return hecho(descErr);
         hecho(null, Number(row?.total_descuento) || 0);
       });
     };
 
-    obtenerSalidasPorFecha(fecha, negocioId, (salidasErr, salidasData) => {
+    const cargarSalidas = (hecho) => {
+      if (!ignorarFecha) {
+        return obtenerSalidasPorFecha(fecha, negocioId, hecho);
+      }
+      obtenerUltimoCierreCaja(negocioId, (inicioErr, inicioTurno) => {
+        if (inicioErr) return hecho(inicioErr);
+        obtenerSalidasPorFecha(null, negocioId, { ignorarFecha: true, desde: inicioTurno }, hecho);
+      });
+    };
+
+    cargarSalidas((salidasErr, salidasData) => {
       if (salidasErr) {
         return callback(salidasErr);
       }
@@ -3423,10 +3491,15 @@ const registrarCierreCaja = async (payload, negocioId) => {
   const observaciones = (payload?.observaciones || '').toString();
 
   const resumenDia = await new Promise((resolve, reject) => {
-    calcularResumenCajaPorFecha(fechaOperacion, negocio, { soloPendientes: true }, (err, data) => {
-      if (err) return reject(err);
-      return resolve(data || {});
-    });
+    calcularResumenCajaPorFecha(
+      fechaOperacion,
+      negocio,
+      { soloPendientes: true, ignorarFecha: true },
+      (err, data) => {
+        if (err) return reject(err);
+        return resolve(data || {});
+      }
+    );
   });
 
   const totalEfectivo = Number(resumenDia.total_efectivo) || 0;
@@ -3458,9 +3531,8 @@ const registrarCierreCaja = async (payload, negocioId) => {
          SET cierre_id = ?
        WHERE estado = 'pagado'
          AND (cierre_id IS NULL)
-         AND DATE(${FECHA_BASE_PEDIDOS_SQL}) = ?
          AND negocio_id = ?`,
-      [cierreId, fechaOperacion, negocio]
+      [cierreId, negocio]
     );
   }
 
@@ -3993,34 +4065,40 @@ app.get('/api/caja/resumen-dia', (req, res) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
     const fecha = normalizarFechaOperacion(req.query?.fecha || new Date());
     const detalle = req.query?.detalle === '1';
-    const soloPendientes = req.query?.pendientes === '1';
+    const modoTurno = req.query?.turno === '1';
+    const soloPendientes = modoTurno || req.query?.pendientes === '1';
 
-    calcularResumenCajaPorFecha(fecha, negocioId, { soloPendientes }, (err, resumen) => {
-      if (err) {
-        console.error('Error al calcular resumen de caja:', err);
-        return res.status(500).json({ ok: false, error: 'No se pudo obtener el resumen diario.' });
+    calcularResumenCajaPorFecha(
+      fecha,
+      negocioId,
+      { soloPendientes, ignorarFecha: modoTurno },
+      (err, resumen) => {
+        if (err) {
+          console.error('Error al calcular resumen de caja:', err);
+          return res.status(500).json({ ok: false, error: 'No se pudo obtener el resumen diario.' });
+        }
+
+        const respuesta = {
+          ok: true,
+          fecha: resumen.fecha || fecha,
+          total_sistema: resumen.total_sistema,
+          total_general: resumen.total_general,
+          total_efectivo: resumen.total_efectivo,
+          total_tarjeta: resumen.total_tarjeta,
+          total_transferencia: resumen.total_transferencia,
+          total_salidas: resumen.total_salidas,
+          total_descuentos: resumen.total_descuentos,
+          cantidad_pedidos: resumen.cantidad_pedidos,
+          salidas: resumen.salidas,
+        };
+
+        if (detalle) {
+          respuesta.pedidos = resumen.pedidos || [];
+        }
+
+        res.json(respuesta);
       }
-
-      const respuesta = {
-        ok: true,
-        fecha: resumen.fecha || fecha,
-        total_sistema: resumen.total_sistema,
-        total_general: resumen.total_general,
-        total_efectivo: resumen.total_efectivo,
-        total_tarjeta: resumen.total_tarjeta,
-        total_transferencia: resumen.total_transferencia,
-        total_salidas: resumen.total_salidas,
-        total_descuentos: resumen.total_descuentos,
-        cantidad_pedidos: resumen.cantidad_pedidos,
-        salidas: resumen.salidas,
-      };
-
-      if (detalle) {
-        respuesta.pedidos = resumen.pedidos || [];
-      }
-
-      res.json(respuesta);
-    });
+    );
   });
 });
 

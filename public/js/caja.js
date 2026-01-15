@@ -1376,13 +1376,8 @@ const construirDetalleCuadreProductos = (cuenta) => {
   `;
 };
 
-const obtenerDetalleCuadre = async (cuadreId, fecha) => {
-  const params = new URLSearchParams();
-  if (fecha) params.set('fecha', fecha);
-  const url = params.toString()
-    ? `/api/caja/cuadre/${cuadreId}/detalle?${params.toString()}`
-    : `/api/caja/cuadre/${cuadreId}/detalle`;
-  const respuesta = await fetchAutorizadoCaja(url);
+const obtenerDetalleCuadre = async (cuadreId) => {
+  const respuesta = await fetchAutorizadoCaja(`/api/caja/cuadre/${cuadreId}/detalle`);
   if (!respuesta.ok) {
     throw new Error('No se pudo obtener el detalle de la venta.');
   }
@@ -1415,10 +1410,9 @@ const mostrarDetalleCuadre = async (fila, cuadreId) => {
   fila.parentNode?.insertBefore(filaDetalle, fila.nextSibling);
 
   try {
-    const fechaConsulta = cuadreFechaInput?.value || resumenCuadre.fecha || null;
     let cuenta = detalleCuadreCache.get(cuadreId);
     if (!cuenta) {
-      cuenta = await obtenerDetalleCuadre(cuadreId, fechaConsulta);
+      cuenta = await obtenerDetalleCuadre(cuadreId);
       detalleCuadreCache.set(cuadreId, cuenta);
     }
     celda.innerHTML = construirDetalleCuadreProductos(cuenta);
@@ -2537,7 +2531,7 @@ const cargarResumenCuadre = async (mostrarCarga = true) => {
 
   const fechaSeleccionada = cuadreFechaInput.value || resumenCuadre.fecha || obtenerFechaLocalHoy();
 
-  const params = new URLSearchParams({ fecha: fechaSeleccionada, detalle: '1' });
+  const params = new URLSearchParams({ fecha: fechaSeleccionada, detalle: '1', turno: '1' });
 
 
 
@@ -3733,8 +3727,6 @@ const inicializarCuadre = () => {
   cuadreFechaInput.addEventListener('change', () => {
 
     cargarResumenCuadre();
-
-    cargarSalidas();
 
   });
 
