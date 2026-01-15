@@ -138,10 +138,7 @@ async function seedDefaultRooms() {
     );
     if (existe.length === 0) {
       try {
-        await query(
-          'INSERT INTO chat_rooms (negocio_id, nombre, tipo, creado_por_usuario_id) VALUES (?, ?, "channel", NULL)',
-          [negocio.id, 'General']
-        );
+          await query(`INSERT INTO chat_rooms (negocio_id, nombre, tipo, creado_por_usuario_id) VALUES (?, ?, 'channel', NULL)`, [negocio.id, 'General']);
       } catch (error) {
         console.warn('No se pudo crear la sala General para el negocio', negocio.id, error?.message || error);
       }
