@@ -480,6 +480,10 @@ let descuentosPorItem = [];
 
 let clientesSugeridos = [];
 
+const detalleCuadreCache = new Map();
+let detalleCuadreIdActivo = null;
+let detalleCuadreFilaActiva = null;
+
 
 
 const REFRESH_INTERVAL = 15000;
@@ -489,6 +493,9 @@ let refreshTimer = null;
 let recargandoEstado = false;
 
 const SYNC_STORAGE_KEY = 'kanm:last-update';
+const FONDO_STORAGE_PREFIX = 'kanm:fondo-inicial:';
+const PROPINA_STORAGE_KEY = 'kanm:propina-legal';
+const PROPINA_DEFAULT = 10;
 
 let ultimaMarcaSyncProcesada = 0;
 
@@ -930,6 +937,114 @@ const registrarSalida = async () => {
 
 
 
+const obtenerFechaFondoInicial = (fecha) => {
+  if (fecha) return fecha;
+  if (cuadreFechaInput?.value) return cuadreFechaInput.value;
+  if (resumenCuadre?.fecha) return resumenCuadre.fecha;
+  return obtenerFechaLocalHoy();
+};
+
+const obtenerKeyFondoInicial = (fecha) =>
+  `${FONDO_STORAGE_PREFIX}${obtenerFechaFondoInicial(fecha)}`;
+
+const leerFondoInicialPersistido = (fecha) => {
+  if (!window.localStorage) return null;
+  try {
+    const raw = localStorage.getItem(obtenerKeyFondoInicial(fecha));
+    if (raw === null || raw === undefined || raw === '') return null;
+    const valor = Number(raw);
+    if (!Number.isFinite(valor) || valor < 0) return null;
+    return valor;
+  } catch (error) {
+    return null;
+  }
+};
+
+const guardarFondoInicialPersistido = (fecha) => {
+  if (!window.localStorage || !cuadreFondoInicialInput) return;
+  try {
+    const raw = cuadreFondoInicialInput.value;
+    const key = obtenerKeyFondoInicial(fecha);
+    if (raw === null || raw === undefined || raw === '') {
+      localStorage.removeItem(key);
+      return;
+    }
+    const valor = Number(raw);
+    if (!Number.isFinite(valor) || valor < 0) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, String(valor));
+  } catch (error) {
+    return;
+  }
+};
+
+const aplicarFondoInicialPersistido = (fecha, { force = false } = {}) => {
+  if (!cuadreFondoInicialInput) return;
+  if (!force && cuadreFondoInicialInput.dataset.dirty) return;
+  const valor = leerFondoInicialPersistido(fecha);
+  if (valor === null) {
+    if (force) {
+      cuadreFondoInicialInput.value = '';
+      delete cuadreFondoInicialInput.dataset.dirty;
+    }
+    return;
+  }
+  cuadreFondoInicialInput.value = String(valor);
+  delete cuadreFondoInicialInput.dataset.dirty;
+};
+
+const normalizarPropinaPreferida = (valor) => {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero) || numero < 0) return null;
+  return Math.min(numero, 100);
+};
+
+const leerPropinaPreferida = () => {
+  if (!window.localStorage) return null;
+  try {
+    const raw = localStorage.getItem(PROPINA_STORAGE_KEY);
+    if (raw === null || raw === undefined || raw === '') return null;
+    return normalizarPropinaPreferida(raw);
+  } catch (error) {
+    return null;
+  }
+};
+
+const guardarPropinaPreferida = (valor) => {
+  if (!window.localStorage) return;
+  try {
+    if (valor === null || valor === undefined || valor === '') {
+      localStorage.removeItem(PROPINA_STORAGE_KEY);
+      return;
+    }
+    const normalizado = normalizarPropinaPreferida(valor);
+    if (normalizado === null) {
+      localStorage.removeItem(PROPINA_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(PROPINA_STORAGE_KEY, String(normalizado));
+  } catch (error) {
+    return;
+  }
+};
+
+const aplicarPropinaPreferida = ({ force = false } = {}) => {
+  if (!inputPropina) return;
+  if (!force && inputPropina.dataset.dirty) return;
+  const preferida = leerPropinaPreferida();
+  if (preferida === null) {
+    if (force) {
+      inputPropina.value = String(PROPINA_DEFAULT);
+      delete inputPropina.dataset.dirty;
+    }
+    return;
+  }
+  inputPropina.value = String(preferida);
+  delete inputPropina.dataset.dirty;
+};
+
 const obtenerFondoInicial = () => {
 
   const valor = Number(cuadreFondoInicialInput?.value);
@@ -1214,7 +1329,104 @@ const obtenerMetodoPagoLabel = (pedido = {}) => {
 
 };
 
+const limpiarDetalleCuadreExpandido = () => {
+  if (detalleCuadreFilaActiva) {
+    detalleCuadreFilaActiva.classList.remove('is-expanded');
+    detalleCuadreFilaActiva.setAttribute('aria-expanded', 'false');
+  }
+  detalleCuadreFilaActiva = null;
+  detalleCuadreIdActivo = null;
+  const existente = cuadreDetalleBody?.querySelector('tr.cuadre-detalle-expand');
+  if (existente) existente.remove();
+};
 
+const construirDetalleCuadreProductos = (cuenta) => {
+  const items = Array.isArray(cuenta?.items_agregados) ? cuenta.items_agregados : [];
+  if (!items.length) {
+    return `
+      <div class="cuadre-detalle-panel">
+        <div class="cuadre-detalle-empty">No hay productos registrados para esta venta.</div>
+      </div>
+    `;
+  }
+
+  const filas = items
+    .map((item) => {
+      const nombre = item.nombre || 'Producto';
+      const cantidad = Number(item.cantidad) || 0;
+      const precio = Number(item.precio_unitario) || 0;
+      const totalLinea = Number(item.total_linea) || 0;
+      const descuento = Number(item.descuento_monto) || 0;
+      const detalle = `${cantidad} x ${formatCurrency(precio)} = ${formatCurrency(totalLinea)}`;
+      const textoDescuento = descuento > 0 ? ` (Desc. ${formatCurrency(descuento)})` : '';
+      return `
+        <div class="cuadre-detalle-item">
+          <span class="cuadre-detalle-nombre">${nombre}</span>
+          <span class="cuadre-detalle-meta">${detalle}${textoDescuento}</span>
+        </div>
+      `;
+    })
+    .join('');
+
+  return `
+    <div class="cuadre-detalle-panel">
+      <div class="cuadre-detalle-title">Productos vendidos</div>
+      <div class="cuadre-detalle-items">${filas}</div>
+    </div>
+  `;
+};
+
+const obtenerDetalleCuadre = async (cuadreId, fecha) => {
+  const params = new URLSearchParams();
+  if (fecha) params.set('fecha', fecha);
+  const url = params.toString()
+    ? `/api/caja/cuadre/${cuadreId}/detalle?${params.toString()}`
+    : `/api/caja/cuadre/${cuadreId}/detalle`;
+  const respuesta = await fetchAutorizadoCaja(url);
+  if (!respuesta.ok) {
+    throw new Error('No se pudo obtener el detalle de la venta.');
+  }
+  const data = await respuesta.json();
+  if (!data?.ok || !data.cuenta) {
+    throw new Error(data?.error || 'No se pudo obtener el detalle de la venta.');
+  }
+  return data.cuenta;
+};
+
+const mostrarDetalleCuadre = async (fila, cuadreId) => {
+  if (!cuadreDetalleBody) return;
+  if (detalleCuadreIdActivo === cuadreId) {
+    limpiarDetalleCuadreExpandido();
+    return;
+  }
+
+  limpiarDetalleCuadreExpandido();
+  detalleCuadreIdActivo = cuadreId;
+  detalleCuadreFilaActiva = fila;
+  fila.classList.add('is-expanded');
+  fila.setAttribute('aria-expanded', 'true');
+
+  const filaDetalle = document.createElement('tr');
+  filaDetalle.className = 'cuadre-detalle-expand';
+  const celda = document.createElement('td');
+  celda.colSpan = 5;
+  celda.textContent = 'Cargando productos...';
+  filaDetalle.appendChild(celda);
+  fila.parentNode?.insertBefore(filaDetalle, fila.nextSibling);
+
+  try {
+    const fechaConsulta = cuadreFechaInput?.value || resumenCuadre.fecha || null;
+    let cuenta = detalleCuadreCache.get(cuadreId);
+    if (!cuenta) {
+      cuenta = await obtenerDetalleCuadre(cuadreId, fechaConsulta);
+      detalleCuadreCache.set(cuadreId, cuenta);
+    }
+    celda.innerHTML = construirDetalleCuadreProductos(cuenta);
+  } catch (error) {
+    celda.textContent =
+      error?.message || 'No se pudo cargar el detalle de productos. Intenta nuevamente.';
+  }
+};
 
 const setMensajeLista = (texto, tipo = 'info') => {
 
@@ -2230,6 +2442,8 @@ const renderDetalleCuadreActual = () => {
 
 
   cuadreDetalleBody.innerHTML = '';
+  detalleCuadreIdActivo = null;
+  detalleCuadreFilaActiva = null;
 
 
 
@@ -2285,6 +2499,10 @@ const renderDetalleCuadreActual = () => {
 
 
 
+    fila.dataset.cuadreId = pedido.id;
+    fila.style.cursor = 'pointer';
+    fila.setAttribute('aria-expanded', 'false');
+    fila.setAttribute('title', 'Haz clic para ver productos');
     fila.innerHTML = `
 
       <td>#${pedido.id}</td>
@@ -2351,6 +2569,7 @@ const cargarResumenCuadre = async (mostrarCarga = true) => {
 
 
 
+    const fechaAnterior = resumenCuadre.fecha;
     const fecha = data.fecha || fechaSeleccionada;
 
     resumenCuadre = {
@@ -2385,7 +2604,13 @@ const cargarResumenCuadre = async (mostrarCarga = true) => {
 
 
 
+    if (fecha !== fechaAnterior) {
+      detalleCuadreCache.clear();
+      limpiarDetalleCuadreExpandido();
+    }
+
     cuadreFechaInput.value = fecha;
+    aplicarFondoInicialPersistido(fecha, { force: fecha !== fechaAnterior });
 
     setCampoCuadre('cuadre-total-sistema', resumenCuadre.totalSistema);
 
@@ -2783,7 +3008,7 @@ const seleccionarCuenta = async (cuentaId) => {
 
     if (inputDescuento) inputDescuento.value = '0';
 
-    if (inputPropina) inputPropina.value = '10';
+    aplicarPropinaPreferida({ force: true });
 
 
 
@@ -3142,6 +3367,10 @@ const inicializarEventos = () => {
 
 
   inputPropina?.addEventListener('change', () => {
+    if (inputPropina) {
+      inputPropina.dataset.dirty = 'true';
+      guardarPropinaPreferida(inputPropina.value);
+    }
 
     if (!cuentaSeleccionada) return;
 
@@ -3495,6 +3724,8 @@ const inicializarCuadre = () => {
 
     actualizarDiferenciaCuadre();
 
+    guardarFondoInicialPersistido();
+
   });
 
 
@@ -3551,6 +3782,14 @@ const inicializarCuadre = () => {
 
     }
 
+  });
+
+  cuadreDetalleBody?.addEventListener('click', (event) => {
+    const fila = event.target.closest('tr');
+    if (!fila || fila.classList.contains('cuadre-detalle-expand')) return;
+    const cuadreId = Number(fila.dataset.cuadreId);
+    if (!Number.isFinite(cuadreId) || cuadreId <= 0) return;
+    mostrarDetalleCuadre(fila, cuadreId);
   });
 
 

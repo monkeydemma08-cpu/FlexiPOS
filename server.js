@@ -2992,12 +2992,29 @@ const normalizarFechaOperacion = (valor) => {
   return obtenerFechaLocalISO(new Date());
 };
 
-const obtenerPedidosPendientesDeCierre = (fecha, negocioId, _usuarioId, callback) => {
+const FECHA_BASE_PEDIDOS_SQL = 'COALESCE(fecha_factura, fecha_cierre, fecha_creacion)';
+const FECHA_BASE_PEDIDOS_ALIAS_SQL = 'COALESCE(p.fecha_factura, p.fecha_cierre, p.fecha_creacion)';
+
+const obtenerPedidosPendientesDeCierre = (fecha, negocioId, opcionesOrCallback, maybeCallback) => {
+  let callback = maybeCallback;
+  let opciones = {};
   if (typeof negocioId === 'function') {
     callback = negocioId;
     negocioId = NEGOCIO_ID_DEFAULT;
-  } else if (typeof _usuarioId === 'function') {
-    callback = _usuarioId;
+  } else if (typeof opcionesOrCallback === 'function') {
+    callback = opcionesOrCallback;
+  } else if (opcionesOrCallback && typeof opcionesOrCallback === 'object') {
+    opciones = opcionesOrCallback;
+  }
+
+  const soloPendientes = opciones?.soloPendientes !== false;
+  const filtros = [
+    "estado = 'pagado'",
+    `DATE(${FECHA_BASE_PEDIDOS_SQL}) = ?`,
+    'negocio_id = ?',
+  ];
+  if (soloPendientes) {
+    filtros.push('(cierre_id IS NULL)');
   }
 
   const sql = `
@@ -3006,7 +3023,7 @@ const obtenerPedidosPendientesDeCierre = (fecha, negocioId, _usuarioId, callback
       MAX(cuenta_id) AS cuenta_id,
       MAX(mesa) AS mesa,
       MAX(cliente) AS cliente,
-      MIN(fecha_cierre) AS fecha_cierre,
+      MIN(${FECHA_BASE_PEDIDOS_SQL}) AS fecha_cierre,
       SUM(subtotal) AS subtotal,
       SUM(impuesto) AS impuesto,
       SUM(COALESCE(descuento_monto, 0)) AS descuento_monto,
@@ -3017,10 +3034,7 @@ const obtenerPedidosPendientesDeCierre = (fecha, negocioId, _usuarioId, callback
       SUM(COALESCE(pago_transferencia, 0)) AS pago_transferencia,
       SUM(COALESCE(pago_cambio, 0)) AS pago_cambio
     FROM pedidos
-    WHERE estado = 'pagado'
-      AND (cierre_id IS NULL)
-      AND DATE(fecha_cierre) = ?
-      AND negocio_id = ?
+    WHERE ${filtros.join('\n      AND ')}
     GROUP BY id
   `;
 
@@ -3058,30 +3072,53 @@ const obtenerSalidasPorFecha = (fecha, negocioId, callback) => {
   });
 };
 
-const calcularResumenCajaPorFecha = (fecha, negocioIdOrCallback, maybeCallback) => {
-  const callback = typeof negocioIdOrCallback === 'function' ? negocioIdOrCallback : maybeCallback;
+const calcularResumenCajaPorFecha = (
+  fecha,
+  negocioIdOrCallback,
+  opcionesOrCallback,
+  maybeCallback
+) => {
+  let callback = null;
+  let opciones = {};
   const negocioId =
     typeof negocioIdOrCallback === 'function' || negocioIdOrCallback === undefined
       ? NEGOCIO_ID_DEFAULT
       : negocioIdOrCallback;
 
+  if (typeof negocioIdOrCallback === 'function') {
+    callback = negocioIdOrCallback;
+  } else if (typeof opcionesOrCallback === 'function') {
+    callback = opcionesOrCallback;
+  } else {
+    opciones = opcionesOrCallback || {};
+    callback = maybeCallback;
+  }
+
   if (typeof callback !== 'function') {
     throw new TypeError('callback debe ser una funci?n');
   }
 
-  obtenerPedidosPendientesDeCierre(fecha, negocioId, null, (err, pedidos) => {
+  const soloPendientes = opciones?.soloPendientes !== false;
+
+  obtenerPedidosPendientesDeCierre(fecha, negocioId, { soloPendientes }, (err, pedidos) => {
     if (err) {
       return callback(err);
     }
 
     const obtenerDescuentosLineas = (hecho) => {
+      const filtros = [
+        "p.estado = 'pagado'",
+        `DATE(${FECHA_BASE_PEDIDOS_ALIAS_SQL}) = ?`,
+        'p.negocio_id = ?',
+      ];
+      if (soloPendientes) {
+        filtros.push('p.cierre_id IS NULL');
+      }
       const sql = `
         SELECT SUM(d.cantidad * d.precio_unitario * (COALESCE(d.descuento_porcentaje, 0) / 100.0) + COALESCE(d.descuento_monto, 0)) AS total_descuento
         FROM detalle_pedido d
         JOIN pedidos p ON p.id = d.pedido_id
-        WHERE p.estado = 'pagado'
-          AND DATE(p.fecha_cierre) = DATE(?)
-          AND p.negocio_id = ?
+        WHERE ${filtros.join('\n          AND ')}
       `;
       db.get(sql, [fecha, negocioId], (descErr, row) => {
         if (descErr) return hecho(descErr);
@@ -3386,7 +3423,7 @@ const registrarCierreCaja = async (payload, negocioId) => {
   const observaciones = (payload?.observaciones || '').toString();
 
   const resumenDia = await new Promise((resolve, reject) => {
-    calcularResumenCajaPorFecha(fechaOperacion, negocio, (err, data) => {
+    calcularResumenCajaPorFecha(fechaOperacion, negocio, { soloPendientes: true }, (err, data) => {
       if (err) return reject(err);
       return resolve(data || {});
     });
@@ -3421,7 +3458,7 @@ const registrarCierreCaja = async (payload, negocioId) => {
          SET cierre_id = ?
        WHERE estado = 'pagado'
          AND (cierre_id IS NULL)
-         AND DATE(fecha_cierre) = ?
+         AND DATE(${FECHA_BASE_PEDIDOS_SQL}) = ?
          AND negocio_id = ?`,
       [cierreId, fechaOperacion, negocio]
     );
@@ -3956,8 +3993,9 @@ app.get('/api/caja/resumen-dia', (req, res) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
     const fecha = normalizarFechaOperacion(req.query?.fecha || new Date());
     const detalle = req.query?.detalle === '1';
+    const soloPendientes = req.query?.pendientes === '1';
 
-    calcularResumenCajaPorFecha(fecha, negocioId, (err, resumen) => {
+    calcularResumenCajaPorFecha(fecha, negocioId, { soloPendientes }, (err, resumen) => {
       if (err) {
         console.error('Error al calcular resumen de caja:', err);
         return res.status(500).json({ ok: false, error: 'No se pudo obtener el resumen diario.' });
@@ -3983,6 +4021,69 @@ app.get('/api/caja/resumen-dia', (req, res) => {
 
       res.json(respuesta);
     });
+  });
+});
+
+app.get('/api/caja/cuadre/:id/detalle', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const cuentaId = Number(req.params.id);
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
+    }
+
+    const fecha = req.query?.fecha;
+    if (fecha && !esFechaISOValida(fecha)) {
+      return res.status(400).json({ ok: false, error: 'Fecha invalida.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const params = [cuentaId, cuentaId, negocioId];
+    const filtroFechaSql = fecha ? ` AND DATE(${FECHA_BASE_PEDIDOS_SQL}) = ?` : '';
+    if (fecha) params.push(fecha);
+
+    try {
+      const pedidos = await db.all(
+        `
+          SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
+                 impuesto, total, fecha_creacion, fecha_listo, fecha_cierre, cliente_documento,
+                 ncf, tipo_comprobante, propina_monto, descuento_monto, comentarios
+          FROM pedidos
+          WHERE (cuenta_id = ? OR id = ?)
+            AND estado = 'pagado'
+            AND negocio_id = ?${filtroFechaSql}
+          ORDER BY fecha_creacion ASC
+        `,
+        params
+      );
+
+      if (!pedidos.length) {
+        return res.status(404).json({ ok: false, error: 'No se encontro detalle para esta venta.' });
+      }
+
+      const detalle = await obtenerDetallePedidosPorIds(
+        pedidos.map((pedido) => pedido.id),
+        negocioId
+      );
+      const itemsAgrupados = agruparItemsCuenta(detalle);
+      const cuenta = {
+        cuenta_id: pedidos[0].cuenta_id || pedidos[0].id,
+        mesa: pedidos[0].mesa,
+        cliente: pedidos[0].cliente,
+        modo_servicio: pedidos[0].modo_servicio,
+        estado: 'pagado',
+        estado_cuenta: 'pagado',
+        items_agregados: itemsAgrupados,
+        pedidos: pedidos.map((pedido) => ({
+          ...pedido,
+          items: detalle.get(pedido.id) || [],
+        })),
+      };
+
+      res.json({ ok: true, cuenta });
+    } catch (error) {
+      console.error('Error al obtener detalle del cuadre:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el detalle del cuadre.' });
+    }
   });
 });
 
