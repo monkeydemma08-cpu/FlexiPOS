@@ -1,0 +1,241 @@
+﻿:root {
+  --pf-bg: #f5f6fa;
+  --pf-card: #ffffff;
+  --pf-text: #1f2937;
+  --pf-muted: #6b7280;
+  --pf-accent: #0a4c9a;
+  --pf-border: #e5e7eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.posium-factura-body {
+  margin: 0;
+  font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+  background: var(--pf-bg);
+  color: var(--pf-text);
+}
+
+.posium-factura {
+  max-width: 900px;
+  margin: 32px auto;
+  padding: 28px 32px;
+  background: var(--pf-card);
+  border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.08);
+}
+
+.pf-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--pf-border);
+  padding-bottom: 16px;
+}
+
+.pf-emisor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pf-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pf-logo img {
+  max-width: 60px;
+  max-height: 60px;
+  object-fit: contain;
+  display: none;
+}
+
+.pf-emisor-nombre {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.pf-emisor-datos {
+  color: var(--pf-muted);
+  font-size: 0.95rem;
+  display: grid;
+  gap: 4px;
+}
+
+.pf-factura-meta {
+  display: grid;
+  gap: 8px;
+  min-width: 200px;
+  background: #f3f6fb;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 0.95rem;
+}
+
+.pf-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pf-meta-row span {
+  color: var(--pf-muted);
+}
+
+.pf-clientes {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  margin: 22px 0 16px;
+}
+
+.pf-cliente h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--pf-muted);
+}
+
+.pf-cliente {
+  display: grid;
+  gap: 4px;
+}
+
+.pf-cliente-nombre {
+  font-weight: 600;
+}
+
+.pf-acciones {
+  display: flex;
+  align-items: center;
+}
+
+.pf-btn {
+  background: var(--pf-accent);
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.pf-items table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.pf-items th,
+.pf-items td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--pf-border);
+}
+
+.pf-items th {
+  color: var(--pf-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+}
+
+.pf-items td:nth-child(2),
+.pf-items td:nth-child(3),
+.pf-items td:nth-child(4),
+.pf-items th:nth-child(2),
+.pf-items th:nth-child(3),
+.pf-items th:nth-child(4) {
+  text-align: right;
+}
+
+.pf-resumen {
+  margin-top: 18px;
+  display: grid;
+  gap: 8px;
+  max-width: 320px;
+  margin-left: auto;
+}
+
+.pf-resumen-linea {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.95rem;
+}
+
+.pf-resumen-linea.total {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--pf-accent);
+  border-top: 1px solid var(--pf-border);
+  padding-top: 8px;
+}
+
+.pf-footer {
+  margin-top: 24px;
+  display: grid;
+  gap: 18px;
+  border-top: 1px solid var(--pf-border);
+  padding-top: 16px;
+  color: var(--pf-muted);
+}
+
+.pf-footer-col h3 {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 720px) {
+  .posium-factura {
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 20px;
+  }
+
+  .pf-header,
+  .pf-clientes {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pf-factura-meta {
+    width: 100%;
+  }
+
+  .pf-resumen {
+    max-width: 100%;
+  }
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  .posium-factura-body {
+    background: #fff;
+  }
+
+  .posium-factura {
+    box-shadow: none;
+    border-radius: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  .pf-acciones {
+    display: none;
+  }
+}

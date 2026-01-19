@@ -33,6 +33,9 @@
   --kanm-warning: #f7b733;
   --kanm-radius-lg: 20px;
   --kanm-shadow: 0 16px 40px color-mix(in srgb, var(--color-boton-primario) 18%, transparent);
+  --password-toggle-color: var(--color-primario);
+  --password-toggle-hover: var(--color-secundario);
+  --password-toggle-focus: var(--color-primario);
   font-family: 'Poppins', sans-serif;
 }
 
@@ -252,8 +255,100 @@ img {
   overflow-y: auto;
 }
 
+#kanm-facturacion-modal,
+#kanm-facturacion-historial-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+#kanm-facturacion-modal.oculto,
+#kanm-facturacion-historial-modal.oculto {
+  display: none;
+}
+
+#kanm-facturacion-modal .kanm-modal-backdrop,
+#kanm-facturacion-historial-modal .kanm-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+#kanm-facturacion-modal .kanm-modal-panel,
+#kanm-facturacion-historial-modal .kanm-modal-panel {
+  position: relative;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+  max-width: 980px;
+  width: min(96vw, 980px);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 1;
+}
+
+#kanm-facturacion-modal .kanm-modal-header,
+#kanm-facturacion-historial-modal .kanm-modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#kanm-facturacion-modal .kanm-modal-body,
+#kanm-facturacion-historial-modal .kanm-modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+}
+
+.kanm-modal-panel--wide {
+  max-width: 980px;
+}
+
+.kanm-modal-actions--between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.facturacion-resumen-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.facturacion-resumen-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f7f7fb;
+  font-weight: 600;
+}
+
+.facturacion-resumen-item.total {
+  background: #eef6ff;
+  color: #0a4c9a;
+}
+
 @media (max-width: 768px) {
   #kanm-negocios-modal .kanm-modal-panel {
+    max-width: 100%;
+    width: 100%;
+    border-radius: 0;
+  }
+
+  #kanm-facturacion-modal .kanm-modal-panel,
+  #kanm-facturacion-historial-modal .kanm-modal-panel {
     max-width: 100%;
     width: 100%;
     border-radius: 0;
@@ -513,6 +608,49 @@ img {
   flex-direction: row;
   align-items: center;
   gap: 12px;
+}
+
+.password-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.password-field input {
+  width: 100%;
+  padding-right: 84px;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--password-toggle-color, var(--color-primario));
+  cursor: pointer;
+}
+
+.password-toggle:hover {
+  color: var(--password-toggle-hover, var(--color-secundario));
+}
+
+.password-toggle:focus-visible {
+  outline: 2px solid var(--password-toggle-focus, var(--color-primario));
+  outline-offset: 2px;
+}
+
+.password-toggle:disabled,
+.password-toggle.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .kanm-message {

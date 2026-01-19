@@ -271,27 +271,45 @@
         const subtotalBruto = precio * cantidad;
         const descPct = Number(item.descuento_porcentaje || 0);
         const descMonto = Number(item.descuento_monto || 0);
-        const descuentoTotal = Math.min(subtotalBruto * (descPct / 100) + descMonto, subtotalBruto);
-        const subtotal = item.subtotal ?? subtotalBruto - descuentoTotal;
+        const descuentoBase = Number(item.descuento_total || 0);
+        const descuentoCalculado = Math.min(subtotalBruto * (descPct / 100) + descMonto, subtotalBruto);
+        const descuentoTotal = descuentoBase > 0 ? Math.min(descuentoBase, subtotalBruto) : descuentoCalculado;
+        const subtotalFinal = Math.max(subtotalBruto - descuentoTotal, 0);
+        const precioFinal = cantidad > 0 ? subtotalFinal / cantidad : precio;
         const tieneDescuento = descuentoTotal > 0;
-        const partes = [];
-        if (descPct > 0) partes.push(`${descPct}%`);
-        if (descMonto > 0) partes.push(formatCurrency(descMonto));
-        const unidadesDesc = Number(item.cantidad_descuento);
-        const textoUnidades =
-          unidadesDesc > 0 && unidadesDesc < cantidad
-            ? ` aplicado a ${unidadesDesc} de ${cantidad} unidades`
-            : '';
-        const descInfo = tieneDescuento
-          ? `Descuento aplicado${textoUnidades}: -${formatCurrency(descuentoTotal)}${
-              partes.length ? ` (${partes.join(' + ')})` : ''
-            }`
-          : '';
+        const precioHtml = tieneDescuento
+          ? `
+            <div class="factura-price-block">
+              <div class="factura-price-stack">
+                <span class="factura-price-original">${formatCurrency(precio)}</span>
+                <span class="factura-price-final">${formatCurrency(precioFinal)}</span>
+              </div>
+            </div>
+          `
+          : `
+            <div class="factura-price-block">
+              <span class="factura-price-final">${formatCurrency(precio)}</span>
+            </div>
+          `;
+        const subtotalHtml = tieneDescuento
+          ? `
+            <div class="factura-price-block">
+              <div class="factura-price-stack">
+                <span class="factura-price-original">${formatCurrency(subtotalBruto)}</span>
+                <span class="factura-price-final">${formatCurrency(subtotalFinal)}</span>
+              </div>
+            </div>
+          `
+          : `
+            <div class="factura-price-block">
+              <span class="factura-price-final">${formatCurrency(subtotalBruto)}</span>
+            </div>
+          `;
         fila.innerHTML = `
-        <td>${item.nombre || `Producto ${item.producto_id || ''}`}</td>
-        <td>${cantidad}</td>
-        <td>${formatCurrency(precio)}${descInfo ? `<div class="factura-desc">${descInfo}</div>` : ''}</td>
-        <td>${formatCurrency(subtotal)}</td>
+        <td class="factura-prod-cell"><span class="factura-prod-name">${item.nombre || `Producto ${item.producto_id || ''}`}</span></td>
+        <td class="factura-qty-cell">${cantidad}</td>
+        <td class="factura-price-cell">${precioHtml}</td>
+        <td class="factura-subtotal-cell">${subtotalHtml}</td>
       `;
         itemsBody.appendChild(fila);
       });

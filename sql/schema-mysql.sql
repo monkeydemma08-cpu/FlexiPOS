@@ -235,6 +235,62 @@ CREATE TABLE IF NOT EXISTS historial_bar (
   CONSTRAINT fk_historial_bar_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS posium_facturacion_config (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  negocio_id INT NOT NULL,
+  cliente_nombre VARCHAR(200) NULL,
+  cliente_rnc VARCHAR(40) NULL,
+  cliente_direccion VARCHAR(255) NULL,
+  cliente_telefono VARCHAR(50) NULL,
+  cliente_email VARCHAR(120) NULL,
+  cliente_contacto VARCHAR(120) NULL,
+  emisor_nombre VARCHAR(200) NULL,
+  emisor_rnc VARCHAR(40) NULL,
+  emisor_direccion VARCHAR(255) NULL,
+  emisor_telefono VARCHAR(50) NULL,
+  emisor_email VARCHAR(120) NULL,
+  emisor_logo VARCHAR(255) NULL,
+  emisor_nota TEXT NULL,
+  plan_nombre VARCHAR(200) NULL,
+  precio_base DECIMAL(12,2) NULL,
+  moneda VARCHAR(10) NULL,
+  impuesto_tipo VARCHAR(20) NULL,
+  impuesto_valor DECIMAL(12,2) NULL,
+  periodo_default VARCHAR(60) NULL,
+  terminos_pago VARCHAR(120) NULL,
+  metodo_pago VARCHAR(60) NULL,
+  notas_internas TEXT NULL,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY idx_posium_facturacion_config_negocio (negocio_id),
+  CONSTRAINT fk_posium_facturacion_config_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS posium_facturas (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  negocio_id INT NOT NULL,
+  numero_factura INT NOT NULL,
+  fecha_emision DATE NOT NULL,
+  periodo VARCHAR(60) NOT NULL,
+  items_json JSON NULL,
+  subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+  itbis DECIMAL(12,2) NOT NULL DEFAULT 0,
+  descuento DECIMAL(12,2) NOT NULL DEFAULT 0,
+  total DECIMAL(12,2) NOT NULL DEFAULT 0,
+  moneda VARCHAR(10) NULL,
+  estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+  terminos_pago VARCHAR(120) NULL,
+  metodo_pago VARCHAR(60) NULL,
+  emisor_snapshot JSON NULL,
+  cliente_snapshot JSON NULL,
+  created_by INT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY idx_posium_facturas_numero (numero_factura),
+  KEY idx_posium_facturas_negocio_fecha (negocio_id, fecha_emision),
+  CONSTRAINT fk_posium_facturas_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS compras (
   id INT AUTO_INCREMENT PRIMARY KEY,
   proveedor VARCHAR(255) NOT NULL,
@@ -280,6 +336,9 @@ CREATE TABLE IF NOT EXISTS gastos (
   descripcion TEXT,
   comprobante_ncf VARCHAR(30),
   referencia VARCHAR(60),
+  referencia_tipo VARCHAR(40) NULL,
+  referencia_id BIGINT NULL,
+  usuario_id INT NULL,
   es_recurrente TINYINT(1) NOT NULL DEFAULT 0,
   frecuencia VARCHAR(20) NULL,
   tags TEXT,
@@ -288,6 +347,7 @@ CREATE TABLE IF NOT EXISTS gastos (
   negocio_id INT NOT NULL,
   INDEX idx_gastos_negocio_fecha (negocio_id, fecha),
   INDEX idx_gastos_negocio_categoria_fecha (negocio_id, categoria, fecha),
+  INDEX idx_gastos_referencia (negocio_id, referencia_tipo, referencia_id),
   CONSTRAINT fk_gastos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -383,6 +443,7 @@ CREATE TABLE IF NOT EXISTS salidas_caja (
   descripcion TEXT,
   monto DECIMAL(10,2) NOT NULL,
   metodo VARCHAR(50) DEFAULT 'efectivo',
+  usuario_id INT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_salidas_caja_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

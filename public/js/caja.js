@@ -195,6 +195,31 @@ const fetchAutorizadoCaja = async (url, options = {}) => {
   return respuesta;
 };
 
+const leerRespuestaJsonCaja = async (respuesta) => {
+  const contentType = respuesta.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const data = await respuesta.json().catch(() => null);
+    return { data, esJson: true, contentType };
+  }
+  const texto = await respuesta.text().catch(() => '');
+  return { data: texto, esJson: false, contentType };
+};
+
+const construirErrorNoJsonCaja = (respuesta, contenido, contentType) => {
+  let mensaje = 'Respuesta inesperada del servidor.';
+  if (respuesta.status === 404) {
+    mensaje = 'Ruta no existe o servicio no disponible.';
+  } else if (respuesta.status >= 500) {
+    mensaje = 'Error del servidor. Intenta nuevamente.';
+  }
+  console.error('Respuesta no JSON en caja:', {
+    status: respuesta.status,
+    contentType,
+    body: contenido,
+  });
+  return new Error(mensaje);
+};
+
 const normalizarFlagUI = (valor, predeterminado = 1) => {
   if (valor === undefined || valor === null) {
     return predeterminado;
@@ -815,13 +840,19 @@ const cargarSalidas = async (fecha, mostrarCarga = false) => {
 
     const respuesta = await fetchAutorizadoCaja(`/api/caja/salidas?fecha=${fechaConsulta}`);
 
-    if (!respuesta.ok) {
+    const { data, esJson, contentType } = await leerRespuestaJsonCaja(respuesta);
 
-      throw new Error('No se pudieron cargar las salidas de caja.');
+    if (!esJson) {
+
+      throw construirErrorNoJsonCaja(respuesta, data, contentType);
 
     }
 
-    const data = await respuesta.json();
+    if (!respuesta.ok || data?.ok === false) {
+
+      throw new Error(data?.error || 'No se pudieron cargar las salidas de caja.');
+
+    }
 
     if (!data.ok && data.total === undefined && !Array.isArray(data.salidas)) {
 
@@ -867,6 +898,13 @@ const registrarSalida = async () => {
 
   const fecha = cuadreFechaInput?.value || resumenCuadre.fecha || obtenerFechaLocalHoy();
 
+  if (!descripcion) {
+
+    setSalidasMensaje('Ingresa una descripcion para la salida.', 'error');
+
+    return;
+
+  }
 
 
   if (!Number.isFinite(monto) || monto <= 0) {
@@ -901,11 +939,17 @@ const registrarSalida = async () => {
 
 
 
-    const data = await respuesta.json();
+    const { data, esJson, contentType } = await leerRespuestaJsonCaja(respuesta);
 
-    if (!respuesta.ok || !data.ok) {
+    if (!esJson) {
 
-      throw new Error(data.error || 'No se pudo registrar la salida.');
+      throw construirErrorNoJsonCaja(respuesta, data, contentType);
+
+    }
+
+    if (!respuesta.ok || !data?.ok) {
+
+      throw new Error(data?.error || 'No se pudo registrar la salida.');
 
     }
 

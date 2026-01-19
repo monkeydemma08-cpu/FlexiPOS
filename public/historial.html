@@ -11,6 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="css/styles.css" />
+    <script src="js/password-toggle.js" defer></script>
     <script src="js/auth.js" defer></script>
     <script src="js/historial.js" defer></script>
   </head>
@@ -114,12 +115,23 @@
         </p>
         <div class="kanm-input-group">
           <label for="historial-eliminar-password">Contraseña de administrador</label>
-          <input
-            type="password"
-            id="historial-eliminar-password"
-            placeholder="Ingresa la contraseña"
-            autocomplete="current-password"
-          />
+          <div class="password-field">
+            <input
+              type="password"
+              id="historial-eliminar-password"
+              placeholder="Ingresa la contraseña"
+              autocomplete="current-password"
+            />
+            <button
+              type="button"
+              class="password-toggle"
+              data-password-toggle
+              aria-pressed="false"
+              aria-label="Mostrar contrasena"
+            >
+              Mostrar
+            </button>
+          </div>
         </div>
         <div class="kanm-modal-actions">
           <button type="button" class="kanm-button ghost" id="historial-eliminar-cancelar">Cancelar</button>

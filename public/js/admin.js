@@ -178,6 +178,7 @@ const cierresDetalleWrapper = document.getElementById('cierres-detalle-wrapper')
 const cierresDetalleTabla = document.getElementById('cierres-detalle-tabla');
 
 const histCocinaFechaInput = document.getElementById('hist-cocina-fecha');
+const histCocinaAreaSelect = document.getElementById('hist-cocina-area');
 const histCocinaBuscarBtn = document.getElementById('hist-cocina-buscar');
 const histCocinaExportarBtn = document.getElementById('hist-cocina-exportar');
 const histCocinaMensaje = document.getElementById('hist-cocina-mensaje');
@@ -3329,14 +3330,17 @@ const renderHistorialCocina = (items = []) => {
     .map((item) => {
       const entrada = formatDateTime(item.created_at);
       const salida = formatDateTime(item.completed_at);
-      const cocinero = item.cocinero_nombre || 'No asignado';
+      const area = (item.area || '').toLowerCase() === 'bar' ? 'Bar' : 'Cocina';
+      const preparador =
+        item.preparador_nombre || item.cocinero_nombre || item.bartender_nombre || 'No asignado';
       return `
         <tr>
           <td>${item.cuenta_id || '—'}</td>
           <td>${item.pedido_id}</td>
           <td>${item.item_nombre || '—'}</td>
           <td>${item.cantidad}</td>
-          <td>${cocinero}</td>
+          <td>${area}</td>
+          <td>${preparador}</td>
           <td>${entrada}</td>
           <td>${salida}</td>
         </tr>
@@ -3358,31 +3362,33 @@ const actualizarPaginacionHistorialCocina = (total, pageSize, page) => {
 const cargarHistorialCocina = async (page = 1) => {
   if (!histCocinaTabla) return;
   const fecha = histCocinaFechaInput?.value || getLocalDateISO();
-  const cocinero = histCocinaCocineroSelect?.value;
+  const area = histCocinaAreaSelect?.value || 'todas';
+  const preparador = histCocinaCocineroSelect?.value;
   paginaHistorialCocina = page;
 
   try {
     const params = new URLSearchParams({ fecha, page, limit: HIST_COCINA_PAGE_SIZE });
-    if (cocinero) params.append('cocinero_id', cocinero);
+    if (area) params.append('area', area);
+    if (preparador) params.append('preparador_id', preparador);
 
-    const respuesta = await fetchConAutorizacion(`/api/historial-cocina?${params.toString()}`);
+    const respuesta = await fetchConAutorizacion(`/api/preparacion/historial?${params.toString()}`);
 
     if (!respuesta.ok) {
-      throw new Error('No se pudo obtener el historial de cocina.');
+      throw new Error('No se pudo obtener el historial de preparacion.');
     }
 
     const data = await respuesta.json();
     if (!data.ok) {
-      throw new Error(data.error || 'No se pudo obtener el historial de cocina.');
+      throw new Error(data.error || 'No se pudo obtener el historial de preparacion.');
     }
 
     renderHistorialCocina(data.items || []);
     actualizarPaginacionHistorialCocina(data.total || 0, data.pageSize || HIST_COCINA_PAGE_SIZE, data.page || page);
   } catch (error) {
-    console.error('Error al cargar el historial de cocina:', error);
+    console.error('Error al cargar el historial de preparacion:', error);
     setMessage(
       histCocinaMensaje,
-      error.message || 'No se pudo obtener el historial de cocina. Intenta nuevamente.',
+      error.message || 'No se pudo obtener el historial de preparacion. Intenta nuevamente.',
       'error'
     );
     if (histCocinaTabla) {
@@ -3393,46 +3399,60 @@ const cargarHistorialCocina = async (page = 1) => {
 
 const exportarHistorialCocina = async () => {
   const fecha = histCocinaFechaInput?.value || getLocalDateISO();
-  const cocinero = histCocinaCocineroSelect?.value;
+  const area = histCocinaAreaSelect?.value || 'todas';
+  const preparador = histCocinaCocineroSelect?.value;
   try {
     const params = new URLSearchParams({ fecha });
-    if (cocinero) params.append('cocinero_id', cocinero);
+    if (area) params.append('area', area);
+    if (preparador) params.append('preparador_id', preparador);
 
-    const respuesta = await fetchConAutorizacion(`/api/historial-cocina/export?${params.toString()}`);
+    const respuesta = await fetchConAutorizacion(
+      `/api/preparacion/historial/export?${params.toString()}`
+    );
     if (!respuesta.ok) {
-      throw new Error('No se pudo exportar el historial de cocina.');
+      throw new Error('No se pudo exportar el historial de preparacion.');
     }
 
     const blob = await respuesta.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `historial_cocina_${fecha}.csv`;
+    a.download = `historial_preparacion_${fecha}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
   } catch (error) {
-    console.error('Error al exportar historial de cocina:', error);
-    setMessage(histCocinaMensaje, error.message || 'No se pudo exportar el historial de cocina.', 'error');
+    console.error('Error al exportar historial de preparacion:', error);
+    setMessage(
+      histCocinaMensaje,
+      error.message || 'No se pudo exportar el historial de preparacion.',
+      'error'
+    );
   }
 };
 
 const cargarCocinerosHistorial = async () => {
   if (!histCocinaCocineroSelect) return;
   try {
-    const resp = await fetchConAutorizacion('/api/historial-cocina/cocineros');
+    const area = histCocinaAreaSelect?.value || 'todas';
+    const params = new URLSearchParams();
+    if (area) params.append('area', area);
+
+    const resp = await fetchConAutorizacion(
+      `/api/preparacion/historial/preparadores?${params.toString()}`
+    );
     if (!resp.ok) return;
     const data = await resp.json();
-    if (!data?.ok || !Array.isArray(data.cocineros)) return;
+    if (!data?.ok || !Array.isArray(data.preparadores)) return;
 
     const opts = ['<option value="">Todos</option>'].concat(
-      data.cocineros.map((c) => {
-        const nombre = c.cocinero_nombre || `ID ${c.cocinero_id}`;
-        return `<option value="${c.cocinero_id}">${nombre}</option>`;
+      data.preparadores.map((p) => {
+        const nombre = p.preparador_nombre || `ID ${p.preparador_id}`;
+        return `<option value="${p.preparador_id}">${nombre}</option>`;
       })
     );
     histCocinaCocineroSelect.innerHTML = opts.join('');
   } catch (err) {
-    console.warn('No se pudieron cargar los cocineros del historial:', err);
+    console.warn('No se pudieron cargar los preparadores del historial:', err);
   }
 };
 
@@ -3628,22 +3648,20 @@ const renderAccionesNegocio = (neg = {}) => {
   const id = neg.id;
   const eliminado = Boolean(neg.deleted_at);
   const activo = Number(neg.activo) !== 0;
-  const suspendido = Number(neg.suspendido) === 1;
   const disabled = eliminado ? 'disabled' : '';
 
   const btnEditar = `<button type="button" class="kanm-button ghost kanm-negocios-btn-editar" data-negocio-id="${id}" ${disabled}>Editar</button>`;
   const btnActivar = activo
     ? `<button type="button" class="kanm-button ghost" data-negocio-action="desactivar" data-negocio-id="${id}" ${disabled}>Desactivar</button>`
     : `<button type="button" class="kanm-button ghost" data-negocio-action="activar" data-negocio-id="${id}" ${disabled}>Activar</button>`;
-  const btnSuspender = suspendido
-    ? `<button type="button" class="kanm-button ghost" data-negocio-action="reactivar" data-negocio-id="${id}" ${disabled}>Reactivar</button>`
-    : `<button type="button" class="kanm-button ghost" data-negocio-action="suspender" data-negocio-id="${id}" ${disabled}>Suspender</button>`;
+  const btnFacturar = `<button type="button" class="kanm-button ghost" data-negocio-action="facturar-posium" data-negocio-id="${id}" ${disabled}>Generar factura</button>`;
+  const btnHistorial = `<button type="button" class="kanm-button ghost" data-negocio-action="historial-posium" data-negocio-id="${id}" ${disabled}>Historial facturas</button>`;
   const btnReset = `<button type="button" class="kanm-button ghost" data-negocio-action="reset-password" data-negocio-id="${id}" ${disabled}>Resetear password</button>`;
   const btnForce = `<button type="button" class="kanm-button ghost" data-negocio-action="force-password" data-negocio-id="${id}" ${disabled}>Forzar cambio</button>`;
   const btnImpersonar = `<button type="button" class="kanm-button ghost" data-negocio-action="impersonar" data-negocio-id="${id}" ${disabled}>Entrar como negocio</button>`;
   const btnEliminar = `<button type="button" class="kanm-button danger" data-negocio-action="eliminar" data-negocio-id="${id}" ${disabled}>Eliminar</button>`;
 
-  return `${btnEditar}${btnActivar}${btnSuspender}${btnReset}${btnForce}${btnImpersonar}${btnEliminar}`;
+  return `${btnEditar}${btnActivar}${btnFacturar}${btnHistorial}${btnReset}${btnForce}${btnImpersonar}${btnEliminar}`;
 };
 
 
@@ -3777,23 +3795,28 @@ const iniciarSesionImpersonada = (data = {}) => {
 const procesarAccionNegocio = async (accion, id) => {
   if (!id || !accion) return;
   try {
+    if (accion === 'facturar-posium') {
+      if (window.kanmFacturacionPosium?.abrirModal) {
+        await window.kanmFacturacionPosium.abrirModal(id);
+      } else {
+        setNegociosMsg('Modulo de facturacion POSIUM no disponible.', 'error');
+      }
+      return;
+    }
+    if (accion === 'historial-posium') {
+      if (window.kanmFacturacionPosium?.abrirHistorial) {
+        await window.kanmFacturacionPosium.abrirHistorial(id);
+      } else {
+        setNegociosMsg('Modulo de facturacion POSIUM no disponible.', 'error');
+      }
+      return;
+    }
+
     setNegociosMsg('Procesando accion...', 'info');
     if (accion === 'activar') {
       await ejecutarAccionNegocio(`/api/admin/negocios/${id}/activar`, { method: 'PUT' });
     } else if (accion === 'desactivar') {
       await ejecutarAccionNegocio(`/api/admin/negocios/${id}/desactivar`, { method: 'PUT' });
-    } else if (accion === 'suspender') {
-      const motivo = prompt('Motivo de suspension (opcional):');
-      if (motivo === null) {
-        setNegociosMsg('', 'info');
-        return;
-      }
-      await ejecutarAccionNegocio(`/api/admin/negocios/${id}/suspender`, {
-        method: 'PUT',
-        body: JSON.stringify({ motivo_suspension: motivo || null }),
-      });
-    } else if (accion === 'reactivar') {
-      await ejecutarAccionNegocio(`/api/admin/negocios/${id}/reactivar`, { method: 'PUT' });
     } else if (accion === 'reset-password') {
       const data = await ejecutarAccionNegocio(`/api/admin/negocios/${id}/reset-admin-password`, { method: 'POST' });
       if (data?.temp_password) {
@@ -4566,6 +4589,10 @@ histCocinaPrev?.addEventListener('click', () => {
 });
 histCocinaNext?.addEventListener('click', () => cargarHistorialCocina(paginaHistorialCocina + 1));
 histCocinaCocineroSelect?.addEventListener('change', () => cargarHistorialCocina(1));
+histCocinaAreaSelect?.addEventListener('change', () => {
+  cargarCocinerosHistorial();
+  cargarHistorialCocina(1);
+});
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && modalEliminarOverlay && !modalEliminarOverlay.hidden) {

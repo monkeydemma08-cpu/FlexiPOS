@@ -3122,6 +3122,144 @@ const obtenerSalidasPorFecha = (fecha, negocioIdOrCallback, opcionesOrCallback, 
   });
 };
 
+const REFERENCIA_TIPO_SALIDA = 'SALIDA_CAJA';
+const construirReferenciaSalida = (salidaId) => `${REFERENCIA_TIPO_SALIDA}:${salidaId}`;
+
+const obtenerFechaSalidaGasto = (fechaEntrada) => {
+  if (fechaEntrada instanceof Date) {
+    return obtenerFechaLocalISO(fechaEntrada);
+  }
+  if (typeof fechaEntrada === 'string') {
+    const valor = fechaEntrada.trim();
+    if (esFechaISOValida(valor)) {
+      return valor;
+    }
+    if (valor.length >= 10) {
+      const recorte = valor.slice(0, 10);
+      if (esFechaISOValida(recorte)) {
+        return recorte;
+      }
+    }
+  }
+  return obtenerFechaLocalISO(new Date());
+};
+
+const obtenerGastoSalidaCaja = async (negocioId, salidaId) => {
+  return db.get(
+    `SELECT id, fecha, monto, descripcion, referencia, referencia_tipo, referencia_id
+       FROM gastos
+      WHERE negocio_id = ?
+        AND referencia_tipo = ?
+        AND referencia_id = ?
+      LIMIT 1`,
+    [negocioId, REFERENCIA_TIPO_SALIDA, salidaId]
+  );
+};
+
+const crearGastoSalidaCaja = async ({ negocioId, usuarioId, fecha, monto, descripcion, salidaId }) => {
+  const descripcionGasto = `Salida de caja: ${descripcion}`;
+  const referencia = construirReferenciaSalida(salidaId);
+  const params = [
+    fecha,
+    monto,
+    'DOP',
+    REFERENCIA_TIPO_SALIDA,
+    'EFECTIVO',
+    null,
+    descripcionGasto,
+    referencia,
+    REFERENCIA_TIPO_SALIDA,
+    salidaId,
+    usuarioId || null,
+    0,
+    null,
+    null,
+    negocioId,
+  ];
+
+  const insert = await db.run(
+    `
+      INSERT INTO gastos (
+        fecha, monto, moneda, categoria, metodo_pago, proveedor, descripcion,
+        referencia, referencia_tipo, referencia_id, usuario_id, es_recurrente,
+        frecuencia, tags, negocio_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    params
+  );
+
+  return {
+    id: insert?.lastID || null,
+    fecha,
+    monto,
+    moneda: 'DOP',
+    categoria: REFERENCIA_TIPO_SALIDA,
+    metodo_pago: 'EFECTIVO',
+    descripcion: descripcionGasto,
+    referencia,
+    referencia_tipo: REFERENCIA_TIPO_SALIDA,
+    referencia_id: salidaId,
+    usuario_id: usuarioId || null,
+  };
+};
+
+const actualizarGastoSalidaCaja = async ({
+  gastoId,
+  negocioId,
+  usuarioId,
+  fecha,
+  monto,
+  descripcion,
+  salidaId,
+}) => {
+  const descripcionGasto = `Salida de caja: ${descripcion}`;
+  const referencia = construirReferenciaSalida(salidaId);
+  const params = [
+    fecha,
+    monto,
+    REFERENCIA_TIPO_SALIDA,
+    'EFECTIVO',
+    descripcionGasto,
+    referencia,
+    REFERENCIA_TIPO_SALIDA,
+    salidaId,
+    usuarioId || null,
+    gastoId,
+    negocioId,
+  ];
+
+  await db.run(
+    `
+      UPDATE gastos
+         SET fecha = ?,
+             monto = ?,
+             categoria = ?,
+             metodo_pago = ?,
+             descripcion = ?,
+             referencia = ?,
+             referencia_tipo = ?,
+             referencia_id = ?,
+             usuario_id = ?
+       WHERE id = ?
+         AND negocio_id = ?
+    `,
+    params
+  );
+
+  return {
+    id: gastoId,
+    fecha,
+    monto,
+    categoria: REFERENCIA_TIPO_SALIDA,
+    metodo_pago: 'EFECTIVO',
+    descripcion: descripcionGasto,
+    referencia,
+    referencia_tipo: REFERENCIA_TIPO_SALIDA,
+    referencia_id: salidaId,
+    usuario_id: usuarioId || null,
+  };
+};
+
 const calcularResumenCajaPorFecha = (
   fecha,
   negocioIdOrCallback,
@@ -4056,6 +4194,313 @@ app.get('/api/productos', (req, res) => {
     } catch (error) {
       console.error('Error al construir consulta de productos:', error?.message || error);
       res.status(500).json({ error: 'Error al obtener productos' });
+    }
+  });
+});
+
+app.get('/api/caja/salidas', (req, res) => {
+  requireUsuarioSesion(req, res, (usuarioSesion) => {
+    const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+    const fechaQuery = normalizarCampoTexto(req.query?.fecha, null);
+    const fecha = fechaQuery ? (esFechaISOValida(fechaQuery) ? fechaQuery : null) : obtenerFechaLocalISO(new Date());
+
+    if (!fecha) {
+      return res.status(400).json({ ok: false, error: 'Fecha invalida.' });
+    }
+
+    obtenerSalidasPorFecha(fecha, negocioId, (err, data) => {
+      if (err) {
+        console.error('Error al obtener salidas de caja:', err?.message || err);
+        return res.status(500).json({ ok: false, error: 'No se pudieron cargar las salidas de caja.' });
+      }
+
+      res.json({
+        ok: true,
+        fecha,
+        total: data?.total || 0,
+        total_salidas: data?.total || 0,
+        salidas: data?.salidas || [],
+      });
+    });
+  });
+});
+
+const POSIUM_FACTURA_ESTADOS = new Set(['pendiente', 'pagada', 'anulada']);
+const POSIUM_IMPUESTO_TIPOS = new Set(['porcentaje', 'fijo']);
+
+const normalizarNumeroPosium = (valor, fallback = 0) => {
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? numero : fallback;
+};
+
+const normalizarMonedaPosium = (valor) => {
+  const texto = normalizarCampoTexto(valor, null);
+  return texto || 'RD$';
+};
+
+const normalizarImpuestoTipoPosium = (valor) => {
+  const texto = normalizarCampoTexto(valor, null);
+  const tipo = texto ? texto.toLowerCase() : '';
+  return POSIUM_IMPUESTO_TIPOS.has(tipo) ? tipo : 'porcentaje';
+};
+
+const normalizarEstadoFacturaPosium = (valor) => {
+  const texto = normalizarCampoTexto(valor, null);
+  const estado = texto ? texto.toLowerCase() : '';
+  return POSIUM_FACTURA_ESTADOS.has(estado) ? estado : 'pendiente';
+};
+
+const normalizarFechaPosium = (valor) => {
+  if (!valor) return new Date().toISOString().slice(0, 10);
+  const texto = String(valor).slice(0, 10);
+  return texto || new Date().toISOString().slice(0, 10);
+};
+
+const aplicarConfigPosium = (payload = {}, actual = {}) => ({
+  cliente_nombre: normalizarCampoTexto(payload.cliente_nombre ?? actual.cliente_nombre, null),
+  cliente_rnc: normalizarCampoTexto(payload.cliente_rnc ?? actual.cliente_rnc, null),
+  cliente_direccion: normalizarCampoTexto(payload.cliente_direccion ?? actual.cliente_direccion, null),
+  cliente_telefono: normalizarCampoTexto(payload.cliente_telefono ?? actual.cliente_telefono, null),
+  cliente_email: normalizarCampoTexto(payload.cliente_email ?? actual.cliente_email, null),
+  cliente_contacto: normalizarCampoTexto(payload.cliente_contacto ?? actual.cliente_contacto, null),
+  emisor_nombre: normalizarCampoTexto(payload.emisor_nombre ?? actual.emisor_nombre, null),
+  emisor_rnc: normalizarCampoTexto(payload.emisor_rnc ?? actual.emisor_rnc, null),
+  emisor_direccion: normalizarCampoTexto(payload.emisor_direccion ?? actual.emisor_direccion, null),
+  emisor_telefono: normalizarCampoTexto(payload.emisor_telefono ?? actual.emisor_telefono, null),
+  emisor_email: normalizarCampoTexto(payload.emisor_email ?? actual.emisor_email, null),
+  emisor_logo: normalizarCampoTexto(payload.emisor_logo ?? actual.emisor_logo, null),
+  emisor_nota: normalizarCampoTexto(payload.emisor_nota ?? actual.emisor_nota, null),
+  plan_nombre: normalizarCampoTexto(payload.plan_nombre ?? actual.plan_nombre, null),
+  precio_base: normalizarNumeroPosium(payload.precio_base ?? actual.precio_base, 0),
+  moneda: normalizarMonedaPosium(payload.moneda ?? actual.moneda),
+  impuesto_tipo: normalizarImpuestoTipoPosium(payload.impuesto_tipo ?? actual.impuesto_tipo),
+  impuesto_valor: normalizarNumeroPosium(payload.impuesto_valor ?? actual.impuesto_valor, 0),
+  periodo_default: normalizarCampoTexto(payload.periodo_default ?? actual.periodo_default, null),
+  terminos_pago: normalizarCampoTexto(payload.terminos_pago ?? actual.terminos_pago, null),
+  metodo_pago: normalizarCampoTexto(payload.metodo_pago ?? actual.metodo_pago, null),
+  notas_internas: normalizarCampoTexto(payload.notas_internas ?? actual.notas_internas, null),
+});
+
+app.post('/api/caja/salidas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+    const descripcion = normalizarCampoTexto(req.body?.descripcion, null);
+    const monto = normalizarNumero(req.body?.monto, null);
+    const fechaInput = normalizarCampoTexto(req.body?.fecha, null);
+    const fecha = fechaInput ? (esFechaISOValida(fechaInput) ? fechaInput : null) : obtenerFechaLocalISO(new Date());
+
+    if (!descripcion) {
+      return res.status(400).json({ ok: false, error: 'La descripcion es obligatoria.' });
+    }
+
+    if (monto === null || monto <= 0) {
+      return res.status(400).json({ ok: false, error: 'El monto debe ser mayor a 0.' });
+    }
+
+    if (!fecha) {
+      return res.status(400).json({ ok: false, error: 'Fecha invalida.' });
+    }
+
+    try {
+      await db.run('BEGIN');
+
+      const salidaInsert = await db.run(
+        `
+          INSERT INTO salidas_caja (negocio_id, fecha, descripcion, monto, metodo, usuario_id)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        [negocioId, fecha, descripcion, monto, 'efectivo', usuarioSesion?.id || null]
+      );
+      const salidaId = salidaInsert?.lastID || null;
+      if (!salidaId) {
+        throw new Error('No se pudo registrar la salida.');
+      }
+
+      const gastoExistente = await obtenerGastoSalidaCaja(negocioId, salidaId);
+      const gasto =
+        gastoExistente ||
+        (await crearGastoSalidaCaja({
+          negocioId,
+          usuarioId: usuarioSesion?.id || null,
+          fecha: obtenerFechaSalidaGasto(fecha),
+          monto,
+          descripcion,
+          salidaId,
+        }));
+
+      await db.run('COMMIT');
+
+      res.status(201).json({
+        ok: true,
+        salida: {
+          id: salidaId,
+          fecha,
+          descripcion,
+          monto,
+          metodo: 'efectivo',
+        },
+        gasto,
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al registrar salida de caja:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo registrar la salida de caja.' });
+    }
+  });
+});
+
+app.put('/api/caja/salidas/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const salidaId = Number(req.params.id);
+    if (!Number.isFinite(salidaId) || salidaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Salida invalida.' });
+    }
+
+    const descripcionInput = req.body?.descripcion;
+    const montoInput = req.body?.monto;
+    const fechaInput = req.body?.fecha;
+    const descripcion = descripcionInput !== undefined ? normalizarCampoTexto(descripcionInput, null) : null;
+    const monto = montoInput !== undefined ? normalizarNumero(montoInput, null) : null;
+    const fecha = fechaInput !== undefined ? normalizarCampoTexto(fechaInput, null) : null;
+
+    if (descripcionInput !== undefined && !descripcion) {
+      return res.status(400).json({ ok: false, error: 'La descripcion es obligatoria.' });
+    }
+
+    if (montoInput !== undefined && (monto === null || monto <= 0)) {
+      return res.status(400).json({ ok: false, error: 'El monto debe ser mayor a 0.' });
+    }
+
+    if (fechaInput !== undefined && (!fecha || !esFechaISOValida(fecha))) {
+      return res.status(400).json({ ok: false, error: 'Fecha invalida.' });
+    }
+
+    if (descripcionInput === undefined && montoInput === undefined && fechaInput === undefined) {
+      return res.status(400).json({ ok: false, error: 'No hay cambios para aplicar.' });
+    }
+
+    const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+
+    try {
+      const existente = await db.get(
+        `SELECT id, fecha, descripcion, monto, metodo
+           FROM salidas_caja
+          WHERE id = ? AND negocio_id = ?
+          LIMIT 1`,
+        [salidaId, negocioId]
+      );
+
+      if (!existente) {
+        return res.status(404).json({ ok: false, error: 'Salida no encontrada.' });
+      }
+
+      const fechaFinal = obtenerFechaSalidaGasto(fecha || existente.fecha);
+      const descripcionFinal = descripcion ?? existente.descripcion ?? '';
+      const montoFinal = monto ?? Number(existente.monto || 0);
+
+      await db.run('BEGIN');
+
+      const updates = [];
+      const params = [];
+      if (descripcionInput !== undefined) {
+        updates.push('descripcion = ?');
+        params.push(descripcionFinal);
+      }
+      if (montoInput !== undefined) {
+        updates.push('monto = ?');
+        params.push(montoFinal);
+      }
+      if (fechaInput !== undefined) {
+        updates.push('fecha = ?');
+        params.push(fecha);
+      }
+
+      if (updates.length) {
+        params.push(salidaId, negocioId);
+        await db.run(
+          `UPDATE salidas_caja SET ${updates.join(', ')} WHERE id = ? AND negocio_id = ?`,
+          params
+        );
+      }
+
+      const gastoExistente = await obtenerGastoSalidaCaja(negocioId, salidaId);
+      const gasto = gastoExistente
+        ? await actualizarGastoSalidaCaja({
+            gastoId: gastoExistente.id,
+            negocioId,
+            usuarioId: usuarioSesion?.id || null,
+            fecha: fechaFinal,
+            monto: montoFinal,
+            descripcion: descripcionFinal,
+            salidaId,
+          })
+        : await crearGastoSalidaCaja({
+            negocioId,
+            usuarioId: usuarioSesion?.id || null,
+            fecha: fechaFinal,
+            monto: montoFinal,
+            descripcion: descripcionFinal,
+            salidaId,
+          });
+
+      await db.run('COMMIT');
+
+      res.json({
+        ok: true,
+        salida: {
+          id: salidaId,
+          fecha: fechaInput !== undefined ? fecha : existente.fecha,
+          descripcion: descripcionFinal,
+          monto: montoFinal,
+          metodo: existente.metodo || 'efectivo',
+        },
+        gasto,
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al actualizar salida de caja:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar la salida de caja.' });
+    }
+  });
+});
+
+app.delete('/api/caja/salidas/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const salidaId = Number(req.params.id);
+    if (!Number.isFinite(salidaId) || salidaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Salida invalida.' });
+    }
+
+    const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+
+    try {
+      const existente = await db.get(
+        'SELECT id FROM salidas_caja WHERE id = ? AND negocio_id = ?',
+        [salidaId, negocioId]
+      );
+      if (!existente) {
+        return res.status(404).json({ ok: false, error: 'Salida no encontrada.' });
+      }
+
+      await db.run('BEGIN');
+
+      await db.run(
+        `DELETE FROM gastos
+          WHERE negocio_id = ?
+            AND referencia_tipo = ?
+            AND referencia_id = ?`,
+        [negocioId, REFERENCIA_TIPO_SALIDA, salidaId]
+      );
+
+      await db.run('DELETE FROM salidas_caja WHERE id = ? AND negocio_id = ?', [salidaId, negocioId]);
+
+      await db.run('COMMIT');
+
+      res.json({ ok: true });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al eliminar salida de caja:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo eliminar la salida de caja.' });
     }
   });
 });
@@ -5423,64 +5868,460 @@ app.put('/api/admin/negocios/:id/desactivar', (req, res) => {
 });
 
 app.put('/api/admin/negocios/:id/suspender', (req, res) => {
-  requireSuperAdmin(req, res, async (usuarioSesion) => {
+  res.status(404).json({ ok: false, error: 'Operacion no disponible' });
+});
+
+app.put('/api/admin/negocios/:id/reactivar', (req, res) => {
+  res.status(404).json({ ok: false, error: 'Operacion no disponible' });
+});
+
+app.get('/api/admin/negocios/:id/facturacion-config', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
     }
 
-    const motivo = normalizarCampoTexto(
-      req.body?.motivo_suspension ?? req.body?.motivo ?? req.body?.motivoSuspension,
-      null
-    );
-
     try {
-      const negocio = await obtenerNegocioAdmin(id);
+      const negocio = await db.get(
+        `SELECT n.id, n.nombre, n.rnc, n.telefono, n.direccion, n.admin_principal_correo,
+                u.nombre AS admin_nombre, u.usuario AS admin_usuario
+           FROM negocios n
+           LEFT JOIN usuarios u ON u.id = n.admin_principal_usuario_id
+          WHERE n.id = ?
+          LIMIT 1`,
+        [id]
+      );
       if (!negocio) {
         return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
       }
-      if (negocio.deleted_at) {
-        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
-      }
 
-      await db.run(
-        'UPDATE negocios SET suspendido = 1, motivo_suspension = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [motivo, id]
+      const existente = await db.get(
+        'SELECT * FROM posium_facturacion_config WHERE negocio_id = ? LIMIT 1',
+        [id]
       );
-      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'suspender' });
-      res.json({ ok: true, suspendido: 1, motivo_suspension: motivo });
+      const defaults = {
+        cliente_nombre: negocio.nombre || '',
+        cliente_rnc: negocio.rnc || '',
+        cliente_direccion: negocio.direccion || '',
+        cliente_telefono: negocio.telefono || '',
+        cliente_email: negocio.admin_principal_correo || '',
+        cliente_contacto: negocio.admin_nombre || negocio.admin_usuario || '',
+        emisor_nombre: 'POSIUM',
+        emisor_rnc: '',
+        emisor_direccion: '',
+        emisor_telefono: '',
+        emisor_email: '',
+        emisor_logo: '',
+        emisor_nota: '',
+        plan_nombre: 'Suscripcion POSIUM mensual',
+        precio_base: 0,
+        moneda: 'RD$',
+        impuesto_tipo: 'porcentaje',
+        impuesto_valor: 0,
+        periodo_default: '',
+        terminos_pago: 'Pago inmediato',
+        metodo_pago: 'Transferencia',
+        notas_internas: '',
+      };
+
+      const config = aplicarConfigPosium(existente || {}, defaults);
+      res.json({ ok: true, config, negocio });
     } catch (error) {
-      console.error('Error suspendiendo negocio:', error?.message || error);
-      res.status(500).json({ ok: false, error: 'No se pudo suspender el negocio' });
+      console.error('Error al obtener configuracion de facturacion POSIUM:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener la configuracion' });
     }
   });
 });
 
-app.put('/api/admin/negocios/:id/reactivar', (req, res) => {
-  requireSuperAdmin(req, res, async (usuarioSesion) => {
+app.put('/api/admin/negocios/:id/facturacion-config', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
     }
 
     try {
-      const negocio = await obtenerNegocioAdmin(id);
-      if (!negocio) {
-        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
-      }
-      if (negocio.deleted_at) {
-        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
-      }
-
-      await db.run(
-        'UPDATE negocios SET suspendido = 0, motivo_suspension = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      const existente = await db.get(
+        'SELECT * FROM posium_facturacion_config WHERE negocio_id = ? LIMIT 1',
         [id]
       );
-      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'reactivar' });
-      res.json({ ok: true, suspendido: 0 });
+      const payload = req.body || {};
+      const config = aplicarConfigPosium(payload, existente || {});
+
+      const sql = `
+        INSERT INTO posium_facturacion_config (
+          negocio_id, cliente_nombre, cliente_rnc, cliente_direccion, cliente_telefono, cliente_email, cliente_contacto,
+          emisor_nombre, emisor_rnc, emisor_direccion, emisor_telefono, emisor_email, emisor_logo, emisor_nota,
+          plan_nombre, precio_base, moneda, impuesto_tipo, impuesto_valor, periodo_default, terminos_pago, metodo_pago,
+          notas_internas
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          cliente_nombre = VALUES(cliente_nombre),
+          cliente_rnc = VALUES(cliente_rnc),
+          cliente_direccion = VALUES(cliente_direccion),
+          cliente_telefono = VALUES(cliente_telefono),
+          cliente_email = VALUES(cliente_email),
+          cliente_contacto = VALUES(cliente_contacto),
+          emisor_nombre = VALUES(emisor_nombre),
+          emisor_rnc = VALUES(emisor_rnc),
+          emisor_direccion = VALUES(emisor_direccion),
+          emisor_telefono = VALUES(emisor_telefono),
+          emisor_email = VALUES(emisor_email),
+          emisor_logo = VALUES(emisor_logo),
+          emisor_nota = VALUES(emisor_nota),
+          plan_nombre = VALUES(plan_nombre),
+          precio_base = VALUES(precio_base),
+          moneda = VALUES(moneda),
+          impuesto_tipo = VALUES(impuesto_tipo),
+          impuesto_valor = VALUES(impuesto_valor),
+          periodo_default = VALUES(periodo_default),
+          terminos_pago = VALUES(terminos_pago),
+          metodo_pago = VALUES(metodo_pago),
+          notas_internas = VALUES(notas_internas),
+          updated_at = CURRENT_TIMESTAMP
+      `;
+
+      const params = [
+        id,
+        config.cliente_nombre,
+        config.cliente_rnc,
+        config.cliente_direccion,
+        config.cliente_telefono,
+        config.cliente_email,
+        config.cliente_contacto,
+        config.emisor_nombre,
+        config.emisor_rnc,
+        config.emisor_direccion,
+        config.emisor_telefono,
+        config.emisor_email,
+        config.emisor_logo,
+        config.emisor_nota,
+        config.plan_nombre,
+        config.precio_base,
+        config.moneda,
+        config.impuesto_tipo,
+        config.impuesto_valor,
+        config.periodo_default,
+        config.terminos_pago,
+        config.metodo_pago,
+        config.notas_internas,
+      ];
+
+      await db.run(sql, params);
+      res.json({ ok: true, config });
     } catch (error) {
-      console.error('Error reactivando negocio:', error?.message || error);
-      res.status(500).json({ ok: false, error: 'No se pudo reactivar el negocio' });
+      console.error('Error al guardar configuracion de facturacion POSIUM:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo guardar la configuracion' });
+    }
+  });
+});
+
+app.get('/api/admin/negocios/:id/facturas', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    const page = Math.max(1, Number(req.query?.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(req.query?.limit) || 20));
+    const offset = (page - 1) * limit;
+
+    try {
+      const totalRow = await db.get(
+        'SELECT COUNT(1) AS total FROM posium_facturas WHERE negocio_id = ?',
+        [id]
+      );
+      const total = Number(totalRow?.total) || 0;
+      const dataSql = `
+        SELECT id, numero_factura, fecha_emision, periodo, subtotal, itbis, descuento, total, moneda, estado, created_at
+          FROM posium_facturas
+         WHERE negocio_id = ?
+         ORDER BY fecha_emision DESC, id DESC
+         LIMIT ${limit} OFFSET ${offset}
+      `;
+      const items = await db.all(dataSql, [id]);
+
+      res.json({ ok: true, items: items || [], total, page, pageSize: limit });
+    } catch (error) {
+      console.error('Error al listar facturas POSIUM:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el historial de facturas' });
+    }
+  });
+});
+
+app.post('/api/admin/negocios/:id/facturas', (req, res) => {
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    const payload = req.body || {};
+    const facturaPayload = payload.factura || payload;
+    const configPayload = payload.config || null;
+    const actualizarConfig = payload.actualizar_config !== false;
+
+    try {
+      const existente = await db.get(
+        'SELECT * FROM posium_facturacion_config WHERE negocio_id = ? LIMIT 1',
+        [id]
+      );
+      let configFinal = aplicarConfigPosium(configPayload || {}, existente || {});
+
+      if (configPayload && actualizarConfig) {
+        const sqlConfig = `
+          INSERT INTO posium_facturacion_config (
+            negocio_id, cliente_nombre, cliente_rnc, cliente_direccion, cliente_telefono, cliente_email, cliente_contacto,
+            emisor_nombre, emisor_rnc, emisor_direccion, emisor_telefono, emisor_email, emisor_logo, emisor_nota,
+            plan_nombre, precio_base, moneda, impuesto_tipo, impuesto_valor, periodo_default, terminos_pago, metodo_pago,
+            notas_internas
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            cliente_nombre = VALUES(cliente_nombre),
+            cliente_rnc = VALUES(cliente_rnc),
+            cliente_direccion = VALUES(cliente_direccion),
+            cliente_telefono = VALUES(cliente_telefono),
+            cliente_email = VALUES(cliente_email),
+            cliente_contacto = VALUES(cliente_contacto),
+            emisor_nombre = VALUES(emisor_nombre),
+            emisor_rnc = VALUES(emisor_rnc),
+            emisor_direccion = VALUES(emisor_direccion),
+            emisor_telefono = VALUES(emisor_telefono),
+            emisor_email = VALUES(emisor_email),
+            emisor_logo = VALUES(emisor_logo),
+            emisor_nota = VALUES(emisor_nota),
+            plan_nombre = VALUES(plan_nombre),
+            precio_base = VALUES(precio_base),
+            moneda = VALUES(moneda),
+            impuesto_tipo = VALUES(impuesto_tipo),
+            impuesto_valor = VALUES(impuesto_valor),
+            periodo_default = VALUES(periodo_default),
+            terminos_pago = VALUES(terminos_pago),
+            metodo_pago = VALUES(metodo_pago),
+            notas_internas = VALUES(notas_internas),
+            updated_at = CURRENT_TIMESTAMP
+        `;
+        const paramsConfig = [
+          id,
+          configFinal.cliente_nombre,
+          configFinal.cliente_rnc,
+          configFinal.cliente_direccion,
+          configFinal.cliente_telefono,
+          configFinal.cliente_email,
+          configFinal.cliente_contacto,
+          configFinal.emisor_nombre,
+          configFinal.emisor_rnc,
+          configFinal.emisor_direccion,
+          configFinal.emisor_telefono,
+          configFinal.emisor_email,
+          configFinal.emisor_logo,
+          configFinal.emisor_nota,
+          configFinal.plan_nombre,
+          configFinal.precio_base,
+          configFinal.moneda,
+          configFinal.impuesto_tipo,
+          configFinal.impuesto_valor,
+          configFinal.periodo_default,
+          configFinal.terminos_pago,
+          configFinal.metodo_pago,
+          configFinal.notas_internas,
+        ];
+        await db.run(sqlConfig, paramsConfig);
+      }
+
+      const fechaEmision = normalizarFechaPosium(facturaPayload.fecha_emision ?? facturaPayload.fecha);
+      const periodo = normalizarCampoTexto(facturaPayload.periodo, null);
+      if (!periodo) {
+        return res.status(400).json({ ok: false, error: 'El periodo facturado es obligatorio' });
+      }
+
+      const descripcionBase = normalizarCampoTexto(facturaPayload.descripcion, null);
+      const descripcion =
+        descripcionBase ||
+        [configFinal.plan_nombre || 'Suscripcion POSIUM', periodo].filter(Boolean).join(' - ');
+      const cantidad = Math.max(1, normalizarNumeroPosium(facturaPayload.cantidad, 1));
+      const precioUnitario = normalizarNumeroPosium(
+        facturaPayload.precio_unitario ?? facturaPayload.precio_unitario_base ?? configFinal.precio_base,
+        0
+      );
+      const subtotalLinea = cantidad * precioUnitario;
+      const items = [
+        {
+          descripcion,
+          cantidad,
+          precio_unitario: precioUnitario,
+          subtotal: subtotalLinea,
+        },
+      ];
+
+      const subtotal = items.reduce((acc, item) => acc + normalizarNumeroPosium(item.subtotal, 0), 0);
+      const impuestoTipo = normalizarImpuestoTipoPosium(
+        facturaPayload.impuesto_tipo ?? configFinal.impuesto_tipo
+      );
+      const impuestoValor = normalizarNumeroPosium(
+        facturaPayload.impuesto_valor ?? configFinal.impuesto_valor,
+        0
+      );
+      const itbis =
+        impuestoTipo === 'porcentaje' ? (subtotal * impuestoValor) / 100 : impuestoValor;
+      const descuento = Math.max(0, normalizarNumeroPosium(facturaPayload.descuento, 0));
+      const total = Math.max(0, subtotal + itbis - descuento);
+      const moneda = normalizarMonedaPosium(facturaPayload.moneda ?? configFinal.moneda);
+      const estado = normalizarEstadoFacturaPosium(facturaPayload.estado);
+      const terminosPago =
+        normalizarCampoTexto(facturaPayload.terminos_pago ?? configFinal.terminos_pago, null) || '';
+      const metodoPago =
+        normalizarCampoTexto(facturaPayload.metodo_pago ?? configFinal.metodo_pago, null) || '';
+
+      const emisorSnapshot = {
+        nombre: configFinal.emisor_nombre,
+        rnc: configFinal.emisor_rnc,
+        direccion: configFinal.emisor_direccion,
+        telefono: configFinal.emisor_telefono,
+        email: configFinal.emisor_email,
+        logo: configFinal.emisor_logo,
+        nota: configFinal.emisor_nota,
+      };
+      const clienteSnapshot = {
+        nombre: configFinal.cliente_nombre,
+        rnc: configFinal.cliente_rnc,
+        direccion: configFinal.cliente_direccion,
+        telefono: configFinal.cliente_telefono,
+        email: configFinal.cliente_email,
+        contacto: configFinal.cliente_contacto,
+      };
+
+      await db.run('BEGIN');
+      const maxRow = await db.get('SELECT COALESCE(MAX(numero_factura), 0) AS max_num FROM posium_facturas');
+      const numeroFactura = Number(maxRow?.max_num || 0) + 1;
+
+      const insertSql = `
+        INSERT INTO posium_facturas (
+          negocio_id, numero_factura, fecha_emision, periodo, items_json, subtotal, itbis, descuento, total,
+          moneda, estado, terminos_pago, metodo_pago, emisor_snapshot, cliente_snapshot, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      const insertParams = [
+        id,
+        numeroFactura,
+        fechaEmision,
+        periodo,
+        JSON.stringify(items),
+        subtotal,
+        itbis,
+        descuento,
+        total,
+        moneda,
+        estado,
+        terminosPago,
+        metodoPago,
+        JSON.stringify(emisorSnapshot),
+        JSON.stringify(clienteSnapshot),
+        usuarioSesion?.id || null,
+      ];
+
+      const resultado = await db.run(insertSql, insertParams);
+      await db.run('COMMIT');
+
+      res.status(201).json({
+        ok: true,
+        factura: {
+          id: resultado?.lastID,
+          numero_factura: numeroFactura,
+          fecha_emision: fechaEmision,
+          periodo,
+          subtotal,
+          itbis,
+          descuento,
+          total,
+          moneda,
+          estado,
+        },
+      });
+    } catch (error) {
+      try {
+        await db.run('ROLLBACK');
+      } catch (rollbackError) {
+        console.warn('Error al revertir factura POSIUM:', rollbackError?.message || rollbackError);
+      }
+      console.error('Error al generar factura POSIUM:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo generar la factura' });
+    }
+  });
+});
+
+app.get('/api/admin/posium-facturas/:id', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de factura invalido' });
+    }
+
+    try {
+      const row = await db.get('SELECT * FROM posium_facturas WHERE id = ? LIMIT 1', [id]);
+      if (!row) {
+        return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+      }
+
+      const parseJsonField = (value, fallback) => {
+        if (!value) return fallback;
+        if (Array.isArray(value) || typeof value === 'object') return value;
+        try {
+          if (Buffer.isBuffer(value)) {
+            return JSON.parse(value.toString('utf8'));
+          }
+          if (typeof value === 'string') {
+            return JSON.parse(value);
+          }
+        } catch (parseErr) {
+          return fallback;
+        }
+        return fallback;
+      };
+
+      const itemsRaw = parseJsonField(row.items_json, []);
+      const items = Array.isArray(itemsRaw) ? itemsRaw : [];
+      const emisor = parseJsonField(row.emisor_snapshot, null);
+      const cliente = parseJsonField(row.cliente_snapshot, null);
+
+      res.json({
+        ok: true,
+        factura: {
+          ...row,
+          items,
+          emisor,
+          cliente,
+        },
+      });
+    } catch (error) {
+      console.error('Error al obtener factura POSIUM:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener la factura' });
+    }
+  });
+});
+
+app.put('/api/admin/posium-facturas/:id/estado', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de factura invalido' });
+    }
+
+    const estado = normalizarEstadoFacturaPosium(req.body?.estado);
+    try {
+      const resultado = await db.run(
+        'UPDATE posium_facturas SET estado = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [estado, id]
+      );
+      if (!resultado?.changes) {
+        return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+      }
+      res.json({ ok: true, estado });
+    } catch (error) {
+      console.error('Error al actualizar estado de factura POSIUM:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar el estado' });
     }
   });
 });
@@ -7952,6 +8793,344 @@ app.get('/api/reportes/607', (req, res) => {
   });
 });
 
+const normalizarAreaHistorial = (valor) => {
+  const texto = normalizarCampoTexto(valor) || 'todas';
+  const normalizado = texto.toLowerCase();
+  if (normalizado === 'cocina' || normalizado === 'bar') return normalizado;
+  return 'todas';
+};
+
+const tablasHistorialCache = new Map();
+const tablaExiste = async (nombreTabla) => {
+  if (!nombreTabla) return false;
+  if (tablasHistorialCache.has(nombreTabla)) {
+    return tablasHistorialCache.get(nombreTabla);
+  }
+  try {
+    const row = await db.get(
+      'SELECT 1 AS existe FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ? LIMIT 1',
+      nombreTabla
+    );
+    const existe = Boolean(row && row.existe !== undefined);
+    tablasHistorialCache.set(nombreTabla, existe);
+    return existe;
+  } catch (error) {
+    console.warn(`No se pudo validar la tabla ${nombreTabla}:`, error?.message || error);
+    tablasHistorialCache.set(nombreTabla, false);
+    return false;
+  }
+};
+
+const construirHistorialQuery = ({ table, area, idCol, nombreCol, negocioId, fecha, preparadorId }) => {
+  const where = ['negocio_id = ?', 'DATE(created_at) = ?'];
+  const params = [negocioId, fecha];
+
+  if (Number.isFinite(preparadorId)) {
+    where.push(`${idCol} = ?`);
+    params.push(preparadorId);
+  }
+
+  const whereSql = where.join(' AND ');
+  const selectSql = `
+    SELECT id, cuenta_id, pedido_id, item_nombre, cantidad,
+           ${idCol} AS preparador_id,
+           ${nombreCol} AS preparador_nombre,
+           created_at, completed_at,
+           '${area}' AS area
+    FROM ${table}
+    WHERE ${whereSql}
+  `;
+  const countSql = `SELECT COUNT(1) AS total FROM ${table} WHERE ${whereSql}`;
+  return { selectSql, countSql, params };
+};
+
+const resolverFiltroPreparador = (query) => {
+  const raw =
+    query?.user_id ?? query?.preparador_id ?? query?.cocinero_id ?? query?.bartender_id ?? null;
+  if (raw === null || raw === undefined || raw === '') {
+    return null;
+  }
+  const numero = Number(raw);
+  return Number.isFinite(numero) ? numero : null;
+};
+
+const obtenerNombreArea = (valor) => (valor === 'bar' ? 'Bar' : 'Cocina');
+
+// Historial de preparacion (cocina + bar)
+app.get('/api/preparacion/historial', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || usuarioSesion?.negocioId || NEGOCIO_ID_DEFAULT;
+    const fecha = (req.query?.fecha || '').slice(0, 10);
+    const area = normalizarAreaHistorial(req.query?.area);
+    const preparadorId = resolverFiltroPreparador(req.query);
+    const page = Math.max(1, Number(req.query?.page) || 1);
+    const limit = Math.max(1, Math.min(200, Number(req.query?.limit) || 50));
+    const offset = (page - 1) * limit;
+    const limitSafe = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
+    const offsetSafe = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+
+    if (!fecha) {
+      return res.status(400).json({ ok: false, error: 'Debe especificar la fecha' });
+    }
+
+    try {
+      const cocinaDisponible = await tablaExiste('historial_cocina');
+      const barDisponible = await tablaExiste('historial_bar');
+
+      let total = 0;
+      let items = [];
+
+      if (!cocinaDisponible && !barDisponible) {
+        return res.json({ ok: true, items: [], total: 0, page, pageSize: limit });
+      }
+
+      const cocinaQuery = cocinaDisponible
+        ? construirHistorialQuery({
+            table: 'historial_cocina',
+            area: 'cocina',
+            idCol: 'cocinero_id',
+            nombreCol: 'cocinero_nombre',
+            negocioId,
+            fecha,
+            preparadorId,
+          })
+        : null;
+      const barQuery = barDisponible
+        ? construirHistorialQuery({
+            table: 'historial_bar',
+            area: 'bar',
+            idCol: 'bartender_id',
+            nombreCol: 'bartender_nombre',
+            negocioId,
+            fecha,
+            preparadorId,
+          })
+        : null;
+
+      if (area === 'cocina') {
+        if (!cocinaQuery) {
+          return res.json({ ok: true, items: [], total: 0, page, pageSize: limit });
+        }
+        const countRow = await db.get(cocinaQuery.countSql, cocinaQuery.params);
+        total = Number(countRow?.total) || 0;
+        const dataSql = `${cocinaQuery.selectSql} ORDER BY created_at DESC, id DESC LIMIT ${limitSafe} OFFSET ${offsetSafe}`;
+        items = await db.all(dataSql, cocinaQuery.params);
+      } else if (area === 'bar') {
+        if (!barQuery) {
+          return res.json({ ok: true, items: [], total: 0, page, pageSize: limit });
+        }
+        const countRow = await db.get(barQuery.countSql, barQuery.params);
+        total = Number(countRow?.total) || 0;
+        const dataSql = `${barQuery.selectSql} ORDER BY created_at DESC, id DESC LIMIT ${limitSafe} OFFSET ${offsetSafe}`;
+        items = await db.all(dataSql, barQuery.params);
+      } else if (cocinaQuery && barQuery) {
+        const countCocina = await db.get(cocinaQuery.countSql, cocinaQuery.params);
+        const countBar = await db.get(barQuery.countSql, barQuery.params);
+        total = (Number(countCocina?.total) || 0) + (Number(countBar?.total) || 0);
+        const dataSql = `
+          SELECT *
+          FROM (${cocinaQuery.selectSql} UNION ALL ${barQuery.selectSql}) AS historial
+          ORDER BY created_at DESC, id DESC
+          LIMIT ${limitSafe} OFFSET ${offsetSafe}
+        `;
+        items = await db.all(dataSql, [...cocinaQuery.params, ...barQuery.params]);
+      } else if (cocinaQuery) {
+        const countRow = await db.get(cocinaQuery.countSql, cocinaQuery.params);
+        total = Number(countRow?.total) || 0;
+        const dataSql = `${cocinaQuery.selectSql} ORDER BY created_at DESC, id DESC LIMIT ${limitSafe} OFFSET ${offsetSafe}`;
+        items = await db.all(dataSql, cocinaQuery.params);
+      } else if (barQuery) {
+        const countRow = await db.get(barQuery.countSql, barQuery.params);
+        total = Number(countRow?.total) || 0;
+        const dataSql = `${barQuery.selectSql} ORDER BY created_at DESC, id DESC LIMIT ${limitSafe} OFFSET ${offsetSafe}`;
+        items = await db.all(dataSql, barQuery.params);
+      }
+
+      const normalizados = (items || []).map((item) => ({
+        ...item,
+        area: normalizarAreaHistorial(item.area),
+      }));
+
+      res.json({
+        ok: true,
+        items: normalizados,
+        total,
+        page,
+        pageSize: limitSafe,
+      });
+    } catch (error) {
+      console.error('Error al obtener historial de preparacion:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el historial de preparacion.' });
+    }
+  });
+});
+
+app.get('/api/preparacion/historial/export', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || usuarioSesion?.negocioId || NEGOCIO_ID_DEFAULT;
+    const fecha = (req.query?.fecha || '').slice(0, 10);
+    const area = normalizarAreaHistorial(req.query?.area);
+    const preparadorId = resolverFiltroPreparador(req.query);
+
+    if (!fecha) {
+      return res.status(400).json({ ok: false, error: 'Debe especificar la fecha' });
+    }
+
+    try {
+      const cocinaDisponible = await tablaExiste('historial_cocina');
+      const barDisponible = await tablaExiste('historial_bar');
+
+      let rows = [];
+
+      const cocinaQuery = cocinaDisponible
+        ? construirHistorialQuery({
+            table: 'historial_cocina',
+            area: 'cocina',
+            idCol: 'cocinero_id',
+            nombreCol: 'cocinero_nombre',
+            negocioId,
+            fecha,
+            preparadorId,
+          })
+        : null;
+      const barQuery = barDisponible
+        ? construirHistorialQuery({
+            table: 'historial_bar',
+            area: 'bar',
+            idCol: 'bartender_id',
+            nombreCol: 'bartender_nombre',
+            negocioId,
+            fecha,
+            preparadorId,
+          })
+        : null;
+
+      if (area === 'cocina') {
+        if (cocinaQuery) {
+          const dataSql = `${cocinaQuery.selectSql} ORDER BY created_at DESC, id DESC`;
+          rows = await db.all(dataSql, cocinaQuery.params);
+        }
+      } else if (area === 'bar') {
+        if (barQuery) {
+          const dataSql = `${barQuery.selectSql} ORDER BY created_at DESC, id DESC`;
+          rows = await db.all(dataSql, barQuery.params);
+        }
+      } else if (cocinaQuery && barQuery) {
+        const dataSql = `
+          SELECT *
+          FROM (${cocinaQuery.selectSql} UNION ALL ${barQuery.selectSql}) AS historial
+          ORDER BY created_at DESC, id DESC
+        `;
+        rows = await db.all(dataSql, [...cocinaQuery.params, ...barQuery.params]);
+      } else if (cocinaQuery) {
+        const dataSql = `${cocinaQuery.selectSql} ORDER BY created_at DESC, id DESC`;
+        rows = await db.all(dataSql, cocinaQuery.params);
+      } else if (barQuery) {
+        const dataSql = `${barQuery.selectSql} ORDER BY created_at DESC, id DESC`;
+        rows = await db.all(dataSql, barQuery.params);
+      }
+
+      const headers = [
+        'cuenta',
+        'pedido',
+        'item',
+        'cantidad',
+        'area',
+        'preparador',
+        'entrada',
+        'finalizado',
+      ];
+      const datos = (rows || []).map((r) => ({
+        cuenta: r.cuenta_id || '',
+        pedido: r.pedido_id || '',
+        item: r.item_nombre || '',
+        cantidad: r.cantidad || 0,
+        area: obtenerNombreArea(normalizarAreaHistorial(r.area)),
+        preparador: r.preparador_nombre || '',
+        entrada: r.created_at || '',
+        finalizado: r.completed_at || '',
+      }));
+
+      const csv = construirCSV(headers, datos);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="historial_preparacion_${fecha}.csv"`);
+      res.send(csv);
+    } catch (error) {
+      console.error('Error al exportar historial de preparacion:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo exportar el historial de preparacion.' });
+    }
+  });
+});
+
+app.get('/api/preparacion/historial/preparadores', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || usuarioSesion?.negocioId || NEGOCIO_ID_DEFAULT;
+    const area = normalizarAreaHistorial(req.query?.area);
+
+    try {
+      const queries = [];
+      const params = [];
+      const cocinaDisponible = await tablaExiste('historial_cocina');
+      const barDisponible = await tablaExiste('historial_bar');
+
+      if ((area === 'cocina' || area === 'todas') && cocinaDisponible) {
+        queries.push(`
+          SELECT DISTINCT cocinero_id AS preparador_id, cocinero_nombre AS preparador_nombre
+          FROM historial_cocina
+          WHERE negocio_id = ? AND cocinero_id IS NOT NULL
+        `);
+        params.push(negocioId);
+      }
+
+      if ((area === 'bar' || area === 'todas') && barDisponible) {
+        queries.push(`
+          SELECT DISTINCT bartender_id AS preparador_id, bartender_nombre AS preparador_nombre
+          FROM historial_bar
+          WHERE negocio_id = ? AND bartender_id IS NOT NULL
+        `);
+        params.push(negocioId);
+      }
+
+      if (!queries.length) {
+        return res.json({ ok: true, preparadores: [] });
+      }
+
+      const rows = await db.all(queries.join(' UNION ALL '), params);
+      const mapa = new Map();
+
+      (rows || []).forEach((row) => {
+        const id = Number(row.preparador_id);
+        if (!Number.isFinite(id)) return;
+        const nombre = normalizarCampoTexto(row.preparador_nombre, null) || `ID ${id}`;
+        if (!mapa.has(id)) {
+          mapa.set(id, { preparador_id: id, preparador_nombre: nombre });
+        }
+      });
+
+      const preparadores = Array.from(mapa.values()).sort((a, b) =>
+        (a.preparador_nombre || '').localeCompare(b.preparador_nombre || '')
+      );
+
+      res.json({ ok: true, preparadores });
+    } catch (error) {
+      console.error('Error al obtener preparadores de historial:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener los preparadores.' });
+    }
+  });
+});
+
 // Historial de cocina
 app.get('/api/historial-cocina', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
@@ -9537,6 +10716,24 @@ app.post('/api/logout', (req, res) => {
     finalizar();
   });
 });
+
+app.use('/api', (req, res) => {
+  res.status(404).json({ ok: false, error: 'Ruta no existe.' });
+});
+
+app.use((err, req, res, next) => {
+  const status = err?.status || err?.statusCode || 500;
+  const payload = {
+    ok: false,
+    error: err?.message || 'Error del servidor.',
+  };
+  const ruta = req?.originalUrl || '';
+  if (ruta.startsWith('/api')) {
+    return res.status(status).json(payload);
+  }
+  return res.status(status).send(payload.error);
+});
+
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 

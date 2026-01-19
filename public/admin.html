@@ -119,7 +119,7 @@
       <button type="button" class="kanm-tab" data-admin-tab="ventas" data-modulo="caja">Ventas &amp; 607</button>
       <button type="button" class="kanm-tab" data-admin-tab="analisis" data-modulo="admin">Analisis del negocio</button>
       <button type="button" class="kanm-tab" data-admin-tab="cuadres" data-modulo="caja">Cuadres de caja</button>
-      <button type="button" class="kanm-tab" data-admin-tab="historial" data-modulo="historialCocina">Historial de cocina</button>
+      <button type="button" class="kanm-tab" data-admin-tab="historial" data-modulo="historialCocina">Historial de preparación</button>
       <button type="button" class="kanm-tab super-admin-only" data-admin-tab="negocios" data-modulo="admin">Negocios</button>
     </div>
 
@@ -427,7 +427,18 @@
 
               <div class="kanm-input-group">
                 <label for="usuario-password">Contraseña</label>
-                <input type="password" id="usuario-password" placeholder="•••••••" />
+                <div class="password-field">
+                  <input type="password" id="usuario-password" placeholder="•••••••" />
+                  <button
+                    type="button"
+                    class="password-toggle"
+                    data-password-toggle
+                    aria-pressed="false"
+                    aria-label="Mostrar contrasena"
+                  >
+                    Mostrar
+                  </button>
+                </div>
                 <p class="kanm-help-text">Obligatoria al crear. En edición es opcional.</p>
               </div>
 
@@ -1549,11 +1560,11 @@
       </section>
     </section>
 
-    <!-- Historial de cocina -->
+    <!-- Historial de preparación -->
     <section class="admin-panel hidden" data-admin-section="historial" id="admin-section-historial">
       <div class="kanm-card-header">
-        <h2>Historial de cocina</h2>
-        <p class="kanm-subtitle">Consulta los items finalizados agrupados por día.</p>
+        <h2>Historial de preparación</h2>
+        <p class="kanm-subtitle">Consulta los items finalizados agrupados por dia y area (Cocina/Bar).</p>
       </div>
       <section class="kanm-card admin-card">
         <div class="admin-report-controls">
@@ -1562,7 +1573,15 @@
             <input type="date" id="hist-cocina-fecha" />
           </div>
           <div class="kanm-input-group">
-            <label for="hist-cocina-cocinero">Cocinero</label>
+            <label for="hist-cocina-area">Área</label>
+            <select id="hist-cocina-area">
+              <option value="todas">Todas</option>
+              <option value="cocina">Cocina</option>
+              <option value="bar">Bar</option>
+            </select>
+          </div>
+          <div class="kanm-input-group">
+            <label for="hist-cocina-cocinero">Preparador</label>
             <select id="hist-cocina-cocinero">
               <option value="">Todos</option>
             </select>
@@ -1581,7 +1600,8 @@
                 <th>Pedido</th>
                 <th>Ítem</th>
                 <th>Cantidad</th>
-                <th>Cocinero</th>
+                <th>Área</th>
+                <th>Preparador</th>
                 <th>Entrada</th>
                 <th>Finalizado</th>
               </tr>
@@ -1734,7 +1754,7 @@
               </label>
               <label class="kanm-checkbox">
                 <input type="checkbox" id="kanm-modulo-historial" checked />
-                <span>Historial de cocina</span>
+                <span>Historial de preparación</span>
               </label>
             </div>
           </section>
@@ -1760,11 +1780,22 @@
             </div>
             <div class="kanm-input-group">
               <label for="kanm-negocios-admin-password">Contrase?a admin (opcional)</label>
-              <input
-                type="password"
-                id="kanm-negocios-admin-password"
-                placeholder="Deja vacio para mantener la actual"
-              />
+              <div class="password-field">
+                <input
+                  type="password"
+                  id="kanm-negocios-admin-password"
+                  placeholder="Deja vacio para mantener la actual"
+                />
+                <button
+                  type="button"
+                  class="password-toggle"
+                  data-password-toggle
+                  aria-pressed="false"
+                  aria-label="Mostrar contrasena"
+                >
+                  Mostrar
+                </button>
+              </div>
               <span class="kanm-input-help">Solo se aplica si activas "Actualizar contrase?a".</span>
             </div>
           </div>
@@ -1779,6 +1810,256 @@
     </div>
   </div>
 
+
+
+  <!-- Modal Facturacion POSIUM -->
+  <div class="kanm-modal oculto" id="kanm-facturacion-modal">
+    <div class="kanm-modal-backdrop"></div>
+    <div class="kanm-modal-panel kanm-modal-panel--wide">
+      <div class="kanm-modal-header">
+        <h3 id="kanm-facturacion-modal-titulo">Facturacion POSIUM</h3>
+        <button type="button" class="kanm-button ghost" id="kanm-facturacion-btn-cerrar">Cerrar</button>
+      </div>
+      <div class="kanm-modal-body">
+        <form id="kanm-facturacion-form" class="kanm-form" novalidate>
+          <input type="hidden" id="kanm-facturacion-negocio-id" />
+          <p class="kanm-subtitle" id="kanm-facturacion-negocio-nombre"></p>
+
+          <section class="kanm-modal-section">
+            <h4>Cliente</h4>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="facturacion-cliente-nombre">Razon social / Nombre comercial</label>
+                <input type="text" id="facturacion-cliente-nombre" placeholder="Cliente" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="facturacion-cliente-rnc">RNC o Cedula</label>
+                <input type="text" id="facturacion-cliente-rnc" placeholder="RNC/Cedula" />
+              </div>
+            </div>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="facturacion-cliente-direccion">Direccion</label>
+                <input type="text" id="facturacion-cliente-direccion" placeholder="Direccion del cliente" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="facturacion-cliente-telefono">Telefono</label>
+                <input type="text" id="facturacion-cliente-telefono" placeholder="Telefono" />
+              </div>
+            </div>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="facturacion-cliente-email">Email</label>
+                <input type="email" id="facturacion-cliente-email" placeholder="correo@cliente.com" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="facturacion-cliente-contacto">Contacto</label>
+                <input type="text" id="facturacion-cliente-contacto" placeholder="Nombre contacto" />
+              </div>
+            </div>
+          </section>
+
+          <section class="kanm-modal-section">
+            <h4>Emisor (POSIUM)</h4>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="facturacion-emisor-nombre">Nombre comercial</label>
+                <input type="text" id="facturacion-emisor-nombre" placeholder="POSIUM" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="facturacion-emisor-rnc">RNC</label>
+                <input type="text" id="facturacion-emisor-rnc" placeholder="RNC" />
+              </div>
+            </div>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="facturacion-emisor-direccion">Direccion</label>
+                <input type="text" id="facturacion-emisor-direccion" placeholder="Direccion" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="facturacion-emisor-telefono">Telefono</label>
+                <input type="text" id="facturacion-emisor-telefono" placeholder="Telefono" />
+              </div>
+            </div>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="facturacion-emisor-email">Email</label>
+                <input type="email" id="facturacion-emisor-email" placeholder="correo@posium.com" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="facturacion-emisor-logo">Logo (URL)</label>
+                <input type="text" id="facturacion-emisor-logo" placeholder="https://..." />
+              </div>
+            </div>
+            <div class="kanm-input-group">
+              <label for="facturacion-emisor-nota">Nota/pie de factura</label>
+              <textarea id="facturacion-emisor-nota" rows="2" placeholder="Gracias por su preferencia"></textarea>
+            </div>
+          </section>
+
+          <section class="kanm-modal-section">
+            <h4>Plan y configuracion</h4>
+            <div class="kanm-grid-3">
+              <div class="kanm-input-group">
+                <label for="facturacion-plan-nombre">Plan/paquete</label>
+                <input type="text" id="facturacion-plan-nombre" placeholder="Suscripcion POSIUM mensual" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="facturacion-precio-base">Precio base</label>
+                <input type="number" step="0.01" min="0" id="facturacion-precio-base" placeholder="0.00" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="facturacion-moneda">Moneda</label>
+                <select id="facturacion-moneda">
+                  <option value="RD$">RD$</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+            </div>
+            <div class="kanm-grid-3">
+              <div class="kanm-input-group">
+                <label for="facturacion-impuesto-tipo">Impuesto</label>
+                <select id="facturacion-impuesto-tipo">
+                  <option value="porcentaje">ITBIS %</option>
+                  <option value="fijo">Monto fijo</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="facturacion-impuesto-valor">Valor impuesto</label>
+                <input type="number" step="0.01" min="0" id="facturacion-impuesto-valor" placeholder="0.00" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="facturacion-periodo-default">Periodo por defecto</label>
+                <input type="text" id="facturacion-periodo-default" placeholder="Enero 2026" />
+              </div>
+            </div>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="facturacion-terminos">Terminos de pago</label>
+                <input type="text" id="facturacion-terminos" placeholder="Pago inmediato" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="facturacion-metodo">Metodo de pago</label>
+                <select id="facturacion-metodo">
+                  <option value="Transferencia">Transferencia</option>
+                  <option value="Efectivo">Efectivo</option>
+                  <option value="Tarjeta">Tarjeta</option>
+                </select>
+              </div>
+            </div>
+            <div class="kanm-input-group">
+              <label for="facturacion-notas">Notas internas</label>
+              <textarea id="facturacion-notas" rows="2" placeholder="Notas internas"></textarea>
+            </div>
+          </section>
+
+          <section class="kanm-modal-section">
+            <h4>Factura</h4>
+            <div class="kanm-grid-3">
+              <div class="kanm-input-group">
+                <label for="factura-fecha-emision">Fecha de emision</label>
+                <input type="date" id="factura-fecha-emision" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="factura-periodo">Periodo facturado</label>
+                <input type="text" id="factura-periodo" placeholder="Enero 2026" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="factura-estado">Estado</label>
+                <select id="factura-estado">
+                  <option value="pendiente">Pendiente</option>
+                  <option value="pagada">Pagada</option>
+                  <option value="anulada">Anulada</option>
+                </select>
+              </div>
+            </div>
+            <div class="kanm-input-group">
+              <label for="factura-descripcion">Descripcion</label>
+              <input type="text" id="factura-descripcion" placeholder="Suscripcion POSIUM" />
+            </div>
+            <div class="kanm-grid-3">
+              <div class="kanm-input-group">
+                <label for="factura-cantidad">Cantidad</label>
+                <input type="number" step="1" min="1" id="factura-cantidad" value="1" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="factura-precio-unitario">Precio unitario</label>
+                <input type="number" step="0.01" min="0" id="factura-precio-unitario" placeholder="0.00" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="factura-descuento">Descuento</label>
+                <input type="number" step="0.01" min="0" id="factura-descuento" value="0" />
+              </div>
+            </div>
+          </section>
+
+          <section class="kanm-modal-section facturacion-resumen">
+            <h4>Resumen</h4>
+            <div class="facturacion-resumen-grid">
+              <div class="facturacion-resumen-item">
+                <span>Subtotal</span>
+                <strong id="facturacion-resumen-subtotal">RD$0.00</strong>
+              </div>
+              <div class="facturacion-resumen-item">
+                <span>ITBIS</span>
+                <strong id="facturacion-resumen-itbis">RD$0.00</strong>
+              </div>
+              <div class="facturacion-resumen-item">
+                <span>Descuento</span>
+                <strong id="facturacion-resumen-descuento">RD$0.00</strong>
+              </div>
+              <div class="facturacion-resumen-item total">
+                <span>Total</span>
+                <strong id="facturacion-resumen-total">RD$0.00</strong>
+              </div>
+            </div>
+          </section>
+
+          <div class="kanm-modal-footer">
+            <div id="facturacion-mensaje" class="kanm-message"></div>
+            <div class="kanm-modal-actions">
+              <button type="button" class="kanm-button secondary" id="facturacion-guardar-config">Guardar configuracion</button>
+              <button type="button" class="kanm-button" id="facturacion-generar">Generar factura</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Historial Facturas POSIUM -->
+  <div class="kanm-modal oculto" id="kanm-facturacion-historial-modal">
+    <div class="kanm-modal-backdrop"></div>
+    <div class="kanm-modal-panel kanm-modal-panel--wide">
+      <div class="kanm-modal-header">
+        <h3>Historial de facturas POSIUM</h3>
+        <button type="button" class="kanm-button ghost" id="kanm-facturacion-historial-cerrar">Cerrar</button>
+      </div>
+      <div class="kanm-modal-body">
+        <div class="kanm-modal-actions kanm-modal-actions--between">
+          <span class="kanm-subtitle" id="facturacion-historial-titulo"></span>
+          <button type="button" class="kanm-button ghost" id="facturacion-historial-recargar">Recargar</button>
+        </div>
+        <div id="facturacion-historial-mensaje" class="kanm-message"></div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Fecha</th>
+                <th>Periodo</th>
+                <th>Total</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="facturacion-historial-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="kanm-modal-overlay" id="admin-eliminar-modal" hidden>
     <div class="kanm-modal" role="dialog" aria-modal="true" aria-labelledby="admin-eliminar-titulo">
       <h3 id="admin-eliminar-titulo">Eliminar registro</h3>
@@ -1787,12 +2068,23 @@
       </p>
       <div class="kanm-input-group">
         <label for="admin-eliminar-password">Contraseña de administrador</label>
-        <input
-          type="password"
-          id="admin-eliminar-password"
-          placeholder="Ingresa la contraseña"
-          autocomplete="current-password"
-        />
+        <div class="password-field">
+          <input
+            type="password"
+            id="admin-eliminar-password"
+            placeholder="Ingresa la contraseña"
+            autocomplete="current-password"
+          />
+          <button
+            type="button"
+            class="password-toggle"
+            data-password-toggle
+            aria-pressed="false"
+            aria-label="Mostrar contrasena"
+          >
+            Mostrar
+          </button>
+        </div>
       </div>
       <div class="kanm-modal-actions">
         <button type="button" class="kanm-button ghost" id="admin-eliminar-cancelar">Cancelar</button>
@@ -1802,8 +2094,10 @@
     </div>
   </div>
 
+  <script src="/js/password-toggle.js"></script>
   <script src="/js/auth.js"></script>
   <script src="/js/admin.js"></script>
+  <script src="/js/admin-facturacion-posium.js"></script>
   <script src="/js/admin-cotizaciones.js"></script>
   <script src="/js/admin-clientes.js"></script>
   <script src="/js/admin-categorias.js"></script>

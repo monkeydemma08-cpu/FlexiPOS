@@ -1,0 +1,83 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Factura POSIUM</title>
+  <link rel="stylesheet" href="css/posium-factura.css" />
+  <script src="/js/auth.js"></script>
+  <script src="/js/posium-factura.js" defer></script>
+</head>
+<body class="posium-factura-body">
+  <main class="posium-factura">
+    <header class="pf-header">
+      <div class="pf-emisor">
+        <div class="pf-logo">
+          <img id="pf-emisor-logo" alt="Logo" />
+          <div class="pf-emisor-nombre" id="pf-emisor-nombre">POSIUM</div>
+        </div>
+        <div class="pf-emisor-datos">
+          <div id="pf-emisor-rnc"></div>
+          <div id="pf-emisor-direccion"></div>
+          <div id="pf-emisor-contacto"></div>
+        </div>
+      </div>
+      <div class="pf-factura-meta">
+        <div class="pf-meta-row"><span>Factura #</span><strong id="pf-numero">-</strong></div>
+        <div class="pf-meta-row"><span>Fecha</span><strong id="pf-fecha">-</strong></div>
+        <div class="pf-meta-row"><span>Periodo</span><strong id="pf-periodo">-</strong></div>
+        <div class="pf-meta-row"><span>Estado</span><strong id="pf-estado">Pendiente</strong></div>
+      </div>
+    </header>
+
+    <section class="pf-clientes">
+      <div class="pf-cliente">
+        <h2>Facturar a</h2>
+        <div class="pf-cliente-nombre" id="pf-cliente-nombre"></div>
+        <div id="pf-cliente-rnc"></div>
+        <div id="pf-cliente-direccion"></div>
+        <div id="pf-cliente-contacto"></div>
+      </div>
+      <div class="pf-acciones">
+        <button type="button" class="pf-btn" id="pf-imprimir">Imprimir</button>
+      </div>
+    </section>
+
+    <section class="pf-items">
+      <table>
+        <thead>
+          <tr>
+            <th>Descripcion</th>
+            <th>Cant.</th>
+            <th>P. unit.</th>
+            <th>Subtotal</th>
+          </tr>
+        </thead>
+        <tbody id="pf-items"></tbody>
+      </table>
+    </section>
+
+    <section class="pf-resumen">
+      <div class="pf-resumen-linea"><span>Subtotal</span><strong id="pf-subtotal">RD$0.00</strong></div>
+      <div class="pf-resumen-linea"><span>ITBIS</span><strong id="pf-itbis">RD$0.00</strong></div>
+      <div class="pf-resumen-linea"><span>Descuento</span><strong id="pf-descuento">RD$0.00</strong></div>
+      <div class="pf-resumen-linea total"><span>Total</span><strong id="pf-total">RD$0.00</strong></div>
+    </section>
+
+    <footer class="pf-footer">
+      <div class="pf-footer-col">
+        <h3>Terminos de pago</h3>
+        <p id="pf-terminos"></p>
+      </div>
+      <div class="pf-footer-col">
+        <h3>Metodo de pago</h3>
+        <p id="pf-metodo"></p>
+      </div>
+      <div class="pf-footer-col">
+        <h3>Nota</h3>
+        <p id="pf-nota"></p>
+      </div>
+    </footer>
+  </main>
+</body>
+</html>
