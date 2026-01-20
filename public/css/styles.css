@@ -2629,15 +2629,24 @@ img {
   border-radius: 14px;
   background: var(--kanm-gray-100);
   border: 1px solid var(--tone-12);
+  display: grid;
+  gap: 6px;
+}
+
+.abastecimiento-resumen-linea {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-weight: 600;
 }
 
-.abastecimiento-resumen span {
+.abastecimiento-resumen-linea span {
   color: var(--kanm-gray-600);
   font-weight: 500;
+}
+
+.abastecimiento-resumen-linea.total {
+  font-size: 1.02rem;
 }
 
 .abastecimiento-detalle-wrapper {

@@ -7517,6 +7517,20 @@ app.post('/api/compras', (req, res) => {
   });
 });
 
+const normalizarAplicaItbis = (valor) => {
+  if (valor === true || valor === 1 || valor === '1' || valor === 'true') {
+    return true;
+  }
+  return false;
+};
+
+const calcularTotalesCompraInventario = (subtotal, aplicaItbis) => {
+  const base = Number(subtotal) || 0;
+  const itbis = aplicaItbis ? Number((base * 0.18).toFixed(2)) : 0;
+  const total = Number((base + itbis).toFixed(2));
+  return { subtotal: base, itbis, total };
+};
+
 app.get('/api/inventario/compras', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     if (!tienePermisoAdmin(usuarioSesion)) {
@@ -7533,7 +7547,16 @@ app.get('/api/inventario/compras', (req, res) => {
     try {
       const rows = await db.all(
         `
-        SELECT ci.id, ci.fecha, ci.proveedor, ci.origen_fondos, ci.metodo_pago, ci.total, ci.observaciones,
+        SELECT ci.id,
+               ci.fecha,
+               ci.proveedor,
+               ci.origen_fondos,
+               ci.metodo_pago,
+               CASE WHEN ci.subtotal IS NULL OR ci.subtotal = 0 THEN ci.total ELSE ci.subtotal END AS subtotal,
+               COALESCE(ci.itbis, 0) AS itbis,
+               COALESCE(ci.aplica_itbis, 0) AS aplica_itbis,
+               ci.total,
+               ci.observaciones,
                ci.creado_en, u.nombre AS creado_por,
                (SELECT COUNT(1) FROM compras_inventario_detalle cid WHERE cid.compra_id = ci.id) AS lineas,
                (SELECT SUM(cid.cantidad) FROM compras_inventario_detalle cid WHERE cid.compra_id = ci.id) AS items
@@ -7569,8 +7592,18 @@ app.get('/api/inventario/compras/:id', (req, res) => {
     try {
       const compra = await db.get(
         `
-        SELECT ci.id, ci.fecha, ci.proveedor, ci.origen_fondos, ci.metodo_pago, ci.total, ci.observaciones,
-               ci.creado_en, u.nombre AS creado_por
+        SELECT ci.id,
+               ci.fecha,
+               ci.proveedor,
+               ci.origen_fondos,
+               ci.metodo_pago,
+               CASE WHEN ci.subtotal IS NULL OR ci.subtotal = 0 THEN ci.total ELSE ci.subtotal END AS subtotal,
+               COALESCE(ci.itbis, 0) AS itbis,
+               COALESCE(ci.aplica_itbis, 0) AS aplica_itbis,
+               ci.total,
+               ci.observaciones,
+               ci.creado_en,
+               u.nombre AS creado_por
           FROM compras_inventario ci
           LEFT JOIN usuarios u ON u.id = ci.creado_por
          WHERE ci.id = ? AND ci.negocio_id = ?
@@ -7616,6 +7649,7 @@ app.post('/api/inventario/compras', (req, res) => {
     const origenFondos = origenFondosRaw === 'caja' ? 'caja' : 'negocio';
     const metodoPago = normalizarCampoTexto(req.body?.metodo_pago ?? req.body?.metodoPago);
     const observaciones = normalizarCampoTexto(req.body?.observaciones ?? req.body?.comentarios);
+    const aplicaItbis = normalizarAplicaItbis(req.body?.aplica_itbis ?? req.body?.aplicaItbis);
     const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
 
     if (!proveedor || !esFechaISOValida(fecha)) {
@@ -7624,6 +7658,10 @@ app.post('/api/inventario/compras', (req, res) => {
 
     if (!itemsEntrada.length) {
       return res.status(400).json({ error: 'Agrega al menos un producto a la compra.' });
+    }
+
+    if (origenFondos === 'caja' && !metodoPago) {
+      return res.status(400).json({ error: 'Selecciona el metodo de pago cuando el origen es caja.' });
     }
 
     const productoIds = Array.from(
@@ -7647,7 +7685,7 @@ app.post('/api/inventario/compras', (req, res) => {
       const productosMap = new Map((productos || []).map((producto) => [Number(producto.id), producto]));
 
       const detalles = [];
-      let total = 0;
+      let subtotal = 0;
 
       for (const item of itemsEntrada) {
         const productoId = Number(item?.producto_id);
@@ -7666,7 +7704,7 @@ app.post('/api/inventario/compras', (req, res) => {
         }
 
         const totalLinea = Number((cantidad * costoUnitario).toFixed(2));
-        total += totalLinea;
+        subtotal += totalLinea;
         detalles.push({
           producto_id: productoId,
           cantidad,
@@ -7675,17 +7713,33 @@ app.post('/api/inventario/compras', (req, res) => {
         });
       }
 
-      total = Number(total.toFixed(2));
+      subtotal = Number(subtotal.toFixed(2));
+      const { subtotal: subtotalFinal, itbis, total } = calcularTotalesCompraInventario(
+        subtotal,
+        aplicaItbis
+      );
 
       await db.run('BEGIN');
 
       const insertCompra = await db.run(
         `
           INSERT INTO compras_inventario
-            (fecha, proveedor, origen_fondos, metodo_pago, total, observaciones, creado_por, negocio_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (fecha, proveedor, origen_fondos, metodo_pago, subtotal, itbis, aplica_itbis, total, observaciones, creado_por, negocio_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        [fecha, proveedor, origenFondos, metodoPago, total, observaciones, usuarioSesion.id, negocioId]
+        [
+          fecha,
+          proveedor,
+          origenFondos,
+          metodoPago,
+          subtotalFinal,
+          itbis,
+          aplicaItbis ? 1 : 0,
+          total,
+          observaciones,
+          usuarioSesion.id,
+          negocioId,
+        ]
       );
 
       const compraId = insertCompra?.lastID;
@@ -7722,20 +7776,22 @@ app.post('/api/inventario/compras', (req, res) => {
         }
       }
 
-      const compraComentarios = `Compra inventario #${compraId}`;
+      const compraComentarios = `Compra inventario #${compraId}${observaciones ? ` - ${observaciones}` : ''}`;
       const compraInsert = await db.run(
         `
           INSERT INTO compras
             (proveedor, rnc, fecha, tipo_comprobante, ncf, monto_gravado, impuesto, total, monto_exento, comentarios, negocio_id)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        [proveedor, null, fecha, null, null, total, 0, total, 0, compraComentarios, negocioId]
+        [proveedor, null, fecha, null, null, subtotalFinal, itbis, total, 0, compraComentarios, negocioId]
       );
       const compra606Id = compraInsert?.lastID || null;
 
       if (compra606Id) {
         for (const detalle of detalles) {
           const producto = productosMap.get(detalle.producto_id);
+          const itbisLinea = aplicaItbis ? Number((detalle.total_linea * 0.18).toFixed(2)) : 0;
+          const totalLinea = Number((detalle.total_linea + itbisLinea).toFixed(2));
           await db.run(
             `
               INSERT INTO detalle_compra
@@ -7747,8 +7803,8 @@ app.post('/api/inventario/compras', (req, res) => {
               producto?.nombre || `Producto ${detalle.producto_id}`,
               detalle.cantidad,
               detalle.costo_unitario,
-              0,
-              detalle.total_linea,
+              itbisLinea,
+              totalLinea,
               negocioId,
             ]
           );
@@ -7805,7 +7861,10 @@ app.post('/api/inventario/compras', (req, res) => {
       res.status(201).json({
         ok: true,
         id: compraId,
+        subtotal: subtotalFinal,
+        itbis,
         total,
+        aplica_itbis: aplicaItbis ? 1 : 0,
         compra_id: compra606Id,
         gasto_id: gastoId,
         salida_id: salidaId,
@@ -8965,6 +9024,319 @@ app.get('/api/preparacion/historial', (req, res) => {
     } catch (error) {
       console.error('Error al obtener historial de preparacion:', error?.message || error);
       res.status(500).json({ ok: false, error: 'No se pudo obtener el historial de preparacion.' });
+    }
+  });
+});
+
+app.put('/api/inventario/compras/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const compraId = Number(req.params.id);
+    if (!Number.isInteger(compraId) || compraId <= 0) {
+      return res.status(400).json({ error: 'ID invalido.' });
+    }
+
+    const proveedor = normalizarCampoTexto(req.body?.proveedor);
+    const fecha = req.body?.fecha;
+    const origenFondosRaw =
+      normalizarCampoTexto(req.body?.origen_fondos ?? req.body?.origenFondos) || 'negocio';
+    const origenFondos = origenFondosRaw === 'caja' ? 'caja' : 'negocio';
+    const metodoPago = normalizarCampoTexto(req.body?.metodo_pago ?? req.body?.metodoPago);
+    const observaciones = normalizarCampoTexto(req.body?.observaciones ?? req.body?.comentarios);
+    const aplicaItbis = normalizarAplicaItbis(req.body?.aplica_itbis ?? req.body?.aplicaItbis);
+    const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
+
+    if (!proveedor || !esFechaISOValida(fecha)) {
+      return res.status(400).json({ error: 'Proveedor y fecha son obligatorios.' });
+    }
+
+    if (!itemsEntrada.length) {
+      return res.status(400).json({ error: 'Agrega al menos un producto a la compra.' });
+    }
+
+    if (origenFondos === 'caja' && !metodoPago) {
+      return res.status(400).json({ error: 'Selecciona el metodo de pago cuando el origen es caja.' });
+    }
+
+    const nuevosProductoIds = Array.from(
+      new Set(
+        itemsEntrada
+          .map((item) => Number(item?.producto_id))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
+    );
+
+    if (!nuevosProductoIds.length) {
+      return res.status(400).json({ error: 'Selecciona productos validos.' });
+    }
+
+    try {
+      const compraActual = await db.get(
+        `
+        SELECT id, origen_fondos, metodo_pago, compra_id, gasto_id, salida_id
+          FROM compras_inventario
+         WHERE id = ? AND negocio_id = ?
+        `,
+        [compraId, negocioId]
+      );
+
+      if (!compraActual) {
+        return res.status(404).json({ error: 'Compra no encontrada.' });
+      }
+
+      const detallesActuales = await db.all(
+        `
+        SELECT producto_id, cantidad
+          FROM compras_inventario_detalle
+         WHERE compra_id = ? AND negocio_id = ?
+        `,
+        [compraId, negocioId]
+      );
+
+      const productoIdsUnion = Array.from(
+        new Set([
+          ...nuevosProductoIds,
+          ...detallesActuales.map((detalle) => Number(detalle?.producto_id)).filter((id) => id > 0),
+        ])
+      );
+
+      const placeholders = productoIdsUnion.map(() => '?').join(',');
+      const productos = await db.all(
+        `SELECT id, nombre, stock_indefinido FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
+        [negocioId, ...productoIdsUnion]
+      );
+      const productosMap = new Map((productos || []).map((producto) => [Number(producto.id), producto]));
+
+      const detalles = [];
+      let subtotal = 0;
+
+      for (const item of itemsEntrada) {
+        const productoId = Number(item?.producto_id);
+        if (!Number.isFinite(productoId) || productoId <= 0 || !productosMap.has(productoId)) {
+          return res.status(400).json({ error: 'Hay productos invalidos en la compra.' });
+        }
+
+        const cantidad = normalizarNumero(item?.cantidad, null);
+        const costoUnitario = normalizarNumero(item?.costo_unitario ?? item?.costoUnitario, null);
+
+        if (cantidad === null || cantidad <= 0) {
+          return res.status(400).json({ error: 'La cantidad debe ser mayor a 0.' });
+        }
+        if (costoUnitario === null || costoUnitario < 0) {
+          return res.status(400).json({ error: 'El costo unitario debe ser mayor o igual a 0.' });
+        }
+
+        const totalLinea = Number((cantidad * costoUnitario).toFixed(2));
+        subtotal += totalLinea;
+        detalles.push({
+          producto_id: productoId,
+          cantidad,
+          costo_unitario: Number(costoUnitario.toFixed(2)),
+          total_linea: totalLinea,
+        });
+      }
+
+      subtotal = Number(subtotal.toFixed(2));
+      const { subtotal: subtotalFinal, itbis, total } = calcularTotalesCompraInventario(
+        subtotal,
+        aplicaItbis
+      );
+
+      const cantidadesPrevias = new Map();
+      detallesActuales.forEach((detalle) => {
+        const productoId = Number(detalle?.producto_id);
+        const cantidad = Number(detalle?.cantidad) || 0;
+        if (!Number.isFinite(productoId) || productoId <= 0) return;
+        const acumulado = cantidadesPrevias.get(productoId) || 0;
+        cantidadesPrevias.set(productoId, Number((acumulado + cantidad).toFixed(2)));
+      });
+
+      const cantidadesNuevas = new Map();
+      detalles.forEach((detalle) => {
+        const productoId = Number(detalle?.producto_id);
+        const cantidad = Number(detalle?.cantidad) || 0;
+        if (!Number.isFinite(productoId) || productoId <= 0) return;
+        const acumulado = cantidadesNuevas.get(productoId) || 0;
+        cantidadesNuevas.set(productoId, Number((acumulado + cantidad).toFixed(2)));
+      });
+
+      const productosParaStock = new Set([...cantidadesPrevias.keys(), ...cantidadesNuevas.keys()]);
+
+      await db.run('BEGIN');
+
+      for (const productoId of productosParaStock) {
+        const cantidadPrev = cantidadesPrevias.get(productoId) || 0;
+        const cantidadNueva = cantidadesNuevas.get(productoId) || 0;
+        const diferencia = Number((cantidadNueva - cantidadPrev).toFixed(2));
+        if (diferencia === 0) {
+          continue;
+        }
+
+        const producto = productosMap.get(productoId);
+        if (!producto) {
+          throw new Error(`Producto ${productoId} no encontrado.`);
+        }
+        if (!esStockIndefinido(producto)) {
+          const updateResult = await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?',
+            [diferencia, productoId, negocioId]
+          );
+          if ((updateResult?.changes || 0) === 0) {
+            throw new Error(`No se pudo actualizar el stock del producto ${productoId}.`);
+          }
+        }
+      }
+
+      await db.run(
+        'DELETE FROM compras_inventario_detalle WHERE compra_id = ? AND negocio_id = ?',
+        [compraId, negocioId]
+      );
+
+      for (const detalle of detalles) {
+        await db.run(
+          `
+            INSERT INTO compras_inventario_detalle
+              (compra_id, producto_id, cantidad, costo_unitario, total_linea, negocio_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+          [
+            compraId,
+            detalle.producto_id,
+            detalle.cantidad,
+            detalle.costo_unitario,
+            detalle.total_linea,
+            negocioId,
+          ]
+        );
+      }
+
+      const compraComentarios = `Compra inventario #${compraId}${observaciones ? ` - ${observaciones}` : ''}`;
+      if (compraActual.compra_id) {
+        await db.run(
+          `
+            UPDATE compras
+               SET proveedor = ?, fecha = ?, monto_gravado = ?, impuesto = ?, total = ?, comentarios = ?
+             WHERE id = ? AND negocio_id = ?
+          `,
+          [proveedor, fecha, subtotalFinal, itbis, total, compraComentarios, compraActual.compra_id, negocioId]
+        );
+
+        await db.run(
+          'DELETE FROM detalle_compra WHERE compra_id = ? AND negocio_id = ?',
+          [compraActual.compra_id, negocioId]
+        );
+
+        for (const detalle of detalles) {
+          const producto = productosMap.get(detalle.producto_id);
+          const itbisLinea = aplicaItbis ? Number((detalle.total_linea * 0.18).toFixed(2)) : 0;
+          const totalLinea = Number((detalle.total_linea + itbisLinea).toFixed(2));
+          await db.run(
+            `
+              INSERT INTO detalle_compra
+                (compra_id, descripcion, cantidad, precio_unitario, itbis, total, negocio_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `,
+            [
+              compraActual.compra_id,
+              producto?.nombre || `Producto ${detalle.producto_id}`,
+              detalle.cantidad,
+              detalle.costo_unitario,
+              itbisLinea,
+              totalLinea,
+              negocioId,
+            ]
+          );
+        }
+      }
+
+      if (compraActual.gasto_id) {
+        const descripcionGasto = `Compra inventario #${compraId}${observaciones ? ` - ${observaciones}` : ''}`;
+        await db.run(
+          `
+            UPDATE gastos
+               SET fecha = ?, monto = ?, metodo_pago = ?, proveedor = ?, descripcion = ?
+             WHERE id = ? AND negocio_id = ?
+          `,
+          [fecha, total, metodoPago, proveedor, descripcionGasto, compraActual.gasto_id, negocioId]
+        );
+      }
+
+      let salidaId = compraActual.salida_id || null;
+      if (origenFondos === 'caja') {
+        const descripcionSalida = `Compra inventario #${compraId} - ${proveedor}`;
+        if (salidaId) {
+          await db.run(
+            `
+              UPDATE salidas_caja
+                 SET fecha = ?, descripcion = ?, monto = ?, metodo = ?
+               WHERE id = ? AND negocio_id = ?
+            `,
+            [fecha, descripcionSalida, total, metodoPago || 'efectivo', salidaId, negocioId]
+          );
+        } else {
+          const salidaInsert = await db.run(
+            `
+              INSERT INTO salidas_caja (negocio_id, fecha, descripcion, monto, metodo)
+              VALUES (?, ?, ?, ?, ?)
+            `,
+            [negocioId, fecha, descripcionSalida, total, metodoPago || 'efectivo']
+          );
+          salidaId = salidaInsert?.lastID || null;
+        }
+      } else if (salidaId) {
+        await db.run('DELETE FROM salidas_caja WHERE id = ? AND negocio_id = ?', [salidaId, negocioId]);
+        salidaId = null;
+      }
+
+      await db.run(
+        `
+          UPDATE compras_inventario
+             SET fecha = ?,
+                 proveedor = ?,
+                 origen_fondos = ?,
+                 metodo_pago = ?,
+                 subtotal = ?,
+                 itbis = ?,
+                 aplica_itbis = ?,
+                 total = ?,
+                 observaciones = ?,
+                 salida_id = ?
+           WHERE id = ? AND negocio_id = ?
+        `,
+        [
+          fecha,
+          proveedor,
+          origenFondos,
+          metodoPago,
+          subtotalFinal,
+          itbis,
+          aplicaItbis ? 1 : 0,
+          total,
+          observaciones,
+          salidaId,
+          compraId,
+          negocioId,
+        ]
+      );
+
+      await db.run('COMMIT');
+
+      res.json({
+        ok: true,
+        id: compraId,
+        subtotal: subtotalFinal,
+        itbis,
+        total,
+        aplica_itbis: aplicaItbis ? 1 : 0,
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al actualizar compra de inventario:', error?.message || error);
+      res.status(500).json({ error: error?.message || 'No se pudo actualizar la compra.' });
     }
   });
 });

@@ -70,7 +70,14 @@ const abastecimientoMetodoInput = document.getElementById('abastecimiento-metodo
 const abastecimientoObservacionesInput = document.getElementById('abastecimiento-observaciones');
 const abastecimientoDetallesContainer = document.getElementById('abastecimiento-detalles');
 const abastecimientoAgregarDetalleBtn = document.getElementById('abastecimiento-agregar-detalle');
+const abastecimientoAplicaItbisInput = document.getElementById('abastecimiento-aplica-itbis');
+const abastecimientoSubtotalSpan = document.getElementById('abastecimiento-subtotal');
+const abastecimientoItbisSpan = document.getElementById('abastecimiento-itbis');
+const abastecimientoItbisRow = document.getElementById('abastecimiento-itbis-row');
 const abastecimientoTotalSpan = document.getElementById('abastecimiento-total');
+const abastecimientoTotalLabel = document.getElementById('abastecimiento-total-label');
+const abastecimientoSubmitBtn = document.getElementById('abastecimiento-submit');
+const abastecimientoCancelarBtn = document.getElementById('abastecimiento-cancelar');
 const abastecimientoMensaje = document.getElementById('abastecimiento-mensaje');
 const abastecimientoListaMensaje = document.getElementById('abastecimiento-lista-mensaje');
 const abastecimientoTabla = document.getElementById('abastecimiento-tabla');
@@ -202,6 +209,7 @@ let datosReporte606 = [];
 let cierresCaja = [];
 let detalleCierreActivo = null;
 let detalleAbastecimientoActivo = null;
+let abastecimientoEditId = null;
 let usuarios = [];
 
 const REFRESH_INTERVAL_ADMIN = 15000;
@@ -1862,6 +1870,60 @@ const registrarCompra = async (payload) => {
 /* =====================
  * Abastecimiento (compras inventario)
  * ===================== */
+const ITBIS_RATE_ABASTECIMIENTO = 0.18;
+
+const calcularTotalesAbastecimiento = (subtotal) => {
+  const base = Number(subtotal) || 0;
+  const aplicaItbis = !!abastecimientoAplicaItbisInput?.checked;
+  const itbis = aplicaItbis ? Number((base * ITBIS_RATE_ABASTECIMIENTO).toFixed(2)) : 0;
+  const total = Number((base + itbis).toFixed(2));
+  return { aplicaItbis, itbis, total };
+};
+
+const actualizarResumenAbastecimiento = (subtotal) => {
+  const base = Number(subtotal) || 0;
+  const { aplicaItbis, itbis, total } = calcularTotalesAbastecimiento(base);
+  if (abastecimientoSubtotalSpan) {
+    abastecimientoSubtotalSpan.textContent = formatCurrency(base);
+  }
+  if (abastecimientoItbisSpan) {
+    abastecimientoItbisSpan.textContent = formatCurrency(itbis);
+  }
+  if (abastecimientoTotalSpan) {
+    abastecimientoTotalSpan.textContent = formatCurrency(total);
+  }
+  if (abastecimientoItbisRow) {
+    abastecimientoItbisRow.hidden = !aplicaItbis;
+  }
+  if (abastecimientoTotalLabel) {
+    abastecimientoTotalLabel.textContent = aplicaItbis ? 'Total con ITBIS' : 'Total';
+  }
+  return { aplicaItbis, itbis, total };
+};
+
+const establecerModoEdicionAbastecimiento = (compraId = null) => {
+  abastecimientoEditId = Number.isFinite(Number(compraId)) ? Number(compraId) : null;
+  if (abastecimientoSubmitBtn) {
+    abastecimientoSubmitBtn.textContent = abastecimientoEditId ? 'Guardar cambios' : 'Registrar compra';
+  }
+  if (abastecimientoCancelarBtn) {
+    abastecimientoCancelarBtn.hidden = !abastecimientoEditId;
+  }
+};
+
+const obtenerFechaAbastecimiento = (valor) => {
+  if (!valor) return '';
+  return getLocalDateISO(valor);
+};
+
+const detectarAplicaItbisCompra = (compra) => {
+  if (!compra) return false;
+  const bandera = compra.aplica_itbis;
+  if (bandera === true || bandera === 1 || bandera === '1') return true;
+  const subtotal = Number(compra.subtotal ?? 0);
+  const total = Number(compra.total ?? 0);
+  return Number.isFinite(subtotal) && Number.isFinite(total) && total > subtotal;
+};
 const construirOpcionesProductos = (select, seleccionado = null) => {
   if (!select) return;
   const valorActual = seleccionado ?? select.value;
@@ -1946,11 +2008,11 @@ const crearFilaAbastecimientoDetalle = (detalle = {}) => {
 const recalcularAbastecimientoTotales = () => {
   const filas = abastecimientoDetallesContainer?.querySelectorAll('.abastecimiento-detalle-row');
   if (!filas || !filas.length) {
-    if (abastecimientoTotalSpan) abastecimientoTotalSpan.textContent = formatCurrency(0);
+    actualizarResumenAbastecimiento(0);
     return;
   }
 
-  let total = 0;
+  let subtotal = 0;
   filas.forEach((fila) => {
     const cantidadInput = fila.querySelector('.abastecimiento-detalle-cantidad');
     const costoInput = fila.querySelector('.abastecimiento-detalle-costo');
@@ -1965,22 +2027,20 @@ const recalcularAbastecimientoTotales = () => {
 
     const totalLinea = Number((cantidad * costo).toFixed(2));
     if (totalInput) totalInput.value = totalLinea.toFixed(2);
-    total += totalLinea;
+    subtotal += totalLinea;
   });
 
-  if (abastecimientoTotalSpan) {
-    abastecimientoTotalSpan.textContent = formatCurrency(total);
-  }
+  actualizarResumenAbastecimiento(subtotal);
 };
 
 const obtenerDetallesAbastecimiento = () => {
   const filas = abastecimientoDetallesContainer?.querySelectorAll('.abastecimiento-detalle-row');
   if (!filas || filas.length === 0) {
-    return { detalles: [], invalido: true, total: 0 };
+    return { detalles: [], invalido: true, subtotal: 0 };
   }
 
   const detalles = [];
-  let total = 0;
+  let subtotal = 0;
   let invalido = false;
 
   filas.forEach((fila) => {
@@ -2013,7 +2073,7 @@ const obtenerDetallesAbastecimiento = () => {
     }
 
     const totalLinea = Number((cantidad * costo).toFixed(2));
-    total += totalLinea;
+    subtotal += totalLinea;
     detalles.push({
       producto_id: productoId,
       cantidad,
@@ -2022,7 +2082,7 @@ const obtenerDetallesAbastecimiento = () => {
     });
   });
 
-  return { detalles, invalido, total: Number(total.toFixed(2)) };
+  return { detalles, invalido, subtotal: Number(subtotal.toFixed(2)) };
 };
 
 const limpiarFormularioAbastecimiento = () => {
@@ -2033,11 +2093,13 @@ const limpiarFormularioAbastecimiento = () => {
   if (abastecimientoOrigenInput) abastecimientoOrigenInput.value = 'negocio';
   if (abastecimientoMetodoInput) abastecimientoMetodoInput.value = '';
   if (abastecimientoObservacionesInput) abastecimientoObservacionesInput.value = '';
+  if (abastecimientoAplicaItbisInput) abastecimientoAplicaItbisInput.checked = true;
   if (abastecimientoDetallesContainer) {
     abastecimientoDetallesContainer.innerHTML = '';
     abastecimientoDetallesContainer.appendChild(crearFilaAbastecimientoDetalle());
   }
-  if (abastecimientoTotalSpan) abastecimientoTotalSpan.textContent = formatCurrency(0);
+  actualizarResumenAbastecimiento(0);
+  establecerModoEdicionAbastecimiento(null);
   setMessage(abastecimientoMensaje, '', 'info');
 };
 
@@ -2077,12 +2139,23 @@ const renderComprasInventario = (lista) => {
     total.textContent = formatCurrency(compra.total || 0);
 
     const acciones = document.createElement('td');
+    const accionesWrapper = document.createElement('div');
+    accionesWrapper.className = 'tabla-acciones';
     const botonDetalle = document.createElement('button');
     botonDetalle.type = 'button';
     botonDetalle.className = 'kanm-button secondary';
     botonDetalle.textContent = 'Ver detalle';
     botonDetalle.dataset.detalleAbastecimiento = compra.id;
-    acciones.appendChild(botonDetalle);
+
+    const botonEditar = document.createElement('button');
+    botonEditar.type = 'button';
+    botonEditar.className = 'kanm-button ghost';
+    botonEditar.textContent = 'Editar';
+    botonEditar.dataset.editarAbastecimiento = compra.id;
+
+    accionesWrapper.appendChild(botonDetalle);
+    accionesWrapper.appendChild(botonEditar);
+    acciones.appendChild(accionesWrapper);
 
     fila.appendChild(fecha);
     fila.appendChild(proveedor);
@@ -2113,8 +2186,17 @@ const renderDetalleAbastecimiento = (compra, detalles) => {
   }
   if (abastecimientoDetalleSubtitulo) {
     const proveedor = compra?.proveedor || '';
-    const total = formatCurrency(compra?.total || 0);
-    abastecimientoDetalleSubtitulo.textContent = `${proveedor} · ${total}`;
+    const subtotalBase =
+      compra?.subtotal === undefined || compra?.subtotal === null || compra?.subtotal === ''
+        ? Number(compra?.total || 0)
+        : Number(compra?.subtotal || 0);
+    const itbis = Number(compra?.itbis || 0);
+    const total = Number(compra?.total ?? subtotalBase + itbis) || 0;
+    const resumen =
+      itbis > 0
+        ? `Subtotal ${formatCurrency(subtotalBase)} | ITBIS ${formatCurrency(itbis)} | Total ${formatCurrency(total)}`
+        : `Total ${formatCurrency(total)}`;
+    abastecimientoDetalleSubtitulo.textContent = proveedor ? `${proveedor} | ${resumen}` : resumen;
   }
 
   if (!Array.isArray(detalles) || detalles.length === 0) {
@@ -2158,6 +2240,45 @@ const renderDetalleAbastecimiento = (compra, detalles) => {
   abastecimientoDetalleWrapper.hidden = false;
 };
 
+const prepararEdicionAbastecimiento = (compra, detalles) => {
+  if (!compra) return;
+  if (abastecimientoProveedorInput) abastecimientoProveedorInput.value = compra.proveedor || '';
+  if (abastecimientoFechaInput) abastecimientoFechaInput.value = obtenerFechaAbastecimiento(compra.fecha);
+  if (abastecimientoOrigenInput) {
+    abastecimientoOrigenInput.value = compra.origen_fondos === 'caja' ? 'caja' : 'negocio';
+  }
+  if (abastecimientoMetodoInput) abastecimientoMetodoInput.value = compra.metodo_pago || '';
+  if (abastecimientoObservacionesInput) {
+    abastecimientoObservacionesInput.value = compra.observaciones || '';
+  }
+  if (abastecimientoAplicaItbisInput) {
+    abastecimientoAplicaItbisInput.checked = detectarAplicaItbisCompra(compra);
+  }
+
+  if (abastecimientoDetallesContainer) {
+    abastecimientoDetallesContainer.innerHTML = '';
+    if (Array.isArray(detalles) && detalles.length > 0) {
+      detalles.forEach((detalle) => {
+        abastecimientoDetallesContainer.appendChild(
+          crearFilaAbastecimientoDetalle({
+            producto_id: detalle.producto_id,
+            cantidad: detalle.cantidad,
+            costo_unitario: detalle.costo_unitario,
+            total_linea: detalle.total_linea,
+          })
+        );
+      });
+    } else {
+      abastecimientoDetallesContainer.appendChild(crearFilaAbastecimientoDetalle());
+    }
+  }
+
+  establecerModoEdicionAbastecimiento(compra.id);
+  recalcularAbastecimientoTotales();
+  setMessage(abastecimientoMensaje, '', 'info');
+  abastecimientoForm?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
 const cargarDetalleAbastecimiento = async (id) => {
   if (!id) return;
   try {
@@ -2178,6 +2299,27 @@ const cargarDetalleAbastecimiento = async (id) => {
     console.error('Error al cargar detalle de compra de inventario:', error);
     setMessage(abastecimientoListaMensaje, error.message || 'No se pudo cargar el detalle.', 'error');
     limpiarDetalleAbastecimiento();
+  }
+};
+
+const cargarEdicionAbastecimiento = async (id) => {
+  if (!id) return;
+  try {
+    setMessage(abastecimientoListaMensaje, 'Cargando compra...', 'info');
+    const respuesta = await fetchConAutorizacion(`/api/inventario/compras/${id}`);
+    if (!respuesta.ok) {
+      throw new Error('No se pudo obtener la compra.');
+    }
+    const data = await respuesta.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudo obtener la compra.');
+    }
+
+    prepararEdicionAbastecimiento(data.compra, data.detalles || []);
+    setMessage(abastecimientoListaMensaje, '', 'info');
+  } catch (error) {
+    console.error('Error al cargar compra para edicion:', error);
+    setMessage(abastecimientoListaMensaje, error.message || 'No se pudo cargar la compra.', 'error');
   }
 };
 
@@ -2218,16 +2360,19 @@ const cargarComprasInventario = async () => {
   }
 };
 
-const registrarCompraInventario = async (payload) => {
-  const respuesta = await fetchJsonAutorizado('/api/inventario/compras', {
-    method: 'POST',
+const guardarCompraInventario = async (payload, compraId = null) => {
+  const url = compraId ? `/api/inventario/compras/${compraId}` : '/api/inventario/compras';
+  const respuesta = await fetchJsonAutorizado(url, {
+    method: compraId ? 'PUT' : 'POST',
     body: JSON.stringify(payload),
   });
 
-  if (!respuesta.ok) {
-    const error = await respuesta.json().catch(() => ({}));
-    throw new Error(error.error || 'No se pudo registrar la compra de inventario.');
+  const data = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok || !data.ok) {
+    throw new Error(data.error || 'No se pudo guardar la compra de inventario.');
   }
+
+  return data;
 };
 
 /* =====================
@@ -4330,6 +4475,13 @@ abastecimientoDetallesContainer?.addEventListener('input', (event) => {
   }
 });
 
+abastecimientoAplicaItbisInput?.addEventListener('change', () => recalcularAbastecimientoTotales());
+
+abastecimientoCancelarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  limpiarFormularioAbastecimiento();
+});
+
 abastecimientoForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
 
@@ -4339,7 +4491,7 @@ abastecimientoForm?.addEventListener('submit', async (event) => {
   const metodoPago = abastecimientoMetodoInput?.value || '';
   const observaciones = abastecimientoObservacionesInput?.value.trim();
 
-  const { detalles, invalido } = obtenerDetallesAbastecimiento();
+  const { detalles, invalido, subtotal } = obtenerDetallesAbastecimiento();
 
   if (!proveedor || !fecha || detalles.length === 0 || invalido) {
     setMessage(
@@ -4355,21 +4507,37 @@ abastecimientoForm?.addEventListener('submit', async (event) => {
     return;
   }
 
+  const aplicaItbis = !!abastecimientoAplicaItbisInput?.checked;
+  actualizarResumenAbastecimiento(subtotal || 0);
+
   const payload = {
     proveedor,
     fecha,
     origen_fondos: origenFondos,
     metodo_pago: metodoPago || null,
     observaciones: observaciones || null,
+    aplica_itbis: aplicaItbis ? 1 : 0,
     items: detalles,
   };
 
   try {
-    setMessage(abastecimientoMensaje, 'Registrando compra...', 'info');
-    await registrarCompraInventario(payload);
-    setMessage(abastecimientoMensaje, 'Compra registrada y stock actualizado.', 'info');
+    const edicionId = abastecimientoEditId;
+    setMessage(
+      abastecimientoMensaje,
+      edicionId ? 'Actualizando compra...' : 'Registrando compra...',
+      'info'
+    );
+    await guardarCompraInventario(payload, edicionId);
+    setMessage(
+      abastecimientoMensaje,
+      edicionId ? 'Compra actualizada correctamente.' : 'Compra registrada y stock actualizado.',
+      'info'
+    );
     limpiarFormularioAbastecimiento();
     await cargarComprasInventario();
+    if (edicionId && Number(detalleAbastecimientoActivo) === Number(edicionId)) {
+      await cargarDetalleAbastecimiento(edicionId);
+    }
     await cargarProductos();
   } catch (error) {
     console.error('Error al registrar compra de inventario:', error);
@@ -4382,6 +4550,16 @@ abastecimientoForm?.addEventListener('submit', async (event) => {
 });
 
 abastecimientoTabla?.addEventListener('click', (event) => {
+  const botonEditar = event.target.closest('[data-editar-abastecimiento]');
+  if (botonEditar) {
+    event.preventDefault();
+    const id = Number(botonEditar.dataset.editarAbastecimiento);
+    if (Number.isFinite(id) && id > 0) {
+      cargarEdicionAbastecimiento(id);
+    }
+    return;
+  }
+
   const boton = event.target.closest('[data-detalle-abastecimiento]');
   if (!boton) return;
   event.preventDefault();

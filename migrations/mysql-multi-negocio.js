@@ -271,6 +271,9 @@ async function ensureTableComprasInventario() {
       proveedor VARCHAR(255) NOT NULL,
       origen_fondos VARCHAR(20) NOT NULL DEFAULT 'negocio',
       metodo_pago VARCHAR(40) NULL,
+      subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+      itbis DECIMAL(12,2) NOT NULL DEFAULT 0,
+      aplica_itbis TINYINT(1) NOT NULL DEFAULT 0,
       total DECIMAL(12,2) NOT NULL DEFAULT 0,
       observaciones TEXT NULL,
       creado_por INT NULL,
@@ -289,6 +292,12 @@ async function ensureTableComprasInventario() {
   await ensureIndexByName('compras_inventario', 'idx_compras_inventario_compra', '(compra_id)');
   await ensureForeignKey('compras_inventario', 'negocio_id');
   await ensureForeignKey('compras_inventario', 'compra_id', 'compras');
+  await ensureColumn('compras_inventario', 'subtotal DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('compras_inventario', 'itbis DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('compras_inventario', 'aplica_itbis TINYINT(1) NOT NULL DEFAULT 0');
+  await query(
+    'UPDATE compras_inventario SET subtotal = total WHERE (subtotal IS NULL OR subtotal = 0) AND total > 0'
+  );
 }
 
 async function ensureTableComprasInventarioDetalle() {

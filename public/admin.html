@@ -1031,6 +1031,13 @@
                 Si eliges Caja, se registrara automaticamente una salida de caja.
               </span>
             </div>
+            <div class="kanm-input-group kanm-input-group--inline kanm-input-toggle">
+              <label class="kanm-checkbox" for="abastecimiento-aplica-itbis">
+                <input type="checkbox" id="abastecimiento-aplica-itbis" checked />
+                <span>Aplicar ITBIS (18%)</span>
+              </label>
+              <span class="kanm-input-help">Aplica el ITBIS al total de la compra.</span>
+            </div>
 
             <div class="compra-detalle-header">
               <h4 class="kanm-subheading">Detalle de productos</h4>
@@ -1044,12 +1051,25 @@
             <div class="compra-detalles abastecimiento-detalles" id="abastecimiento-detalles"></div>
 
             <div class="abastecimiento-resumen">
-              <span>Total compra</span>
-              <strong id="abastecimiento-total">DOP&nbsp;0.00</strong>
+              <div class="abastecimiento-resumen-linea">
+                <span>Subtotal</span>
+                <strong id="abastecimiento-subtotal">DOP&nbsp;0.00</strong>
+              </div>
+              <div class="abastecimiento-resumen-linea" id="abastecimiento-itbis-row">
+                <span>ITBIS (18%)</span>
+                <strong id="abastecimiento-itbis">DOP&nbsp;0.00</strong>
+              </div>
+              <div class="abastecimiento-resumen-linea total">
+                <span id="abastecimiento-total-label">Total con ITBIS</span>
+                <strong id="abastecimiento-total">DOP&nbsp;0.00</strong>
+              </div>
             </div>
 
             <div class="admin-form-actions">
-              <button type="submit" class="kanm-button">Registrar compra</button>
+              <button type="button" class="kanm-button secondary" id="abastecimiento-cancelar" hidden>
+                Cancelar edicion
+              </button>
+              <button type="submit" class="kanm-button" id="abastecimiento-submit">Registrar compra</button>
             </div>
 
             <div id="abastecimiento-mensaje" class="kanm-message"></div>
