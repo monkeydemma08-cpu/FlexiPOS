@@ -132,8 +132,6 @@ const analisisKpiGanancia = document.getElementById('analisis-kpi-ganancia');
 const analisisKpiMargen = document.getElementById('analisis-kpi-margen');
 const analisisKpiTicket = document.getElementById('analisis-kpi-ticket');
 const analisisKpiVentasCount = document.getElementById('analisis-kpi-ventas-count');
-const analisisKpiVariacionCaja = document.getElementById('analisis-kpi-variacion-caja');
-const analisisKpiInventarioFinal = document.getElementById('analisis-kpi-inventario-final');
 const analisisKpiVentasDelta = document.getElementById('analisis-kpi-ventas-delta');
 const analisisKpiGastosDelta = document.getElementById('analisis-kpi-gastos-delta');
 const analisisKpiGananciaDelta = document.getElementById('analisis-kpi-ganancia-delta');
@@ -149,6 +147,18 @@ const analisisMetodosPago = document.getElementById('analisis-metodos-pago');
 const analisisTopCategorias = document.getElementById('analisis-top-categorias');
 const analisisGastosRecurrentes = document.getElementById('analisis-gastos-recurrentes');
 const analisisAlertas = document.getElementById('analisis-alertas');
+const analisisAvanzadoAlertas = document.getElementById('analisis-avanzado-alertas');
+const analisisAdvComprasInventario = document.getElementById('analisis-adv-compras-inventario');
+const analisisAdvGastosOperativos = document.getElementById('analisis-adv-gastos-operativos');
+const analisisAdvFlujoCaja = document.getElementById('analisis-adv-flujo-caja');
+const analisisAdvCajaInicial = document.getElementById('analisis-adv-caja-inicial');
+const analisisAdvCajaFinal = document.getElementById('analisis-adv-caja-final');
+const analisisAdvInventarioInicial = document.getElementById('analisis-adv-inventario-inicial');
+const analisisAdvInventarioFinal = document.getElementById('analisis-adv-inventario-final');
+const analisisCapitalModal = document.getElementById('analisis-capital-modal');
+const analisisCapitalAbrirBtn = document.getElementById('analisis-capital-abrir');
+const analisisCapitalCerrarBtn = document.getElementById('analisis-capital-cerrar');
+const analisisCapitalCancelarBtn = document.getElementById('analisis-capital-cancelar');
 const analisisCapitalDesdeInput = document.getElementById('analisis-capital-desde');
 const analisisCapitalHastaInput = document.getElementById('analisis-capital-hasta');
 const analisisCapitalCajaInput = document.getElementById('analisis-capital-caja');
@@ -596,6 +606,29 @@ const cerrarModalEliminar = () => {
     modalEliminarPassword.value = '';
   }
   setMessage(modalEliminarMensaje, '', 'info');
+};
+
+const abrirModalCapitalInicial = () => {
+  if (!analisisCapitalModal) return;
+  if (analisisCapitalDesdeInput && analisisDesdeInput && !analisisCapitalDesdeInput.value) {
+    analisisCapitalDesdeInput.value = analisisDesdeInput.value;
+  }
+  if (analisisCapitalHastaInput && analisisHastaInput && !analisisCapitalHastaInput.value) {
+    analisisCapitalHastaInput.value = analisisHastaInput.value;
+  }
+  analisisCapitalModal.hidden = false;
+  requestAnimationFrame(() => {
+    analisisCapitalModal.classList.add('is-visible');
+  });
+};
+
+const cerrarModalCapitalInicial = () => {
+  if (!analisisCapitalModal) return;
+  analisisCapitalModal.classList.remove('is-visible');
+  analisisCapitalModal.hidden = true;
+  if (analisisCapitalMensaje) {
+    setMessage(analisisCapitalMensaje, '', 'info');
+  }
 };
 
 const abrirModalEliminar = ({ titulo, descripcion, endpoint, forzar = false, extraBody = {}, onSuccess }) => {
@@ -3011,14 +3044,14 @@ const renderRankingList = (container, items, formatter) => {
   });
 };
 
-const renderAlertasAnalisis = (alertas) => {
-  if (!analisisAlertas) return;
-  analisisAlertas.innerHTML = '';
+const renderAlertasAnalisis = (alertas, container = analisisAlertas) => {
+  if (!container) return;
+  container.innerHTML = '';
   if (!Array.isArray(alertas) || alertas.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'kanm-empty-message';
     empty.textContent = 'Sin alertas para este periodo.';
-    analisisAlertas.appendChild(empty);
+    container.appendChild(empty);
     return;
   }
 
@@ -3027,7 +3060,7 @@ const renderAlertasAnalisis = (alertas) => {
     const nivel = alerta?.nivel || 'info';
     item.className = `analisis-alerta analisis-alerta--${nivel}`;
     item.textContent = alerta?.mensaje || 'Alerta';
-    analisisAlertas.appendChild(item);
+    container.appendChild(item);
   });
 };
 
@@ -3044,7 +3077,7 @@ const renderDelta = (element, porcentaje) => {
   element.classList.add(valor > 0 ? 'delta-positive' : valor < 0 ? 'delta-negative' : 'delta-neutral');
 };
 
-const renderAnalisisSerie = (ventasSerie, gastosSerie, cogsSerie) => {
+const renderAnalisisSerie = (ventasSerie, gastosSerie) => {
   if (!analisisSerieBody) return;
   analisisSerieBody.innerHTML = '';
 
@@ -3054,17 +3087,11 @@ const renderAnalisisSerie = (ventasSerie, gastosSerie, cogsSerie) => {
       fecha: row.fecha,
       ventas: Number(row.total) || 0,
       gastos: 0,
-      cogs: 0,
     });
   });
   (gastosSerie || []).forEach((row) => {
-    const actual = mapa.get(row.fecha) || { fecha: row.fecha, ventas: 0, gastos: 0, cogs: 0 };
+    const actual = mapa.get(row.fecha) || { fecha: row.fecha, ventas: 0, gastos: 0 };
     actual.gastos = Number(row.total) || 0;
-    mapa.set(row.fecha, actual);
-  });
-  (cogsSerie || []).forEach((row) => {
-    const actual = mapa.get(row.fecha) || { fecha: row.fecha, ventas: 0, gastos: 0, cogs: 0 };
-    actual.cogs = Number(row.total) || 0;
     mapa.set(row.fecha, actual);
   });
 
@@ -3084,7 +3111,7 @@ const renderAnalisisSerie = (ventasSerie, gastosSerie, cogsSerie) => {
 
   serie.forEach((item) => {
     const fila = document.createElement('tr');
-    const ganancia = Number((item.ventas - item.gastos - item.cogs).toFixed(2));
+    const ganancia = Number((item.ventas - item.gastos).toFixed(2));
     const ventasPct = maxValor > 0 ? Math.round((item.ventas / maxValor) * 100) : 0;
     const gastosPct = maxValor > 0 ? Math.round((item.gastos / maxValor) * 100) : 0;
 
@@ -3166,42 +3193,24 @@ const renderAnalisis = (data) => {
   const ingresos = data.ingresos || {};
   const gastosData = data.gastos || {};
   const ganancias = data.ganancias || {};
-  const flujoCaja = data.flujo_caja || {};
-  const inventario = data.inventario || {};
   const comparacion = data.comparacion || {};
 
   if (analisisKpiVentas) analisisKpiVentas.textContent = formatCurrency(ingresos.total || 0);
-  if (analisisKpiGastos) {
-    analisisKpiGastos.textContent = formatCurrency(gastosData.total_operativos || 0);
-  }
-  if (analisisKpiGanancia) {
-    analisisKpiGanancia.textContent = formatCurrency(ganancias.neta_operativa || 0);
-  }
+  if (analisisKpiGastos) analisisKpiGastos.textContent = formatCurrency(gastosData.total || 0);
+  if (analisisKpiGanancia) analisisKpiGanancia.textContent = formatCurrency(ganancias.neta || 0);
   if (analisisKpiMargen) {
-    const margen = Number(ganancias.margen_operativo) || 0;
+    const margen = Number(ganancias.margen) || 0;
     analisisKpiMargen.textContent = `${(margen * 100).toFixed(1)}%`;
   }
   if (analisisKpiTicket) analisisKpiTicket.textContent = formatCurrency(ingresos.ticket_promedio || 0);
   if (analisisKpiVentasCount) analisisKpiVentasCount.textContent = String(ingresos.count || 0);
-  if (analisisKpiVariacionCaja) {
-    analisisKpiVariacionCaja.textContent = formatCurrency(flujoCaja.variacion || 0);
-  }
-  if (analisisKpiInventarioFinal) {
-    analisisKpiInventarioFinal.textContent = formatCurrency(inventario.final || 0);
-  }
 
   renderDelta(analisisKpiVentasDelta, comparacion.ventas?.porcentaje);
   renderDelta(analisisKpiGastosDelta, comparacion.gastos?.porcentaje);
   renderDelta(analisisKpiGananciaDelta, comparacion.ganancia?.porcentaje);
   renderDelta(analisisKpiTicketDelta, comparacion.ticket_promedio?.porcentaje);
 
-  renderAnalisisSerie(
-    ingresos.serie_diaria || [],
-    gastosData.serie_diaria || [],
-    ganancias.cogs_serie || []
-  );
-
-  renderCapitalInicialAnalisis(data.capital_inicial || {}, data.configuracion || {}, data.rango || {});
+  renderAnalisisSerie(ingresos.serie_diaria || [], gastosData.serie_diaria || []);
 
   renderRankingList(analisisTopCantidad, data.rankings?.top_productos_cantidad || [], (item) => ({
     label: item.nombre || `Producto ${item.id}`,
@@ -3259,6 +3268,40 @@ const renderAnalisis = (data) => {
   renderAlertasAnalisis(data.alertas || []);
 };
 
+const renderAnalisisAvanzado = (data) => {
+  if (!data) return;
+  const gastos = data.gastos || {};
+  const flujoCaja = data.flujo_caja || {};
+  const inventario = data.inventario || {};
+  const capital = data.capital_inicial || {};
+  const configuracion = data.configuracion || {};
+
+  if (analisisAdvComprasInventario) {
+    analisisAdvComprasInventario.textContent = formatCurrency(gastos.total_inventario || 0);
+  }
+  if (analisisAdvGastosOperativos) {
+    analisisAdvGastosOperativos.textContent = formatCurrency(gastos.total_operativos || 0);
+  }
+  if (analisisAdvFlujoCaja) {
+    analisisAdvFlujoCaja.textContent = formatCurrency(flujoCaja.variacion || 0);
+  }
+  if (analisisAdvCajaInicial) {
+    analisisAdvCajaInicial.textContent = formatCurrency(flujoCaja.caja_inicial ?? capital.caja_inicial ?? 0);
+  }
+  if (analisisAdvCajaFinal) {
+    analisisAdvCajaFinal.textContent = formatCurrency(flujoCaja.caja_final || 0);
+  }
+  if (analisisAdvInventarioInicial) {
+    analisisAdvInventarioInicial.textContent = formatCurrency(inventario.inicial ?? capital.inventario_inicial ?? 0);
+  }
+  if (analisisAdvInventarioFinal) {
+    analisisAdvInventarioFinal.textContent = formatCurrency(inventario.final || 0);
+  }
+
+  renderCapitalInicialAnalisis(capital, configuracion, data.rango || {});
+  renderAlertasAnalisis(data.alertas || [], analisisAvanzadoAlertas);
+};
+
 const guardarCapitalInicialAnalisis = async () => {
   const periodoInicio = analisisCapitalDesdeInput?.value || analisisDesdeInput?.value || '';
   const periodoFin = analisisCapitalHastaInput?.value || analisisHastaInput?.value || '';
@@ -3307,6 +3350,7 @@ const guardarCapitalInicialAnalisis = async () => {
     }
     setMessage(analisisCapitalMensaje, 'Capital inicial guardado.', 'info');
     await cargarAnalisis();
+    cerrarModalCapitalInicial();
   } catch (error) {
     console.error('Error al guardar capital inicial:', error);
     setMessage(
@@ -3327,16 +3371,53 @@ const cargarAnalisis = async () => {
     const params = new URLSearchParams();
     if (desde) params.set('from', desde);
     if (hasta) params.set('to', hasta);
-    const respuesta = await fetchConAutorizacion(`/api/admin/analytics/overview?${params.toString()}`);
-    if (!respuesta.ok) {
-      throw new Error('No se pudo obtener el analisis');
+    const urlBasico = `/api/admin/analytics/overview?${params.toString()}`;
+    const urlAvanzado = `/api/admin/analytics/advanced?${params.toString()}`;
+
+    let basicoOk = false;
+    let avanzadoOk = false;
+
+    try {
+      const respuesta = await fetchConAutorizacion(urlBasico);
+      if (!respuesta.ok) {
+        throw new Error('No se pudo obtener el analisis');
+      }
+      const data = await respuesta.json();
+      if (!data.ok) {
+        throw new Error(data.error || 'No se pudo obtener el analisis');
+      }
+      renderAnalisis(data);
+      basicoOk = true;
+    } catch (error) {
+      console.error('Error al cargar analisis basico:', error);
+      setMessage(analisisMensaje, error.message || 'Error al cargar el analisis.', 'error');
     }
-    const data = await respuesta.json();
-    if (!data.ok) {
-      throw new Error(data.error || 'No se pudo obtener el analisis');
+
+    try {
+      const respuestaAvanzado = await fetchConAutorizacion(urlAvanzado);
+      if (!respuestaAvanzado.ok) {
+        throw new Error('No se pudo obtener el analisis avanzado');
+      }
+      const dataAvanzado = await respuestaAvanzado.json();
+      if (!dataAvanzado.ok) {
+        throw new Error(dataAvanzado.error || 'No se pudo obtener el analisis avanzado');
+      }
+      renderAnalisisAvanzado(dataAvanzado);
+      avanzadoOk = true;
+    } catch (error) {
+      console.error('Error al cargar analisis avanzado:', error);
+      renderAlertasAnalisis(
+        [{ nivel: 'warning', mensaje: error.message || 'No se pudo cargar el analisis avanzado.' }],
+        analisisAvanzadoAlertas
+      );
+      if (basicoOk) {
+        setMessage(analisisMensaje, 'Analisis avanzado no disponible.', 'warning');
+      }
     }
-    renderAnalisis(data);
-    setMessage(analisisMensaje, '', 'info');
+
+    if (basicoOk && avanzadoOk) {
+      setMessage(analisisMensaje, '', 'info');
+    }
   } catch (error) {
     console.error('Error al cargar analisis:', error);
     setMessage(analisisMensaje, error.message || 'Error al cargar el analisis.', 'error');
@@ -4789,6 +4870,21 @@ analisisRangeButtons.forEach((btn) => {
 analisisActualizarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   cargarAnalisis();
+});
+
+analisisCapitalAbrirBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  abrirModalCapitalInicial();
+});
+
+analisisCapitalCerrarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  cerrarModalCapitalInicial();
+});
+
+analisisCapitalCancelarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  cerrarModalCapitalInicial();
 });
 
 analisisCapitalGuardarBtn?.addEventListener('click', (event) => {

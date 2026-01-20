@@ -332,6 +332,7 @@ CREATE TABLE IF NOT EXISTS gastos (
   moneda VARCHAR(3) DEFAULT 'DOP',
   categoria VARCHAR(80),
   tipo_gasto VARCHAR(20) NOT NULL DEFAULT 'OPERATIVO',
+  origen VARCHAR(20) NOT NULL DEFAULT 'manual',
   metodo_pago VARCHAR(40),
   proveedor VARCHAR(120),
   descripcion TEXT,

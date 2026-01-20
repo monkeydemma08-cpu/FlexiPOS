@@ -236,6 +236,7 @@ async function ensureTableGastos() {
       moneda VARCHAR(3) DEFAULT 'DOP',
       categoria VARCHAR(80),
       tipo_gasto VARCHAR(20) NOT NULL DEFAULT 'OPERATIVO',
+      origen VARCHAR(20) NOT NULL DEFAULT 'manual',
       metodo_pago VARCHAR(40),
       proveedor VARCHAR(120),
       descripcion TEXT,
@@ -258,12 +259,23 @@ async function ensureTableGastos() {
   await ensureColumn('gastos', 'referencia_id BIGINT NULL');
   await ensureColumn('gastos', 'usuario_id INT NULL');
   await ensureColumn('gastos', "tipo_gasto VARCHAR(20) NOT NULL DEFAULT 'OPERATIVO'");
+  await ensureColumn('gastos', "origen VARCHAR(20) NOT NULL DEFAULT 'manual'");
   await query("UPDATE gastos SET tipo_gasto = 'OPERATIVO' WHERE tipo_gasto IS NULL OR tipo_gasto = ''");
   await query(
     "UPDATE gastos SET tipo_gasto = 'INVENTARIO' WHERE (categoria = 'Compras inventario' OR referencia LIKE 'INV-%') AND (tipo_gasto IS NULL OR tipo_gasto = '' OR tipo_gasto = 'OPERATIVO')"
   );
   await query(
     "UPDATE gastos SET tipo_gasto = 'RETIRO_CAJA' WHERE (referencia_tipo = 'SALIDA_CAJA' OR categoria = 'SALIDA_CAJA') AND (tipo_gasto IS NULL OR tipo_gasto = '' OR tipo_gasto = 'OPERATIVO')"
+  );
+  await query("UPDATE gastos SET origen = 'manual' WHERE origen IS NULL OR origen = ''");
+  await query(
+    "UPDATE gastos SET origen = 'compra' WHERE (categoria = 'Compras inventario' OR referencia LIKE 'INV-%') AND (origen IS NULL OR origen = '' OR origen = 'manual')"
+  );
+  await query(
+    "UPDATE gastos SET origen = 'caja' WHERE (referencia_tipo = 'SALIDA_CAJA' OR categoria = 'SALIDA_CAJA') AND (origen IS NULL OR origen = '' OR origen = 'manual')"
+  );
+  await query(
+    "UPDATE gastos SET origen = 'nomina' WHERE (LOWER(categoria) LIKE 'nomina%' OR LOWER(descripcion) LIKE 'nomina%') AND (origen IS NULL OR origen = '' OR origen = 'manual')"
   );
 
   await ensureIndexByName('gastos', 'idx_gastos_negocio_fecha', '(negocio_id, fecha)');

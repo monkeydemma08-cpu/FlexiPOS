@@ -2734,6 +2734,23 @@ img {
   justify-content: flex-end;
 }
 
+.analisis-avanzado-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.analisis-avanzado-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.analisis-avanzado-grid .resumen-metric {
+  min-width: 180px;
+}
+
 .analisis-kpi-grid .resumen-metric {
   min-width: 180px;
 }
