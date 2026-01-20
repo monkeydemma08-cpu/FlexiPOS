@@ -235,6 +235,7 @@ async function ensureTableGastos() {
       monto DECIMAL(12,2) NOT NULL,
       moneda VARCHAR(3) DEFAULT 'DOP',
       categoria VARCHAR(80),
+      tipo_gasto VARCHAR(20) NOT NULL DEFAULT 'OPERATIVO',
       metodo_pago VARCHAR(40),
       proveedor VARCHAR(120),
       descripcion TEXT,
@@ -256,6 +257,14 @@ async function ensureTableGastos() {
   await ensureColumn('gastos', 'referencia_tipo VARCHAR(40) NULL');
   await ensureColumn('gastos', 'referencia_id BIGINT NULL');
   await ensureColumn('gastos', 'usuario_id INT NULL');
+  await ensureColumn('gastos', "tipo_gasto VARCHAR(20) NOT NULL DEFAULT 'OPERATIVO'");
+  await query("UPDATE gastos SET tipo_gasto = 'OPERATIVO' WHERE tipo_gasto IS NULL OR tipo_gasto = ''");
+  await query(
+    "UPDATE gastos SET tipo_gasto = 'INVENTARIO' WHERE (categoria = 'Compras inventario' OR referencia LIKE 'INV-%') AND (tipo_gasto IS NULL OR tipo_gasto = '' OR tipo_gasto = 'OPERATIVO')"
+  );
+  await query(
+    "UPDATE gastos SET tipo_gasto = 'RETIRO_CAJA' WHERE (referencia_tipo = 'SALIDA_CAJA' OR categoria = 'SALIDA_CAJA') AND (tipo_gasto IS NULL OR tipo_gasto = '' OR tipo_gasto = 'OPERATIVO')"
+  );
 
   await ensureIndexByName('gastos', 'idx_gastos_negocio_fecha', '(negocio_id, fecha)');
   await ensureIndexByName('gastos', 'idx_gastos_negocio_categoria_fecha', '(negocio_id, categoria, fecha)');
@@ -322,6 +331,23 @@ async function ensureTableComprasInventarioDetalle() {
   await ensureForeignKey('compras_inventario_detalle', 'negocio_id');
   await ensureForeignKey('compras_inventario_detalle', 'compra_id', 'compras_inventario');
   await ensureForeignKey('compras_inventario_detalle', 'producto_id', 'productos');
+}
+
+async function ensureTableAnalisisCapitalInicial() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS analisis_capital_inicial (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      periodo_inicio DATE NOT NULL,
+      periodo_fin DATE NOT NULL,
+      caja_inicial DECIMAL(12,2) NOT NULL DEFAULT 0,
+      inventario_inicial DECIMAL(12,2) NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_capital_inicial_periodo (negocio_id, periodo_inicio, periodo_fin),
+      CONSTRAINT fk_capital_inicial_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 }
 
 async function ensureDefaultNegocio() {
@@ -839,6 +865,7 @@ async function runMigrations() {
   await ensureTableGastos();
   await ensureTableComprasInventario();
   await ensureTableComprasInventarioDetalle();
+  await ensureTableAnalisisCapitalInicial();
   await ensureColumn('salidas_caja', 'usuario_id INT NULL');
   await ensureColumn('negocios', 'slug VARCHAR(120) UNIQUE');
   await ensureColumn('negocios', 'color_primario VARCHAR(20) NULL');

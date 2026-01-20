@@ -98,6 +98,7 @@ const gastoFechaInput = document.getElementById('gasto-fecha');
 const gastoMontoInput = document.getElementById('gasto-monto');
 const gastoMonedaInput = document.getElementById('gasto-moneda');
 const gastoCategoriaInput = document.getElementById('gasto-categoria');
+const gastoTipoInput = document.getElementById('gasto-tipo');
 const gastoMetodoInput = document.getElementById('gasto-metodo');
 const gastoProveedorInput = document.getElementById('gasto-proveedor');
 const gastoDescripcionInput = document.getElementById('gasto-descripcion');
@@ -111,6 +112,7 @@ const gastoMensaje = document.getElementById('gasto-mensaje');
 const gastosDesdeInput = document.getElementById('gastos-desde');
 const gastosHastaInput = document.getElementById('gastos-hasta');
 const gastosCategoriaFiltroInput = document.getElementById('gastos-categoria-filtro');
+const gastosTipoFiltroInput = document.getElementById('gastos-tipo-filtro');
 const gastosMetodoFiltroInput = document.getElementById('gastos-metodo-filtro');
 const gastosBuscarInput = document.getElementById('gastos-buscar');
 const gastosConsultarBtn = document.getElementById('gastos-consultar');
@@ -130,6 +132,8 @@ const analisisKpiGanancia = document.getElementById('analisis-kpi-ganancia');
 const analisisKpiMargen = document.getElementById('analisis-kpi-margen');
 const analisisKpiTicket = document.getElementById('analisis-kpi-ticket');
 const analisisKpiVentasCount = document.getElementById('analisis-kpi-ventas-count');
+const analisisKpiVariacionCaja = document.getElementById('analisis-kpi-variacion-caja');
+const analisisKpiInventarioFinal = document.getElementById('analisis-kpi-inventario-final');
 const analisisKpiVentasDelta = document.getElementById('analisis-kpi-ventas-delta');
 const analisisKpiGastosDelta = document.getElementById('analisis-kpi-gastos-delta');
 const analisisKpiGananciaDelta = document.getElementById('analisis-kpi-ganancia-delta');
@@ -145,6 +149,14 @@ const analisisMetodosPago = document.getElementById('analisis-metodos-pago');
 const analisisTopCategorias = document.getElementById('analisis-top-categorias');
 const analisisGastosRecurrentes = document.getElementById('analisis-gastos-recurrentes');
 const analisisAlertas = document.getElementById('analisis-alertas');
+const analisisCapitalDesdeInput = document.getElementById('analisis-capital-desde');
+const analisisCapitalHastaInput = document.getElementById('analisis-capital-hasta');
+const analisisCapitalCajaInput = document.getElementById('analisis-capital-caja');
+const analisisCapitalInventarioInput = document.getElementById('analisis-capital-inventario');
+const analisisCogsEstimadoInput = document.getElementById('analisis-cogs-estimado');
+const analisisCapitalGuardarBtn = document.getElementById('analisis-capital-guardar');
+const analisisCapitalMensaje = document.getElementById('analisis-capital-mensaje');
+const analisisCapitalAviso = document.getElementById('analisis-capital-aviso');
 
 const usuariosRolSelect = document.getElementById('usuarios-rol');
 const usuariosTablaBody = document.getElementById('usuarios-tabla-body');
@@ -2420,6 +2432,7 @@ const limpiarFormularioGasto = () => {
   gastoForm?.reset();
   if (gastoIdInput) gastoIdInput.value = '';
   if (gastoMonedaInput) gastoMonedaInput.value = 'DOP';
+  if (gastoTipoInput) gastoTipoInput.value = 'OPERATIVO';
   if (gastoRecurrenteInput) gastoRecurrenteInput.checked = false;
   if (gastoFechaInput) {
     gastoFechaInput.value = getLocalDateISO(new Date());
@@ -2435,6 +2448,7 @@ const cargarGastoEnFormulario = (gasto) => {
   if (gastoMontoInput) gastoMontoInput.value = gasto.monto ?? '';
   if (gastoMonedaInput) gastoMonedaInput.value = gasto.moneda || 'DOP';
   if (gastoCategoriaInput) gastoCategoriaInput.value = gasto.categoria ?? '';
+  if (gastoTipoInput) gastoTipoInput.value = gasto.tipo_gasto || 'OPERATIVO';
   if (gastoMetodoInput) gastoMetodoInput.value = gasto.metodo_pago ?? '';
   if (gastoProveedorInput) gastoProveedorInput.value = gasto.proveedor ?? '';
   if (gastoDescripcionInput) gastoDescripcionInput.value = gasto.descripcion ?? '';
@@ -2452,6 +2466,7 @@ const obtenerValoresGasto = () => {
   const monto = parseFloat(gastoMontoInput?.value ?? '');
   const moneda = gastoMonedaInput?.value || 'DOP';
   const categoria = gastoCategoriaInput?.value.trim();
+  const tipo_gasto = gastoTipoInput?.value || 'OPERATIVO';
   const metodo_pago = gastoMetodoInput?.value || '';
   const proveedor = gastoProveedorInput?.value.trim();
   const descripcion = gastoDescripcionInput?.value.trim();
@@ -2466,6 +2481,7 @@ const obtenerValoresGasto = () => {
     monto,
     moneda,
     categoria,
+    tipo_gasto,
     metodo_pago,
     proveedor,
     descripcion,
@@ -2490,6 +2506,11 @@ const validarGasto = (gasto) => {
     setMessage(gastoMensaje, 'Selecciona la frecuencia del gasto recurrente.', 'error');
     return false;
   }
+  const tiposValidos = ['OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA'];
+  if (gasto.tipo_gasto && !tiposValidos.includes(gasto.tipo_gasto)) {
+    setMessage(gastoMensaje, 'Selecciona un tipo de gasto valido.', 'error');
+    return false;
+  }
   return true;
 };
 
@@ -2512,6 +2533,13 @@ const renderResumenGastos = (resumen) => {
   });
 };
 
+const formatearTipoGasto = (tipo) => {
+  const limpio = String(tipo || '').toUpperCase();
+  if (limpio === 'INVENTARIO') return 'Inventario';
+  if (limpio === 'RETIRO_CAJA') return 'Retiro';
+  return 'Operativo';
+};
+
 const renderGastosTabla = (lista) => {
   if (!gastosTabla) return;
   gastosTabla.innerHTML = '';
@@ -2519,7 +2547,7 @@ const renderGastosTabla = (lista) => {
   if (!Array.isArray(lista) || lista.length === 0) {
     const fila = document.createElement('tr');
     const celda = document.createElement('td');
-    celda.colSpan = 8;
+    celda.colSpan = 9;
     celda.className = 'tabla-vacia';
     celda.textContent = 'No hay gastos registrados.';
     fila.appendChild(celda);
@@ -2535,6 +2563,9 @@ const renderGastosTabla = (lista) => {
 
     const cCategoria = document.createElement('td');
     cCategoria.textContent = gasto.categoria || '--';
+
+    const cTipo = document.createElement('td');
+    cTipo.textContent = formatearTipoGasto(gasto.tipo_gasto);
 
     const cMetodo = document.createElement('td');
     cMetodo.textContent = gasto.metodo_pago || '--';
@@ -2579,6 +2610,7 @@ const renderGastosTabla = (lista) => {
 
     fila.appendChild(cFecha);
     fila.appendChild(cCategoria);
+    fila.appendChild(cTipo);
     fila.appendChild(cMetodo);
     fila.appendChild(cProveedor);
     fila.appendChild(cMonto);
@@ -2596,6 +2628,7 @@ const cargarGastos = async () => {
     if (gastosDesdeInput?.value) params.set('from', gastosDesdeInput.value);
     if (gastosHastaInput?.value) params.set('to', gastosHastaInput.value);
     if (gastosCategoriaFiltroInput?.value) params.set('categoria', gastosCategoriaFiltroInput.value.trim());
+    if (gastosTipoFiltroInput?.value) params.set('tipo_gasto', gastosTipoFiltroInput.value);
     if (gastosMetodoFiltroInput?.value) params.set('metodo_pago', gastosMetodoFiltroInput.value);
     if (gastosBuscarInput?.value) params.set('q', gastosBuscarInput.value.trim());
     params.set('page', '1');
@@ -3011,7 +3044,7 @@ const renderDelta = (element, porcentaje) => {
   element.classList.add(valor > 0 ? 'delta-positive' : valor < 0 ? 'delta-negative' : 'delta-neutral');
 };
 
-const renderAnalisisSerie = (ventasSerie, gastosSerie) => {
+const renderAnalisisSerie = (ventasSerie, gastosSerie, cogsSerie) => {
   if (!analisisSerieBody) return;
   analisisSerieBody.innerHTML = '';
 
@@ -3021,11 +3054,17 @@ const renderAnalisisSerie = (ventasSerie, gastosSerie) => {
       fecha: row.fecha,
       ventas: Number(row.total) || 0,
       gastos: 0,
+      cogs: 0,
     });
   });
   (gastosSerie || []).forEach((row) => {
-    const actual = mapa.get(row.fecha) || { fecha: row.fecha, ventas: 0, gastos: 0 };
+    const actual = mapa.get(row.fecha) || { fecha: row.fecha, ventas: 0, gastos: 0, cogs: 0 };
     actual.gastos = Number(row.total) || 0;
+    mapa.set(row.fecha, actual);
+  });
+  (cogsSerie || []).forEach((row) => {
+    const actual = mapa.get(row.fecha) || { fecha: row.fecha, ventas: 0, gastos: 0, cogs: 0 };
+    actual.cogs = Number(row.total) || 0;
     mapa.set(row.fecha, actual);
   });
 
@@ -3045,7 +3084,7 @@ const renderAnalisisSerie = (ventasSerie, gastosSerie) => {
 
   serie.forEach((item) => {
     const fila = document.createElement('tr');
-    const ganancia = Number((item.ventas - item.gastos).toFixed(2));
+    const ganancia = Number((item.ventas - item.gastos - item.cogs).toFixed(2));
     const ventasPct = maxValor > 0 ? Math.round((item.ventas / maxValor) * 100) : 0;
     const gastosPct = maxValor > 0 ? Math.round((item.gastos / maxValor) * 100) : 0;
 
@@ -3087,29 +3126,82 @@ const renderAnalisisSerie = (ventasSerie, gastosSerie) => {
   });
 };
 
+const renderCapitalInicialAnalisis = (capital, configuracion, rango) => {
+  const periodoInicio = capital?.periodo_inicio || rango?.desde || '';
+  const periodoFin = capital?.periodo_fin || rango?.hasta || '';
+  if (analisisCapitalDesdeInput) analisisCapitalDesdeInput.value = periodoInicio;
+  if (analisisCapitalHastaInput) analisisCapitalHastaInput.value = periodoFin;
+  if (analisisCapitalCajaInput) {
+    const caja = capital?.caja_inicial ?? '';
+    analisisCapitalCajaInput.value = caja === '' ? '' : Number(caja).toFixed(2);
+  }
+  if (analisisCapitalInventarioInput) {
+    const inventario = capital?.inventario_inicial ?? '';
+    analisisCapitalInventarioInput.value = inventario === '' ? '' : Number(inventario).toFixed(2);
+  }
+  if (analisisCogsEstimadoInput) {
+    const costoEstimado = configuracion?.costo_estimado_cogs;
+    analisisCogsEstimadoInput.value =
+      costoEstimado === undefined || costoEstimado === null ? '' : Number(costoEstimado).toFixed(2);
+  }
+
+  if (analisisCapitalMensaje) {
+    setMessage(analisisCapitalMensaje, '', 'info');
+  }
+
+  if (analisisCapitalAviso) {
+    if (!capital?.encontrado) {
+      analisisCapitalAviso.hidden = false;
+      analisisCapitalAviso.textContent =
+        'Configura tu capital inicial para obtener metricas mas precisas en este periodo.';
+    } else {
+      analisisCapitalAviso.hidden = true;
+      analisisCapitalAviso.textContent = '';
+    }
+  }
+};
+
 const renderAnalisis = (data) => {
   if (!data) return;
   const ingresos = data.ingresos || {};
   const gastosData = data.gastos || {};
   const ganancias = data.ganancias || {};
+  const flujoCaja = data.flujo_caja || {};
+  const inventario = data.inventario || {};
   const comparacion = data.comparacion || {};
 
   if (analisisKpiVentas) analisisKpiVentas.textContent = formatCurrency(ingresos.total || 0);
-  if (analisisKpiGastos) analisisKpiGastos.textContent = formatCurrency(gastosData.total || 0);
-  if (analisisKpiGanancia) analisisKpiGanancia.textContent = formatCurrency(ganancias.neta || 0);
+  if (analisisKpiGastos) {
+    analisisKpiGastos.textContent = formatCurrency(gastosData.total_operativos || 0);
+  }
+  if (analisisKpiGanancia) {
+    analisisKpiGanancia.textContent = formatCurrency(ganancias.neta_operativa || 0);
+  }
   if (analisisKpiMargen) {
-    const margen = Number(ganancias.margen) || 0;
+    const margen = Number(ganancias.margen_operativo) || 0;
     analisisKpiMargen.textContent = `${(margen * 100).toFixed(1)}%`;
   }
   if (analisisKpiTicket) analisisKpiTicket.textContent = formatCurrency(ingresos.ticket_promedio || 0);
   if (analisisKpiVentasCount) analisisKpiVentasCount.textContent = String(ingresos.count || 0);
+  if (analisisKpiVariacionCaja) {
+    analisisKpiVariacionCaja.textContent = formatCurrency(flujoCaja.variacion || 0);
+  }
+  if (analisisKpiInventarioFinal) {
+    analisisKpiInventarioFinal.textContent = formatCurrency(inventario.final || 0);
+  }
 
   renderDelta(analisisKpiVentasDelta, comparacion.ventas?.porcentaje);
   renderDelta(analisisKpiGastosDelta, comparacion.gastos?.porcentaje);
   renderDelta(analisisKpiGananciaDelta, comparacion.ganancia?.porcentaje);
   renderDelta(analisisKpiTicketDelta, comparacion.ticket_promedio?.porcentaje);
 
-  renderAnalisisSerie(ingresos.serie_diaria || [], gastosData.serie_diaria || []);
+  renderAnalisisSerie(
+    ingresos.serie_diaria || [],
+    gastosData.serie_diaria || [],
+    ganancias.cogs_serie || []
+  );
+
+  renderCapitalInicialAnalisis(data.capital_inicial || {}, data.configuracion || {}, data.rango || {});
 
   renderRankingList(analisisTopCantidad, data.rankings?.top_productos_cantidad || [], (item) => ({
     label: item.nombre || `Producto ${item.id}`,
@@ -3165,6 +3257,64 @@ const renderAnalisis = (data) => {
   );
 
   renderAlertasAnalisis(data.alertas || []);
+};
+
+const guardarCapitalInicialAnalisis = async () => {
+  const periodoInicio = analisisCapitalDesdeInput?.value || analisisDesdeInput?.value || '';
+  const periodoFin = analisisCapitalHastaInput?.value || analisisHastaInput?.value || '';
+  const cajaInicial = parseFloat(analisisCapitalCajaInput?.value ?? '');
+  const inventarioInicial = parseFloat(analisisCapitalInventarioInput?.value ?? '');
+  const costoEstimado = parseFloat(analisisCogsEstimadoInput?.value ?? '');
+
+  if (!periodoInicio || !periodoFin) {
+    setMessage(analisisCapitalMensaje, 'Selecciona el periodo del capital inicial.', 'error');
+    return;
+  }
+
+  const cajaValor = Number.isFinite(cajaInicial) ? cajaInicial : 0;
+  const inventarioValor = Number.isFinite(inventarioInicial) ? inventarioInicial : 0;
+  const costoValor = Number.isFinite(costoEstimado) ? costoEstimado : null;
+
+  if (cajaValor < 0 || inventarioValor < 0) {
+    setMessage(analisisCapitalMensaje, 'Los valores iniciales no pueden ser negativos.', 'error');
+    return;
+  }
+
+  if (costoValor !== null && costoValor < 0) {
+    setMessage(analisisCapitalMensaje, 'El costo estimado no puede ser negativo.', 'error');
+    return;
+  }
+
+  const payload = {
+    periodo_inicio: periodoInicio,
+    periodo_fin: periodoFin,
+    caja_inicial: Number(cajaValor.toFixed(2)),
+    inventario_inicial: Number(inventarioValor.toFixed(2)),
+  };
+  if (costoValor !== null) {
+    payload.costo_estimado_cogs = Number(costoValor.toFixed(2));
+  }
+
+  try {
+    setMessage(analisisCapitalMensaje, 'Guardando capital inicial...', 'info');
+    const respuesta = await fetchJsonAutorizado('/api/admin/analytics/capital', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    if (!respuesta.ok) {
+      const error = await respuesta.json().catch(() => ({}));
+      throw new Error(error.error || 'No se pudo guardar el capital inicial.');
+    }
+    setMessage(analisisCapitalMensaje, 'Capital inicial guardado.', 'info');
+    await cargarAnalisis();
+  } catch (error) {
+    console.error('Error al guardar capital inicial:', error);
+    setMessage(
+      analisisCapitalMensaje,
+      error.message || 'No se pudo guardar el capital inicial.',
+      'error'
+    );
+  }
 };
 
 const cargarAnalisis = async () => {
@@ -4588,6 +4738,7 @@ gastoForm?.addEventListener('submit', async (event) => {
     monto: valores.monto,
     moneda: valores.moneda,
     categoria: valores.categoria || null,
+    tipo_gasto: valores.tipo_gasto || 'OPERATIVO',
     metodo_pago: valores.metodo_pago || null,
     proveedor: valores.proveedor || null,
     descripcion: valores.descripcion || null,
@@ -4623,6 +4774,7 @@ gastosLimpiarBtn?.addEventListener('click', (event) => {
   if (gastosDesdeInput) gastosDesdeInput.value = '';
   if (gastosHastaInput) gastosHastaInput.value = '';
   if (gastosCategoriaFiltroInput) gastosCategoriaFiltroInput.value = '';
+  if (gastosTipoFiltroInput) gastosTipoFiltroInput.value = '';
   if (gastosMetodoFiltroInput) gastosMetodoFiltroInput.value = '';
   if (gastosBuscarInput) gastosBuscarInput.value = '';
   cargarGastos();
@@ -4637,6 +4789,11 @@ analisisRangeButtons.forEach((btn) => {
 analisisActualizarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   cargarAnalisis();
+});
+
+analisisCapitalGuardarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  guardarCapitalInicialAnalisis();
 });
 
 reporte607ConsultarBtn?.addEventListener('click', (event) => {

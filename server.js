@@ -1623,6 +1623,20 @@ const guardarConfiguracionNegocio = async (negocioId, valores = {}) => {
   }
 };
 
+const COGS_CONFIG_KEY = 'cogs_costo_estimado';
+
+const obtenerCostoEstimadoCogs = async (negocioId) => {
+  try {
+    const valores = await leerConfiguracionNegocio(negocioId, [COGS_CONFIG_KEY]);
+    const raw = valores?.[COGS_CONFIG_KEY];
+    const valor = normalizarNumero(raw, 0);
+    return valor >= 0 ? Number(valor.toFixed(2)) : 0;
+  } catch (error) {
+    console.warn('No se pudo obtener el costo estimado de COGS:', error?.message || error);
+    return 0;
+  }
+};
+
 const leerSecuenciaCorrelativo = (tipo, negocioId) =>
   new Promise((resolve, reject) => {
     const negocio = negocioId || NEGOCIO_ID_DEFAULT;
@@ -1856,6 +1870,19 @@ const normalizarFlag = (valor, predeterminado = 0) => {
     if (['0', 'false', 'off', 'no'].includes(limpio)) return 0;
   }
   return valor ? 1 : 0;
+};
+
+const TIPOS_GASTO = ['OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA'];
+
+const normalizarTipoGasto = (valor, predeterminado = 'OPERATIVO') => {
+  if (!valor) {
+    return predeterminado;
+  }
+  const limpio = String(valor).trim().toUpperCase();
+  if (TIPOS_GASTO.includes(limpio)) {
+    return limpio;
+  }
+  return predeterminado;
 };
 
 const obtenerConfiguracionSecuenciasNegocio = async (negocioId) => {
@@ -3164,6 +3191,7 @@ const crearGastoSalidaCaja = async ({ negocioId, usuarioId, fecha, monto, descri
     monto,
     'DOP',
     REFERENCIA_TIPO_SALIDA,
+    'RETIRO_CAJA',
     'EFECTIVO',
     null,
     descripcionGasto,
@@ -3180,7 +3208,7 @@ const crearGastoSalidaCaja = async ({ negocioId, usuarioId, fecha, monto, descri
   const insert = await db.run(
     `
       INSERT INTO gastos (
-        fecha, monto, moneda, categoria, metodo_pago, proveedor, descripcion,
+        fecha, monto, moneda, categoria, tipo_gasto, metodo_pago, proveedor, descripcion,
         referencia, referencia_tipo, referencia_id, usuario_id, es_recurrente,
         frecuencia, tags, negocio_id
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -3218,6 +3246,7 @@ const actualizarGastoSalidaCaja = async ({
     fecha,
     monto,
     REFERENCIA_TIPO_SALIDA,
+    'RETIRO_CAJA',
     'EFECTIVO',
     descripcionGasto,
     referencia,
@@ -3234,6 +3263,7 @@ const actualizarGastoSalidaCaja = async ({
          SET fecha = ?,
              monto = ?,
              categoria = ?,
+             tipo_gasto = ?,
              metodo_pago = ?,
              descripcion = ?,
              referencia = ?,
@@ -7815,14 +7845,15 @@ app.post('/api/inventario/compras', (req, res) => {
       const gastoInsert = await db.run(
         `
           INSERT INTO gastos
-            (fecha, monto, moneda, categoria, metodo_pago, proveedor, descripcion, referencia, es_recurrente, negocio_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (fecha, monto, moneda, categoria, tipo_gasto, metodo_pago, proveedor, descripcion, referencia, es_recurrente, negocio_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           fecha,
           total,
           'DOP',
           'Compras inventario',
+          'INVENTARIO',
           metodoPago,
           proveedor,
           descripcionGasto,
@@ -7891,6 +7922,7 @@ app.get('/api/admin/gastos', (req, res) => {
     const desde = esFechaISOValida(req.query?.from) ? req.query.from : null;
     const hasta = esFechaISOValida(req.query?.to) ? req.query.to : null;
     const categoria = normalizarCampoTexto(req.query?.categoria, null);
+    const tipoGastoRaw = normalizarCampoTexto(req.query?.tipo_gasto ?? req.query?.tipoGasto, null);
     const metodoPago = normalizarCampoTexto(req.query?.metodo_pago ?? req.query?.metodoPago, null);
     const q = normalizarCampoTexto(req.query?.q, null);
 
@@ -7909,6 +7941,14 @@ app.get('/api/admin/gastos', (req, res) => {
       filtros.push('categoria = ?');
       params.push(categoria);
     }
+    if (tipoGastoRaw) {
+      const limpio = tipoGastoRaw.trim().toUpperCase();
+      const tipoGasto = TIPOS_GASTO.includes(limpio) ? limpio : null;
+      if (tipoGasto) {
+        filtros.push("COALESCE(tipo_gasto, 'OPERATIVO') = ?");
+        params.push(tipoGasto);
+      }
+    }
     if (metodoPago) {
       filtros.push('metodo_pago = ?');
       params.push(metodoPago);
@@ -7925,7 +7965,8 @@ app.get('/api/admin/gastos', (req, res) => {
 
     try {
       const listadoSql = `
-        SELECT id, fecha, monto, moneda, categoria, metodo_pago, proveedor, descripcion,
+        SELECT id, fecha, monto, moneda, categoria, COALESCE(tipo_gasto, 'OPERATIVO') AS tipo_gasto,
+               metodo_pago, proveedor, descripcion,
                comprobante_ncf, referencia, es_recurrente, frecuencia, tags, created_at, updated_at
         FROM gastos
         ${whereClause}
@@ -8018,6 +8059,8 @@ app.post('/api/admin/gastos', (req, res) => {
       return res.status(400).json({ error: 'La categoria no puede superar 80 caracteres' });
     }
 
+    const tipoGasto = normalizarTipoGasto(payload.tipo_gasto ?? payload.tipoGasto, 'OPERATIVO');
+
     const metodoPago = normalizarCampoTexto(payload.metodo_pago ?? payload.metodoPago, null);
     if (metodoPago && metodoPago.length > 40) {
       return res.status(400).json({ error: 'El metodo de pago no puede superar 40 caracteres' });
@@ -8059,15 +8102,16 @@ app.post('/api/admin/gastos', (req, res) => {
     try {
       const sql = `
         INSERT INTO gastos (
-          fecha, monto, moneda, categoria, metodo_pago, proveedor, descripcion,
+          fecha, monto, moneda, categoria, tipo_gasto, metodo_pago, proveedor, descripcion,
           comprobante_ncf, referencia, es_recurrente, frecuencia, tags, negocio_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       const params = [
         fecha,
         montoValor,
         moneda,
         categoria,
+        tipoGasto,
         metodoPago,
         proveedor,
         descripcion,
@@ -8088,6 +8132,7 @@ app.post('/api/admin/gastos', (req, res) => {
           monto: montoValor,
           moneda,
           categoria,
+          tipo_gasto: tipoGasto,
           metodo_pago: metodoPago,
           proveedor,
           descripcion,
@@ -8166,6 +8211,12 @@ app.put('/api/admin/gastos/:id', (req, res) => {
       }
       updates.push('categoria = ?');
       params.push(categoria);
+    }
+
+    if (payload.tipo_gasto !== undefined || payload.tipoGasto !== undefined) {
+      const tipoGasto = normalizarTipoGasto(payload.tipo_gasto ?? payload.tipoGasto, 'OPERATIVO');
+      updates.push('tipo_gasto = ?');
+      params.push(tipoGasto);
     }
 
     if (payload.metodo_pago !== undefined || payload.metodoPago !== undefined) {
@@ -8292,6 +8343,146 @@ app.delete('/api/admin/gastos/:id', (req, res) => {
     } catch (error) {
       console.error('Error al eliminar gasto:', error?.message || error);
       res.status(500).json({ error: 'Error al eliminar el gasto' });
+    }
+  });
+});
+
+const obtenerCapitalInicialPeriodo = async (negocioId, desde, hasta) => {
+  if (!desde || !hasta) {
+    return {
+      periodo_inicio: desde || '',
+      periodo_fin: hasta || '',
+      caja_inicial: 0,
+      inventario_inicial: 0,
+      encontrado: false,
+    };
+  }
+
+  const row = await db.get(
+    `
+      SELECT periodo_inicio, periodo_fin, caja_inicial, inventario_inicial
+      FROM analisis_capital_inicial
+      WHERE negocio_id = ? AND periodo_inicio = ? AND periodo_fin = ?
+      LIMIT 1
+    `,
+    [negocioId, desde, hasta]
+  );
+
+  if (!row) {
+    return {
+      periodo_inicio: desde,
+      periodo_fin: hasta,
+      caja_inicial: 0,
+      inventario_inicial: 0,
+      encontrado: false,
+    };
+  }
+
+  return {
+    periodo_inicio: row.periodo_inicio,
+    periodo_fin: row.periodo_fin,
+    caja_inicial: Number(row.caja_inicial) || 0,
+    inventario_inicial: Number(row.inventario_inicial) || 0,
+    encontrado: true,
+  };
+};
+
+const guardarCapitalInicialPeriodo = async (
+  negocioId,
+  periodoInicio,
+  periodoFin,
+  cajaInicial,
+  inventarioInicial
+) => {
+  await db.run(
+    `
+      INSERT INTO analisis_capital_inicial
+        (negocio_id, periodo_inicio, periodo_fin, caja_inicial, inventario_inicial)
+      VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        caja_inicial = VALUES(caja_inicial),
+        inventario_inicial = VALUES(inventario_inicial),
+        updated_at = CURRENT_TIMESTAMP
+    `,
+    [negocioId, periodoInicio, periodoFin, cajaInicial, inventarioInicial]
+  );
+};
+
+app.get('/api/admin/analytics/capital', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const rango = normalizarRangoAnalisis(req.query?.from ?? req.query?.desde, req.query?.to ?? req.query?.hasta);
+    try {
+      const capital = await obtenerCapitalInicialPeriodo(negocioId, rango.desde, rango.hasta);
+      const costoEstimado = await obtenerCostoEstimadoCogs(negocioId);
+      res.json({ ok: true, capital, costo_estimado_cogs: costoEstimado });
+    } catch (error) {
+      console.error('Error al obtener capital inicial:', error?.message || error);
+      res.status(500).json({ error: 'No se pudo obtener el capital inicial.' });
+    }
+  });
+});
+
+app.put('/api/admin/analytics/capital', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const periodoInicio = normalizarCampoTexto(req.body?.periodo_inicio ?? req.body?.periodoInicio, null);
+    const periodoFin = normalizarCampoTexto(req.body?.periodo_fin ?? req.body?.periodoFin, null);
+    if (!periodoInicio || !periodoFin || !esFechaISOValida(periodoInicio) || !esFechaISOValida(periodoFin)) {
+      return res.status(400).json({ error: 'Periodo de capital invalido.' });
+    }
+    if (periodoInicio > periodoFin) {
+      return res.status(400).json({ error: 'El periodo inicio no puede ser mayor que el fin.' });
+    }
+
+    const cajaInicialRaw = normalizarNumero(req.body?.caja_inicial ?? req.body?.cajaInicial, 0);
+    const inventarioInicialRaw = normalizarNumero(
+      req.body?.inventario_inicial ?? req.body?.inventarioInicial,
+      0
+    );
+    if (cajaInicialRaw < 0 || inventarioInicialRaw < 0) {
+      return res.status(400).json({ error: 'Los valores iniciales no pueden ser negativos.' });
+    }
+
+    const costoEstimadoRaw = req.body?.costo_estimado_cogs ?? req.body?.costoEstimadoCogs;
+    const costoEstimado = costoEstimadoRaw !== undefined ? normalizarNumero(costoEstimadoRaw, 0) : null;
+    if (costoEstimado !== null && costoEstimado < 0) {
+      return res.status(400).json({ error: 'El costo estimado no puede ser negativo.' });
+    }
+
+    try {
+      await guardarCapitalInicialPeriodo(
+        negocioId,
+        periodoInicio,
+        periodoFin,
+        Number(cajaInicialRaw.toFixed(2)),
+        Number(inventarioInicialRaw.toFixed(2))
+      );
+
+      if (costoEstimado !== null) {
+        await guardarConfiguracionNegocio(negocioId, {
+          [COGS_CONFIG_KEY]: Number(costoEstimado.toFixed(2)),
+        });
+      }
+
+      for (const key of analyticsCache.keys()) {
+        if (key.startsWith(`${negocioId}:`)) {
+          analyticsCache.delete(key);
+        }
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al guardar capital inicial:', error?.message || error);
+      res.status(500).json({ error: 'No se pudo guardar el capital inicial.' });
     }
   });
 });
@@ -8482,16 +8673,98 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         paramsBase
       );
 
-      const gastosResumen = await db.get(
+      const capitalInicial = await obtenerCapitalInicialPeriodo(negocioId, rango.desde, rango.hasta);
+      const costoEstimadoCogs = await obtenerCostoEstimadoCogs(negocioId);
+
+      const obtenerCogsTotal = async (desde, hasta) => {
+        const row = await db.get(
+          `
+            SELECT SUM(dp.cantidad * COALESCE(costos.costo_promedio, ?)) AS total
+            FROM detalle_pedido dp
+            JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
+            LEFT JOIN (
+              SELECT cid.producto_id,
+                     SUM(cid.cantidad * cid.costo_unitario) / NULLIF(SUM(cid.cantidad), 0) AS costo_promedio
+              FROM compras_inventario_detalle cid
+              JOIN compras_inventario ci ON ci.id = cid.compra_id
+              WHERE cid.negocio_id = ?
+                AND DATE(ci.fecha) <= ?
+              GROUP BY cid.producto_id
+            ) costos ON costos.producto_id = dp.producto_id
+            WHERE dp.negocio_id = ?
+              AND pe.estado = 'pagado'
+              AND ${fechaBase} BETWEEN ? AND ?
+          `,
+          [costoEstimadoCogs, negocioId, negocioId, hasta, negocioId, desde, hasta]
+        );
+        return Number(row?.total) || 0;
+      };
+
+      const obtenerCogsSerie = async (desde, hasta) => {
+        const rows = await db.all(
+          `
+            SELECT ${fechaBase} AS fecha,
+                   SUM(dp.cantidad * COALESCE(costos.costo_promedio, ?)) AS total
+            FROM detalle_pedido dp
+            JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
+            LEFT JOIN (
+              SELECT cid.producto_id,
+                     SUM(cid.cantidad * cid.costo_unitario) / NULLIF(SUM(cid.cantidad), 0) AS costo_promedio
+              FROM compras_inventario_detalle cid
+              JOIN compras_inventario ci ON ci.id = cid.compra_id
+              WHERE cid.negocio_id = ?
+                AND DATE(ci.fecha) <= ?
+              GROUP BY cid.producto_id
+            ) costos ON costos.producto_id = dp.producto_id
+            WHERE dp.negocio_id = ?
+              AND pe.estado = 'pagado'
+              AND ${fechaBase} BETWEEN ? AND ?
+            GROUP BY fecha
+            ORDER BY fecha ASC
+          `,
+          [costoEstimadoCogs, negocioId, negocioId, hasta, negocioId, desde, hasta]
+        );
+        return rows || [];
+      };
+
+      const cogsTotal = await obtenerCogsTotal(rango.desde, rango.hasta);
+      const cogsSerie = await obtenerCogsSerie(rango.desde, rango.hasta);
+
+      const gastosOperativosResumen = await db.get(
         `
           SELECT SUM(monto) AS total
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
+            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'OPERATIVO'
         `,
         paramsBase
       );
-      const gastosTotal = Number(gastosResumen?.total) || 0;
+      const gastosOperativosTotal = Number(gastosOperativosResumen?.total) || 0;
+
+      const gastosInventarioResumen = await db.get(
+        `
+          SELECT SUM(monto) AS total
+          FROM gastos
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'INVENTARIO'
+        `,
+        paramsBase
+      );
+      const gastosInventarioTotal = Number(gastosInventarioResumen?.total) || 0;
+
+      const gastosRetirosResumen = await db.get(
+        `
+          SELECT SUM(monto) AS total
+          FROM gastos
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'RETIRO_CAJA'
+        `,
+        paramsBase
+      );
+      const gastosRetirosTotal = Number(gastosRetirosResumen?.total) || 0;
 
       const gastosSerie = await db.all(
         `
@@ -8499,6 +8772,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
+            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'OPERATIVO'
           GROUP BY fecha
           ORDER BY fecha ASC
         `,
@@ -8511,6 +8785,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
+            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'OPERATIVO'
             AND categoria IS NOT NULL
             AND categoria <> ''
           GROUP BY categoria
@@ -8526,13 +8801,27 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
+            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'OPERATIVO'
           GROUP BY es_recurrente
         `,
         paramsBase
       );
 
-      const gananciaNeta = Number((ingresosTotal - gastosTotal).toFixed(2));
-      const margenNeto = ingresosTotal > 0 ? Number((gananciaNeta / ingresosTotal).toFixed(4)) : 0;
+      const utilidadBruta = Number((ingresosTotal - cogsTotal).toFixed(2));
+      const utilidadNetaOperativa = Number((utilidadBruta - gastosOperativosTotal).toFixed(2));
+      const margenOperativo =
+        ingresosTotal > 0 ? Number((utilidadNetaOperativa / ingresosTotal).toFixed(4)) : 0;
+
+      const entradasCaja =
+        (Number(metodosPago?.efectivo) || 0) +
+        (Number(metodosPago?.tarjeta) || 0) +
+        (Number(metodosPago?.transferencia) || 0);
+      const salidasCaja = Number((gastosOperativosTotal + gastosInventarioTotal + gastosRetirosTotal).toFixed(2));
+      const variacionCaja = Number((entradasCaja - salidasCaja).toFixed(2));
+      const cajaFinal = Number((capitalInicial.caja_inicial + variacionCaja).toFixed(2));
+      const inventarioFinal = Number(
+        (capitalInicial.inventario_inicial + gastosInventarioTotal - cogsTotal).toFixed(2)
+      );
 
       const rangoAnterior = obtenerRangoAnterior(rango.desde, rango.dias);
       const ventasAnterior = await db.get(
@@ -8552,6 +8841,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
+            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'OPERATIVO'
         `,
         [negocioId, rangoAnterior.desde, rangoAnterior.hasta]
       );
@@ -8560,8 +8850,10 @@ app.get('/api/admin/analytics/overview', (req, res) => {
       const ventasCountAnterior = Number(ventasAnterior?.total_ventas) || 0;
       const ticketPromedioAnterior =
         ventasCountAnterior > 0 ? Number((ventasTotalAnterior / ventasCountAnterior).toFixed(2)) : 0;
-      const gastosTotalAnterior = Number(gastosAnterior?.total) || 0;
-      const gananciaAnterior = Number((ventasTotalAnterior - gastosTotalAnterior).toFixed(2));
+      const gastosOperativosAnterior = Number(gastosAnterior?.total) || 0;
+      const cogsAnterior = await obtenerCogsTotal(rangoAnterior.desde, rangoAnterior.hasta);
+      const utilidadBrutaAnterior = Number((ventasTotalAnterior - cogsAnterior).toFixed(2));
+      const utilidadOperativaAnterior = Number((utilidadBrutaAnterior - gastosOperativosAnterior).toFixed(2));
 
       const comparacion = {
         periodo_anterior: rangoAnterior,
@@ -8574,19 +8866,19 @@ app.get('/api/admin/analytics/overview', (req, res) => {
               : null,
         },
         gastos: {
-          total: gastosTotalAnterior,
-          delta: Number((gastosTotal - gastosTotalAnterior).toFixed(2)),
+          total: gastosOperativosAnterior,
+          delta: Number((gastosOperativosTotal - gastosOperativosAnterior).toFixed(2)),
           porcentaje:
-            gastosTotalAnterior > 0
-              ? Number(((gastosTotal - gastosTotalAnterior) / gastosTotalAnterior).toFixed(4))
+            gastosOperativosAnterior > 0
+              ? Number(((gastosOperativosTotal - gastosOperativosAnterior) / gastosOperativosAnterior).toFixed(4))
               : null,
         },
         ganancia: {
-          total: gananciaAnterior,
-          delta: Number((gananciaNeta - gananciaAnterior).toFixed(2)),
+          total: utilidadOperativaAnterior,
+          delta: Number((utilidadNetaOperativa - utilidadOperativaAnterior).toFixed(2)),
           porcentaje:
-            gananciaAnterior !== 0
-              ? Number(((gananciaNeta - gananciaAnterior) / gananciaAnterior).toFixed(4))
+            utilidadOperativaAnterior !== 0
+              ? Number(((utilidadNetaOperativa - utilidadOperativaAnterior) / utilidadOperativaAnterior).toFixed(4))
               : null,
         },
         ticket_promedio: {
@@ -8706,7 +8998,9 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           por_hora: ventasHoraFormateadas,
         },
         gastos: {
-          total: gastosTotal,
+          total_operativos: gastosOperativosTotal,
+          total_inventario: gastosInventarioTotal,
+          total_retiros: gastosRetirosTotal,
           top_categorias: (gastosTopCategorias || []).map((row) => ({
             categoria: row.categoria,
             total: Number(row.total) || 0,
@@ -8721,8 +9015,36 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           })),
         },
         ganancias: {
-          neta: gananciaNeta,
-          margen: margenNeto,
+          cogs_total: cogsTotal,
+          bruta: utilidadBruta,
+          neta_operativa: utilidadNetaOperativa,
+          margen_operativo: margenOperativo,
+          cogs_serie: (cogsSerie || []).map((row) => ({
+            fecha: row.fecha,
+            total: Number(row.total) || 0,
+          })),
+        },
+        flujo_caja: {
+          entradas: Number(entradasCaja) || 0,
+          salidas: salidasCaja,
+          variacion: variacionCaja,
+          caja_inicial: capitalInicial.caja_inicial,
+          caja_final: cajaFinal,
+          salidas_detalle: {
+            operativos: gastosOperativosTotal,
+            inventario: gastosInventarioTotal,
+            retiros: gastosRetirosTotal,
+          },
+        },
+        inventario: {
+          inicial: capitalInicial.inventario_inicial,
+          compras: gastosInventarioTotal,
+          cogs: cogsTotal,
+          final: inventarioFinal,
+        },
+        capital_inicial: capitalInicial,
+        configuracion: {
+          costo_estimado_cogs: costoEstimadoCogs,
         },
         rankings: {
           top_productos_cantidad: topProductosCantidad || [],
@@ -9258,10 +9580,10 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         await db.run(
           `
             UPDATE gastos
-               SET fecha = ?, monto = ?, metodo_pago = ?, proveedor = ?, descripcion = ?
+               SET fecha = ?, monto = ?, tipo_gasto = ?, metodo_pago = ?, proveedor = ?, descripcion = ?
              WHERE id = ? AND negocio_id = ?
           `,
-          [fecha, total, metodoPago, proveedor, descripcionGasto, compraActual.gasto_id, negocioId]
+          [fecha, total, 'INVENTARIO', metodoPago, proveedor, descripcionGasto, compraActual.gasto_id, negocioId]
         );
       }
 

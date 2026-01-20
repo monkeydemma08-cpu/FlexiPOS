@@ -331,6 +331,7 @@ CREATE TABLE IF NOT EXISTS gastos (
   monto DECIMAL(12,2) NOT NULL,
   moneda VARCHAR(3) DEFAULT 'DOP',
   categoria VARCHAR(80),
+  tipo_gasto VARCHAR(20) NOT NULL DEFAULT 'OPERATIVO',
   metodo_pago VARCHAR(40),
   proveedor VARCHAR(120),
   descripcion TEXT,
@@ -383,6 +384,19 @@ CREATE TABLE IF NOT EXISTS compras_inventario_detalle (
   CONSTRAINT fk_compra_inv_detalle_compra FOREIGN KEY (compra_id) REFERENCES compras_inventario(id),
   CONSTRAINT fk_compra_inv_detalle_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
   CONSTRAINT fk_compra_inv_detalle_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS analisis_capital_inicial (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  negocio_id INT NOT NULL,
+  periodo_inicio DATE NOT NULL,
+  periodo_fin DATE NOT NULL,
+  caja_inicial DECIMAL(12,2) NOT NULL DEFAULT 0,
+  inventario_inicial DECIMAL(12,2) NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY idx_capital_inicial_periodo (negocio_id, periodo_inicio, periodo_fin),
+  CONSTRAINT fk_capital_inicial_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS notas_credito_ventas (

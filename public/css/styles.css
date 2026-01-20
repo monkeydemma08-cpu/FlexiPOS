@@ -2723,6 +2723,17 @@ img {
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
+.analisis-capital-grid {
+  display: grid;
+  gap: 16px;
+  align-items: end;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.analisis-capital-actions {
+  justify-content: flex-end;
+}
+
 .analisis-kpi-grid .resumen-metric {
   min-width: 180px;
 }

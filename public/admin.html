@@ -1178,6 +1178,14 @@
                 <input type="text" id="gasto-categoria" list="gastos-categorias" placeholder="Ej. Alquiler" />
               </div>
               <div class="kanm-input-group">
+                <label for="gasto-tipo">Tipo de gasto</label>
+                <select id="gasto-tipo">
+                  <option value="OPERATIVO">Operativo</option>
+                  <option value="INVENTARIO">Inventario</option>
+                  <option value="RETIRO_CAJA">Retiro de caja</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
                 <label for="gasto-metodo">Metodo de pago</label>
                 <select id="gasto-metodo">
                   <option value="">Selecciona</option>
@@ -1256,6 +1264,15 @@
               <input type="text" id="gastos-categoria-filtro" list="gastos-categorias" placeholder="Todas" />
             </div>
             <div class="kanm-input-group">
+              <label for="gastos-tipo-filtro">Tipo</label>
+              <select id="gastos-tipo-filtro">
+                <option value="">Todos</option>
+                <option value="OPERATIVO">Operativo</option>
+                <option value="INVENTARIO">Inventario</option>
+                <option value="RETIRO_CAJA">Retiros</option>
+              </select>
+            </div>
+            <div class="kanm-input-group">
               <label for="gastos-metodo-filtro">Metodo pago</label>
               <select id="gastos-metodo-filtro">
                 <option value="">Todos</option>
@@ -1281,6 +1298,7 @@
                 <tr>
                   <th>Fecha</th>
                   <th>Categoria</th>
+                  <th>Tipo</th>
                   <th>Metodo</th>
                   <th>Proveedor</th>
                   <th>Monto</th>
@@ -1360,7 +1378,7 @@
     <section class="admin-panel hidden" data-admin-section="analisis" id="admin-section-analisis">
       <div class="kanm-card-header">
         <h2>Analisis del negocio</h2>
-        <p class="kanm-subtitle">KPIs, tendencias y recomendaciones basadas en ventas y gastos.</p>
+        <p class="kanm-subtitle">KPIs, flujo de caja e inventario basados en ventas y costos.</p>
       </div>
 
       <section class="kanm-card admin-card">
@@ -1393,8 +1411,49 @@
 
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
+          <h3>Capital inicial del periodo</h3>
+          <p class="kanm-subtitle">Registra caja e inventario inicial para resultados mas precisos.</p>
+        </header>
+        <div class="analisis-capital-grid">
+          <div class="kanm-input-group">
+            <label for="analisis-capital-desde">Periodo inicio</label>
+            <input type="date" id="analisis-capital-desde" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="analisis-capital-hasta">Periodo fin</label>
+            <input type="date" id="analisis-capital-hasta" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="analisis-capital-caja">Caja inicial (RD$)</label>
+            <input type="number" id="analisis-capital-caja" min="0" step="0.01" placeholder="0.00" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="analisis-capital-inventario">Inventario inicial (RD$)</label>
+            <input
+              type="number"
+              id="analisis-capital-inventario"
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+            />
+          </div>
+          <div class="kanm-input-group">
+            <label for="analisis-cogs-estimado">Costo estimado por unidad</label>
+            <input type="number" id="analisis-cogs-estimado" min="0" step="0.01" placeholder="0.00" />
+            <span class="kanm-input-help">Se usa si no hay costo real en inventario.</span>
+          </div>
+        </div>
+        <div class="admin-form-actions analisis-capital-actions">
+          <button type="button" class="kanm-button secondary" id="analisis-capital-guardar">Guardar capital</button>
+        </div>
+        <div id="analisis-capital-mensaje" class="kanm-message"></div>
+        <div id="analisis-capital-aviso" class="kanm-message" data-type="warning" hidden></div>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
           <h3>KPIs principales</h3>
-          <p class="kanm-subtitle">Ingresos, gastos y ganancia neta.</p>
+          <p class="kanm-subtitle">Ingresos, utilidad operativa y flujo de caja.</p>
         </header>
         <div class="admin-resumen-grid analisis-kpi-grid">
           <div class="resumen-metric">
@@ -1403,17 +1462,17 @@
             <span class="resumen-delta" id="analisis-kpi-ventas-delta"></span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Gastos</span>
+            <span class="resumen-label">Gastos operativos</span>
             <span class="resumen-value" id="analisis-kpi-gastos">DOP&nbsp;0.00</span>
             <span class="resumen-delta" id="analisis-kpi-gastos-delta"></span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Ganancia neta</span>
+            <span class="resumen-label">Utilidad neta operativa</span>
             <span class="resumen-value" id="analisis-kpi-ganancia">DOP&nbsp;0.00</span>
             <span class="resumen-delta" id="analisis-kpi-ganancia-delta"></span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Margen neto</span>
+            <span class="resumen-label">Margen operativo</span>
             <span class="resumen-value" id="analisis-kpi-margen">0%</span>
           </div>
           <div class="resumen-metric">
@@ -1425,13 +1484,21 @@
             <span class="resumen-label">Cantidad de ventas</span>
             <span class="resumen-value" id="analisis-kpi-ventas-count">0</span>
           </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Variacion de caja</span>
+            <span class="resumen-value" id="analisis-kpi-variacion-caja">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Inventario final estimado</span>
+            <span class="resumen-value" id="analisis-kpi-inventario-final">DOP&nbsp;0.00</span>
+          </div>
         </div>
       </section>
 
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
           <h3>Serie diaria</h3>
-          <p class="kanm-subtitle">Ventas, gastos y ganancia por dia.</p>
+          <p class="kanm-subtitle">Ventas, gastos operativos y utilidad operativa por dia.</p>
         </header>
         <div class="kanm-table-wrapper">
           <table class="kanm-table analisis-serie-table">
@@ -1439,8 +1506,8 @@
               <tr>
                 <th>Fecha</th>
                 <th>Ventas</th>
-                <th>Gastos</th>
-                <th>Ganancia</th>
+                <th>Gastos operativos</th>
+                <th>Utilidad operativa</th>
               </tr>
             </thead>
             <tbody id="analisis-serie-body"></tbody>
@@ -1496,8 +1563,8 @@
 
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
-          <h3>Gastos por categoria</h3>
-          <p class="kanm-subtitle">Categorias principales y gastos recurrentes.</p>
+          <h3>Gastos operativos por categoria</h3>
+          <p class="kanm-subtitle">Categorias principales y gastos recurrentes operativos.</p>
         </header>
         <div class="analisis-insights-grid">
           <div>
