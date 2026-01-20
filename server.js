@@ -73,6 +73,14 @@ const SESSION_EXPIRATION_HOURS = 12; // Ventana m?xima para considerar una sesi?
 const ANALYTICS_CACHE_TTL_MS = 2 * 60 * 1000;
 const analyticsCache = new Map();
 
+const limpiarCacheAnalitica = (negocioId) => {
+  for (const key of analyticsCache.keys()) {
+    if (key.startsWith(`${negocioId}:`)) {
+      analyticsCache.delete(key);
+    }
+  }
+};
+
 const usuarioRolesPermitidos = ['mesera', 'cocina', 'bar', 'caja'];
 
 const generarTokenSesion = () => crypto.randomBytes(24).toString('hex');
@@ -4359,6 +4367,7 @@ app.post('/api/caja/salidas', (req, res) => {
         }));
 
       await db.run('COMMIT');
+      limpiarCacheAnalitica(negocioId);
 
       res.status(201).json({
         ok: true,
@@ -4474,6 +4483,7 @@ app.put('/api/caja/salidas/:id', (req, res) => {
           });
 
       await db.run('COMMIT');
+      limpiarCacheAnalitica(negocioId);
 
       res.json({
         ok: true,
@@ -4525,6 +4535,7 @@ app.delete('/api/caja/salidas/:id', (req, res) => {
       await db.run('DELETE FROM salidas_caja WHERE id = ? AND negocio_id = ?', [salidaId, negocioId]);
 
       await db.run('COMMIT');
+      limpiarCacheAnalitica(negocioId);
 
       res.json({ ok: true });
     } catch (error) {
@@ -6254,6 +6265,7 @@ app.post('/api/admin/negocios/:id/facturas', (req, res) => {
 
       const resultado = await db.run(insertSql, insertParams);
       await db.run('COMMIT');
+      limpiarCacheAnalitica(negocioId);
 
       res.status(201).json({
         ok: true,
@@ -8124,6 +8136,7 @@ app.post('/api/admin/gastos', (req, res) => {
       ];
 
       const result = await db.run(sql, params);
+      limpiarCacheAnalitica(negocioId);
       res.status(201).json({
         ok: true,
         gasto: {
@@ -8313,6 +8326,7 @@ app.put('/api/admin/gastos/:id', (req, res) => {
       if (result.changes === 0) {
         return res.status(404).json({ error: 'Gasto no encontrado' });
       }
+      limpiarCacheAnalitica(negocioId);
       res.json({ ok: true });
     } catch (error) {
       console.error('Error al actualizar gasto:', error?.message || error);
@@ -8339,6 +8353,7 @@ app.delete('/api/admin/gastos/:id', (req, res) => {
       if (result.changes === 0) {
         return res.status(404).json({ error: 'Gasto no encontrado' });
       }
+      limpiarCacheAnalitica(negocioId);
       res.json({ ok: true });
     } catch (error) {
       console.error('Error al eliminar gasto:', error?.message || error);
@@ -8362,7 +8377,10 @@ const obtenerCapitalInicialPeriodo = async (negocioId, desde, hasta) => {
     `
       SELECT periodo_inicio, periodo_fin, caja_inicial, inventario_inicial
       FROM analisis_capital_inicial
-      WHERE negocio_id = ? AND periodo_inicio = ? AND periodo_fin = ?
+      WHERE negocio_id = ?
+        AND periodo_inicio <= ?
+        AND periodo_fin >= ?
+      ORDER BY periodo_inicio DESC, periodo_fin ASC
       LIMIT 1
     `,
     [negocioId, desde, hasta]
@@ -8473,11 +8491,7 @@ app.put('/api/admin/analytics/capital', (req, res) => {
         });
       }
 
-      for (const key of analyticsCache.keys()) {
-        if (key.startsWith(`${negocioId}:`)) {
-          analyticsCache.delete(key);
-        }
-      }
+      limpiarCacheAnalitica(negocioId);
 
       res.json({ ok: true });
     } catch (error) {
@@ -8730,41 +8744,59 @@ app.get('/api/admin/analytics/overview', (req, res) => {
       const cogsTotal = await obtenerCogsTotal(rango.desde, rango.hasta);
       const cogsSerie = await obtenerCogsSerie(rango.desde, rango.hasta);
 
-      const gastosOperativosResumen = await db.get(
-        `
-          SELECT SUM(monto) AS total
-          FROM gastos
-          WHERE negocio_id = ?
-            AND DATE(fecha) BETWEEN ? AND ?
-            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'OPERATIVO'
-        `,
-        paramsBase
-      );
-      const gastosOperativosTotal = Number(gastosOperativosResumen?.total) || 0;
+      const tipoGastoNormalizadoSql = `
+        CASE
+          WHEN UPPER(TRIM(COALESCE(tipo_gasto, ''))) IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA') THEN UPPER(TRIM(tipo_gasto))
+          WHEN UPPER(TRIM(COALESCE(categoria, ''))) = 'COMPRAS INVENTARIO'
+            OR COALESCE(referencia, '') LIKE 'INV-%' THEN 'INVENTARIO'
+          WHEN UPPER(TRIM(COALESCE(categoria, ''))) = 'SALIDA_CAJA'
+            OR UPPER(TRIM(COALESCE(referencia_tipo, ''))) = 'SALIDA_CAJA' THEN 'RETIRO_CAJA'
+          ELSE 'OPERATIVO'
+        END
+      `;
 
-      const gastosInventarioResumen = await db.get(
+      const gastosTotalesResumen = await db.get(
         `
-          SELECT SUM(monto) AS total
+          SELECT
+            SUM(monto) AS total,
+            SUM(CASE WHEN ${tipoGastoNormalizadoSql} = 'OPERATIVO' THEN monto ELSE 0 END) AS total_operativos,
+            SUM(CASE WHEN ${tipoGastoNormalizadoSql} = 'INVENTARIO' THEN monto ELSE 0 END) AS total_inventario,
+            SUM(CASE WHEN ${tipoGastoNormalizadoSql} = 'RETIRO_CAJA' THEN monto ELSE 0 END) AS total_retiros,
+            SUM(CASE WHEN tipo_gasto IS NULL OR TRIM(tipo_gasto) = '' THEN 1 ELSE 0 END) AS cantidad_sin_tipo,
+            SUM(CASE WHEN tipo_gasto IS NULL OR TRIM(tipo_gasto) = '' THEN monto ELSE 0 END) AS total_sin_tipo,
+            SUM(
+              CASE
+                WHEN tipo_gasto IS NOT NULL
+                  AND TRIM(tipo_gasto) <> ''
+                  AND UPPER(TRIM(tipo_gasto)) NOT IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA')
+                THEN 1
+                ELSE 0
+              END
+            ) AS cantidad_tipo_invalido,
+            SUM(
+              CASE
+                WHEN tipo_gasto IS NOT NULL
+                  AND TRIM(tipo_gasto) <> ''
+                  AND UPPER(TRIM(tipo_gasto)) NOT IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA')
+                THEN monto
+                ELSE 0
+              END
+            ) AS total_tipo_invalido
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
-            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'INVENTARIO'
         `,
         paramsBase
       );
-      const gastosInventarioTotal = Number(gastosInventarioResumen?.total) || 0;
 
-      const gastosRetirosResumen = await db.get(
-        `
-          SELECT SUM(monto) AS total
-          FROM gastos
-          WHERE negocio_id = ?
-            AND DATE(fecha) BETWEEN ? AND ?
-            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'RETIRO_CAJA'
-        `,
-        paramsBase
-      );
-      const gastosRetirosTotal = Number(gastosRetirosResumen?.total) || 0;
+      const gastosPeriodoTotal = Number(gastosTotalesResumen?.total) || 0;
+      const gastosOperativosTotal = Number(gastosTotalesResumen?.total_operativos) || 0;
+      const gastosInventarioTotal = Number(gastosTotalesResumen?.total_inventario) || 0;
+      const gastosRetirosTotal = Number(gastosTotalesResumen?.total_retiros) || 0;
+      const gastosSinTipoCount = Number(gastosTotalesResumen?.cantidad_sin_tipo) || 0;
+      const gastosSinTipoTotal = Number(gastosTotalesResumen?.total_sin_tipo) || 0;
+      const gastosTipoInvalidoCount = Number(gastosTotalesResumen?.cantidad_tipo_invalido) || 0;
+      const gastosTipoInvalidoTotal = Number(gastosTotalesResumen?.total_tipo_invalido) || 0;
 
       const gastosSerie = await db.all(
         `
@@ -8772,7 +8804,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
-            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'OPERATIVO'
+            AND ${tipoGastoNormalizadoSql} = 'OPERATIVO'
           GROUP BY fecha
           ORDER BY fecha ASC
         `,
@@ -8785,7 +8817,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
-            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'OPERATIVO'
+            AND ${tipoGastoNormalizadoSql} = 'OPERATIVO'
             AND categoria IS NOT NULL
             AND categoria <> ''
           GROUP BY categoria
@@ -8801,7 +8833,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
-            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'OPERATIVO'
+            AND ${tipoGastoNormalizadoSql} = 'OPERATIVO'
           GROUP BY es_recurrente
         `,
         paramsBase
@@ -8841,7 +8873,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
-            AND COALESCE(tipo_gasto, 'OPERATIVO') = 'OPERATIVO'
+            AND ${tipoGastoNormalizadoSql} = 'OPERATIVO'
         `,
         [negocioId, rangoAnterior.desde, rangoAnterior.hasta]
       );
@@ -8892,6 +8924,29 @@ app.get('/api/admin/analytics/overview', (req, res) => {
       };
 
       const alertas = [];
+      if (gastosPeriodoTotal > 0 && gastosOperativosTotal === 0) {
+        alertas.push({
+          nivel: 'warning',
+          mensaje:
+            'Hay gastos en el periodo pero ninguno clasificado como operativo. Revisa el tipo de gasto para evitar KPIs en cero.',
+        });
+      }
+      if (gastosSinTipoCount > 0) {
+        alertas.push({
+          nivel: 'warning',
+          mensaje: `Se detectaron ${gastosSinTipoCount} gastos sin tipo (RD$${gastosSinTipoTotal.toFixed(
+            2
+          )}) y se asignaron automaticamente para el analisis.`,
+        });
+      }
+      if (gastosTipoInvalidoCount > 0) {
+        alertas.push({
+          nivel: 'warning',
+          mensaje: `Se detectaron ${gastosTipoInvalidoCount} gastos con tipo invalido (RD$${gastosTipoInvalidoTotal.toFixed(
+            2
+          )}). Corrige el tipo_gasto para mantener consistencia.`,
+        });
+      }
       if (comparacion.gastos.porcentaje !== null && comparacion.gastos.porcentaje > 0.2) {
         if (comparacion.ventas.porcentaje === null || comparacion.ventas.porcentaje <= 0) {
           alertas.push({
@@ -9646,6 +9701,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
       );
 
       await db.run('COMMIT');
+      limpiarCacheAnalitica(negocioId);
 
       res.json({
         ok: true,
