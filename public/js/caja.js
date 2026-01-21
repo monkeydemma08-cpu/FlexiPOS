@@ -626,6 +626,26 @@ const formatCurrency = (valor) => {
 
 };
 
+const parseMoneyValueCaja = (input, { fallback = 0, allowEmpty = true } = {}) => {
+  const raw =
+    input && typeof input === 'object' && 'value' in input ? input.value : input ?? '';
+  const texto = raw === null || raw === undefined ? '' : String(raw).trim();
+  if (!texto) return allowEmpty ? fallback : NaN;
+  const parsed = window.KANMMoney?.parse
+    ? window.KANMMoney.parse(input)
+    : Number(texto.replace(/,/g, ''));
+  return Number.isFinite(parsed) ? parsed : NaN;
+};
+
+const setMoneyInputValueCaja = (input, value) => {
+  if (!input) return;
+  if (window.KANMMoney?.setValue && input.matches?.('input[data-money]')) {
+    window.KANMMoney.setValue(input, value);
+    return;
+  }
+  input.value = value ?? '';
+};
+
 
 
 const formatCurrencySigned = (valor) => {
@@ -894,7 +914,7 @@ const registrarSalida = async () => {
 
   const descripcion = salidaDescripcionInput?.value?.trim() || '';
 
-  const monto = Number(salidaMontoInput?.value);
+  const monto = parseMoneyValueCaja(salidaMontoInput, { allowEmpty: false });
 
   const fecha = cuadreFechaInput?.value || resumenCuadre.fecha || obtenerFechaLocalHoy();
 
@@ -957,7 +977,7 @@ const registrarSalida = async () => {
 
     salidaDescripcionInput.value = '';
 
-    salidaMontoInput.value = '';
+    setMoneyInputValueCaja(salidaMontoInput, '');
 
     await cargarSalidas(fecha, false);
 
@@ -1013,7 +1033,7 @@ const guardarFondoInicialPersistido = (fecha) => {
       localStorage.removeItem(key);
       return;
     }
-    const valor = Number(raw);
+    const valor = parseMoneyValueCaja(cuadreFondoInicialInput, { allowEmpty: false });
     if (!Number.isFinite(valor) || valor < 0) {
       localStorage.removeItem(key);
       return;
@@ -1030,12 +1050,12 @@ const aplicarFondoInicialPersistido = (fecha, { force = false } = {}) => {
   const valor = leerFondoInicialPersistido(fecha);
   if (valor === null) {
     if (force) {
-      cuadreFondoInicialInput.value = '';
+      setMoneyInputValueCaja(cuadreFondoInicialInput, '');
       delete cuadreFondoInicialInput.dataset.dirty;
     }
     return;
   }
-  cuadreFondoInicialInput.value = String(valor);
+  setMoneyInputValueCaja(cuadreFondoInicialInput, valor);
   delete cuadreFondoInicialInput.dataset.dirty;
 };
 
@@ -1091,7 +1111,7 @@ const aplicarPropinaPreferida = ({ force = false } = {}) => {
 
 const obtenerFondoInicial = () => {
 
-  const valor = Number(cuadreFondoInicialInput?.value);
+  const valor = parseMoneyValueCaja(cuadreFondoInicialInput, { allowEmpty: false });
 
   if (Number.isNaN(valor) || valor < 0) return 0;
 
@@ -1504,11 +1524,11 @@ const setCuadreMensaje = (texto, tipo = 'info') => {
 
 const resetFormularioCuadre = () => {
 
-  if (cuadreDeclaradoInput) cuadreDeclaradoInput.value = '';
+  if (cuadreDeclaradoInput) setMoneyInputValueCaja(cuadreDeclaradoInput, '');
 
   if (cuadreFondoInicialInput) {
 
-    cuadreFondoInicialInput.value = '';
+    setMoneyInputValueCaja(cuadreFondoInicialInput, '');
 
     delete cuadreFondoInicialInput.dataset.dirty;
 
@@ -2281,7 +2301,7 @@ const obtenerPagosFormulario = () => {
 
   if (metodo === 'efectivo') {
 
-    const recibido = Math.max(Number(inputPagoEfectivoEntregado?.value) || 0, 0);
+    const recibido = Math.max(parseMoneyValueCaja(inputPagoEfectivoEntregado), 0);
 
     return { efectivo: total, efectivoEntregado: recibido || total, tarjeta: 0, transferencia: 0, metodo };
 
@@ -2289,13 +2309,11 @@ const obtenerPagosFormulario = () => {
 
 
 
-  const tarjeta = Math.max(Number(inputPagoTarjeta?.value) || 0, 0);
+  const tarjeta = Math.max(parseMoneyValueCaja(inputPagoTarjeta), 0);
 
-  const transferencia = Math.max(Number(inputPagoTransferencia?.value) || 0, 0);
+  const transferencia = Math.max(parseMoneyValueCaja(inputPagoTransferencia), 0);
 
-  const entregadoRaw = inputPagoEfectivoEntregado?.value;
-
-  const efectivoEntregado = Math.max(Number(entregadoRaw) || 0, 0);
+  const efectivoEntregado = Math.max(parseMoneyValueCaja(inputPagoEfectivoEntregado), 0);
 
   const efectivo = Math.min(efectivoEntregado, Math.max(total - tarjeta - transferencia, 0));
 
@@ -2343,11 +2361,11 @@ const resetPagosFormulario = (total = 0) => {
 
   if (selectMetodoPago) selectMetodoPago.value = 'efectivo';
 
-  if (inputPagoEfectivoEntregado) inputPagoEfectivoEntregado.value = (Number(total) || 0).toFixed(2);
+  if (inputPagoEfectivoEntregado) setMoneyInputValueCaja(inputPagoEfectivoEntregado, Number(total) || 0);
 
-  if (inputPagoTarjeta) inputPagoTarjeta.value = '0';
+  if (inputPagoTarjeta) setMoneyInputValueCaja(inputPagoTarjeta, 0);
 
-  if (inputPagoTransferencia) inputPagoTransferencia.value = '0';
+  if (inputPagoTransferencia) setMoneyInputValueCaja(inputPagoTransferencia, 0);
 
   toggleCamposPago();
 
@@ -2385,27 +2403,27 @@ const toggleCamposPago = () => {
 
     if (metodo === 'efectivo') {
 
-      if (inputPagoEfectivoEntregado) inputPagoEfectivoEntregado.value = calculo.total.toFixed(2);
+      if (inputPagoEfectivoEntregado) setMoneyInputValueCaja(inputPagoEfectivoEntregado, calculo.total);
 
-      if (inputPagoTarjeta) inputPagoTarjeta.value = '0';
+      if (inputPagoTarjeta) setMoneyInputValueCaja(inputPagoTarjeta, 0);
 
-      if (inputPagoTransferencia) inputPagoTransferencia.value = '0';
+      if (inputPagoTransferencia) setMoneyInputValueCaja(inputPagoTransferencia, 0);
 
     } else if (metodo === 'tarjeta') {
 
-      if (inputPagoTarjeta) inputPagoTarjeta.value = calculo.total.toFixed(2);
+      if (inputPagoTarjeta) setMoneyInputValueCaja(inputPagoTarjeta, calculo.total);
 
-      if (inputPagoEfectivoEntregado) inputPagoEfectivoEntregado.value = '0';
+      if (inputPagoEfectivoEntregado) setMoneyInputValueCaja(inputPagoEfectivoEntregado, 0);
 
-      if (inputPagoTransferencia) inputPagoTransferencia.value = '0';
+      if (inputPagoTransferencia) setMoneyInputValueCaja(inputPagoTransferencia, 0);
 
     } else if (metodo === 'transferencia') {
 
-      if (inputPagoTransferencia) inputPagoTransferencia.value = calculo.total.toFixed(2);
+      if (inputPagoTransferencia) setMoneyInputValueCaja(inputPagoTransferencia, calculo.total);
 
-      if (inputPagoEfectivoEntregado) inputPagoEfectivoEntregado.value = '0';
+      if (inputPagoEfectivoEntregado) setMoneyInputValueCaja(inputPagoEfectivoEntregado, 0);
 
-      if (inputPagoTarjeta) inputPagoTarjeta.value = '0';
+      if (inputPagoTarjeta) setMoneyInputValueCaja(inputPagoTarjeta, 0);
 
     }
 
@@ -2445,7 +2463,7 @@ const actualizarDiferenciaCuadre = () => {
 
 
 
-  const declarado = Number(valorEntrada);
+  const declarado = parseMoneyValueCaja(cuadreDeclaradoInput, { allowEmpty: false });
 
   if (Number.isNaN(declarado)) {
 
@@ -2822,7 +2840,7 @@ const registrarCuadre = async () => {
 
 
 
-  const montoDeclarado = Number(cuadreDeclaradoInput?.value);
+  const montoDeclarado = parseMoneyValueCaja(cuadreDeclaradoInput, { allowEmpty: false });
 
   if (!Number.isFinite(montoDeclarado) || montoDeclarado < 0) {
 
@@ -3086,7 +3104,7 @@ const cargarPedidos = async (mostrarCarga = true) => {
 
     }
 
-    const respuesta = await fetchAutorizadoCaja('/api/pedidos?estado=listo');
+    const respuesta = await fetchAutorizadoCaja('/api/pedidos?estado=listo&origen=caja');
 
     if (!respuesta.ok) {
 

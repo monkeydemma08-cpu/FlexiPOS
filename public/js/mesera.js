@@ -1339,6 +1339,10 @@ const enviarPedido = async (destino = 'cocina') => {
       return;
     }
 
+    if (Array.isArray(data?.advertencias) && data.advertencias.length) {
+      mostrarMensaje(data.advertencias.join(' '), 'warning');
+    }
+
     const mensajeExito = esEdicion
       ? 'Nueva orden agregada a la cuenta correctamente.'
       : destino === 'caja'

@@ -164,7 +164,88 @@
 
                 <div class="kanm-input-group">
                   <label for="prod-precio">Precio</label>
-                  <input type="number" id="prod-precio" step="0.01" min="0" placeholder="0.00" />
+                  <input type="text" id="prod-precio" inputmode="decimal" data-money placeholder="0.00" />
+                </div>
+
+                <div class="kanm-input-group modo-reventa-only">
+                  <label for="prod-costo-real">Costo unitario real</label>
+                  <input type="text" id="prod-costo-real" inputmode="decimal" data-money placeholder="0.00" />
+                  <span class="kanm-input-help">
+                    Costo unitario real = lo que cuesta comprar 1 unidad del producto.
+                  </span>
+                </div>
+
+                <div class="kanm-input-group modo-reventa-only">
+                  <label class="kanm-input-toggle" for="prod-costo-real-itbis">
+                    <span>Este costo incluye ITBIS</span>
+                    <input type="checkbox" id="prod-costo-real-itbis" />
+                  </label>
+                </div>
+
+                <div class="kanm-input-group modo-preparacion-only">
+                  <label for="prod-costo-base">Costo base (sin ITBIS)</label>
+                  <input type="text" id="prod-costo-base" inputmode="decimal" data-money placeholder="0.00" />
+                </div>
+
+                <div class="kanm-input-group modo-preparacion-only">
+                  <label for="prod-costo-promedio">Costo promedio actual</label>
+                  <input
+                    type="text"
+                    id="prod-costo-promedio"
+                    inputmode="decimal"
+                    data-money
+                    placeholder="0.00"
+                    readonly
+                  />
+                </div>
+
+                <div class="kanm-input-group modo-preparacion-only">
+                  <label for="prod-ultimo-costo">Ultimo costo (sin ITBIS)</label>
+                  <input
+                    type="text"
+                    id="prod-ultimo-costo"
+                    inputmode="decimal"
+                    data-money
+                    placeholder="0.00"
+                    readonly
+                  />
+                </div>
+
+                <div class="kanm-input-group modo-preparacion-only">
+                  <label class="kanm-input-toggle" for="prod-es-insumo">
+                    <span>Es insumo</span>
+                    <input type="checkbox" id="prod-es-insumo" />
+                  </label>
+                  <p class="kanm-input-help">Activalo si este producto se consume en recetas.</p>
+                </div>
+
+                <div class="kanm-input-group modo-preparacion-only insumo-vendible-group">
+                  <label class="kanm-input-toggle" for="prod-insumo-vendible">
+                    <span>Insumo vendible</span>
+                    <input type="checkbox" id="prod-insumo-vendible" />
+                  </label>
+                  <p class="kanm-input-help">Permite vender este insumo como producto final.</p>
+                </div>
+
+                <div class="kanm-input-group modo-preparacion-only">
+                  <label for="prod-unidad-base">Unidad base</label>
+                  <select id="prod-unidad-base">
+                    <option value="UND">Unidades</option>
+                    <option value="ML">Mililitros (ML)</option>
+                    <option value="GR">Gramos (GR)</option>
+                  </select>
+                </div>
+
+                <div class="kanm-input-group modo-preparacion-only">
+                  <label for="prod-contenido-unidad">Contenido por unidad</label>
+                  <input
+                    type="number"
+                    id="prod-contenido-unidad"
+                    step="0.0001"
+                    min="0"
+                    placeholder="1.0000"
+                  />
+                  <span class="kanm-input-help">Ej: 750 ML por botella.</span>
                 </div>
 
                 <div class="kanm-input-group producto-precios-group">
@@ -204,6 +285,33 @@
                 <label for="prod-activo">Activo</label>
                 <input type="checkbox" id="prod-activo" checked />
               </div>
+
+              <div class="kanm-input-group modo-preparacion-only">
+                <label class="kanm-input-toggle" for="prod-actualiza-costo">
+                  <span>Actualizar costo con compras</span>
+                  <input type="checkbox" id="prod-actualiza-costo" checked />
+                </label>
+                <p class="kanm-input-help">Si esta activo, las compras ajustan el costo promedio.</p>
+              </div>
+            </div>
+
+            <div class="producto-receta-section modo-preparacion-only" id="prod-receta-section">
+              <div class="kanm-card-header">
+                <h4>Receta del producto</h4>
+                <p class="kanm-subtitle">Define insumos y cantidades en unidad base.</p>
+              </div>
+              <div class="receta-detalles" id="prod-receta-detalles"></div>
+              <div class="receta-actions">
+                <button type="button" class="kanm-button ghost kanm-button--sm" id="prod-receta-agregar">
+                  Agregar insumo
+                </button>
+              </div>
+              <div class="admin-form-actions">
+                <button type="button" class="kanm-button secondary" id="prod-receta-guardar">
+                  Guardar receta
+                </button>
+              </div>
+              <div id="prod-receta-mensaje" class="kanm-message"></div>
             </div>
 
             <div class="admin-form-actions producto-form-actions">
@@ -222,7 +330,7 @@
         <h2>Configuración</h2>
         <p class="kanm-subtitle">Impuesto ITBIS y datos de facturación.</p>
       </div>
-      <div class="admin-grid-two">
+      <div class="admin-grid-two admin-config-grid">
         <section class="kanm-card admin-card">
           <header class="kanm-card-header">
             <h3>Configuración de impuesto</h3>
@@ -237,6 +345,60 @@
               <button type="button" class="kanm-button" id="impuesto-guardar">Guardar impuesto</button>
             </div>
             <div id="impuesto-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+
+        <section class="kanm-card admin-card" id="itbis-acredita-config">
+          <header class="kanm-card-header">
+            <h3>ITBIS en compras</h3>
+            <p class="kanm-subtitle">Define si este negocio acredita ITBIS al comprar.</p>
+          </header>
+          <form class="kanm-form" id="itbis-acredita-form" novalidate>
+            <div class="kanm-input-group">
+              <label class="kanm-input-toggle" for="itbis-acredita">
+                <span>Este negocio acredita ITBIS</span>
+                <input type="checkbox" id="itbis-acredita" checked />
+              </label>
+              <p class="kanm-input-help">
+                Si no acredita ITBIS, el costo se capitaliza por defecto en el abastecimiento.
+              </p>
+            </div>
+            <div class="admin-form-actions">
+              <button type="button" class="kanm-button" id="itbis-acredita-guardar">Guardar configuracion</button>
+            </div>
+            <div id="itbis-acredita-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+
+        <section class="kanm-card admin-card" id="inventario-config">
+          <header class="kanm-card-header">
+            <h3>Modo de inventario y costos</h3>
+            <p class="kanm-subtitle">Define si el negocio opera por reventa o preparacion.</p>
+          </header>
+          <form class="kanm-form" id="inventario-config-form" novalidate>
+            <div class="kanm-input-group">
+              <label for="inventario-modo">Modo de inventario</label>
+              <select id="inventario-modo">
+                <option value="REVENTA">Reventa (costo unitario real)</option>
+                <option value="PREPARACION">Preparacion (recetas e insumos)</option>
+              </select>
+              <span class="kanm-input-help">
+                Reventa usa un costo simple por producto. Preparacion habilita recetas e insumos.
+              </span>
+            </div>
+            <div class="kanm-input-group">
+              <label class="kanm-input-toggle" for="insumos-bloqueo">
+                <span>Bloquear venta si falta insumo</span>
+                <input type="checkbox" id="insumos-bloqueo" />
+              </label>
+              <p class="kanm-input-help">Aplica solo cuando el modo es preparacion.</p>
+            </div>
+            <div class="admin-form-actions">
+              <button type="button" class="kanm-button" id="inventario-guardar">
+                Guardar configuracion
+              </button>
+            </div>
+            <div id="inventario-mensaje" class="kanm-message"></div>
           </form>
         </section>
 
@@ -367,7 +529,7 @@
     <section class="admin-panel hidden" data-admin-section="usuarios" id="admin-section-usuarios">
       <div class="kanm-card-header">
         <h2>Usuarios</h2>
-        <p class="kanm-subtitle">Administra las cuentas de meseras, cocina y caja.</p>
+        <p class="kanm-subtitle">Administra las cuentas de meseras, cocina, caja y mostrador.</p>
       </div>
       <div class="admin-layout-two-cols">
         <section class="kanm-card admin-card">
@@ -382,6 +544,7 @@
               <option value="cocina">Cocina</option>
               <option value="bar">Bar</option>
               <option value="caja">Caja</option>
+              <option value="vendedor">Mostrador</option>
               <option value="admin">Administrador</option>
             </select>
           </div>
@@ -449,6 +612,7 @@
                   <option value="cocina">Cocina</option>
                   <option value="bar">Bar</option>
                   <option value="caja">Caja</option>
+                  <option value="vendedor">Mostrador</option>
                   <option value="admin">Administrador</option>
                 </select>
               </div>
@@ -793,7 +957,7 @@
                 </div>
                 <div class="kanm-input-group">
                   <label for="cotizacion-descuento-monto">Descuento global (monto)</label>
-                  <input type="number" id="cotizacion-descuento-monto" min="0" step="0.01" />
+                  <input type="text" id="cotizacion-descuento-monto" inputmode="decimal" data-money />
                 </div>
               </div>
               <div class="cotizacion-totales-display">
@@ -862,19 +1026,19 @@
             </div>
             <div class="kanm-input-group">
               <label for="compra-gravado">Monto gravado</label>
-              <input type="number" id="compra-gravado" min="0" step="0.01" placeholder="0.00" />
+              <input type="text" id="compra-gravado" inputmode="decimal" data-money placeholder="0.00" />
             </div>
             <div class="kanm-input-group">
               <label for="compra-impuesto">ITBIS</label>
-              <input type="number" id="compra-impuesto" min="0" step="0.01" placeholder="0.00" />
+              <input type="text" id="compra-impuesto" inputmode="decimal" data-money placeholder="0.00" />
             </div>
             <div class="kanm-input-group">
               <label for="compra-exento">Monto exento</label>
-              <input type="number" id="compra-exento" min="0" step="0.01" placeholder="0.00" />
+              <input type="text" id="compra-exento" inputmode="decimal" data-money placeholder="0.00" />
             </div>
             <div class="kanm-input-group">
               <label for="compra-total">Total factura</label>
-              <input type="number" id="compra-total" min="0" step="0.01" placeholder="0.00" />
+              <input type="text" id="compra-total" inputmode="decimal" data-money placeholder="0.00" />
             </div>
           </div>
 
@@ -1038,6 +1202,13 @@
               </label>
               <span class="kanm-input-help">Aplica el ITBIS al total de la compra.</span>
             </div>
+            <div class="kanm-input-group kanm-input-group--inline kanm-input-toggle">
+              <label class="kanm-checkbox" for="abastecimiento-itbis-capitalizable">
+                <input type="checkbox" id="abastecimiento-itbis-capitalizable" />
+                <span>ITBIS capitalizable en el costo</span>
+              </label>
+              <span class="kanm-input-help">Usa el ITBIS como parte del costo unitario.</span>
+            </div>
 
             <div class="compra-detalle-header">
               <h4 class="kanm-subheading">Detalle de productos</h4>
@@ -1163,7 +1334,7 @@
               </div>
               <div class="kanm-input-group">
                 <label for="gasto-monto">Monto</label>
-                <input type="number" id="gasto-monto" min="0" step="0.01" placeholder="0.00" />
+                <input type="text" id="gasto-monto" inputmode="decimal" data-money placeholder="0.00" />
               </div>
               <div class="kanm-input-group">
                 <label for="gasto-moneda">Moneda</label>
@@ -1412,7 +1583,7 @@
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
           <h3>KPIs principales</h3>
-          <p class="kanm-subtitle">Ingresos, gastos y ganancia neta.</p>
+          <p class="kanm-subtitle">Ingresos, gastos y utilidad real.</p>
         </header>
         <div class="admin-resumen-grid analisis-kpi-grid">
           <div class="resumen-metric">
@@ -1431,6 +1602,10 @@
             <span class="resumen-delta" id="analisis-kpi-ganancia-delta"></span>
           </div>
           <div class="resumen-metric">
+            <span class="resumen-label">Utilidad real</span>
+            <span class="resumen-value" id="analisis-kpi-utilidad-real">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
             <span class="resumen-label">Margen neto</span>
             <span class="resumen-value" id="analisis-kpi-margen">0%</span>
           </div>
@@ -1444,6 +1619,7 @@
             <span class="resumen-value" id="analisis-kpi-ventas-count">0</span>
           </div>
         </div>
+        <div id="analisis-utilidad-real-aviso" class="kanm-message" data-type="warning" hidden></div>
       </section>
 
       <section class="kanm-card admin-card">
@@ -1468,6 +1644,18 @@
           <div class="resumen-metric">
             <span class="resumen-label">Gastos operativos reales</span>
             <span class="resumen-value" id="analisis-adv-gastos-operativos">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">COGS del periodo</span>
+            <span class="resumen-value" id="analisis-adv-cogs-total">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Utilidad bruta</span>
+            <span class="resumen-value" id="analisis-adv-utilidad-bruta">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Utilidad neta real</span>
+            <span class="resumen-value" id="analisis-adv-utilidad-neta">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
             <span class="resumen-label">Flujo de caja (neto)</span>
@@ -1838,6 +2026,10 @@
                 <input type="checkbox" id="kanm-modulo-caja" checked />
                 <span>Caja</span>
               </label>
+                <label class="kanm-checkbox">
+                  <input type="checkbox" id="kanm-modulo-mostrador" checked />
+                  <span>Mostrador</span>
+                </label>
               <label class="kanm-checkbox">
                 <input type="checkbox" id="kanm-modulo-historial" checked />
                 <span>Historial de preparación</span>
@@ -1992,7 +2184,7 @@
               </div>
               <div class="kanm-input-group">
                 <label for="facturacion-precio-base">Precio base</label>
-                <input type="number" step="0.01" min="0" id="facturacion-precio-base" placeholder="0.00" />
+                <input type="text" id="facturacion-precio-base" inputmode="decimal" data-money placeholder="0.00" />
               </div>
               <div class="kanm-input-group">
                 <label for="facturacion-moneda">Moneda</label>
@@ -2012,7 +2204,13 @@
               </div>
               <div class="kanm-input-group">
                 <label for="facturacion-impuesto-valor">Valor impuesto</label>
-                <input type="number" step="0.01" min="0" id="facturacion-impuesto-valor" placeholder="0.00" />
+                <input
+                  type="text"
+                  id="facturacion-impuesto-valor"
+                  inputmode="decimal"
+                  data-money
+                  placeholder="0.00"
+                />
               </div>
               <div class="kanm-input-group">
                 <label for="facturacion-periodo-default">Periodo por defecto</label>
@@ -2070,11 +2268,17 @@
               </div>
               <div class="kanm-input-group">
                 <label for="factura-precio-unitario">Precio unitario</label>
-                <input type="number" step="0.01" min="0" id="factura-precio-unitario" placeholder="0.00" />
+                <input
+                  type="text"
+                  id="factura-precio-unitario"
+                  inputmode="decimal"
+                  data-money
+                  placeholder="0.00"
+                />
               </div>
               <div class="kanm-input-group">
                 <label for="factura-descuento">Descuento</label>
-                <input type="number" step="0.01" min="0" id="factura-descuento" value="0" />
+                <input type="text" id="factura-descuento" inputmode="decimal" data-money value="0" />
               </div>
             </div>
           </section>
@@ -2164,21 +2368,21 @@
           </div>
           <div class="kanm-input-group">
             <label for="analisis-capital-caja">Caja inicial (RD$)</label>
-            <input type="number" id="analisis-capital-caja" min="0" step="0.01" placeholder="0.00" />
+            <input type="text" id="analisis-capital-caja" inputmode="decimal" data-money placeholder="0.00" />
           </div>
           <div class="kanm-input-group">
             <label for="analisis-capital-inventario">Inventario inicial (RD$)</label>
             <input
-              type="number"
+              type="text"
               id="analisis-capital-inventario"
-              min="0"
-              step="0.01"
+              inputmode="decimal"
+              data-money
               placeholder="0.00"
             />
           </div>
           <div class="kanm-input-group">
             <label for="analisis-cogs-estimado">Costo estimado por unidad</label>
-            <input type="number" id="analisis-cogs-estimado" min="0" step="0.01" placeholder="0.00" />
+            <input type="text" id="analisis-cogs-estimado" inputmode="decimal" data-money placeholder="0.00" />
             <span class="kanm-input-help">Se usa si no hay costo real en inventario.</span>
           </div>
         </div>

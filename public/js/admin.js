@@ -1,9 +1,25 @@
-const productosLista = document.getElementById('productos-lista');
+﻿const productosLista = document.getElementById('productos-lista');
 const productosBuscarInput = document.getElementById('productos-buscar');
 const formProducto = document.getElementById('prod-form');
 const inputProdId = document.getElementById('prod-id');
 const inputProdNombre = document.getElementById('prod-nombre');
 const inputProdPrecio = document.getElementById('prod-precio');
+const inputProdCostoBase = document.getElementById('prod-costo-base');
+const inputProdCostoPromedio = document.getElementById('prod-costo-promedio');
+const inputProdUltimoCosto = document.getElementById('prod-ultimo-costo');
+const inputProdActualizaCostoCompras = document.getElementById('prod-actualiza-costo');
+const inputProdCostoReal = document.getElementById('prod-costo-real');
+const inputProdCostoRealIncluyeItbis = document.getElementById('prod-costo-real-itbis');
+const inputProdEsInsumo = document.getElementById('prod-es-insumo');
+const inputProdInsumoVendible = document.getElementById('prod-insumo-vendible');
+const inputProdUnidadBase = document.getElementById('prod-unidad-base');
+const inputProdContenidoUnidad = document.getElementById('prod-contenido-unidad');
+const prodInsumoVendibleGroup = document.querySelector('.insumo-vendible-group');
+const prodRecetaSection = document.getElementById('prod-receta-section');
+const prodRecetaDetalles = document.getElementById('prod-receta-detalles');
+const prodRecetaAgregarBtn = document.getElementById('prod-receta-agregar');
+const prodRecetaGuardarBtn = document.getElementById('prod-receta-guardar');
+const prodRecetaMensaje = document.getElementById('prod-receta-mensaje');
 const prodPreciosLista = document.getElementById('prod-precios-lista');
 const prodPrecioAgregarBtn = document.getElementById('prod-precio-agregar');
 const inputProdStock = document.getElementById('prod-stock');
@@ -18,6 +34,9 @@ const impuestoForm = document.getElementById('impuesto-form');
 const impuestoValorInput = document.getElementById('impuesto-valor');
 const impuestoGuardarBtn = document.getElementById('impuesto-guardar');
 const impuestoMensaje = document.getElementById('impuesto-mensaje');
+const itbisAcreditaInput = document.getElementById('itbis-acredita');
+const itbisAcreditaGuardarBtn = document.getElementById('itbis-acredita-guardar');
+const itbisAcreditaMensaje = document.getElementById('itbis-acredita-mensaje');
 
 const facturaForm = document.getElementById('factura-form');
 const facturaTelefonosContainer = document.getElementById('factura-telefonos');
@@ -71,6 +90,7 @@ const abastecimientoObservacionesInput = document.getElementById('abastecimiento
 const abastecimientoDetallesContainer = document.getElementById('abastecimiento-detalles');
 const abastecimientoAgregarDetalleBtn = document.getElementById('abastecimiento-agregar-detalle');
 const abastecimientoAplicaItbisInput = document.getElementById('abastecimiento-aplica-itbis');
+const abastecimientoItbisCapitalizableInput = document.getElementById('abastecimiento-itbis-capitalizable');
 const abastecimientoSubtotalSpan = document.getElementById('abastecimiento-subtotal');
 const abastecimientoItbisSpan = document.getElementById('abastecimiento-itbis');
 const abastecimientoItbisRow = document.getElementById('abastecimiento-itbis-row');
@@ -132,6 +152,8 @@ const analisisKpiGanancia = document.getElementById('analisis-kpi-ganancia');
 const analisisKpiMargen = document.getElementById('analisis-kpi-margen');
 const analisisKpiTicket = document.getElementById('analisis-kpi-ticket');
 const analisisKpiVentasCount = document.getElementById('analisis-kpi-ventas-count');
+const analisisKpiUtilidadReal = document.getElementById('analisis-kpi-utilidad-real');
+const analisisUtilidadRealAviso = document.getElementById('analisis-utilidad-real-aviso');
 const analisisKpiVentasDelta = document.getElementById('analisis-kpi-ventas-delta');
 const analisisKpiGastosDelta = document.getElementById('analisis-kpi-gastos-delta');
 const analisisKpiGananciaDelta = document.getElementById('analisis-kpi-ganancia-delta');
@@ -150,6 +172,9 @@ const analisisAlertas = document.getElementById('analisis-alertas');
 const analisisAvanzadoAlertas = document.getElementById('analisis-avanzado-alertas');
 const analisisAdvComprasInventario = document.getElementById('analisis-adv-compras-inventario');
 const analisisAdvGastosOperativos = document.getElementById('analisis-adv-gastos-operativos');
+const analisisAdvCogsTotal = document.getElementById('analisis-adv-cogs-total');
+const analisisAdvUtilidadBruta = document.getElementById('analisis-adv-utilidad-bruta');
+const analisisAdvUtilidadNeta = document.getElementById('analisis-adv-utilidad-neta');
 const analisisAdvFlujoCaja = document.getElementById('analisis-adv-flujo-caja');
 const analisisAdvCajaInicial = document.getElementById('analisis-adv-caja-inicial');
 const analisisAdvCajaFinal = document.getElementById('analisis-adv-caja-final');
@@ -233,6 +258,8 @@ let detalleCierreActivo = null;
 let detalleAbastecimientoActivo = null;
 let abastecimientoEditId = null;
 let usuarios = [];
+let acreditaItbisConfig = true;
+let recetaProductoIdActivo = null;
 
 const REFRESH_INTERVAL_ADMIN = 15000;
 const SYNC_STORAGE_KEY = 'kanm:last-update';
@@ -279,7 +306,7 @@ const obtenerAuthHeaders = () => {
   try {
     return authApi?.getAuthHeaders?.() || {};
   } catch (error) {
-    console.warn('No se pudieron obtener encabezados de autenticación:', error);
+    console.warn('No se pudieron obtener encabezados de autenticaciÃ³n:', error);
     return {};
   }
 };
@@ -317,6 +344,24 @@ const fetchJsonAutorizado = async (url, options = {}) => {
   return response;
 };
 
+const parseMoneyValueAdmin = (input, { fallback = 0, allowEmpty = true } = {}) => {
+  const rawValue =
+    input && typeof input === 'object' && 'value' in input ? input.value : input ?? '';
+  const rawText = rawValue === null || rawValue === undefined ? '' : String(rawValue).trim();
+  if (!rawText) return allowEmpty ? fallback : NaN;
+  const parsed = window.KANMMoney?.parse ? window.KANMMoney.parse(input) : Number(rawText.replace(/,/g, ''));
+  return Number.isFinite(parsed) ? parsed : NaN;
+};
+
+const setMoneyInputValueAdmin = (input, value) => {
+  if (!input) return;
+  if (window.KANMMoney?.setValue && input.matches?.('input[data-money]')) {
+    window.KANMMoney.setValue(input, value);
+    return;
+  }
+  input.value = value ?? '';
+};
+
 const formatCurrency = (value) => {
   const number = Number(value);
   if (Number.isNaN(number)) return 'DOP 0.00';
@@ -336,14 +381,14 @@ const formatNumber = (value) => {
 const formatCurrencySigned = (value) => {
   const number = Number(value) || 0;
   if (number === 0) return formatCurrency(0);
-  const prefix = number > 0 ? '+ ' : '− ';
+  const prefix = number > 0 ? '+ ' : '- ';
   return `${prefix}${formatCurrency(Math.abs(number))}`;
 };
 
 const formatDate = (value) => {
-  if (!value) return '—';
+  if (!value) return 'N/D';
   const fecha = new Date(value);
-  if (Number.isNaN(fecha.getTime())) return '—';
+  if (Number.isNaN(fecha.getTime())) return 'N/D';
   return new Intl.DateTimeFormat('es-DO', {
     year: 'numeric',
     month: '2-digit',
@@ -420,7 +465,7 @@ const aplicarTemaAdmin = (tema) => {
   }
   const headerSubtitulo = document.getElementById('kanm-header-negocio-subtitulo');
   if (headerSubtitulo && !headerSubtitulo.textContent) {
-    headerSubtitulo.textContent = 'Panel de administración';
+    headerSubtitulo.textContent = 'Panel de administraciÃ³n';
   }
 
   const logoEl = document.getElementById('kanm-header-logo');
@@ -472,7 +517,7 @@ const aplicarTemaAdmin = (tema) => {
 
 const formatDateTime = (value) => {
   const fecha = parseDateTimeToUtc(value);
-  if (!fecha) return '—';
+  if (!fecha) return 'N/D';
   return new Intl.DateTimeFormat('es-DO', {
     year: 'numeric',
     month: '2-digit',
@@ -645,7 +690,7 @@ const abrirModalEliminar = ({ titulo, descripcion, endpoint, forzar = false, ext
 
   modalEliminarTitulo.textContent = titulo || 'Eliminar registro';
   modalEliminarDescripcion.textContent =
-    descripcion || 'Esta acción es irreversible. Confirma la eliminación del registro seleccionado.';
+    descripcion || 'Esta acciÃ³n es irreversible. Confirma la eliminaciÃ³n del registro seleccionado.';
 
   if (modalEliminarPassword) {
     modalEliminarPassword.value = '';
@@ -669,12 +714,12 @@ const ejecutarEliminacionAdmin = async () => {
 
   const password = modalEliminarPassword?.value?.trim();
   if (!password) {
-    setMessage(modalEliminarMensaje, 'Ingresa la contraseña de administrador para continuar.', 'warning');
+    setMessage(modalEliminarMensaje, 'Ingresa la contraseÃ±a de administrador para continuar.', 'warning');
     return;
   }
 
   if (!modalEliminarEstado.endpoint) {
-    setMessage(modalEliminarMensaje, 'No se ha definido la acción a ejecutar.', 'error');
+    setMessage(modalEliminarMensaje, 'No se ha definido la acciÃ³n a ejecutar.', 'error');
     return;
   }
 
@@ -720,7 +765,7 @@ const ejecutarEliminacionAdmin = async () => {
     }
   } catch (error) {
     console.error('Error al eliminar registro administrativo:', error);
-    setMessage(modalEliminarMensaje, 'Ocurrió un error al eliminar el registro.', 'error');
+    setMessage(modalEliminarMensaje, 'OcurriÃ³ un error al eliminar el registro.', 'error');
   } finally {
     if (modalEliminarConfirmar) {
       modalEliminarConfirmar.disabled = false;
@@ -735,8 +780,23 @@ const limpiarFormularioProducto = () => {
   if (inputProdActivo) inputProdActivo.checked = true;
   if (inputProdStockIndefinido) inputProdStockIndefinido.checked = false;
   if (inputProdStock) inputProdStock.disabled = false;
+  if (inputProdPrecio) setMoneyInputValueAdmin(inputProdPrecio, '');
+  if (inputProdCostoBase) setMoneyInputValueAdmin(inputProdCostoBase, '');
+  if (inputProdCostoPromedio) setMoneyInputValueAdmin(inputProdCostoPromedio, '');
+  if (inputProdUltimoCosto) setMoneyInputValueAdmin(inputProdUltimoCosto, '');
+  if (inputProdActualizaCostoCompras) inputProdActualizaCostoCompras.checked = true;
+  if (inputProdCostoReal) setMoneyInputValueAdmin(inputProdCostoReal, '');
+  if (inputProdCostoRealIncluyeItbis) inputProdCostoRealIncluyeItbis.checked = false;
+  if (inputProdEsInsumo) inputProdEsInsumo.checked = false;
+  if (inputProdInsumoVendible) inputProdInsumoVendible.checked = false;
+  if (inputProdUnidadBase) inputProdUnidadBase.value = 'UND';
+  if (inputProdContenidoUnidad) inputProdContenidoUnidad.value = '';
   setPreciosProductoUI([]);
   refrescarUiStockIndefinido(false);
+  refrescarUiInsumo(true);
+  limpiarRecetaUI();
+  recetaProductoIdActivo = null;
+  actualizarEstadoRecetaUI();
 };
 
 const esProductoStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
@@ -748,6 +808,35 @@ const refrescarUiStockIndefinido = (limpiarValor = false) => {
     if (indefinido && limpiarValor) {
       inputProdStock.value = '';
     }
+  }
+};
+
+const refrescarUiInsumo = (limpiarValores = false) => {
+  const esInsumo = inputProdEsInsumo?.checked ?? false;
+  if (prodInsumoVendibleGroup) {
+    prodInsumoVendibleGroup.classList.toggle('hidden', !esInsumo);
+  }
+  if (!esInsumo && limpiarValores) {
+    if (inputProdInsumoVendible) inputProdInsumoVendible.checked = false;
+  }
+  actualizarEstadoRecetaUI();
+};
+
+const actualizarEstadoRecetaUI = () => {
+  if (!prodRecetaSection) return;
+  const productoId = Number(inputProdId?.value || 0);
+  const esInsumo = inputProdEsInsumo?.checked ?? false;
+  const habilitado = productoId > 0 && !esInsumo;
+  if (prodRecetaAgregarBtn) prodRecetaAgregarBtn.disabled = !habilitado;
+  if (prodRecetaGuardarBtn) prodRecetaGuardarBtn.disabled = !habilitado;
+
+  if (!habilitado) {
+    const mensaje = esInsumo
+      ? 'Los insumos no llevan receta.'
+      : 'Guarda el producto para editar la receta.';
+    setMessage(prodRecetaMensaje, mensaje, esInsumo ? 'warning' : 'info');
+  } else if (prodRecetaMensaje?.textContent) {
+    setMessage(prodRecetaMensaje, '', 'info');
   }
 };
 
@@ -767,12 +856,12 @@ const crearFilaPrecioProducto = (precio = {}) => {
   inputEtiqueta.value = precio.label ?? '';
 
   const inputValor = document.createElement('input');
-  inputValor.type = 'number';
-  inputValor.min = '0';
-  inputValor.step = '0.01';
+  inputValor.type = 'text';
+  inputValor.inputMode = 'decimal';
+  inputValor.dataset.money = 'true';
   inputValor.placeholder = '0.00';
   if (precio.valor !== undefined && precio.valor !== null && precio.valor !== '') {
-    inputValor.value = precio.valor;
+    setMoneyInputValueAdmin(inputValor, precio.valor);
   }
 
   const botonEliminar = document.createElement('button');
@@ -815,7 +904,7 @@ const leerPreciosProductoUI = () => {
     const etiqueta = inputs[0]?.value?.trim() || '';
     const valorTexto = inputs[1]?.value?.trim() || '';
     if (!valorTexto) return;
-    const valor = Number(valorTexto);
+    const valor = parseMoneyValueAdmin(inputs[1], { allowEmpty: false });
     if (!Number.isFinite(valor) || valor < 0) {
       invalido = true;
       return;
@@ -824,6 +913,270 @@ const leerPreciosProductoUI = () => {
   });
 
   return { precios, invalido };
+};
+
+const UNIDADES_RECETA = [
+  { value: 'UND', label: 'Unidades' },
+  { value: 'ML', label: 'ML' },
+  { value: 'GR', label: 'GR' },
+];
+
+const obtenerInsumosDisponibles = () =>
+  (Array.isArray(productos) ? productos : []).filter(
+    (producto) => String(producto?.tipo_producto || '').toUpperCase() === 'INSUMO'
+  );
+
+const obtenerInsumoPorId = (id) =>
+  (Array.isArray(productos) ? productos : []).find(
+    (producto) => Number(producto?.id) === Number(id)
+  );
+
+const construirOpcionesInsumos = (select, seleccionadoId) => {
+  if (!select) return;
+  select.innerHTML = '';
+  const insumos = obtenerInsumosDisponibles();
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = insumos.length ? 'Selecciona insumo' : 'Sin insumos disponibles';
+  select.appendChild(placeholder);
+
+  insumos.forEach((insumo) => {
+    const option = document.createElement('option');
+    option.value = insumo.id;
+    const unidad = String(insumo.unidad_base || 'UND').toUpperCase();
+    option.textContent = `${insumo.nombre} (${unidad})`;
+    select.appendChild(option);
+  });
+
+  if (seleccionadoId !== undefined && seleccionadoId !== null) {
+    select.value = String(seleccionadoId);
+  }
+};
+
+const construirOpcionesUnidadReceta = (select) => {
+  if (!select) return;
+  select.innerHTML = '';
+  UNIDADES_RECETA.forEach(({ value, label }) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  });
+};
+
+const actualizarUnidadReceta = (insumoSelect, unidadSelect) => {
+  if (!unidadSelect) return;
+  const insumo = obtenerInsumoPorId(insumoSelect?.value);
+  const unidadBase = String(insumo?.unidad_base || unidadSelect.value || 'UND').toUpperCase();
+  if (!unidadSelect.querySelector(`option[value="${unidadBase}"]`)) {
+    const option = document.createElement('option');
+    option.value = unidadBase;
+    option.textContent = unidadBase;
+    unidadSelect.appendChild(option);
+  }
+  unidadSelect.value = unidadBase;
+};
+
+const crearFilaReceta = (detalle = {}) => {
+  const fila = document.createElement('div');
+  fila.className = 'receta-row';
+
+  const selectInsumo = document.createElement('select');
+  selectInsumo.className = 'receta-insumo-select';
+  construirOpcionesInsumos(selectInsumo, detalle.insumo_id ?? detalle.insumoId);
+
+  const inputCantidad = document.createElement('input');
+  inputCantidad.type = 'number';
+  inputCantidad.min = '0';
+  inputCantidad.step = '0.0001';
+  inputCantidad.placeholder = 'Cantidad';
+  inputCantidad.className = 'receta-cantidad-input';
+  if (detalle.cantidad !== undefined && detalle.cantidad !== null) {
+    inputCantidad.value = detalle.cantidad;
+  }
+
+  const selectUnidad = document.createElement('select');
+  selectUnidad.className = 'receta-unidad-select';
+  construirOpcionesUnidadReceta(selectUnidad);
+  selectUnidad.disabled = true;
+  if (detalle.unidad) {
+    selectUnidad.value = String(detalle.unidad).toUpperCase();
+  }
+
+  const btnEliminar = document.createElement('button');
+  btnEliminar.type = 'button';
+  btnEliminar.className = 'kanm-button ghost kanm-button--sm';
+  btnEliminar.textContent = 'Quitar';
+  btnEliminar.addEventListener('click', () => {
+    fila.remove();
+  });
+
+  selectInsumo.addEventListener('change', () => {
+    actualizarUnidadReceta(selectInsumo, selectUnidad);
+  });
+
+  actualizarUnidadReceta(selectInsumo, selectUnidad);
+
+  fila.appendChild(selectInsumo);
+  fila.appendChild(inputCantidad);
+  fila.appendChild(selectUnidad);
+  fila.appendChild(btnEliminar);
+  return fila;
+};
+
+const limpiarRecetaUI = () => {
+  if (prodRecetaDetalles) {
+    prodRecetaDetalles.innerHTML = '';
+  }
+};
+
+const setRecetaUI = (detalles = []) => {
+  limpiarRecetaUI();
+  const lista = Array.isArray(detalles) ? detalles : [];
+  if (!lista.length) {
+    return;
+  }
+  lista.forEach((detalle) => {
+    if (prodRecetaDetalles) {
+      prodRecetaDetalles.appendChild(crearFilaReceta(detalle));
+    }
+  });
+};
+
+const obtenerRecetaDetallesUI = () => {
+  if (!prodRecetaDetalles) return { detalles: [], invalido: false };
+  const filas = Array.from(prodRecetaDetalles.querySelectorAll('.receta-row'));
+  const detalles = [];
+  let invalido = false;
+
+  filas.forEach((fila) => {
+    const selectInsumo = fila.querySelector('.receta-insumo-select');
+    const inputCantidad = fila.querySelector('.receta-cantidad-input');
+    const selectUnidad = fila.querySelector('.receta-unidad-select');
+    const insumoId = Number(selectInsumo?.value);
+    const cantidadTexto = (inputCantidad?.value ?? '').trim();
+    const cantidad = cantidadTexto === '' ? NaN : parseFloat(cantidadTexto);
+    const unidad = String(selectUnidad?.value || 'UND').toUpperCase();
+
+    if (!insumoId && cantidadTexto === '') {
+      return;
+    }
+
+    if (!Number.isFinite(insumoId) || insumoId <= 0 || !Number.isFinite(cantidad) || cantidad <= 0) {
+      invalido = true;
+      return;
+    }
+
+    detalles.push({
+      insumo_id: insumoId,
+      cantidad,
+      unidad,
+    });
+  });
+
+  return { detalles, invalido };
+};
+
+const agregarFilaReceta = (detalle = {}) => {
+  if (!prodRecetaDetalles) return;
+  const insumos = obtenerInsumosDisponibles();
+  if (!insumos.length) {
+    setMessage(
+      prodRecetaMensaje,
+      'No hay insumos disponibles. Crea un producto marcado como insumo.',
+      'warning'
+    );
+    return;
+  }
+  prodRecetaDetalles.appendChild(crearFilaReceta(detalle));
+  setMessage(prodRecetaMensaje, '', 'info');
+};
+
+const refrescarOpcionesReceta = () => {
+  if (!prodRecetaDetalles) return;
+  const filas = Array.from(prodRecetaDetalles.querySelectorAll('.receta-row'));
+  filas.forEach((fila) => {
+    const selectInsumo = fila.querySelector('.receta-insumo-select');
+    const selectUnidad = fila.querySelector('.receta-unidad-select');
+    const seleccionadoId = selectInsumo?.value;
+    construirOpcionesInsumos(selectInsumo, seleccionadoId);
+    actualizarUnidadReceta(selectInsumo, selectUnidad);
+  });
+};
+
+const cargarRecetaProducto = async (productoId) => {
+  limpiarRecetaUI();
+  recetaProductoIdActivo = productoId || null;
+  actualizarEstadoRecetaUI();
+
+  if (!productoId || inputProdEsInsumo?.checked) {
+    return;
+  }
+
+  try {
+    setMessage(prodRecetaMensaje, 'Cargando receta...', 'info');
+    const respuesta = await fetchConAutorizacion(`/api/productos/${productoId}/receta`);
+    const data = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo obtener la receta.');
+    }
+
+    setRecetaUI(data.detalles || []);
+    if (!data.detalles?.length) {
+      setMessage(prodRecetaMensaje, 'Sin receta registrada.', 'info');
+    } else {
+      setMessage(prodRecetaMensaje, '', 'info');
+    }
+  } catch (error) {
+    console.error('Error al cargar receta:', error);
+    setMessage(prodRecetaMensaje, error.message || 'No se pudo obtener la receta.', 'error');
+  }
+};
+
+const guardarRecetaProducto = async () => {
+  const productoId = Number(inputProdId?.value || recetaProductoIdActivo || 0);
+  if (!productoId) {
+    setMessage(prodRecetaMensaje, 'Guarda el producto antes de crear la receta.', 'info');
+    return;
+  }
+  if (inputProdEsInsumo?.checked) {
+    setMessage(prodRecetaMensaje, 'Los insumos no llevan receta.', 'warning');
+    return;
+  }
+
+  const { detalles, invalido } = obtenerRecetaDetallesUI();
+  if (invalido) {
+    setMessage(prodRecetaMensaje, 'Cada insumo debe tener cantidad valida.', 'error');
+    return;
+  }
+
+  try {
+    setMessage(prodRecetaMensaje, '', 'info');
+    if (prodRecetaGuardarBtn) {
+      prodRecetaGuardarBtn.disabled = true;
+      prodRecetaGuardarBtn.classList.add('is-loading');
+    }
+
+    const respuesta = await fetchJsonAutorizado(`/api/productos/${productoId}/receta`, {
+      method: 'PUT',
+      body: JSON.stringify({ detalles }),
+    });
+    const data = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo guardar la receta.');
+    }
+
+    setRecetaUI(data.detalles || detalles);
+    setMessage(prodRecetaMensaje, 'Receta guardada correctamente.', 'info');
+  } catch (error) {
+    console.error('Error al guardar receta:', error);
+    setMessage(prodRecetaMensaje, error.message || 'No se pudo guardar la receta.', 'error');
+  } finally {
+    if (prodRecetaGuardarBtn) {
+      prodRecetaGuardarBtn.disabled = false;
+      prodRecetaGuardarBtn.classList.remove('is-loading');
+    }
+  }
 };
 
 
@@ -845,6 +1198,10 @@ const renderProductos = (lista) => {
   lista.forEach((producto) => {
     const activo = Number(producto.activo) === 1;
     const stockEsIndefinido = esProductoStockIndefinido(producto);
+    const costoBase = Number(producto.costo_base_sin_itbis) || 0;
+    const costoPromedio = Number(producto.costo_promedio_actual) || 0;
+    const ultimoCosto = Number(producto.ultimo_costo_sin_itbis) || 0;
+    const actualizaCostoCompras = Number(producto.actualiza_costo_con_compras ?? 1) === 1;
     const preciosExtra = Array.isArray(producto.precios) ? producto.precios : [];
     const preciosTexto = preciosExtra.length
       ? preciosExtra.map((p) => `${p.label || 'Precio'}: ${formatCurrency(p.valor)}`).join(' | ')
@@ -871,7 +1228,10 @@ const renderProductos = (lista) => {
     const stockTexto = stockEsIndefinido ? 'Indefinido' : Number(producto.stock ?? 0);
     detalle.innerHTML = `
       <span><strong>Stock:</strong> ${stockTexto}</span>
-      <span><strong>Categoría:</strong> ${producto.categoria_nombre ?? 'Sin asignar'}</span>
+      <span><strong>CategorÃ­a:</strong> ${producto.categoria_nombre ?? 'Sin asignar'}</span>
+      <span><strong>Costo base:</strong> ${formatCurrency(costoBase)}</span>
+      <span><strong>Costo promedio:</strong> ${formatCurrency(costoPromedio)}</span>
+      <span><strong>Ultimo costo:</strong> ${formatCurrency(ultimoCosto)}</span>
       <span><strong>Estado:</strong> <span class="estado-pill ${
         activo ? '' : 'estado-inactivo'
       }">${activo ? 'Activo' : 'Inactivo'}</span></span>
@@ -887,14 +1247,36 @@ const renderProductos = (lista) => {
     botonEditar.addEventListener('click', async () => {
       if (inputProdId) inputProdId.value = producto.id;
       if (inputProdNombre) inputProdNombre.value = producto.nombre ?? '';
-      if (inputProdPrecio) inputProdPrecio.value = producto.precio ?? '';
+      if (inputProdPrecio) setMoneyInputValueAdmin(inputProdPrecio, producto.precio ?? '');
+      if (inputProdCostoBase) setMoneyInputValueAdmin(inputProdCostoBase, producto.costo_base_sin_itbis ?? 0);
+      if (inputProdCostoPromedio) setMoneyInputValueAdmin(inputProdCostoPromedio, producto.costo_promedio_actual ?? 0);
+      if (inputProdUltimoCosto) setMoneyInputValueAdmin(inputProdUltimoCosto, producto.ultimo_costo_sin_itbis ?? 0);
+      if (inputProdCostoReal) setMoneyInputValueAdmin(inputProdCostoReal, producto.costo_unitario_real ?? 0);
+      if (inputProdCostoRealIncluyeItbis) {
+        inputProdCostoRealIncluyeItbis.checked = Number(producto.costo_unitario_real_incluye_itbis) === 1;
+      }
+      const esInsumo =
+        String(producto.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
+      if (inputProdEsInsumo) inputProdEsInsumo.checked = esInsumo;
+      if (inputProdInsumoVendible) {
+        inputProdInsumoVendible.checked = esInsumo && Number(producto.insumo_vendible) === 1;
+      }
+      if (inputProdUnidadBase) inputProdUnidadBase.value = producto.unidad_base || 'UND';
+      if (inputProdContenidoUnidad) {
+        const contenidoValor = producto.contenido_por_unidad;
+        inputProdContenidoUnidad.value =
+          contenidoValor === null || contenidoValor === undefined ? '' : contenidoValor;
+      }
+      if (inputProdActualizaCostoCompras) inputProdActualizaCostoCompras.checked = actualizaCostoCompras;
       if (inputProdStockIndefinido) inputProdStockIndefinido.checked = stockEsIndefinido;
       if (inputProdStock) inputProdStock.value = stockEsIndefinido ? '' : (producto.stock ?? '');
       refrescarUiStockIndefinido(false);
+      refrescarUiInsumo(false);
       if (inputProdCategoria) inputProdCategoria.value = producto.categoria_id ?? '';
       if (inputProdActivo) inputProdActivo.checked = activo;
       setPreciosProductoUI(producto.precios || []);
       setMessage(mensajeProductos, `Editando producto: ${producto.nombre}`, 'info');
+      cargarRecetaProducto(producto.id);
       inputProdNombre?.focus();
     });
 
@@ -941,6 +1323,7 @@ const cargarProductos = async () => {
     productos = Array.isArray(data) ? data : [];
     filtrarProductos();
     refrescarSelectsAbastecimiento();
+    refrescarOpcionesReceta();
   } catch (error) {
     console.error('Error al cargar productos:', error);
     setMessage(mensajeProductos, 'Error al cargar los productos.', 'error');
@@ -950,7 +1333,9 @@ const cargarProductos = async () => {
 productosBuscarInput?.addEventListener('input', () => filtrarProductos());
 filtroCategoriaProductos?.addEventListener('change', () => filtrarProductos());
 inputProdStockIndefinido?.addEventListener('change', () => refrescarUiStockIndefinido(true));
+inputProdEsInsumo?.addEventListener('change', () => refrescarUiInsumo(false));
 refrescarUiStockIndefinido(false);
+refrescarUiInsumo(false);
 setPreciosProductoUI([]);
 
 prodPrecioAgregarBtn?.addEventListener('click', (event) => {
@@ -958,21 +1343,70 @@ prodPrecioAgregarBtn?.addEventListener('click', (event) => {
   agregarPrecioProductoUI();
 });
 
+prodRecetaAgregarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  agregarFilaReceta();
+});
+
+prodRecetaGuardarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  guardarRecetaProducto();
+});
+
 const obtenerValoresProducto = () => {
   const nombre = inputProdNombre?.value.trim();
-  const precio = parseFloat(inputProdPrecio?.value ?? '');
+  const precio = parseMoneyValueAdmin(inputProdPrecio, { allowEmpty: false });
+  const costoBaseParsed = parseMoneyValueAdmin(inputProdCostoBase);
+  const costoBase = Number.isFinite(costoBaseParsed) ? costoBaseParsed : 0;
+  const costoRealTexto = (inputProdCostoReal?.value ?? '').trim();
+  const costoRealParsed =
+    costoRealTexto === '' ? 0 : parseMoneyValueAdmin(inputProdCostoReal, { allowEmpty: false });
+  const costoReal = Number.isFinite(costoRealParsed) ? costoRealParsed : NaN;
+  const costoRealIncluyeItbis = inputProdCostoRealIncluyeItbis?.checked ?? false;
+  const esInsumo = inputProdEsInsumo?.checked ?? false;
+  const tipoProducto = esInsumo ? 'INSUMO' : 'FINAL';
+  const insumoVendible = esInsumo ? (inputProdInsumoVendible?.checked ?? false) : false;
+  const unidadBase = (inputProdUnidadBase?.value || 'UND').toUpperCase();
+  const contenidoTexto = (inputProdContenidoUnidad?.value ?? '').trim();
+  const contenidoParsed = contenidoTexto === '' ? 1 : parseFloat(contenidoTexto);
+  const contenidoPorUnidad = Number.isFinite(contenidoParsed) ? contenidoParsed : NaN;
   const stockIndefinido = inputProdStockIndefinido?.checked ?? false;
   const stockValor = inputProdStock?.value.trim();
   const stock = stockIndefinido ? null : stockValor === '' ? 0 : parseFloat(stockValor);
   const categoriaValor = inputProdCategoria?.value || '';
   const categoriaId = categoriaValor === '' ? null : parseInt(categoriaValor, 10);
   const activo = inputProdActivo?.checked ?? true;
+  const actualizaCostoCompras = inputProdActualizaCostoCompras?.checked ?? true;
   const { precios } = leerPreciosProductoUI();
 
-  return { nombre, precio, precios, stock, categoriaId, activo, stockIndefinido };
+  return {
+    nombre,
+    precio,
+    precios,
+    stock,
+    categoriaId,
+    activo,
+    stockIndefinido,
+    costoBase,
+    costoReal,
+    costoRealIncluyeItbis,
+    tipoProducto,
+    insumoVendible,
+    unidadBase,
+    contenidoPorUnidad,
+    actualizaCostoCompras,
+  };
 };
 
-const validarProducto = ({ nombre, precio, stock, stockIndefinido }) => {
+const validarProducto = ({
+  nombre,
+  precio,
+  stock,
+  stockIndefinido,
+  costoBase,
+  costoReal,
+  contenidoPorUnidad,
+}) => {
   if (!nombre) {
     setMessage(mensajeProductos, 'El nombre del producto es obligatorio.', 'error');
     return false;
@@ -984,6 +1418,18 @@ const validarProducto = ({ nombre, precio, stock, stockIndefinido }) => {
   const { invalido } = leerPreciosProductoUI();
   if (invalido) {
     setMessage(mensajeProductos, 'Los precios adicionales deben ser numericos y mayores o iguales a 0.', 'error');
+    return false;
+  }
+  if (!Number.isFinite(costoBase) || costoBase < 0) {
+    setMessage(mensajeProductos, 'El costo base debe ser numerico y mayor o igual a 0.', 'error');
+    return false;
+  }
+  if (!Number.isFinite(costoReal) || costoReal < 0) {
+    setMessage(mensajeProductos, 'El costo real debe ser numerico y mayor o igual a 0.', 'error');
+    return false;
+  }
+  if (!Number.isFinite(contenidoPorUnidad) || contenidoPorUnidad <= 0) {
+    setMessage(mensajeProductos, 'El contenido por unidad debe ser numerico y mayor a 0.', 'error');
     return false;
   }
   if (!stockIndefinido) {
@@ -1015,7 +1461,7 @@ const setCategoriasOptions = (lista = []) => {
   }
   if (filtroCategoriaProductos) {
     const valorFiltro = filtroCategoriaProductos.value;
-    filtroCategoriaProductos.innerHTML = '<option value="">Todas las categorías</option>';
+    filtroCategoriaProductos.innerHTML = '<option value="">Todas las categorÃ­as</option>';
     lista.forEach((cat) => {
       const opt = document.createElement('option');
       opt.value = cat.id;
@@ -1036,19 +1482,42 @@ const cargarCategorias = async () => {
   try {
     const resp = await fetchConAutorizacion('/api/categorias?activos=1');
     const data = await resp.json();
-    if (!resp.ok || data?.error) throw new Error(data?.error || 'No se pudo cargar categorías');
+    if (!resp.ok || data?.error) throw new Error(data?.error || 'No se pudo cargar categorÃ­as');
     setCategoriasOptions(data?.categorias || []);
   } catch (error) {
-    console.error('Error al cargar categorías:', error);
+    console.error('Error al cargar categorÃ­as:', error);
   }
 };
 
-const crearProducto = async ({ nombre, precio, precios, stock, categoriaId, stockIndefinido }) => {
+const crearProducto = async ({
+  nombre,
+  precio,
+  precios,
+  stock,
+  categoriaId,
+  stockIndefinido,
+  costoBase,
+  costoReal,
+  costoRealIncluyeItbis,
+  tipoProducto,
+  insumoVendible,
+  unidadBase,
+  contenidoPorUnidad,
+  actualizaCostoCompras,
+}) => {
   const body = {
     nombre,
     precio,
     precios: Array.isArray(precios) ? precios : [],
     stock_indefinido: stockIndefinido ? 1 : 0,
+    costo_base_sin_itbis: Number(costoBase.toFixed(2)),
+    costo_unitario_real: Number(costoReal.toFixed(2)),
+    costo_unitario_real_incluye_itbis: costoRealIncluyeItbis ? 1 : 0,
+    tipo_producto: tipoProducto,
+    insumo_vendible: insumoVendible ? 1 : 0,
+    unidad_base: unidadBase,
+    contenido_por_unidad: Number(contenidoPorUnidad.toFixed(4)),
+    actualiza_costo_con_compras: actualizaCostoCompras ? 1 : 0,
   };
   if (stockIndefinido) {
     body.stock = null;
@@ -1071,7 +1540,26 @@ const crearProducto = async ({ nombre, precio, precios, stock, categoriaId, stoc
   return respuesta.json();
 };
 
-const actualizarProducto = async (id, { nombre, precio, precios, stock, categoriaId, activo, stockIndefinido }) => {
+const actualizarProducto = async (
+  id,
+  {
+    nombre,
+    precio,
+    precios,
+    stock,
+    categoriaId,
+    activo,
+    stockIndefinido,
+    costoBase,
+    costoReal,
+    costoRealIncluyeItbis,
+    tipoProducto,
+    insumoVendible,
+    unidadBase,
+    contenidoPorUnidad,
+    actualizaCostoCompras,
+  }
+) => {
   const body = {
     nombre,
     precio,
@@ -1079,6 +1567,14 @@ const actualizarProducto = async (id, { nombre, precio, precios, stock, categori
     categoria_id: categoriaId !== null && !Number.isNaN(categoriaId) ? categoriaId : null,
     activo: activo ? 1 : 0,
     stock_indefinido: stockIndefinido ? 1 : 0,
+    costo_base_sin_itbis: Number(costoBase.toFixed(2)),
+    costo_unitario_real: Number(costoReal.toFixed(2)),
+    costo_unitario_real_incluye_itbis: costoRealIncluyeItbis ? 1 : 0,
+    tipo_producto: tipoProducto,
+    insumo_vendible: insumoVendible ? 1 : 0,
+    unidad_base: unidadBase,
+    contenido_por_unidad: Number(contenidoPorUnidad.toFixed(4)),
+    actualiza_costo_con_compras: actualizaCostoCompras ? 1 : 0,
   };
   if (stockIndefinido) {
     body.stock = null;
@@ -1099,7 +1595,7 @@ const actualizarProducto = async (id, { nombre, precio, precios, stock, categori
 };
 
 /* =====================
- * Configuración de impuesto
+ * ConfiguraciÃ³n de impuesto
  * ===================== */
 const cargarImpuesto = async () => {
   if (!impuestoValorInput) return;
@@ -1107,7 +1603,7 @@ const cargarImpuesto = async () => {
     setMessage(impuestoMensaje, '', 'info');
     const respuesta = await fetchConAutorizacion('/api/configuracion/impuesto');
     if (!respuesta.ok) {
-      throw new Error('Error al obtener la configuración de impuesto');
+      throw new Error('Error al obtener la configuraciÃ³n de impuesto');
     }
     const data = await respuesta.json();
     if (data.ok) {
@@ -1117,13 +1613,13 @@ const cargarImpuesto = async () => {
     } else {
       setMessage(
         impuestoMensaje,
-        data.error || 'No se pudo obtener la configuración de impuesto.',
+        data.error || 'No se pudo obtener la configuraciÃ³n de impuesto.',
         'error'
       );
     }
   } catch (error) {
     console.error('Error al cargar el impuesto:', error);
-    setMessage(impuestoMensaje, 'Error al obtener la configuración de impuesto.', 'error');
+    setMessage(impuestoMensaje, 'Error al obtener la configuraciÃ³n de impuesto.', 'error');
   }
 };
 
@@ -1134,7 +1630,7 @@ const guardarImpuesto = async () => {
   if (valorTexto === '' || Number.isNaN(valorNumerico) || valorNumerico < 0) {
     setMessage(
       impuestoMensaje,
-      'El valor del impuesto es obligatorio y debe ser un número mayor o igual a 0.',
+      'El valor del impuesto es obligatorio y debe ser un nÃºmero mayor o igual a 0.',
       'error'
     );
     return;
@@ -1154,7 +1650,7 @@ const guardarImpuesto = async () => {
 
     const data = await respuesta.json().catch(() => ({ ok: false }));
     if (!respuesta.ok || !data.ok) {
-      const mensaje = data.error || 'Error al guardar la configuración de impuesto.';
+      const mensaje = data.error || 'Error al guardar la configuraciÃ³n de impuesto.';
       setMessage(impuestoMensaje, mensaje, 'error');
       return;
     }
@@ -1163,7 +1659,7 @@ const guardarImpuesto = async () => {
     setMessage(impuestoMensaje, 'Impuesto actualizado correctamente.', 'info');
   } catch (error) {
     console.error('Error al guardar el impuesto:', error);
-    setMessage(impuestoMensaje, 'Error al guardar la configuración de impuesto.', 'error');
+    setMessage(impuestoMensaje, 'Error al guardar la configuraciÃ³n de impuesto.', 'error');
   } finally {
     if (impuestoGuardarBtn) {
       impuestoGuardarBtn.disabled = false;
@@ -1173,12 +1669,12 @@ const guardarImpuesto = async () => {
 };
 
 /* =====================
- * Configuración de facturación
+ * ConfiguraciÃ³n de facturaciÃ³n
  * ===================== */
 const pintarRango = (inicioInput, finInput, restanteEl, alertaEl, datos, umbral) => {
   if (inicioInput) inicioInput.value = datos?.inicio ?? '';
   if (finInput) finInput.value = datos?.fin ?? '';
-  if (restanteEl) restanteEl.textContent = datos?.restante ?? '—';
+  if (restanteEl) restanteEl.textContent = datos?.restante ?? 'N/D';
 
   if (alertaEl) {
     if (datos?.alerta) {
@@ -1187,6 +1683,69 @@ const pintarRango = (inicioInput, finInput, restanteEl, alertaEl, datos, umbral)
     } else {
       alertaEl.dataset.type = '';
       alertaEl.textContent = '';
+    }
+  }
+};
+
+const cargarConfiguracionItbisAcredita = async () => {
+  if (!itbisAcreditaInput) return;
+  try {
+    setMessage(itbisAcreditaMensaje, '', 'info');
+    const respuesta = await fetchConAutorizacion('/api/configuracion/itbis-acredita');
+    if (!respuesta.ok) {
+      throw new Error('Error al obtener la configuracion de ITBIS acreditable');
+    }
+    const data = await respuesta.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudo obtener la configuracion de ITBIS acreditable.');
+    }
+    acreditaItbisConfig = Number(data.acredita_itbis) === 1;
+    itbisAcreditaInput.checked = acreditaItbisConfig;
+    establecerItbisCapitalizableDefault();
+    actualizarEstadoItbisCapitalizable();
+    setMessage(itbisAcreditaMensaje, '', 'info');
+  } catch (error) {
+    console.error('Error al cargar configuracion de ITBIS acreditable:', error);
+    setMessage(
+      itbisAcreditaMensaje,
+      error.message || 'No se pudo cargar la configuracion de ITBIS acreditable.',
+      'error'
+    );
+  }
+};
+
+const guardarConfiguracionItbisAcredita = async () => {
+  if (!itbisAcreditaInput) return;
+  const valor = itbisAcreditaInput.checked ? 1 : 0;
+  try {
+    setMessage(itbisAcreditaMensaje, '', 'info');
+    if (itbisAcreditaGuardarBtn) {
+      itbisAcreditaGuardarBtn.disabled = true;
+      itbisAcreditaGuardarBtn.classList.add('is-loading');
+    }
+    const respuesta = await fetchJsonAutorizado('/api/configuracion/itbis-acredita', {
+      method: 'PUT',
+      body: JSON.stringify({ acredita_itbis: valor }),
+    });
+    const data = await respuesta.json().catch(() => ({ ok: false }));
+    if (!respuesta.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo guardar la configuracion de ITBIS acreditable.');
+    }
+    acreditaItbisConfig = Number(data.acredita_itbis) === 1;
+    establecerItbisCapitalizableDefault();
+    actualizarEstadoItbisCapitalizable();
+    setMessage(itbisAcreditaMensaje, 'Configuracion guardada correctamente.', 'info');
+  } catch (error) {
+    console.error('Error al guardar configuracion de ITBIS acreditable:', error);
+    setMessage(
+      itbisAcreditaMensaje,
+      error.message || 'No se pudo guardar la configuracion de ITBIS acreditable.',
+      'error'
+    );
+  } finally {
+    if (itbisAcreditaGuardarBtn) {
+      itbisAcreditaGuardarBtn.disabled = false;
+      itbisAcreditaGuardarBtn.classList.remove('is-loading');
     }
   }
 };
@@ -1388,11 +1947,11 @@ const cargarConfiguracionFactura = async (options = {}) => {
   try {
     const respuesta = await fetchConAutorizacion('/api/configuracion/factura');
     if (!respuesta.ok) {
-      throw new Error('No se pudo obtener la configuración de facturación');
+      throw new Error('No se pudo obtener la configuraciÃ³n de facturaciÃ³n');
     }
     const data = await respuesta.json();
     if (!data.ok || !data.configuracion) {
-      throw new Error(data.error || 'Error al obtener la configuración de facturación');
+      throw new Error(data.error || 'Error al obtener la configuraciÃ³n de facturaciÃ³n');
     }
 
     const { configuracion } = data;
@@ -1412,8 +1971,8 @@ const cargarConfiguracionFactura = async (options = {}) => {
     facturaConfigDirty = false;
     setMessage(facturaMensaje, '');
   } catch (error) {
-    console.error('Error al cargar configuración de factura:', error);
-    setMessage(facturaMensaje, 'No se pudo cargar la configuración de facturación.', 'error');
+    console.error('Error al cargar configuraciÃ³n de factura:', error);
+    setMessage(facturaMensaje, 'No se pudo cargar la configuraciÃ³n de facturaciÃ³n.', 'error');
   }
 };
 
@@ -1443,7 +2002,7 @@ const guardarConfiguracionFactura = async () => {
 
     const data = await respuesta.json().catch(() => ({ ok: false }));
     if (!respuesta.ok || !data.ok || !data.configuracion) {
-      throw new Error(data.error || 'No se pudo guardar la configuración de factura');
+      throw new Error(data.error || 'No se pudo guardar la configuraciÃ³n de factura');
     }
 
     const { configuracion } = data;
@@ -1451,10 +2010,10 @@ const guardarConfiguracionFactura = async () => {
     pintarRango(ncfB02InicioInput, ncfB02FinInput, ncfB02Restante, ncfB02Alerta, configuracion.b02, 20);
     pintarRango(ncfB01InicioInput, ncfB01FinInput, ncfB01Restante, ncfB01Alerta, configuracion.b01, 5);
     facturaConfigDirty = false;
-    setMessage(facturaMensaje, 'Configuración de factura guardada correctamente.', 'info');
+    setMessage(facturaMensaje, 'ConfiguraciÃ³n de factura guardada correctamente.', 'info');
   } catch (error) {
-    console.error('Error al guardar configuración de factura:', error);
-    setMessage(facturaMensaje, error.message || 'No se pudo guardar la configuración.', 'error');
+    console.error('Error al guardar configuraciÃ³n de factura:', error);
+    setMessage(facturaMensaje, error.message || 'No se pudo guardar la configuraciÃ³n.', 'error');
   } finally {
     if (facturaGuardarBtn) {
       facturaGuardarBtn.disabled = false;
@@ -1464,9 +2023,9 @@ const guardarConfiguracionFactura = async () => {
 };
 
 /* =====================
- * Gestión de usuarios
+ * GestiÃ³n de usuarios
  * ===================== */
-const ROLES_PERMITIDOS = ['mesera', 'cocina', 'bar', 'caja'];
+const ROLES_PERMITIDOS = ['mesera', 'cocina', 'bar', 'caja', 'vendedor'];
 
 const limpiarFormularioUsuario = () => {
   usuarioForm?.reset();
@@ -1627,12 +2186,12 @@ const validarFormularioUsuario = ({ nombre, usuario, password, rol }, esEdicion)
   }
 
   if (!esEdicion && !password) {
-    setMessage(usuarioFormMensaje, 'La contraseña es obligatoria para crear usuarios.', 'error');
+    setMessage(usuarioFormMensaje, 'La contraseÃ±a es obligatoria para crear usuarios.', 'error');
     return false;
   }
 
   if (!ROLES_PERMITIDOS.includes(rol)) {
-    setMessage(usuarioFormMensaje, 'Selecciona un rol válido (mesera, cocina o caja).', 'error');
+    setMessage(usuarioFormMensaje, 'Selecciona un rol valido (mesera, cocina, bar, caja o mostrador).', 'error');
     return false;
   }
 
@@ -1665,7 +2224,7 @@ const guardarUsuario = async () => {
         throw new Error(error.error || 'No se pudo actualizar el usuario');
       }
     } else {
-      body.password = password; // obligatorio en creación
+      body.password = password; // obligatorio en creaciÃ³n
       const respuesta = await fetchJsonAutorizado('/api/usuarios', {
         method: 'POST',
         body: JSON.stringify(body),
@@ -1706,7 +2265,7 @@ const cambiarEstadoUsuario = async (id, activo) => {
 };
 
 const eliminarUsuario = async (id) => {
-  const confirmar = window.confirm('¿Seguro que deseas eliminar este usuario? Esta acción no se puede deshacer.');
+  const confirmar = window.confirm('Â¿Seguro que deseas eliminar este usuario? Esta acciÃ³n no se puede deshacer.');
   if (!confirmar) return;
 
   try {
@@ -1745,28 +2304,34 @@ const crearFilaDetalle = (detalle = {}) => {
   cantidad.value = detalle.cantidad ?? '';
 
   const precio = document.createElement('input');
-  precio.type = 'number';
-  precio.min = '0';
-  precio.step = '0.01';
+  precio.type = 'text';
+  precio.inputMode = 'decimal';
+  precio.dataset.money = 'true';
   precio.placeholder = 'Precio unitario';
   precio.className = 'compra-detalle-precio';
-  precio.value = detalle.precio_unitario ?? '';
+  if (detalle.precio_unitario !== undefined && detalle.precio_unitario !== null) {
+    setMoneyInputValueAdmin(precio, detalle.precio_unitario);
+  }
 
   const itbis = document.createElement('input');
-  itbis.type = 'number';
-  itbis.min = '0';
-  itbis.step = '0.01';
+  itbis.type = 'text';
+  itbis.inputMode = 'decimal';
+  itbis.dataset.money = 'true';
   itbis.placeholder = 'ITBIS';
   itbis.className = 'compra-detalle-itbis';
-  itbis.value = detalle.itbis ?? '';
+  if (detalle.itbis !== undefined && detalle.itbis !== null) {
+    setMoneyInputValueAdmin(itbis, detalle.itbis);
+  }
 
   const total = document.createElement('input');
-  total.type = 'number';
-  total.min = '0';
-  total.step = '0.01';
+  total.type = 'text';
+  total.inputMode = 'decimal';
+  total.dataset.money = 'true';
   total.placeholder = 'Total linea';
   total.className = 'compra-detalle-total';
-  total.value = detalle.total ?? '';
+  if (detalle.total !== undefined && detalle.total !== null) {
+    setMoneyInputValueAdmin(total, detalle.total);
+  }
 
   const remover = document.createElement('button');
   remover.type = 'button';
@@ -1802,16 +2367,16 @@ const obtenerDetallesCompra = () => {
     if (!descripcion) return;
 
     const cantidadValor = cantidadInput?.value === '' ? null : Number(cantidadInput?.value ?? '');
-    const precioValor = precioInput?.value === '' ? null : Number(precioInput?.value ?? '');
-    const itbisValor = itbisInput?.value === '' ? null : Number(itbisInput?.value ?? '');
-    const totalValor = totalInput?.value === '' ? null : Number(totalInput?.value ?? '');
+    const precioValor = precioInput?.value === '' ? null : parseMoneyValueAdmin(precioInput, { allowEmpty: false });
+    const itbisValor = itbisInput?.value === '' ? null : parseMoneyValueAdmin(itbisInput, { allowEmpty: false });
+    const totalValor = totalInput?.value === '' ? null : parseMoneyValueAdmin(totalInput, { allowEmpty: false });
 
     detalles.push({
       descripcion,
-      cantidad: Number.isNaN(cantidadValor) ? null : cantidadValor,
-      precio_unitario: Number.isNaN(precioValor) ? null : precioValor,
-      itbis: Number.isNaN(itbisValor) ? null : itbisValor,
-      total: Number.isNaN(totalValor) ? null : totalValor,
+      cantidad: Number.isFinite(cantidadValor) ? cantidadValor : null,
+      precio_unitario: Number.isFinite(precioValor) ? precioValor : null,
+      itbis: Number.isFinite(itbisValor) ? itbisValor : null,
+      total: Number.isFinite(totalValor) ? totalValor : null,
     });
   });
 
@@ -1829,12 +2394,12 @@ const recalcularMontosCompra = () => {
 
   const impuestoCalculado = detalles.reduce((acumulado, detalle) => acumulado + (Number(detalle.itbis) || 0), 0);
 
-  if (compraGravadoInput) compraGravadoInput.value = totalGravado.toFixed(2);
-  if (compraImpuestoInput) compraImpuestoInput.value = impuestoCalculado.toFixed(2);
+  if (compraGravadoInput) setMoneyInputValueAdmin(compraGravadoInput, totalGravado);
+  if (compraImpuestoInput) setMoneyInputValueAdmin(compraImpuestoInput, impuestoCalculado);
 
-  const exento = Number(compraExentoInput?.value ?? 0) || 0;
-  const total = totalGravado + impuestoCalculado + exento;
-  if (compraTotalInput) compraTotalInput.value = total.toFixed(2);
+  const exento = parseMoneyValueAdmin(compraExentoInput);
+  const total = totalGravado + impuestoCalculado + (Number.isFinite(exento) ? exento : 0);
+  if (compraTotalInput) setMoneyInputValueAdmin(compraTotalInput, total);
 };
 
 const cargarCompras = async () => {
@@ -1879,7 +2444,7 @@ const renderCompras = (lista) => {
     cProveedor.textContent = compra.proveedor;
 
     const cNcf = document.createElement('td');
-    cNcf.textContent = compra.ncf || '—';
+    cNcf.textContent = compra.ncf || 'N/D';
 
     const cGravado = document.createElement('td');
     cGravado.textContent = formatCurrency(compra.monto_gravado ?? 0);
@@ -1916,6 +2481,23 @@ const registrarCompra = async (payload) => {
  * Abastecimiento (compras inventario)
  * ===================== */
 const ITBIS_RATE_ABASTECIMIENTO = 0.18;
+
+const establecerItbisCapitalizableDefault = () => {
+  if (!abastecimientoItbisCapitalizableInput) return;
+  if (abastecimientoEditId) return;
+  abastecimientoItbisCapitalizableInput.checked = !acreditaItbisConfig;
+};
+
+const actualizarEstadoItbisCapitalizable = () => {
+  if (!abastecimientoItbisCapitalizableInput) return;
+  const aplicaItbis = !!abastecimientoAplicaItbisInput?.checked;
+  if (!aplicaItbis) {
+    abastecimientoItbisCapitalizableInput.checked = false;
+    abastecimientoItbisCapitalizableInput.disabled = true;
+    return;
+  }
+  abastecimientoItbisCapitalizableInput.disabled = false;
+};
 
 const calcularTotalesAbastecimiento = (subtotal) => {
   const base = Number(subtotal) || 0;
@@ -1969,6 +2551,16 @@ const detectarAplicaItbisCompra = (compra) => {
   const total = Number(compra.total ?? 0);
   return Number.isFinite(subtotal) && Number.isFinite(total) && total > subtotal;
 };
+
+const detectarItbisCapitalizableCompra = (compra) => {
+  if (!compra) return false;
+  const bandera = compra.itbis_capitalizable;
+  if (bandera === undefined || bandera === null || bandera === '') {
+    return !acreditaItbisConfig;
+  }
+  if (bandera === true || bandera === 1 || bandera === '1') return true;
+  return false;
+};
 const construirOpcionesProductos = (select, seleccionado = null) => {
   if (!select) return;
   const valorActual = seleccionado ?? select.value;
@@ -1999,6 +2591,19 @@ const refrescarSelectsAbastecimiento = () => {
   });
 };
 
+const resolverCostoProductoAbastecimiento = (productoId) => {
+  if (!productoId) return null;
+  const producto = (productos || []).find((item) => Number(item.id) === Number(productoId));
+  if (!producto) return null;
+  const costoPromedio = Number(producto.costo_promedio_actual);
+  if (Number.isFinite(costoPromedio) && costoPromedio > 0) return costoPromedio;
+  const ultimoCosto = Number(producto.ultimo_costo_sin_itbis);
+  if (Number.isFinite(ultimoCosto) && ultimoCosto > 0) return ultimoCosto;
+  const costoBase = Number(producto.costo_base_sin_itbis);
+  if (Number.isFinite(costoBase) && costoBase > 0) return costoBase;
+  return 0;
+};
+
 const crearFilaAbastecimientoDetalle = (detalle = {}) => {
   const fila = document.createElement('div');
   fila.className = 'compra-detalle-row abastecimiento-detalle-row';
@@ -2016,21 +2621,25 @@ const crearFilaAbastecimientoDetalle = (detalle = {}) => {
   cantidad.value = detalle.cantidad ?? '';
 
   const costo = document.createElement('input');
-  costo.type = 'number';
-  costo.min = '0';
-  costo.step = '0.01';
+  costo.type = 'text';
+  costo.inputMode = 'decimal';
+  costo.dataset.money = 'true';
   costo.placeholder = 'Costo unitario';
   costo.className = 'abastecimiento-detalle-costo';
-  costo.value = detalle.costo_unitario ?? '';
+  if (detalle.costo_unitario !== undefined && detalle.costo_unitario !== null) {
+    setMoneyInputValueAdmin(costo, detalle.costo_unitario);
+  }
 
   const total = document.createElement('input');
-  total.type = 'number';
-  total.min = '0';
-  total.step = '0.01';
+  total.type = 'text';
+  total.inputMode = 'decimal';
+  total.dataset.money = 'true';
   total.placeholder = 'Total linea';
   total.className = 'abastecimiento-detalle-total';
   total.readOnly = true;
-  total.value = detalle.total_linea ?? '';
+  if (detalle.total_linea !== undefined && detalle.total_linea !== null) {
+    setMoneyInputValueAdmin(total, detalle.total_linea);
+  }
 
   const remover = document.createElement('button');
   remover.type = 'button';
@@ -2038,6 +2647,15 @@ const crearFilaAbastecimientoDetalle = (detalle = {}) => {
   remover.textContent = 'Quitar';
   remover.addEventListener('click', () => {
     fila.remove();
+    recalcularAbastecimientoTotales();
+  });
+
+  producto.addEventListener('change', () => {
+    const productoId = Number(producto.value);
+    const costoPreferido = resolverCostoProductoAbastecimiento(productoId);
+    if (costoPreferido !== null) {
+      setMoneyInputValueAdmin(costo, costoPreferido > 0 ? costoPreferido : '');
+    }
     recalcularAbastecimientoTotales();
   });
 
@@ -2064,14 +2682,14 @@ const recalcularAbastecimientoTotales = () => {
     const totalInput = fila.querySelector('.abastecimiento-detalle-total');
 
     const cantidad = Number(cantidadInput?.value ?? '');
-    const costo = Number(costoInput?.value ?? '');
+    const costo = parseMoneyValueAdmin(costoInput, { allowEmpty: false });
     if (!Number.isFinite(cantidad) || cantidad <= 0 || !Number.isFinite(costo) || costo < 0) {
-      if (totalInput) totalInput.value = '';
+      if (totalInput) setMoneyInputValueAdmin(totalInput, '');
       return;
     }
 
     const totalLinea = Number((cantidad * costo).toFixed(2));
-    if (totalInput) totalInput.value = totalLinea.toFixed(2);
+    if (totalInput) setMoneyInputValueAdmin(totalInput, totalLinea);
     subtotal += totalLinea;
   });
 
@@ -2095,7 +2713,7 @@ const obtenerDetallesAbastecimiento = () => {
 
     const productoId = Number(productoInput?.value ?? '');
     const cantidad = Number(cantidadInput?.value ?? '');
-    const costo = Number(costoInput?.value ?? '');
+    const costo = parseMoneyValueAdmin(costoInput, { allowEmpty: false });
 
     const filaVacia =
       !productoInput?.value && (cantidadInput?.value ?? '') === '' && (costoInput?.value ?? '') === '';
@@ -2139,6 +2757,8 @@ const limpiarFormularioAbastecimiento = () => {
   if (abastecimientoMetodoInput) abastecimientoMetodoInput.value = '';
   if (abastecimientoObservacionesInput) abastecimientoObservacionesInput.value = '';
   if (abastecimientoAplicaItbisInput) abastecimientoAplicaItbisInput.checked = true;
+  establecerItbisCapitalizableDefault();
+  actualizarEstadoItbisCapitalizable();
   if (abastecimientoDetallesContainer) {
     abastecimientoDetallesContainer.innerHTML = '';
     abastecimientoDetallesContainer.appendChild(crearFilaAbastecimientoDetalle());
@@ -2267,7 +2887,10 @@ const renderDetalleAbastecimiento = (compra, detalles) => {
     cantidad.className = 'text-right';
 
     const costo = document.createElement('td');
-    costo.textContent = formatCurrency(detalle.costo_unitario || 0);
+    const costoBase = Number(detalle.costo_unitario_sin_itbis);
+    const costoMostrar =
+      Number.isFinite(costoBase) && costoBase > 0 ? costoBase : Number(detalle.costo_unitario) || 0;
+    costo.textContent = formatCurrency(costoMostrar || 0);
     costo.className = 'text-right';
 
     const total = document.createElement('td');
@@ -2299,16 +2922,23 @@ const prepararEdicionAbastecimiento = (compra, detalles) => {
   if (abastecimientoAplicaItbisInput) {
     abastecimientoAplicaItbisInput.checked = detectarAplicaItbisCompra(compra);
   }
+  if (abastecimientoItbisCapitalizableInput) {
+    abastecimientoItbisCapitalizableInput.checked = detectarItbisCapitalizableCompra(compra);
+  }
+  actualizarEstadoItbisCapitalizable();
 
   if (abastecimientoDetallesContainer) {
     abastecimientoDetallesContainer.innerHTML = '';
     if (Array.isArray(detalles) && detalles.length > 0) {
       detalles.forEach((detalle) => {
+        const costoBase = Number(detalle.costo_unitario_sin_itbis);
+        const costoMostrar =
+          Number.isFinite(costoBase) && costoBase > 0 ? costoBase : Number(detalle.costo_unitario) || 0;
         abastecimientoDetallesContainer.appendChild(
           crearFilaAbastecimientoDetalle({
             producto_id: detalle.producto_id,
             cantidad: detalle.cantidad,
-            costo_unitario: detalle.costo_unitario,
+            costo_unitario: costoMostrar,
             total_linea: detalle.total_linea,
           })
         );
@@ -2467,6 +3097,7 @@ const limpiarFormularioGasto = () => {
   if (gastoMonedaInput) gastoMonedaInput.value = 'DOP';
   if (gastoTipoInput) gastoTipoInput.value = 'OPERATIVO';
   if (gastoRecurrenteInput) gastoRecurrenteInput.checked = false;
+  if (gastoMontoInput) setMoneyInputValueAdmin(gastoMontoInput, '');
   if (gastoFechaInput) {
     gastoFechaInput.value = getLocalDateISO(new Date());
   }
@@ -2478,7 +3109,7 @@ const cargarGastoEnFormulario = (gasto) => {
   if (!gasto) return;
   if (gastoIdInput) gastoIdInput.value = gasto.id;
   if (gastoFechaInput) gastoFechaInput.value = (gasto.fecha || '').slice(0, 10);
-  if (gastoMontoInput) gastoMontoInput.value = gasto.monto ?? '';
+  if (gastoMontoInput) setMoneyInputValueAdmin(gastoMontoInput, gasto.monto ?? '');
   if (gastoMonedaInput) gastoMonedaInput.value = gasto.moneda || 'DOP';
   if (gastoCategoriaInput) gastoCategoriaInput.value = gasto.categoria ?? '';
   if (gastoTipoInput) gastoTipoInput.value = gasto.tipo_gasto || 'OPERATIVO';
@@ -2496,7 +3127,7 @@ const cargarGastoEnFormulario = (gasto) => {
 
 const obtenerValoresGasto = () => {
   const fecha = gastoFechaInput?.value;
-  const monto = parseFloat(gastoMontoInput?.value ?? '');
+  const monto = parseMoneyValueAdmin(gastoMontoInput, { allowEmpty: false });
   const moneda = gastoMonedaInput?.value || 'DOP';
   const categoria = gastoCategoriaInput?.value.trim();
   const tipo_gasto = gastoTipoInput?.value || 'OPERATIVO';
@@ -2751,7 +3382,7 @@ const renderReporte607 = () => {
     const celda = document.createElement('td');
     celda.colSpan = 11;
     celda.className = 'tabla-vacia';
-    celda.textContent = 'No hay ventas registradas en el período seleccionado.';
+    celda.textContent = 'No hay ventas registradas en el periodo seleccionado.';
     fila.appendChild(celda);
     reporte607Tabla.appendChild(fila);
     reporte607TotalSpan.textContent = '0';
@@ -2763,7 +3394,7 @@ const renderReporte607 = () => {
     const fila = document.createElement('tr');
     fila.innerHTML = `
       <td>${formatDate(filaDato.fecha_factura)}</td>
-      <td>${filaDato.ncf || '—'}</td>
+      <td>${filaDato.ncf || 'N/D'}</td>
       <td>${filaDato.cliente}</td>
       <td>${filaDato.cliente_documento}</td>
       <td>${filaDato.tipo_comprobante}</td>
@@ -2860,7 +3491,7 @@ const renderReporte606 = () => {
     const celda = document.createElement('td');
     celda.colSpan = 9;
     celda.className = 'tabla-vacia';
-    celda.textContent = 'No hay compras registradas en el período seleccionado.';
+    celda.textContent = 'No hay compras registradas en el periodo seleccionado.';
     fila.appendChild(celda);
     reporte606Tabla.appendChild(fila);
     reporte606TotalSpan.textContent = '0';
@@ -2873,9 +3504,9 @@ const renderReporte606 = () => {
     fila.innerHTML = `
       <td>${formatDate(filaDato.fecha)}</td>
       <td>${filaDato.proveedor}</td>
-      <td>${filaDato.rnc || '—'}</td>
-      <td>${filaDato.tipo_comprobante || '—'}</td>
-      <td>${filaDato.ncf || '—'}</td>
+      <td>${filaDato.rnc || 'N/D'}</td>
+      <td>${filaDato.tipo_comprobante || 'N/D'}</td>
+      <td>${filaDato.ncf || 'N/D'}</td>
       <td>${formatCurrency(filaDato.monto_gravado)}</td>
       <td>${formatCurrency(filaDato.impuesto)}</td>
       <td>${formatCurrency(filaDato.monto_exento)}</td>
@@ -3160,16 +3791,18 @@ const renderCapitalInicialAnalisis = (capital, configuracion, rango) => {
   if (analisisCapitalHastaInput) analisisCapitalHastaInput.value = periodoFin;
   if (analisisCapitalCajaInput) {
     const caja = capital?.caja_inicial ?? '';
-    analisisCapitalCajaInput.value = caja === '' ? '' : Number(caja).toFixed(2);
+    setMoneyInputValueAdmin(analisisCapitalCajaInput, caja === '' ? '' : Number(caja));
   }
   if (analisisCapitalInventarioInput) {
     const inventario = capital?.inventario_inicial ?? '';
-    analisisCapitalInventarioInput.value = inventario === '' ? '' : Number(inventario).toFixed(2);
+    setMoneyInputValueAdmin(analisisCapitalInventarioInput, inventario === '' ? '' : Number(inventario));
   }
   if (analisisCogsEstimadoInput) {
     const costoEstimado = configuracion?.costo_estimado_cogs;
-    analisisCogsEstimadoInput.value =
-      costoEstimado === undefined || costoEstimado === null ? '' : Number(costoEstimado).toFixed(2);
+    setMoneyInputValueAdmin(
+      analisisCogsEstimadoInput,
+      costoEstimado === undefined || costoEstimado === null ? '' : Number(costoEstimado)
+    );
   }
 
   if (analisisCapitalMensaje) {
@@ -3194,10 +3827,16 @@ const renderAnalisis = (data) => {
   const gastosData = data.gastos || {};
   const ganancias = data.ganancias || {};
   const comparacion = data.comparacion || {};
+  const costosConfigurados = data.costos_configurados !== false;
 
   if (analisisKpiVentas) analisisKpiVentas.textContent = formatCurrency(ingresos.total || 0);
   if (analisisKpiGastos) analisisKpiGastos.textContent = formatCurrency(gastosData.total || 0);
   if (analisisKpiGanancia) analisisKpiGanancia.textContent = formatCurrency(ganancias.neta || 0);
+  if (analisisKpiUtilidadReal) {
+    analisisKpiUtilidadReal.textContent = costosConfigurados
+      ? formatCurrency(ganancias.utilidad_real || 0)
+      : '---';
+  }
   if (analisisKpiMargen) {
     const margen = Number(ganancias.margen) || 0;
     analisisKpiMargen.textContent = `${(margen * 100).toFixed(1)}%`;
@@ -3253,6 +3892,17 @@ const renderAnalisis = (data) => {
     value: formatCurrency(item.total || 0),
   }));
 
+  if (analisisUtilidadRealAviso) {
+    if (!costosConfigurados) {
+      analisisUtilidadRealAviso.hidden = false;
+      analisisUtilidadRealAviso.dataset.type = 'warning';
+      analisisUtilidadRealAviso.textContent = 'Configura costos en Productos para ver utilidad real.';
+    } else {
+      analisisUtilidadRealAviso.hidden = true;
+      analisisUtilidadRealAviso.textContent = '';
+    }
+  }
+
   const recurrentes = gastosData.recurrentes || [];
   const montoRecurrente = recurrentes.find((r) => r.es_recurrente)?.total || 0;
   const montoNoRecurrente = recurrentes.find((r) => !r.es_recurrente)?.total || 0;
@@ -3282,6 +3932,15 @@ const renderAnalisisAvanzado = (data) => {
   if (analisisAdvGastosOperativos) {
     analisisAdvGastosOperativos.textContent = formatCurrency(gastos.total_operativos || 0);
   }
+  if (analisisAdvCogsTotal) {
+    analisisAdvCogsTotal.textContent = formatCurrency(data.cogs_total || 0);
+  }
+  if (analisisAdvUtilidadBruta) {
+    analisisAdvUtilidadBruta.textContent = formatCurrency(data.utilidad_bruta || 0);
+  }
+  if (analisisAdvUtilidadNeta) {
+    analisisAdvUtilidadNeta.textContent = formatCurrency(data.utilidad_neta_real || 0);
+  }
   if (analisisAdvFlujoCaja) {
     analisisAdvFlujoCaja.textContent = formatCurrency(flujoCaja.variacion || 0);
   }
@@ -3305,9 +3964,9 @@ const renderAnalisisAvanzado = (data) => {
 const guardarCapitalInicialAnalisis = async () => {
   const periodoInicio = analisisCapitalDesdeInput?.value || analisisDesdeInput?.value || '';
   const periodoFin = analisisCapitalHastaInput?.value || analisisHastaInput?.value || '';
-  const cajaInicial = parseFloat(analisisCapitalCajaInput?.value ?? '');
-  const inventarioInicial = parseFloat(analisisCapitalInventarioInput?.value ?? '');
-  const costoEstimado = parseFloat(analisisCogsEstimadoInput?.value ?? '');
+  const cajaInicial = parseMoneyValueAdmin(analisisCapitalCajaInput, { allowEmpty: false });
+  const inventarioInicial = parseMoneyValueAdmin(analisisCapitalInventarioInput, { allowEmpty: false });
+  const costoEstimado = parseMoneyValueAdmin(analisisCogsEstimadoInput, { allowEmpty: false });
 
   if (!periodoInicio || !periodoFin) {
     setMessage(analisisCapitalMensaje, 'Selecciona el periodo del capital inicial.', 'error');
@@ -3440,9 +4099,9 @@ const renderCierresCaja = () => {
   cierresCaja.forEach((cierre) => {
     const fila = document.createElement('tr');
     const diferencia = Number(cierre.diferencia) || 0;
-    const observacionesTexto = cierre.observaciones || '—';
+    const observacionesTexto = cierre.observaciones || 'N/D';
     const observacionesReducidas =
-      observacionesTexto.length > 60 ? `${observacionesTexto.slice(0, 57)}…` : observacionesTexto;
+      observacionesTexto.length > 60 ? `${observacionesTexto.slice(0, 57)}...` : observacionesTexto;
 
     const celdaFecha = document.createElement('td');
     celdaFecha.textContent = formatDate(cierre.fecha_operacion);
@@ -3453,7 +4112,7 @@ const renderCierresCaja = () => {
     fila.appendChild(celdaHora);
 
     const celdaUsuario = document.createElement('td');
-    celdaUsuario.textContent = cierre.usuario || '—';
+    celdaUsuario.textContent = cierre.usuario || 'N/D';
     fila.appendChild(celdaUsuario);
 
     const celdaSistema = document.createElement('td');
@@ -3542,7 +4201,7 @@ const renderDetalleCierre = (pedidos, cierreId) => {
     fila.appendChild(celdaId);
 
     const celdaMesa = document.createElement('td');
-    celdaMesa.textContent = pedido.mesa || pedido.cliente || '—';
+    celdaMesa.textContent = pedido.mesa || pedido.cliente || 'N/D';
     fila.appendChild(celdaMesa);
 
     const celdaTotal = document.createElement('td');
@@ -3711,9 +4370,9 @@ const renderHistorialCocina = (items = []) => {
         item.preparador_nombre || item.cocinero_nombre || item.bartender_nombre || 'No asignado';
       return `
         <tr>
-          <td>${item.cuenta_id || '—'}</td>
+          <td>${item.cuenta_id || 'N/D'}</td>
           <td>${item.pedido_id}</td>
-          <td>${item.item_nombre || '—'}</td>
+          <td>${item.item_nombre || 'N/D'}</td>
           <td>${item.cantidad}</td>
           <td>${area}</td>
           <td>${preparador}</td>
@@ -3730,7 +4389,7 @@ const actualizarPaginacionHistorialCocina = (total, pageSize, page) => {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const pageNum = Math.min(page, totalPages);
 
-  histCocinaInfo.textContent = `Página ${pageNum} de ${totalPages}`;
+  histCocinaInfo.textContent = `PÃ¡gina ${pageNum} de ${totalPages}`;
   histCocinaPrev.disabled = pageNum <= 1;
   histCocinaNext.disabled = pageNum >= totalPages;
 };
@@ -3909,11 +4568,11 @@ const procesarSyncGlobal = (valor) => {
 
     if (!data.evento || eventosRelevantes.includes(data.evento)) {
       recargarEstadoAdmin(false).catch((error) => {
-        console.error('Error al refrescar el panel administrativo tras sincronización:', error);
+        console.error('Error al refrescar el panel administrativo tras sincronizaciÃ³n:', error);
       });
     }
   } catch (error) {
-    console.warn('No se pudo procesar la sincronización de administrador:', error);
+    console.warn('No se pudo procesar la sincronizaciÃ³n de administrador:', error);
   }
 };
 
@@ -3928,6 +4587,7 @@ const DEFAULT_CONFIG_MODULOS = {
   cocina: true,
   bar: false,
   caja: true,
+  mostrador: true,
   historialCocina: true,
 };
 const DEFAULT_NEGOCIO_COLORS = {
@@ -3964,10 +4624,11 @@ const getNegociosDom = () => ({
   inputColorBotonPeligro: document.getElementById('kanm-negocios-color-boton-peligro'),
   chkModuloAdmin: document.getElementById('kanm-modulo-admin'),
   chkModuloMesera: document.getElementById('kanm-modulo-mesera'),
-  chkModuloCocina: document.getElementById('kanm-modulo-cocina'),
-  chkModuloBar: document.getElementById('kanm-modulo-bar'),
-  chkModuloCaja: document.getElementById('kanm-modulo-caja'),
-  chkModuloHistorial: document.getElementById('kanm-modulo-historial'),
+    chkModuloCocina: document.getElementById('kanm-modulo-cocina'),
+    chkModuloBar: document.getElementById('kanm-modulo-bar'),
+    chkModuloCaja: document.getElementById('kanm-modulo-caja'),
+    chkModuloMostrador: document.getElementById('kanm-modulo-mostrador'),
+    chkModuloHistorial: document.getElementById('kanm-modulo-historial'),
   inputAdminCorreo: document.getElementById('kanm-negocios-admin-correo'),
   inputAdminUsuario: document.getElementById('kanm-negocios-admin-usuario'),
   chkCambiarPassword: document.getElementById('kanm-negocios-cambiar-password'),
@@ -4296,11 +4957,12 @@ const abrirModalNegocio = async (id = null) => {
   }
 
   if (dom.chkModuloAdmin) dom.chkModuloAdmin.checked = configParsed.admin !== false;
-  if (dom.chkModuloMesera) dom.chkModuloMesera.checked = configParsed.mesera !== false;
-  if (dom.chkModuloCocina) dom.chkModuloCocina.checked = configParsed.cocina !== false;
-  if (dom.chkModuloBar) dom.chkModuloBar.checked = configParsed.bar !== false;
-  if (dom.chkModuloCaja) dom.chkModuloCaja.checked = configParsed.caja !== false;
-  if (dom.chkModuloHistorial) dom.chkModuloHistorial.checked = configParsed.historialCocina !== false;
+    if (dom.chkModuloMesera) dom.chkModuloMesera.checked = configParsed.mesera !== false;
+    if (dom.chkModuloCocina) dom.chkModuloCocina.checked = configParsed.cocina !== false;
+    if (dom.chkModuloBar) dom.chkModuloBar.checked = configParsed.bar !== false;
+    if (dom.chkModuloCaja) dom.chkModuloCaja.checked = configParsed.caja !== false;
+    if (dom.chkModuloMostrador) dom.chkModuloMostrador.checked = configParsed.mostrador !== false;
+    if (dom.chkModuloHistorial) dom.chkModuloHistorial.checked = configParsed.historialCocina !== false;
 
   if (dom.inputAdminCorreo) {
     dom.inputAdminCorreo.value =
@@ -4352,14 +5014,15 @@ const guardarNegocio = async (event) => {
   if (dom.mensajeForm) setMessage(dom.mensajeForm, '', 'info');
   const esEdicion = Boolean(dom.inputId?.value);
 
-  const configModulos = {
-    admin: dom.chkModuloAdmin?.checked !== false,
-    mesera: dom.chkModuloMesera?.checked !== false,
-    cocina: dom.chkModuloCocina?.checked !== false,
-    bar: dom.chkModuloBar?.checked !== false,
-    caja: dom.chkModuloCaja?.checked !== false,
-    historialCocina: dom.chkModuloHistorial?.checked !== false,
-  };
+    const configModulos = {
+      admin: dom.chkModuloAdmin?.checked !== false,
+      mesera: dom.chkModuloMesera?.checked !== false,
+      cocina: dom.chkModuloCocina?.checked !== false,
+      bar: dom.chkModuloBar?.checked !== false,
+      caja: dom.chkModuloCaja?.checked !== false,
+      mostrador: dom.chkModuloMostrador?.checked !== false,
+      historialCocina: dom.chkModuloHistorial?.checked !== false,
+    };
 
   const passwordEditable = dom.chkCambiarPassword?.checked === true;
   const adminPassword = passwordEditable ? dom.inputAdminPassword?.value || null : null;
@@ -4403,7 +5066,7 @@ const guardarNegocio = async (event) => {
     const adminInfo = data?.adminPrincipal;
     if (adminInfo?.passwordGenerada) {
       alert(
-        `Se creó el usuario admin ${adminInfo.correo} con la contraseña: ${adminInfo.passwordGenerada}. Guárdala, no se mostrará de nuevo.`
+        `Se creÃ³ el usuario admin ${adminInfo.correo} con la contraseÃ±a: ${adminInfo.passwordGenerada}. GuÃ¡rdala, no se mostrarÃ¡ de nuevo.`
       );
     }
     cerrarModalNegocio();
@@ -4429,12 +5092,12 @@ const initNegociosAdmin = () => {
   const sesion = obtenerSesionNegocios();
   const dom = getNegociosDom();
   if (!dom.section) {
-    console.warn('Sección de negocios no encontrada');
+    console.warn('SecciÃ³n de negocios no encontrada');
     return;
   }
   console.log('[Negocios] initNegociosAdmin llamado. APP_SESION:', window.APP_SESION);
   if (!sesion?.esSuperAdmin) {
-    console.log('[Negocios] Usuario no es super admin, ocultando sección');
+    console.log('[Negocios] Usuario no es super admin, ocultando secciÃ³n');
     dom.section.style.display = 'none';
     return;
   }
@@ -4546,6 +5209,11 @@ impuestoForm?.addEventListener('submit', (event) => {
 impuestoGuardarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   guardarImpuesto();
+});
+
+itbisAcreditaGuardarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  guardarConfiguracionItbisAcredita();
 });
 
 document.getElementById('factura-form')?.addEventListener('submit', (event) => {
@@ -4662,16 +5330,21 @@ compraForm?.addEventListener('submit', async (event) => {
     return;
   }
 
+  const montoGravado = parseMoneyValueAdmin(compraGravadoInput);
+  const impuesto = parseMoneyValueAdmin(compraImpuestoInput);
+  const montoExento = parseMoneyValueAdmin(compraExentoInput);
+  const totalCompra = parseMoneyValueAdmin(compraTotalInput);
+
   const payload = {
     proveedor,
     rnc: compraRncInput?.value,
     fecha,
     tipo_comprobante: compraTipoInput?.value,
     ncf: compraNcfInput?.value,
-    monto_gravado: Number(compraGravadoInput?.value ?? 0),
-    impuesto: Number(compraImpuestoInput?.value ?? 0),
-    monto_exento: Number(compraExentoInput?.value ?? 0),
-    total: Number(compraTotalInput?.value ?? 0),
+    monto_gravado: Number.isFinite(montoGravado) ? montoGravado : 0,
+    impuesto: Number.isFinite(impuesto) ? impuesto : 0,
+    monto_exento: Number.isFinite(montoExento) ? montoExento : 0,
+    total: Number.isFinite(totalCompra) ? totalCompra : 0,
     comentarios: compraComentariosInput?.value,
     items: detalles,
   };
@@ -4681,6 +5354,10 @@ compraForm?.addEventListener('submit', async (event) => {
     await registrarCompra(payload);
     setMessage(compraMensaje, 'Compra registrada correctamente.', 'info');
     compraForm.reset();
+    setMoneyInputValueAdmin(compraGravadoInput, '');
+    setMoneyInputValueAdmin(compraImpuestoInput, '');
+    setMoneyInputValueAdmin(compraExentoInput, '');
+    setMoneyInputValueAdmin(compraTotalInput, '');
     compraDetallesContainer.innerHTML = '';
     compraDetallesContainer.appendChild(crearFilaDetalle());
     await cargarCompras();
@@ -4706,7 +5383,10 @@ abastecimientoDetallesContainer?.addEventListener('input', (event) => {
   }
 });
 
-abastecimientoAplicaItbisInput?.addEventListener('change', () => recalcularAbastecimientoTotales());
+abastecimientoAplicaItbisInput?.addEventListener('change', () => {
+  recalcularAbastecimientoTotales();
+  actualizarEstadoItbisCapitalizable();
+});
 
 abastecimientoCancelarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
@@ -4739,6 +5419,7 @@ abastecimientoForm?.addEventListener('submit', async (event) => {
   }
 
   const aplicaItbis = !!abastecimientoAplicaItbisInput?.checked;
+  const itbisCapitalizable = !!abastecimientoItbisCapitalizableInput?.checked;
   actualizarResumenAbastecimiento(subtotal || 0);
 
   const payload = {
@@ -4748,6 +5429,7 @@ abastecimientoForm?.addEventListener('submit', async (event) => {
     metodo_pago: metodoPago || null,
     observaciones: observaciones || null,
     aplica_itbis: aplicaItbis ? 1 : 0,
+    itbis_capitalizable: itbisCapitalizable ? 1 : 0,
     items: detalles,
   };
 
@@ -4959,7 +5641,7 @@ cierresTabla?.addEventListener('click', (event) => {
   abrirModalEliminar({
     titulo: 'Eliminar cuadre de caja',
     descripcion:
-      'Esta acción es irreversible. Confirma que deseas eliminar el registro de cuadre de caja seleccionado.',
+      'Esta acciÃ³n es irreversible. Confirma que deseas eliminar el registro de cuadre de caja seleccionado.',
     endpoint: `/api/admin/eliminar/cierre-caja/${id}`,
     onSuccess: () => {
       cierresCaja = cierresCaja.filter((item) => item.id !== id);
@@ -5086,6 +5768,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([
     cargarProductos(),
     cargarImpuesto(),
+    cargarConfiguracionItbisAcredita(),
     cargarConfiguracionFactura(),
     cargarConfigSecuencias(),
     cargarCompras(),
@@ -5100,6 +5783,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (abastecimientoDetallesContainer) {
     abastecimientoDetallesContainer.appendChild(crearFilaAbastecimientoDetalle());
     recalcularAbastecimientoTotales();
+    establecerItbisCapitalizableDefault();
+    actualizarEstadoItbisCapitalizable();
   }
   await consultarReporte607();
   await consultarReporte606();
@@ -5124,7 +5809,7 @@ window.addEventListener('storage', (event) => {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     recargarEstadoAdmin(false).catch((error) => {
-      console.error('Error al refrescar el panel administrativo al volver a la pestaña:', error);
+      console.error('Error al refrescar el panel administrativo al volver a la pestaÃ±a:', error);
     });
   }
 });

@@ -9,6 +9,7 @@
     cocina: '/cocina.html',
     bar: '/bar.html',
     caja: '/caja.html',
+    vendedor: '/mostrador.html',
     admin: '/admin.html',
   };
 

@@ -8,6 +8,7 @@ const DEFAULT_CONFIG_MODULOS = {
   cocina: true,
   bar: false,
   caja: true,
+  mostrador: true,
   historialCocina: true,
 };
 const DEFAULT_COLOR_TEXTO = '#222222';
@@ -295,6 +296,7 @@ async function ensureTableComprasInventario() {
       subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
       itbis DECIMAL(12,2) NOT NULL DEFAULT 0,
       aplica_itbis TINYINT(1) NOT NULL DEFAULT 0,
+      itbis_capitalizable TINYINT(1) NOT NULL DEFAULT 0,
       total DECIMAL(12,2) NOT NULL DEFAULT 0,
       observaciones TEXT NULL,
       creado_por INT NULL,
@@ -316,6 +318,7 @@ async function ensureTableComprasInventario() {
   await ensureColumn('compras_inventario', 'subtotal DECIMAL(12,2) NOT NULL DEFAULT 0');
   await ensureColumn('compras_inventario', 'itbis DECIMAL(12,2) NOT NULL DEFAULT 0');
   await ensureColumn('compras_inventario', 'aplica_itbis TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('compras_inventario', 'itbis_capitalizable TINYINT(1) NOT NULL DEFAULT 0');
   await query(
     'UPDATE compras_inventario SET subtotal = total WHERE (subtotal IS NULL OR subtotal = 0) AND total > 0'
   );
@@ -329,6 +332,10 @@ async function ensureTableComprasInventarioDetalle() {
       producto_id INT NOT NULL,
       cantidad DECIMAL(10,2) NOT NULL,
       costo_unitario DECIMAL(10,2) NOT NULL,
+      costo_unitario_sin_itbis DECIMAL(12,2) NOT NULL DEFAULT 0,
+      costo_unitario_efectivo DECIMAL(12,2) NOT NULL DEFAULT 0,
+      itbis_aplica TINYINT(1) NOT NULL DEFAULT 0,
+      itbis_capitalizable TINYINT(1) NOT NULL DEFAULT 0,
       total_linea DECIMAL(10,2) NOT NULL,
       negocio_id INT NOT NULL,
       CONSTRAINT fk_compra_inv_detalle_compra FOREIGN KEY (compra_id) REFERENCES compras_inventario(id),
@@ -343,6 +350,70 @@ async function ensureTableComprasInventarioDetalle() {
   await ensureForeignKey('compras_inventario_detalle', 'negocio_id');
   await ensureForeignKey('compras_inventario_detalle', 'compra_id', 'compras_inventario');
   await ensureForeignKey('compras_inventario_detalle', 'producto_id', 'productos');
+  await ensureColumn('compras_inventario_detalle', 'costo_unitario_sin_itbis DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('compras_inventario_detalle', 'costo_unitario_efectivo DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('compras_inventario_detalle', 'itbis_aplica TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('compras_inventario_detalle', 'itbis_capitalizable TINYINT(1) NOT NULL DEFAULT 0');
+}
+
+async function ensureTableRecetas() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS recetas (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      producto_final_id INT NOT NULL,
+      activo TINYINT(1) NOT NULL DEFAULT 1,
+      creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+      actualizado_en DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_recetas_producto (negocio_id, producto_final_id),
+      CONSTRAINT fk_recetas_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id),
+      CONSTRAINT fk_recetas_producto FOREIGN KEY (producto_final_id) REFERENCES productos(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('recetas', 'idx_recetas_negocio', '(negocio_id)');
+}
+
+async function ensureTableRecetaDetalle() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS receta_detalle (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      receta_id INT NOT NULL,
+      insumo_id INT NOT NULL,
+      cantidad DECIMAL(12,4) NOT NULL,
+      unidad ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND',
+      creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_receta_detalle_receta FOREIGN KEY (receta_id) REFERENCES recetas(id),
+      CONSTRAINT fk_receta_detalle_insumo FOREIGN KEY (insumo_id) REFERENCES productos(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('receta_detalle', 'idx_receta_detalle_receta', '(receta_id)');
+  await ensureIndexByName('receta_detalle', 'idx_receta_detalle_insumo', '(insumo_id)');
+}
+
+async function ensureTableConsumoInsumos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS consumo_insumos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      pedido_id INT NOT NULL,
+      detalle_pedido_id INT NULL,
+      producto_final_id INT NOT NULL,
+      insumo_id INT NOT NULL,
+      cantidad_base DECIMAL(12,4) NOT NULL,
+      unidad_base ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND',
+      revertido TINYINT(1) NOT NULL DEFAULT 0,
+      creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+      negocio_id INT NOT NULL,
+      CONSTRAINT fk_consumo_insumos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id),
+      CONSTRAINT fk_consumo_insumos_pedido FOREIGN KEY (pedido_id) REFERENCES pedidos(id),
+      CONSTRAINT fk_consumo_insumos_producto FOREIGN KEY (producto_final_id) REFERENCES productos(id),
+      CONSTRAINT fk_consumo_insumos_insumo FOREIGN KEY (insumo_id) REFERENCES productos(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('consumo_insumos', 'idx_consumo_insumos_negocio_pedido', '(negocio_id, pedido_id)');
+  await ensureIndexByName('consumo_insumos', 'idx_consumo_insumos_negocio_insumo', '(negocio_id, insumo_id)');
 }
 
 async function ensureTableAnalisisCapitalInicial() {
@@ -821,9 +892,6 @@ async function migrateDetalleCompraManual() {
 async function removeInsumosModule() {
   await migrateDetalleCompraManual();
   await dropColumn('pedidos', 'insumos_descontados');
-  await dropTable('receta_detalle');
-  await dropTable('recetas');
-  await dropTable('insumos');
 }
 
 async function initializeNegocioThemeAndModulesDefaults() {
@@ -838,15 +906,22 @@ async function initializeNegocioThemeAndModulesDefaults() {
           SET config_modulos = CASE
                 WHEN config_modulos IS NULL THEN ?
                 WHEN JSON_VALID(config_modulos) = 0 THEN ?
-                WHEN JSON_EXTRACT(config_modulos, '$.bar') IS NULL THEN JSON_SET(config_modulos, '$.bar', JSON_EXTRACT(?, '$.bar'))
-                ELSE config_modulos
+                ELSE JSON_SET(
+                  JSON_SET(
+                    config_modulos,
+                    '$.bar',
+                    IFNULL(JSON_EXTRACT(config_modulos, '$.bar'), JSON_EXTRACT(?, '$.bar'))
+                  ),
+                  '$.mostrador',
+                  IFNULL(JSON_EXTRACT(config_modulos, '$.mostrador'), JSON_EXTRACT(?, '$.mostrador'))
+                )
               END,
               color_boton_primario = COALESCE(color_boton_primario, color_primario),
               color_boton_secundario = COALESCE(color_boton_secundario, color_secundario),
               color_boton_peligro = COALESCE(color_boton_peligro, ?),
               color_header = COALESCE(color_header, color_primario, color_secundario),
               color_texto = COALESCE(color_texto, ?)` ,
-      [defaultConfig, defaultConfig, defaultConfig, DEFAULT_COLOR_PELIGRO, DEFAULT_COLOR_TEXTO]
+      [defaultConfig, defaultConfig, defaultConfig, defaultConfig, DEFAULT_COLOR_PELIGRO, DEFAULT_COLOR_TEXTO]
     );
   } catch (error) {
     console.warn('No se pudo inicializar temas y modulos de negocios:', error?.message || error);
@@ -877,6 +952,9 @@ async function runMigrations() {
   await ensureTableGastos();
   await ensureTableComprasInventario();
   await ensureTableComprasInventarioDetalle();
+  await ensureTableRecetas();
+  await ensureTableRecetaDetalle();
+  await ensureTableConsumoInsumos();
   await ensureTableAnalisisCapitalInicial();
   await ensureColumn('salidas_caja', 'usuario_id INT NULL');
   await ensureColumn('negocios', 'slug VARCHAR(120) UNIQUE');
@@ -887,8 +965,25 @@ async function runMigrations() {
   await ensureColumn('categorias', "area_preparacion ENUM('ninguna', 'cocina', 'bar') NOT NULL DEFAULT 'ninguna'");
   await ensureColumn('productos', 'stock_indefinido TINYINT(1) NOT NULL DEFAULT 0');
   await ensureColumn('productos', 'precios JSON NULL');
+  await ensureColumn('productos', 'costo_base_sin_itbis DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('productos', 'costo_promedio_actual DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('productos', 'ultimo_costo_sin_itbis DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('productos', 'actualiza_costo_con_compras TINYINT(1) NOT NULL DEFAULT 1');
+  await ensureColumn('productos', 'costo_unitario_real DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('productos', 'costo_unitario_real_incluye_itbis TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('productos', "tipo_producto ENUM('FINAL', 'INSUMO') NOT NULL DEFAULT 'FINAL'");
+  await ensureColumn('productos', 'insumo_vendible TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('productos', "unidad_base ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND'");
+  await ensureColumn('productos', 'contenido_por_unidad DECIMAL(12,4) NOT NULL DEFAULT 1');
+  await modifyColumn('productos', 'stock DECIMAL(12,4) NULL DEFAULT 0');
   await ensureColumn('pedidos', 'bartender_id INT NULL');
   await ensureColumn('pedidos', 'bartender_nombre VARCHAR(255) NULL');
+  await ensureColumn('pedidos', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
+  await ensureColumn('pedidos', 'cogs_total DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('cierres_caja', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
+  await ensureColumn('salidas_caja', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
+  await ensureColumn('detalle_pedido', 'costo_unitario_snapshot DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('detalle_pedido', 'cogs_linea DECIMAL(12,2) NOT NULL DEFAULT 0');
   await ensureNegocioThemeAndModulesColumns();
   await ensureLogoUrlCapacity();
   await ensureNegocioStatusColumns();
@@ -896,6 +991,17 @@ async function runMigrations() {
   await initializeNegocioThemeAndModulesDefaults();
   await addNegocioIdToTables();
   await removeInsumosModule();
+  try {
+    await query(
+      `UPDATE productos
+          SET costo_unitario_real = CASE
+            WHEN COALESCE(costo_unitario_real, 0) = 0 THEN COALESCE(costo_promedio_actual, costo_base_sin_itbis, 0)
+            ELSE costo_unitario_real
+          END`
+    );
+  } catch (error) {
+    console.warn('No se pudo inicializar costo_unitario_real desde costos previos:', error?.message || error);
+  }
   await ensurePedidosNcfUniqueIndex();
   await ensureEsSuperAdminColumn();
   await ensurePasswordControlColumns();

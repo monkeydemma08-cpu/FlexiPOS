@@ -27,9 +27,13 @@ const DEFAULT_CONFIG_MODULOS = {
   cocina: true,
   bar: false,
   caja: true,
+  mostrador: true,
   historialCocina: true,
 };
 const AREAS_PREPARACION = ['ninguna', 'cocina', 'bar'];
+const TIPOS_PRODUCTO = new Set(['FINAL', 'INSUMO']);
+const UNIDADES_BASE = new Set(['UND', 'ML', 'GR']);
+const MODOS_INVENTARIO_COSTOS = new Set(['REVENTA', 'PREPARACION']);
 const DEFAULT_COLOR_TEXTO = '#222222';
 const DEFAULT_COLOR_PELIGRO = '#ff4b4b';
 const PASSWORD_HASH_ROUNDS = 10;
@@ -87,7 +91,7 @@ const limpiarCacheAnalitica = (negocioId) => {
   }
 };
 
-const usuarioRolesPermitidos = ['mesera', 'cocina', 'bar', 'caja'];
+const usuarioRolesPermitidos = ['mesera', 'cocina', 'bar', 'caja', 'vendedor'];
 
 const generarTokenSesion = () => crypto.randomBytes(24).toString('hex');
 const generarPasswordTemporal = (length = 12) => {
@@ -185,6 +189,25 @@ function normalizarCampoTexto(valor) {
 function normalizarAreaPreparacion(area) {
   const valor = (area || 'ninguna').toString().trim().toLowerCase();
   return AREAS_PREPARACION.includes(valor) ? valor : 'ninguna';
+}
+
+const ORIGENES_CAJA = new Set(['caja', 'mostrador']);
+
+function normalizarOrigenCaja(valor, fallback = 'caja') {
+  if (valor === undefined || valor === null) {
+    return fallback;
+  }
+  const texto = String(valor).trim().toLowerCase();
+  return ORIGENES_CAJA.has(texto) ? texto : fallback;
+}
+
+function construirFiltroOrigenCaja(origen, params = [], campo = 'origen_caja') {
+  const normalizado = normalizarOrigenCaja(origen, 'caja');
+  if (normalizado === 'caja') {
+    return `(${campo} IS NULL OR ${campo} = 'caja')`;
+  }
+  params.push(normalizado);
+  return `${campo} = ?`;
 }
 
 function parseConfigModulos(configModulos) {
@@ -1638,6 +1661,9 @@ const guardarConfiguracionNegocio = async (negocioId, valores = {}) => {
 };
 
 const COGS_CONFIG_KEY = 'cogs_costo_estimado';
+const ITBIS_ACREDITA_CONFIG_KEY = 'itbis_acredita';
+const INVENTARIO_MODO_CONFIG_KEY = 'modo_inventario_costos';
+const INSUMOS_BLOQUEO_CONFIG_KEY = 'insumos_bloquear_sin_stock';
 
 const obtenerCostoEstimadoCogs = async (negocioId) => {
   try {
@@ -1648,6 +1674,39 @@ const obtenerCostoEstimadoCogs = async (negocioId) => {
   } catch (error) {
     console.warn('No se pudo obtener el costo estimado de COGS:', error?.message || error);
     return 0;
+  }
+};
+
+const obtenerConfigAcreditaItbis = async (negocioId) => {
+  try {
+    const valores = await leerConfiguracionNegocio(negocioId, [ITBIS_ACREDITA_CONFIG_KEY]);
+    const raw = valores?.[ITBIS_ACREDITA_CONFIG_KEY];
+    return normalizarFlag(raw, 1) === 1;
+  } catch (error) {
+    console.warn('No se pudo obtener configuracion de ITBIS acreditable:', error?.message || error);
+    return true;
+  }
+};
+
+const obtenerModoInventarioCostos = async (negocioId) => {
+  try {
+    const valores = await leerConfiguracionNegocio(negocioId, [INVENTARIO_MODO_CONFIG_KEY]);
+    const raw = valores?.[INVENTARIO_MODO_CONFIG_KEY];
+    return normalizarModoInventarioCostos(raw, 'PREPARACION');
+  } catch (error) {
+    console.warn('No se pudo obtener configuracion de modo inventario:', error?.message || error);
+    return 'PREPARACION';
+  }
+};
+
+const obtenerConfigBloqueoInsumos = async (negocioId) => {
+  try {
+    const valores = await leerConfiguracionNegocio(negocioId, [INSUMOS_BLOQUEO_CONFIG_KEY]);
+    const raw = valores?.[INSUMOS_BLOQUEO_CONFIG_KEY];
+    return normalizarFlag(raw, 0) === 1;
+  } catch (error) {
+    console.warn('No se pudo obtener configuracion de bloqueo de insumos:', error?.message || error);
+    return false;
   }
 };
 
@@ -1884,6 +1943,38 @@ const normalizarFlag = (valor, predeterminado = 0) => {
     if (['0', 'false', 'off', 'no'].includes(limpio)) return 0;
   }
   return valor ? 1 : 0;
+};
+
+const normalizarTipoProducto = (valor, predeterminado = 'FINAL') => {
+  const limpio = String(valor || '').trim().toUpperCase();
+  if (TIPOS_PRODUCTO.has(limpio)) {
+    return limpio;
+  }
+  return predeterminado;
+};
+
+const normalizarUnidadBase = (valor, predeterminado = 'UND') => {
+  const limpio = String(valor || '').trim().toUpperCase();
+  if (UNIDADES_BASE.has(limpio)) {
+    return limpio;
+  }
+  return predeterminado;
+};
+
+const normalizarModoInventarioCostos = (valor, predeterminado = 'PREPARACION') => {
+  const limpio = String(valor || '').trim().toUpperCase();
+  if (MODOS_INVENTARIO_COSTOS.has(limpio)) {
+    return limpio;
+  }
+  return predeterminado;
+};
+
+const normalizarContenidoPorUnidad = (valor, predeterminado = 1) => {
+  const numero = normalizarNumero(valor, predeterminado);
+  if (!Number.isFinite(numero) || numero <= 0) {
+    return predeterminado;
+  }
+  return Number(numero);
 };
 
 const TIPOS_GASTO = ['OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA'];
@@ -2432,17 +2523,29 @@ const obtenerCuentasPorEstados = async (estados, negocioId, opciones = {}) => {
   const estadosBusqueda = filtrarPorEstadoArea || (incluyeListos && incluirSiAreaLista) ? estadosValidos : estados;
   const placeholders = estadosBusqueda.map(() => '?').join(', ');
   const soloHoy = opciones.hoy === true || opciones.soloHoy === true;
-  const filtroFechaSql = soloHoy ? ' AND DATE(COALESCE(fecha_listo, fecha_creacion)) = CURDATE()' : '';
+  const origenSolicitado = opciones?.origen_caja ?? opciones?.origen;
+  const usarFiltroOrigen =
+    origenSolicitado !== undefined &&
+    origenSolicitado !== null &&
+    String(origenSolicitado).trim() !== '';
+  const filtros = [`estado IN (${placeholders})`, 'negocio_id = ?'];
+  const params = [...estadosBusqueda, negocioId];
+  if (soloHoy) {
+    filtros.push('DATE(COALESCE(fecha_listo, fecha_creacion)) = CURDATE()');
+  }
+  if (usarFiltroOrigen) {
+    filtros.push(construirFiltroOrigenCaja(origenSolicitado, params, 'origen_caja'));
+  }
   const pedidos = await db.all(
     `
       SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
              impuesto, total, fecha_creacion, fecha_listo, fecha_cierre,
              cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, negocio_id
       FROM pedidos
-      WHERE estado IN (${placeholders}) AND negocio_id = ?${filtroFechaSql}
+      WHERE ${filtros.join(' AND ')}
       ORDER BY fecha_creacion ASC
     `,
-    [...estadosBusqueda, negocioId]
+    params
   );
 
   if (!pedidos.length) {
@@ -2539,6 +2642,216 @@ const ajustarStockPorPedido = async (pedidoId, negocioId, signo = 1) => {
   }
 };
 
+const obtenerRecetasPorProductos = async (productoIds, negocioId) => {
+  if (!Array.isArray(productoIds) || productoIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = productoIds.map(() => '?').join(', ');
+  const rows = await db.all(
+    `
+      SELECT r.producto_final_id,
+             rd.insumo_id,
+             rd.cantidad,
+             rd.unidad,
+             i.nombre AS insumo_nombre,
+             COALESCE(i.stock, 0) AS stock,
+             COALESCE(i.stock_indefinido, 0) AS stock_indefinido,
+             COALESCE(i.contenido_por_unidad, 1) AS contenido_por_unidad,
+             COALESCE(i.unidad_base, 'UND') AS unidad_base,
+             COALESCE(i.tipo_producto, 'FINAL') AS tipo_producto
+      FROM recetas r
+      JOIN receta_detalle rd ON rd.receta_id = r.id
+      JOIN productos i ON i.id = rd.insumo_id AND i.negocio_id = ?
+      WHERE r.negocio_id = ?
+        AND r.activo = 1
+        AND r.producto_final_id IN (${placeholders})
+    `,
+    [negocioId, negocioId, ...productoIds]
+  );
+
+  const recetasMap = new Map();
+  (rows || []).forEach((row) => {
+    const productoId = Number(row.producto_final_id);
+    if (!Number.isFinite(productoId)) return;
+    const lista = recetasMap.get(productoId) || [];
+    lista.push({
+      insumo_id: Number(row.insumo_id),
+      cantidad: Number(row.cantidad) || 0,
+      unidad: normalizarUnidadBase(row.unidad, 'UND'),
+      insumo_nombre: row.insumo_nombre,
+      stock: Number(row.stock) || 0,
+      stock_indefinido: Number(row.stock_indefinido) || 0,
+      contenido_por_unidad: normalizarContenidoPorUnidad(row.contenido_por_unidad, 1),
+      unidad_base: normalizarUnidadBase(row.unidad_base, 'UND'),
+      tipo_producto: normalizarTipoProducto(row.tipo_producto, 'FINAL'),
+    });
+    recetasMap.set(productoId, lista);
+  });
+
+  return recetasMap;
+};
+
+const obtenerCostosRecetaPorProductos = async (productoIds, negocioId) => {
+  if (!Array.isArray(productoIds) || productoIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = productoIds.map(() => '?').join(', ');
+  const rows = await db.all(
+    `
+      SELECT r.producto_final_id,
+             rd.cantidad,
+             COALESCE(i.costo_promedio_actual, 0) AS costo_promedio_actual,
+             COALESCE(i.contenido_por_unidad, 1) AS contenido_por_unidad
+      FROM recetas r
+      JOIN receta_detalle rd ON rd.receta_id = r.id
+      JOIN productos i ON i.id = rd.insumo_id AND i.negocio_id = ?
+      WHERE r.negocio_id = ?
+        AND r.activo = 1
+        AND r.producto_final_id IN (${placeholders})
+    `,
+    [negocioId, negocioId, ...productoIds]
+  );
+
+  const costosMap = new Map();
+  (rows || []).forEach((row) => {
+    const productoId = Number(row.producto_final_id);
+    if (!Number.isFinite(productoId)) return;
+    const contenido = normalizarContenidoPorUnidad(row.contenido_por_unidad, 1);
+    const costoUnitario = contenido > 0 ? (Number(row.costo_promedio_actual) || 0) / contenido : 0;
+    const costoInsumo = Number(row.cantidad) * costoUnitario;
+    const acumulado = costosMap.get(productoId) || 0;
+    costosMap.set(productoId, Number((acumulado + costoInsumo).toFixed(4)));
+  });
+
+  return costosMap;
+};
+
+const revertirConsumoInsumosPorPedido = async (pedidoId, negocioId) => {
+  const consumos = await db.all(
+    `
+      SELECT insumo_id, cantidad_base
+      FROM consumo_insumos
+      WHERE pedido_id = ? AND negocio_id = ? AND COALESCE(revertido, 0) = 0
+    `,
+    [pedidoId, negocioId]
+  );
+
+  if (!consumos || consumos.length === 0) {
+    return;
+  }
+
+  const insumoIds = Array.from(
+    new Set(consumos.map((consumo) => Number(consumo.insumo_id)).filter((id) => Number.isFinite(id) && id > 0))
+  );
+  if (!insumoIds.length) {
+    return;
+  }
+
+  const placeholders = insumoIds.map(() => '?').join(', ');
+  const insumos = await db.all(
+    `SELECT id, stock_indefinido, contenido_por_unidad FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
+    [negocioId, ...insumoIds]
+  );
+  const insumosMap = new Map((insumos || []).map((insumo) => [Number(insumo.id), insumo]));
+
+  const totals = new Map();
+  consumos.forEach((consumo) => {
+    const insumoId = Number(consumo.insumo_id);
+    if (!Number.isFinite(insumoId)) return;
+    const insumo = insumosMap.get(insumoId);
+    if (!insumo || esStockIndefinido(insumo)) return;
+    const contenido = normalizarContenidoPorUnidad(insumo.contenido_por_unidad, 1);
+    const cantidadBase = Number(consumo.cantidad_base) || 0;
+    const cantidadUnidades = contenido > 0 ? cantidadBase / contenido : 0;
+    const acumulado = totals.get(insumoId) || 0;
+    totals.set(insumoId, Number((acumulado + cantidadUnidades).toFixed(4)));
+  });
+
+  for (const [insumoId, cantidad] of totals.entries()) {
+    if (!cantidad) continue;
+    await db.run('UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?', [
+      cantidad,
+      insumoId,
+      negocioId,
+    ]);
+  }
+
+  await db.run(
+    'UPDATE consumo_insumos SET revertido = 1 WHERE pedido_id = ? AND negocio_id = ? AND COALESCE(revertido, 0) = 0',
+    [pedidoId, negocioId]
+  );
+};
+
+const actualizarCogsPedidos = async (pedidoIds, negocioId) => {
+  if (!Array.isArray(pedidoIds) || pedidoIds.length === 0) {
+    return new Map();
+  }
+
+  const modoInventario = await obtenerModoInventarioCostos(negocioId);
+  const esReventa = modoInventario === 'REVENTA';
+  const placeholders = pedidoIds.map(() => '?').join(', ');
+  const rows = await db.all(
+    `
+      SELECT dp.id AS detalle_id,
+             dp.pedido_id,
+             dp.producto_id,
+             dp.cantidad,
+             COALESCE(p.costo_promedio_actual, 0) AS costo_promedio_actual,
+             COALESCE(p.costo_unitario_real, 0) AS costo_unitario_real
+      FROM detalle_pedido dp
+      JOIN productos p ON p.id = dp.producto_id
+      WHERE dp.pedido_id IN (${placeholders}) AND dp.negocio_id = ?
+    `,
+    [...pedidoIds, negocioId]
+  );
+
+  const productoIds = Array.from(
+    new Set((rows || []).map((row) => Number(row.producto_id)).filter((id) => Number.isFinite(id) && id > 0))
+  );
+  const costosReceta = !esReventa
+    ? await obtenerCostosRecetaPorProductos(productoIds, negocioId)
+    : new Map();
+
+  const cogsPorPedido = new Map();
+  const detalles = rows || [];
+
+  for (const row of detalles) {
+    const productoId = Number(row.producto_id);
+    const costoReceta = costosReceta.get(productoId);
+    let costoUnitario = 0;
+    if (costoReceta !== undefined) {
+      costoUnitario = Number(costoReceta) || 0;
+    } else if (esReventa) {
+      costoUnitario = Number(row.costo_unitario_real) || 0;
+    } else {
+      costoUnitario = Number(row.costo_promedio_actual) || 0;
+    }
+    const cantidad = Number(row.cantidad) || 0;
+    const cogsLinea = Number((cantidad * costoUnitario).toFixed(2));
+    const pedidoId = Number(row.pedido_id);
+    const acumulado = cogsPorPedido.get(pedidoId) || 0;
+    cogsPorPedido.set(pedidoId, Number((acumulado + cogsLinea).toFixed(2)));
+
+    await db.run(
+      'UPDATE detalle_pedido SET costo_unitario_snapshot = ?, cogs_linea = ? WHERE id = ? AND negocio_id = ?',
+      [Number(costoUnitario.toFixed(2)), cogsLinea, row.detalle_id, negocioId]
+    );
+  }
+
+  for (const pedidoId of pedidoIds) {
+    const cogsTotal = cogsPorPedido.get(Number(pedidoId)) || 0;
+    await db.run('UPDATE pedidos SET cogs_total = ? WHERE id = ? AND negocio_id = ?', [
+      Number(cogsTotal.toFixed(2)),
+      pedidoId,
+      negocioId,
+    ]);
+  }
+
+  return cogsPorPedido;
+};
+
 const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
   const pedido = await db.get(
     `
@@ -2630,6 +2943,8 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     opciones?.negocio_id ||
     (pedidosActivos.length ? pedidosActivos[0].negocio_id : null) ||
     NEGOCIO_ID_DEFAULT;
+  const origenFallback = opciones?.usuario_rol === 'vendedor' ? 'mostrador' : 'caja';
+  const origenCaja = normalizarOrigenCaja(opciones?.origen_caja ?? opciones?.origen, origenFallback);
 
   const descuentoValor = normalizarNumero(descuento_porcentaje, 0);
   const propinaValor = normalizarNumero(propina_porcentaje, 0);
@@ -2846,33 +3161,44 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
 
       const actualizarPedido = (indice) => {
         if (indice >= pedidosActivos.length) {
-          return db.run('COMMIT', (commitErr) => {
-            if (commitErr) {
-              console.error('Error al confirmar cierre de cuenta:', commitErr.message);
-              return callback({ status: 500, message: 'No se pudo cerrar la cuenta' });
-            }
+          const pedidoIds = pedidosActivos.map((pedido) => pedido.id);
+          return actualizarCogsPedidos(pedidoIds, negocioIdOperacion)
+            .then(() =>
+              db.run('COMMIT', (commitErr) => {
+                if (commitErr) {
+                  console.error('Error al confirmar cierre de cuenta:', commitErr.message);
+                  return callback({ status: 500, message: 'No se pudo cerrar la cuenta' });
+                }
 
-            const factura = {
-              id: Number(pedidoReferencia.id),
-              cliente: clienteFinal || pedidoReferencia.cliente,
-              cliente_documento: documentoFinal || pedidoReferencia.cliente_documento,
-              tipo_comprobante: tipoFinal,
-              ncf: ncfAsignado || pedidoReferencia.ncf,
-              fecha: new Date().toISOString(),
-            };
+                const factura = {
+                  id: Number(pedidoReferencia.id),
+                  cliente: clienteFinal || pedidoReferencia.cliente,
+                  cliente_documento: documentoFinal || pedidoReferencia.cliente_documento,
+                  tipo_comprobante: tipoFinal,
+                  ncf: ncfAsignado || pedidoReferencia.ncf,
+                  fecha: new Date().toISOString(),
+                };
 
-            const totales = {
-              subtotal: subtotalTotal,
-              impuesto: impuestoTotal,
-              descuento_porcentaje: descuentoValor,
-              descuento_monto: descuentoMonto,
-              propina_porcentaje: propinaValor,
-              propina_monto: propinaMonto,
-              total_cobrado: totalAPagar,
-            };
+                const totales = {
+                  subtotal: subtotalTotal,
+                  impuesto: impuestoTotal,
+                  descuento_porcentaje: descuentoValor,
+                  descuento_monto: descuentoMonto,
+                  propina_porcentaje: propinaValor,
+                  propina_monto: propinaMonto,
+                  total_cobrado: totalAPagar,
+                };
 
-            return callback(null, { factura, totales });
-          });
+                limpiarCacheAnalitica(negocioIdOperacion);
+                return callback(null, { factura, totales });
+              })
+            )
+            .catch((cogsErr) => {
+              console.error('Error al registrar COGS del pedido:', cogsErr?.message || cogsErr);
+              return db.run('ROLLBACK', () =>
+                callback({ status: 500, message: 'No se pudo registrar el costo de la venta' })
+              );
+            });
         }
 
         const p = pedidosActivos[indice];
@@ -2895,6 +3221,7 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
               propina_monto = ?,
               comentarios = COALESCE(?, comentarios),
               cobrado_por = COALESCE(cobrado_por, ?),
+              origen_caja = ?,
               pago_efectivo = ?,
               pago_efectivo_entregado = ?,
               pago_tarjeta = ?,
@@ -2919,6 +3246,7 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
               propina_monto = ?,
               comentarios = COALESCE(?, comentarios),
               cobrado_por = COALESCE(cobrado_por, ?),
+              origen_caja = ?,
               pago_efectivo = ?,
               pago_efectivo_entregado = ?,
               pago_tarjeta = ?,
@@ -2940,6 +3268,7 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
           propinasDistribuidas[indice] || 0,
           comentariosFinal,
           usuario_id || null,
+          origenCaja,
           pagoEfectivoDistribuido[indice] || 0,
           efectivoEntregado,
           pagoTarjetaDistribuido[indice] || 0,
@@ -3064,12 +3393,14 @@ const obtenerPedidosPendientesDeCierre = (fecha, negocioId, opcionesOrCallback, 
   const ignorarFecha = opciones?.ignorarFecha === true;
   const filtros = ["estado = 'pagado'"];
   const params = [];
+  const origenCaja = normalizarOrigenCaja(opciones?.origen_caja ?? opciones?.origen, 'caja');
   if (!ignorarFecha) {
     filtros.push(`DATE(${FECHA_BASE_PEDIDOS_SQL}) = ?`);
     params.push(fecha);
   }
   filtros.push('negocio_id = ?');
   params.push(negocioId || NEGOCIO_ID_DEFAULT);
+  filtros.push(construirFiltroOrigenCaja(origenCaja, params, 'origen_caja'));
   if (soloPendientes) {
     filtros.push('(cierre_id IS NULL)');
   }
@@ -3104,15 +3435,33 @@ const obtenerPedidosPendientesDeCierre = (fecha, negocioId, opcionesOrCallback, 
   });
 };
 
-const obtenerUltimoCierreCaja = (negocioId, callback) => {
+const obtenerUltimoCierreCaja = (negocioIdOrCallback, origenOrCallback, maybeCallback) => {
+  let negocioId = negocioIdOrCallback;
+  let origen = null;
+  let callback = maybeCallback;
+
+  if (typeof negocioIdOrCallback === 'function') {
+    callback = negocioIdOrCallback;
+    negocioId = NEGOCIO_ID_DEFAULT;
+  } else if (typeof origenOrCallback === 'function') {
+    callback = origenOrCallback;
+  } else {
+    origen = origenOrCallback;
+  }
+
+  const params = [negocioId || NEGOCIO_ID_DEFAULT];
+  const filtros = ['negocio_id = ?'];
+  const origenCaja = normalizarOrigenCaja(origen, 'caja');
+  filtros.push(construirFiltroOrigenCaja(origenCaja, params, 'origen_caja'));
+
   const sql = `
     SELECT fecha_cierre
     FROM cierres_caja
-    WHERE negocio_id = ?
+    WHERE ${filtros.join('\n      AND ')}
     ORDER BY fecha_cierre DESC
     LIMIT 1
   `;
-  db.get(sql, [negocioId || NEGOCIO_ID_DEFAULT], (err, row) => {
+  db.get(sql, params, (err, row) => {
     if (err) {
       return callback(err);
     }
@@ -3139,6 +3488,7 @@ const obtenerSalidasPorFecha = (fecha, negocioIdOrCallback, opcionesOrCallback, 
   const hasta = opciones?.hasta || null;
   const filtros = [];
   const params = [];
+  const origenCaja = normalizarOrigenCaja(opciones?.origen_caja ?? opciones?.origen, 'caja');
 
   if (!ignorarFecha) {
     filtros.push('DATE(fecha) = ?');
@@ -3147,6 +3497,7 @@ const obtenerSalidasPorFecha = (fecha, negocioIdOrCallback, opcionesOrCallback, 
 
   filtros.push('negocio_id = ?');
   params.push(negocioId || NEGOCIO_ID_DEFAULT);
+  filtros.push(construirFiltroOrigenCaja(origenCaja, params, 'origen_caja'));
 
   if (ignorarFecha && desde) {
     filtros.push('created_at >= ?');
@@ -3238,7 +3589,7 @@ const crearGastoSalidaCaja = async ({ negocioId, usuarioId, fecha, monto, descri
         fecha, monto, moneda, categoria, tipo_gasto, origen, metodo_pago, proveedor, descripcion,
         referencia, referencia_tipo, referencia_id, usuario_id, es_recurrente,
         frecuencia, tags, negocio_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     params
   );
@@ -3349,11 +3700,12 @@ const calcularResumenCajaPorFecha = (
 
   const ignorarFecha = opciones?.ignorarFecha === true;
   const soloPendientes = ignorarFecha ? true : opciones?.soloPendientes !== false;
+  const origenCaja = normalizarOrigenCaja(opciones?.origen_caja ?? opciones?.origen, 'caja');
 
   obtenerPedidosPendientesDeCierre(
     fecha,
     negocioId,
-    { soloPendientes, ignorarFecha },
+    { soloPendientes, ignorarFecha, origen_caja: origenCaja },
     (err, pedidos) => {
     if (err) {
       return callback(err);
@@ -3368,6 +3720,7 @@ const calcularResumenCajaPorFecha = (
       }
       filtros.push('p.negocio_id = ?');
       params.push(negocioId);
+      filtros.push(construirFiltroOrigenCaja(origenCaja, params, 'p.origen_caja'));
       if (soloPendientes) {
         filtros.push('p.cierre_id IS NULL');
       }
@@ -3385,11 +3738,16 @@ const calcularResumenCajaPorFecha = (
 
     const cargarSalidas = (hecho) => {
       if (!ignorarFecha) {
-        return obtenerSalidasPorFecha(fecha, negocioId, hecho);
+        return obtenerSalidasPorFecha(fecha, negocioId, { origen_caja: origenCaja }, hecho);
       }
-      obtenerUltimoCierreCaja(negocioId, (inicioErr, inicioTurno) => {
+      obtenerUltimoCierreCaja(negocioId, origenCaja, (inicioErr, inicioTurno) => {
         if (inicioErr) return hecho(inicioErr);
-        obtenerSalidasPorFecha(null, negocioId, { ignorarFecha: true, desde: inicioTurno }, hecho);
+        obtenerSalidasPorFecha(
+          null,
+          negocioId,
+          { ignorarFecha: true, desde: inicioTurno, origen_caja: origenCaja },
+          hecho
+        );
       });
     };
 
@@ -3619,17 +3977,20 @@ app.post('/api/caja/cierres', (req, res) => {
   });
 });
 
-const obtenerCierresCaja = (desde, hasta, negocioId, callback) => {
+const obtenerCierresCaja = (desde, hasta, negocioId, origen, callback) => {
   const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const params = [negocio, desde, hasta];
+  const filtros = ['negocio_id = ?', 'DATE(fecha_operacion) BETWEEN ? AND ?'];
+  const origenCaja = normalizarOrigenCaja(origen, 'caja');
+  filtros.push(construirFiltroOrigenCaja(origenCaja, params, 'origen_caja'));
   const sql = `
-    SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol,
+    SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol, origen_caja,
            total_sistema, total_declarado, diferencia, observaciones
     FROM cierres_caja
-    WHERE negocio_id = ?
-      AND DATE(fecha_operacion) BETWEEN ? AND ?
+    WHERE ${filtros.join('\n      AND ')}
     ORDER BY fecha_operacion DESC
   `;
-  db.all(sql, [negocio, desde, hasta], (err, rows) => {
+  db.all(sql, params, (err, rows) => {
     if (err) {
       return callback(err);
     }
@@ -3637,8 +3998,10 @@ const obtenerCierresCaja = (desde, hasta, negocioId, callback) => {
   });
 };
 
-const obtenerPedidosDetalleCierre = (cierreId, negocioId, callback) => {
+const obtenerPedidosDetalleCierre = (cierreId, negocioId, origen, callback) => {
   const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const params = [cierreId, negocio];
+  const filtroOrigen = construirFiltroOrigenCaja(origen, params, 'origen_caja');
   const sql = `
     SELECT
       COALESCE(cuenta_id, id) AS id,
@@ -3651,10 +4014,11 @@ const obtenerPedidosDetalleCierre = (cierreId, negocioId, callback) => {
     FROM pedidos
     WHERE cierre_id = ?
       AND negocio_id = ?
+      AND ${filtroOrigen}
     GROUP BY id
     ORDER BY fecha_cierre DESC, id ASC
   `;
-  db.all(sql, [cierreId, negocio], (err, rows) => {
+  db.all(sql, params, (err, rows) => {
     if (err) {
       return callback(err);
     }
@@ -3688,12 +4052,14 @@ const registrarCierreCaja = async (payload, negocioId) => {
   const fondoInicial = Number(payload?.fondo_inicial) || 0;
   const usuarioRol = payload?.usuario_rol || null;
   const observaciones = (payload?.observaciones || '').toString();
+  const origenFallback = usuarioRol === 'vendedor' ? 'mostrador' : 'caja';
+  const origenCaja = normalizarOrigenCaja(payload?.origen_caja ?? payload?.origen, origenFallback);
 
   const resumenDia = await new Promise((resolve, reject) => {
     calcularResumenCajaPorFecha(
       fechaOperacion,
       negocio,
-      { soloPendientes: true, ignorarFecha: true },
+      { soloPendientes: true, ignorarFecha: true, origen_caja: origenCaja },
       (err, data) => {
         if (err) return reject(err);
         return resolve(data || {});
@@ -3708,12 +4074,13 @@ const registrarCierreCaja = async (payload, negocioId) => {
 
   const insert = await db.run(
     `INSERT INTO cierres_caja
-      (fecha_operacion, usuario, usuario_rol, fondo_inicial, total_sistema, total_declarado, diferencia, observaciones, negocio_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (fecha_operacion, usuario, usuario_rol, origen_caja, fondo_inicial, total_sistema, total_declarado, diferencia, observaciones, negocio_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       fechaOperacion,
       usuario,
       usuarioRol,
+      origenCaja,
       fondoInicial,
       esperado,
       Number(totalDeclarado.toFixed(2)),
@@ -3725,13 +4092,17 @@ const registrarCierreCaja = async (payload, negocioId) => {
 
   const cierreId = insert?.lastID || insert?.lastInsertId || null;
   if (cierreId) {
+    const params = [cierreId, origenCaja, negocio];
+    const filtroOrigen = construirFiltroOrigenCaja(origenCaja, params, 'origen_caja');
     await db.run(
       `UPDATE pedidos
-         SET cierre_id = ?
+         SET cierre_id = ?,
+             origen_caja = ?
        WHERE estado = 'pagado'
          AND (cierre_id IS NULL)
-         AND negocio_id = ?`,
-      [cierreId, negocio]
+         AND negocio_id = ?
+         AND ${filtroOrigen}`,
+      params
     );
   }
 
@@ -3740,6 +4111,7 @@ const registrarCierreCaja = async (payload, negocioId) => {
     fecha_operacion: fechaOperacion,
     usuario,
     usuario_rol: usuarioRol,
+    origen_caja: origenCaja,
     fondo_inicial: fondoInicial,
     total_sistema: esperado,
     total_declarado: Number(totalDeclarado.toFixed(2)),
@@ -3762,9 +4134,10 @@ const construirFilasCierresCSV = (cierres) =>
 app.get('/api/caja/cierres', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
     const rango = normalizarRangoCierres(req.query?.desde, req.query?.hasta);
 
-    obtenerCierresCaja(rango.desde, rango.hasta, negocioId, (err, cierres) => {
+    obtenerCierresCaja(rango.desde, rango.hasta, negocioId, origenCaja, (err, cierres) => {
       if (err) {
         console.error('Error al consultar cierres de caja:', err?.message || err);
         return res.status(500).json({ ok: false, error: 'Error al consultar cierres de caja' });
@@ -3778,7 +4151,8 @@ app.get('/api/caja/cierres/export', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
     const rango = normalizarRangoCierres(req.query?.desde, req.query?.hasta);
-    obtenerCierresCaja(rango.desde, rango.hasta, negocioId, (err, cierres) => {
+    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
+    obtenerCierresCaja(rango.desde, rango.hasta, negocioId, origenCaja, (err, cierres) => {
       if (err) {
         console.error('Error al exportar cierres de caja:', err?.message || err);
         return res.status(500).json({ ok: false, error: 'Error al exportar cierres de caja' });
@@ -3810,10 +4184,13 @@ app.get('/api/caja/cierres/:id/detalle', (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID de cierre inválido' });
     }
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
 
+    const params = [corteId, negocioId];
+    const filtroOrigen = construirFiltroOrigenCaja(origenCaja, params, 'origen_caja');
     db.get(
-      'SELECT id FROM cierres_caja WHERE id = ? AND negocio_id = ?',
-      [corteId, negocioId],
+      `SELECT id FROM cierres_caja WHERE id = ? AND negocio_id = ? AND ${filtroOrigen}`,
+      params,
       (cierreErr, cierreRow) => {
         if (cierreErr) {
           console.error('Error al consultar el cierre de caja:', cierreErr?.message || cierreErr);
@@ -3823,7 +4200,7 @@ app.get('/api/caja/cierres/:id/detalle', (req, res) => {
           return res.status(404).json({ ok: false, error: 'Cierre no encontrado' });
         }
 
-        obtenerPedidosDetalleCierre(corteId, negocioId, (detalleErr, pedidos) => {
+        obtenerPedidosDetalleCierre(corteId, negocioId, origenCaja, (detalleErr, pedidos) => {
           if (detalleErr) {
             console.error('Error al obtener detalle del cierre:', detalleErr?.message || detalleErr);
             return res.status(500).json({ ok: false, error: 'Error al obtener el detalle del cierre' });
@@ -3909,11 +4286,13 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
     };
 
     try {
+      const paramsCierre = [cierreId, negocioId];
+      const filtroOrigen = construirFiltroOrigenCaja(origenCaja, paramsCierre, 'origen_caja');
       const cierre = await db.get(
-        `SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol, total_sistema, total_declarado, diferencia
+        `SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol, origen_caja, total_sistema, total_declarado, diferencia
          FROM cierres_caja
-         WHERE id = ? AND negocio_id = ?`,
-        [cierreId, negocioId]
+         WHERE id = ? AND negocio_id = ? AND ${filtroOrigen}`,
+        paramsCierre
       );
 
       if (!cierre) {
@@ -3922,6 +4301,8 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
 
       const fechaOperacion = normalizarFechaConsulta(cierre.fecha_operacion || cierre.fecha_cierre);
 
+      const paramsVentas = [negocioId, cierreId];
+      const filtroOrigenPedidos = construirFiltroOrigenCaja(origenCaja, paramsVentas, 'p.origen_caja');
       const [productos, ventasRows, comprasRows] = await Promise.all([
         db.all(
           `SELECT id, nombre, precio, precios, stock, stock_indefinido
@@ -3942,8 +4323,9 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
             WHERE p.negocio_id = ?
               AND p.cierre_id = ?
               AND p.estado = 'pagado'
+              AND ${filtroOrigenPedidos}
             GROUP BY dp.producto_id, dp.precio_unitario`,
-          [negocioId, cierreId]
+          paramsVentas
         ),
         db.all(
           `SELECT dc.descripcion, dc.cantidad
@@ -4038,7 +4420,7 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
       const totalValorVenta = detalleProductos.reduce((acc, item) => acc + (Number(item.valor_venta) || 0), 0);
 
       const salidasData = await new Promise((resolve, reject) => {
-        obtenerSalidasPorFecha(fechaOperacion, negocioId, (err, data) => {
+        obtenerSalidasPorFecha(fechaOperacion, negocioId, { origen_caja: origenCaja }, (err, data) => {
           if (err) return reject(err);
           resolve(data || {});
         });
@@ -4123,6 +4505,79 @@ app.put('/api/configuracion/impuesto', (req, res) => {
     } catch (error) {
       console.error('Error al guardar el impuesto configurado:', error?.message || error);
       res.status(500).json({ ok: false, error: 'No se pudo actualizar el impuesto' });
+    }
+  });
+});
+
+app.get('/api/configuracion/itbis-acredita', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const acreditaItbis = await obtenerConfigAcreditaItbis(negocioId);
+      res.json({ ok: true, acredita_itbis: acreditaItbis ? 1 : 0 });
+    } catch (error) {
+      console.error('Error al obtener configuracion de ITBIS acreditable:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo consultar la configuracion de ITBIS.' });
+    }
+  });
+});
+
+app.put('/api/configuracion/itbis-acredita', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const rawValor = req.body?.acredita_itbis ?? req.body?.acreditaItbis;
+    const valor = normalizarFlag(rawValor, 1);
+    try {
+      await guardarConfiguracionNegocio(negocioId, {
+        [ITBIS_ACREDITA_CONFIG_KEY]: valor,
+      });
+      res.json({ ok: true, acredita_itbis: valor });
+    } catch (error) {
+      console.error('Error al guardar configuracion de ITBIS acreditable:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar la configuracion de ITBIS.' });
+    }
+  });
+});
+
+app.get('/api/configuracion/inventario', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const modoInventario = await obtenerModoInventarioCostos(negocioId);
+      const bloquearInsumos = await obtenerConfigBloqueoInsumos(negocioId);
+      res.json({
+        ok: true,
+        modo_inventario_costos: modoInventario,
+        bloquear_insumos_sin_stock: bloquearInsumos ? 1 : 0,
+      });
+    } catch (error) {
+      console.error('Error al obtener configuracion de inventario:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo consultar la configuracion de inventario.' });
+    }
+  });
+});
+
+app.put('/api/configuracion/inventario', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const rawModo = req.body?.modo_inventario_costos ?? req.body?.modoInventarioCostos;
+    const rawBloqueo =
+      req.body?.bloquear_insumos_sin_stock ?? req.body?.bloquearInsumosSinStock;
+    const modoInventario = normalizarModoInventarioCostos(rawModo, 'PREPARACION');
+    const bloquearInsumos = normalizarFlag(rawBloqueo, 0);
+    try {
+      await guardarConfiguracionNegocio(negocioId, {
+        [INVENTARIO_MODO_CONFIG_KEY]: modoInventario,
+        [INSUMOS_BLOQUEO_CONFIG_KEY]: bloquearInsumos,
+      });
+      res.json({
+        ok: true,
+        modo_inventario_costos: modoInventario,
+        bloquear_insumos_sin_stock: bloquearInsumos,
+      });
+    } catch (error) {
+      console.error('Error al guardar configuracion de inventario:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar la configuracion de inventario.' });
     }
   });
 });
@@ -4225,33 +4680,53 @@ app.get('/api/productos', (req, res) => {
         ? 'LEFT JOIN categorias c ON p.categoria_id = c.id AND c.negocio_id = ?'
         : 'LEFT JOIN categorias c ON p.categoria_id = c.id';
 
-        const sql = `
-          SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo, p.categoria_id,
-                 c.nombre AS categoria_nombre
-          FROM productos p
-          ${joinCond}
-          WHERE p.negocio_id = ?
-          ORDER BY p.nombre ASC
-        `;
+      const soloVentaRaw = req.query?.solo_venta ?? req.query?.soloVenta ?? req.query?.venta;
+      const soloVenta = normalizarFlag(soloVentaRaw, 0) === 1;
+      const tipoFiltroRaw = req.query?.tipo_producto ?? req.query?.tipoProducto ?? req.query?.tipo;
+      const tipoFiltro = tipoFiltroRaw ? normalizarTipoProducto(tipoFiltroRaw, null) : null;
+      const filtrarVenta = !tienePermisoAdmin(usuarioSesion) || soloVenta;
+
+      const filtros = ['p.negocio_id = ?'];
+      if (filtrarVenta) {
+        filtros.push("(COALESCE(p.tipo_producto, 'FINAL') <> 'INSUMO' OR COALESCE(p.insumo_vendible, 0) = 1)");
+      }
+      if (tipoFiltro) {
+        filtros.push("COALESCE(p.tipo_producto, 'FINAL') = ?");
+      }
+
+      const sql = `
+        SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo, p.categoria_id,
+               p.costo_base_sin_itbis, p.costo_promedio_actual, p.ultimo_costo_sin_itbis,
+               p.actualiza_costo_con_compras, p.costo_unitario_real, p.costo_unitario_real_incluye_itbis,
+               p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad,
+               c.nombre AS categoria_nombre
+        FROM productos p
+        ${joinCond}
+        WHERE ${filtros.join(' AND ')}
+        ORDER BY p.nombre ASC
+      `;
 
       const params = [];
       if (tieneNegocioId) {
         params.push(negocioId);
       }
       params.push(negocioId);
+      if (tipoFiltro) {
+        params.push(tipoFiltro);
+      }
 
-        db.all(sql, params, (err, rows) => {
-          if (err) {
-            console.error('Error al obtener productos:', err.message);
-            return res.status(500).json({ error: 'Error al obtener productos' });
-          }
+      db.all(sql, params, (err, rows) => {
+        if (err) {
+          console.error('Error al obtener productos:', err.message);
+          return res.status(500).json({ error: 'Error al obtener productos' });
+        }
 
-          const productos = (rows || []).map((row) => ({
-            ...row,
-            precios: normalizarListaPrecios(row.precios),
-          }));
-          res.json(productos);
-        });
+        const productos = (rows || []).map((row) => ({
+          ...row,
+          precios: normalizarListaPrecios(row.precios),
+        }));
+        res.json(productos);
+      });
     } catch (error) {
       console.error('Error al construir consulta de productos:', error?.message || error);
       res.status(500).json({ error: 'Error al obtener productos' });
@@ -4264,12 +4739,13 @@ app.get('/api/caja/salidas', (req, res) => {
     const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
     const fechaQuery = normalizarCampoTexto(req.query?.fecha, null);
     const fecha = fechaQuery ? (esFechaISOValida(fechaQuery) ? fechaQuery : null) : obtenerFechaLocalISO(new Date());
+    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
 
     if (!fecha) {
       return res.status(400).json({ ok: false, error: 'Fecha invalida.' });
     }
 
-    obtenerSalidasPorFecha(fecha, negocioId, (err, data) => {
+    obtenerSalidasPorFecha(fecha, negocioId, { origen_caja: origenCaja }, (err, data) => {
       if (err) {
         console.error('Error al obtener salidas de caja:', err?.message || err);
         return res.status(500).json({ ok: false, error: 'No se pudieron cargar las salidas de caja.' });
@@ -4349,6 +4825,8 @@ app.post('/api/caja/salidas', (req, res) => {
     const monto = normalizarNumero(req.body?.monto, null);
     const fechaInput = normalizarCampoTexto(req.body?.fecha, null);
     const fecha = fechaInput ? (esFechaISOValida(fechaInput) ? fechaInput : null) : obtenerFechaLocalISO(new Date());
+    const origenFallback = usuarioSesion?.rol === 'vendedor' ? 'mostrador' : 'caja';
+    const origenCaja = normalizarOrigenCaja(req.body?.origen_caja ?? req.body?.origen ?? req.query?.origen, origenFallback);
 
     if (!descripcion) {
       return res.status(400).json({ ok: false, error: 'La descripcion es obligatoria.' });
@@ -4367,10 +4845,10 @@ app.post('/api/caja/salidas', (req, res) => {
 
       const salidaInsert = await db.run(
         `
-          INSERT INTO salidas_caja (negocio_id, fecha, descripcion, monto, metodo, usuario_id)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO salidas_caja (negocio_id, fecha, descripcion, monto, metodo, origen_caja, usuario_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
-        [negocioId, fecha, descripcion, monto, 'efectivo', usuarioSesion?.id || null]
+        [negocioId, fecha, descripcion, monto, 'efectivo', origenCaja, usuarioSesion?.id || null]
       );
       const salidaId = salidaInsert?.lastID || null;
       if (!salidaId) {
@@ -4442,14 +4920,18 @@ app.put('/api/caja/salidas/:id', (req, res) => {
     }
 
     const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+    const origenFallback = usuarioSesion?.rol === 'vendedor' ? 'mostrador' : 'caja';
+    const origenCaja = normalizarOrigenCaja(req.body?.origen_caja ?? req.body?.origen ?? req.query?.origen, origenFallback);
 
     try {
+      const params = [salidaId, negocioId];
+      const filtroOrigen = construirFiltroOrigenCaja(origenCaja, params, 'origen_caja');
       const existente = await db.get(
         `SELECT id, fecha, descripcion, monto, metodo
            FROM salidas_caja
-          WHERE id = ? AND negocio_id = ?
+          WHERE id = ? AND negocio_id = ? AND ${filtroOrigen}
           LIMIT 1`,
-        [salidaId, negocioId]
+        params
       );
 
       if (!existente) {
@@ -4463,25 +4945,25 @@ app.put('/api/caja/salidas/:id', (req, res) => {
       await db.run('BEGIN');
 
       const updates = [];
-      const params = [];
+      const updateParams = [];
       if (descripcionInput !== undefined) {
         updates.push('descripcion = ?');
-        params.push(descripcionFinal);
+        updateParams.push(descripcionFinal);
       }
       if (montoInput !== undefined) {
         updates.push('monto = ?');
-        params.push(montoFinal);
+        updateParams.push(montoFinal);
       }
       if (fechaInput !== undefined) {
         updates.push('fecha = ?');
-        params.push(fecha);
+        updateParams.push(fecha);
       }
 
       if (updates.length) {
-        params.push(salidaId, negocioId);
+        updateParams.push(salidaId, negocioId);
         await db.run(
           `UPDATE salidas_caja SET ${updates.join(', ')} WHERE id = ? AND negocio_id = ?`,
-          params
+          updateParams
         );
       }
 
@@ -4535,11 +5017,15 @@ app.delete('/api/caja/salidas/:id', (req, res) => {
     }
 
     const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+    const origenFallback = usuarioSesion?.rol === 'vendedor' ? 'mostrador' : 'caja';
+    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, origenFallback);
 
     try {
+      const params = [salidaId, negocioId];
+      const filtroOrigen = construirFiltroOrigenCaja(origenCaja, params, 'origen_caja');
       const existente = await db.get(
-        'SELECT id FROM salidas_caja WHERE id = ? AND negocio_id = ?',
-        [salidaId, negocioId]
+        `SELECT id FROM salidas_caja WHERE id = ? AND negocio_id = ? AND ${filtroOrigen}`,
+        params
       );
       if (!existente) {
         return res.status(404).json({ ok: false, error: 'Salida no encontrada.' });
@@ -4555,7 +5041,10 @@ app.delete('/api/caja/salidas/:id', (req, res) => {
         [negocioId, REFERENCIA_TIPO_SALIDA, salidaId]
       );
 
-      await db.run('DELETE FROM salidas_caja WHERE id = ? AND negocio_id = ?', [salidaId, negocioId]);
+      await db.run(
+        `DELETE FROM salidas_caja WHERE id = ? AND negocio_id = ? AND ${filtroOrigen}`,
+        params
+      );
 
       await db.run('COMMIT');
       limpiarCacheAnalitica(negocioId);
@@ -4576,11 +5065,12 @@ app.get('/api/caja/resumen-dia', (req, res) => {
     const detalle = req.query?.detalle === '1';
     const modoTurno = req.query?.turno === '1';
     const soloPendientes = modoTurno || req.query?.pendientes === '1';
+    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
 
     calcularResumenCajaPorFecha(
       fecha,
       negocioId,
-      { soloPendientes, ignorarFecha: modoTurno },
+      { soloPendientes, ignorarFecha: modoTurno, origen_caja: origenCaja },
       (err, resumen) => {
         if (err) {
           console.error('Error al calcular resumen de caja:', err);
@@ -4624,7 +5114,9 @@ app.get('/api/caja/cuadre/:id/detalle', (req, res) => {
     }
 
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
     const params = [cuentaId, cuentaId, negocioId];
+    const filtroOrigen = construirFiltroOrigenCaja(origenCaja, params, 'origen_caja');
     const filtroFechaSql = fecha ? ` AND DATE(${FECHA_BASE_PEDIDOS_SQL}) = ?` : '';
     if (fecha) params.push(fecha);
 
@@ -4637,7 +5129,8 @@ app.get('/api/caja/cuadre/:id/detalle', (req, res) => {
           FROM pedidos
           WHERE (cuenta_id = ? OR id = ?)
             AND estado = 'pagado'
-            AND negocio_id = ?${filtroFechaSql}
+            AND negocio_id = ?
+            AND ${filtroOrigen}${filtroFechaSql}
           ORDER BY fecha_creacion ASC
         `,
         params
@@ -4700,6 +5193,13 @@ const actualizarEstadoPedido = async ({ pedidoId, estadoDeseado, usuarioSesion, 
     );
     if (resultadoPago.changes === 0) {
       return { ok: false, status: 404, error: 'Pedido no encontrado.' };
+    }
+    try {
+      await actualizarCogsPedidos([pedidoId], negocioId);
+      limpiarCacheAnalitica(negocioId);
+    } catch (error) {
+      console.error('Error al registrar COGS del pedido:', error?.message || error);
+      return { ok: false, status: 500, error: 'No se pudo registrar el costo de la venta.' };
     }
     return { ok: true, estado: 'pagado' };
   }
@@ -4820,7 +5320,12 @@ app.get('/api/pedidos', (req, res) => {
     try {
       const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
       const incluirSiAreaLista = estadoSolicitud === 'listo' && usuarioSesion?.rol === 'mesera';
-      const cuentas = await obtenerCuentasPorEstados([estadoSolicitud], negocioId, { incluirSiAreaLista });
+      const origenQuery = req.query?.origen ?? req.query?.origen_caja;
+      const opcionesConsulta = { incluirSiAreaLista };
+      if (origenQuery !== undefined && origenQuery !== null && String(origenQuery).trim() !== '') {
+        opcionesConsulta.origen_caja = origenQuery;
+      }
+      const cuentas = await obtenerCuentasPorEstados([estadoSolicitud], negocioId, opcionesConsulta);
       const cuentasFiltradas = (cuentas || []).filter(
         (cuenta) => cuenta.estadoCuentaMesera !== 'pagado'
       );
@@ -4935,6 +5440,7 @@ app.put('/api/cuentas/:id/cerrar', (req, res) => {
       const payload = {
         ...req.body,
         usuario_id: req.body?.usuario_id || usuarioSesion.id,
+        usuario_rol: req.body?.usuario_rol || usuarioSesion.rol,
         negocio_id: negocioId,
       };
 
@@ -4967,6 +5473,11 @@ app.post('/api/pedidos', (req, res) => {
       return res.status(400).json({ error: 'Agrega al menos un producto al pedido.' });
     }
 
+    const modoInventario = await obtenerModoInventarioCostos(negocioId);
+    const usaRecetas = modoInventario === 'PREPARACION';
+    const bloquearInsumosSinStock = usaRecetas ? await obtenerConfigBloqueoInsumos(negocioId) : false;
+    const advertenciasInsumos = [];
+
     const modoServicio = limpiarTextoGeneral(payload.modo_servicio) || 'en_local';
     const destino = (payload.destino || 'cocina').toString().trim().toLowerCase();
     const esParaCaja = destino === 'caja';
@@ -4974,6 +5485,8 @@ app.post('/api/pedidos', (req, res) => {
     const cliente = limpiarTextoGeneral(payload.cliente);
     const nota = limpiarTextoGeneral(payload.nota);
     const cuentaReferencia = payload.cuenta_id || null;
+    const origenFallback = usuarioSesion?.rol === 'vendedor' ? 'mostrador' : 'caja';
+    const origenCaja = normalizarOrigenCaja(payload.origen_caja ?? payload.origen, origenFallback);
 
     const itemsProcesados = [];
 
@@ -4990,6 +5503,7 @@ app.post('/api/pedidos', (req, res) => {
 
         const producto = await db.get(
           `SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido,
+                  p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad,
                   COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
            FROM productos p
            LEFT JOIN categorias c ON c.id = p.categoria_id
@@ -4999,6 +5513,15 @@ app.post('/api/pedidos', (req, res) => {
 
         if (!producto) {
           return res.status(404).json({ error: `Producto ${productoId} no encontrado.` });
+        }
+
+        const tipoProducto = normalizarTipoProducto(producto.tipo_producto, 'FINAL');
+        const esInsumo = tipoProducto === 'INSUMO';
+        const insumoVendible = normalizarFlag(producto.insumo_vendible, 0) === 1;
+        if (usaRecetas && esInsumo && !insumoVendible) {
+          return res.status(400).json({
+            error: `El producto ${producto.nombre || productoId} es un insumo no vendible.`,
+          });
         }
 
         const stockIndefinido = esStockIndefinido(producto);
@@ -5038,7 +5561,68 @@ app.post('/api/pedidos', (req, res) => {
           nombre: producto.nombre,
           stock_indefinido: stockIndefinido ? 1 : 0,
           area_preparacion: normalizarAreaPreparacion(producto.area_preparacion),
+          tipo_producto: tipoProducto,
+          insumo_vendible: insumoVendible ? 1 : 0,
+          unidad_base: normalizarUnidadBase(producto.unidad_base, 'UND'),
+          contenido_por_unidad: normalizarContenidoPorUnidad(producto.contenido_por_unidad, 1),
         });
+      }
+
+      const productoIds = itemsProcesados
+        .map((item) => Number(item.producto_id))
+        .filter((id) => Number.isFinite(id) && id > 0);
+      const recetasMap = usaRecetas ? await obtenerRecetasPorProductos(productoIds, negocioId) : new Map();
+      const insumosMap = new Map();
+      const consumoPorInsumo = new Map();
+
+      if (usaRecetas && recetasMap.size > 0) {
+        for (const item of itemsProcesados) {
+          const receta = recetasMap.get(Number(item.producto_id));
+          if (!Array.isArray(receta) || receta.length === 0) {
+            continue;
+          }
+          item.consumos = [];
+          for (const detalle of receta) {
+            if (detalle.tipo_producto !== 'INSUMO') {
+              return res.status(400).json({
+                error: `La receta de ${item.nombre || item.producto_id} tiene insumos invalidos.`,
+              });
+            }
+            const cantidadBase = Number((item.cantidad * (Number(detalle.cantidad) || 0)).toFixed(4));
+            if (!cantidadBase) {
+              continue;
+            }
+            const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
+            const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
+            item.consumos.push({
+              insumo_id: Number(detalle.insumo_id),
+              cantidad_base: cantidadBase,
+              cantidad_unidades: cantidadUnidades,
+              unidad_base: detalle.unidad_base,
+            });
+            const acumulado = consumoPorInsumo.get(detalle.insumo_id) || 0;
+            consumoPorInsumo.set(detalle.insumo_id, Number((acumulado + cantidadUnidades).toFixed(4)));
+            if (!insumosMap.has(detalle.insumo_id)) {
+              insumosMap.set(detalle.insumo_id, detalle);
+            }
+          }
+        }
+
+        for (const [insumoId, cantidadRequerida] of consumoPorInsumo.entries()) {
+          if (!cantidadRequerida) continue;
+          const insumo = insumosMap.get(insumoId);
+          if (!insumo || esStockIndefinido(insumo)) {
+            continue;
+          }
+          const stockDisponible = Number(insumo.stock) || 0;
+          if (cantidadRequerida > stockDisponible) {
+            const mensaje = `Stock insuficiente para insumo ${insumo.insumo_nombre || insumoId}.`;
+            if (bloquearInsumosSinStock) {
+              return res.status(400).json({ error: mensaje });
+            }
+            advertenciasInsumos.push(mensaje);
+          }
+        }
       }
 
       const tienePreparacion = itemsProcesados.some(
@@ -5056,12 +5640,14 @@ app.post('/api/pedidos', (req, res) => {
 
       await db.run('BEGIN');
 
+      const consumoRegistros = [];
+
       const insertResult = await db.run(
         `
           INSERT INTO pedidos (
             cuenta_id, mesa, cliente, modo_servicio, nota, estado,
-            subtotal, impuesto, total, fecha_listo, creado_por, negocio_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            subtotal, impuesto, total, fecha_listo, origen_caja, creado_por, negocio_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           cuentaReferencia,
@@ -5074,6 +5660,7 @@ app.post('/api/pedidos', (req, res) => {
           impuesto,
           total,
           fechaListo,
+          origenCaja,
           usuarioSesion.id,
           negocioId,
         ]
@@ -5090,10 +5677,22 @@ app.post('/api/pedidos', (req, res) => {
       }
 
       for (const item of itemsProcesados) {
-        await db.run(
+        const detalleResult = await db.run(
           'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id) VALUES (?, ?, ?, ?, ?)',
           [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId]
         );
+        const detalleId = detalleResult?.lastID;
+        if (detalleId && Array.isArray(item.consumos) && item.consumos.length) {
+          item.consumos.forEach((consumo) => {
+            consumoRegistros.push({
+              detalle_pedido_id: detalleId,
+              producto_final_id: item.producto_id,
+              insumo_id: consumo.insumo_id,
+              cantidad_base: consumo.cantidad_base,
+              unidad_base: consumo.unidad_base,
+            });
+          });
+        }
         if (!item.stock_indefinido) {
           const stockResult = await db.run(
             'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
@@ -5102,6 +5701,39 @@ app.post('/api/pedidos', (req, res) => {
           if (stockResult.changes === 0) {
             throw new Error(`No se pudo actualizar el stock del producto ${item.producto_id}.`);
           }
+        }
+      }
+
+      if (usaRecetas && consumoPorInsumo.size > 0) {
+        for (const [insumoId, cantidadUnidades] of consumoPorInsumo.entries()) {
+          if (!cantidadUnidades) continue;
+          const insumo = insumosMap.get(insumoId);
+          if (!insumo || esStockIndefinido(insumo)) {
+            continue;
+          }
+          const stockResult = await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+            [cantidadUnidades, insumoId, negocioId, cantidadUnidades]
+          );
+          if (stockResult.changes === 0) {
+            throw new Error(`No se pudo actualizar el stock del insumo ${insumoId}.`);
+          }
+        }
+        for (const consumo of consumoRegistros) {
+          await db.run(
+            `INSERT INTO consumo_insumos
+              (pedido_id, detalle_pedido_id, producto_final_id, insumo_id, cantidad_base, unidad_base, negocio_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              pedidoId,
+              consumo.detalle_pedido_id,
+              consumo.producto_final_id,
+              consumo.insumo_id,
+              consumo.cantidad_base,
+              consumo.unidad_base,
+              negocioId,
+            ]
+          );
         }
       }
 
@@ -5123,6 +5755,7 @@ app.post('/api/pedidos', (req, res) => {
           fecha_listo: fechaListo,
           items: itemsProcesados,
         },
+        advertencias: advertenciasInsumos.length ? advertenciasInsumos : undefined,
       });
     } catch (error) {
       await db.run('ROLLBACK').catch(() => {});
@@ -5189,6 +5822,7 @@ app.put('/api/pedidos/:id/cancelar', (req, res) => {
         ['cancelado', pedidoId, negocioId]
       );
       await ajustarStockPorPedido(pedidoId, negocioId, 1);
+      await revertirConsumoInsumosPorPedido(pedidoId, negocioId);
       await db.run('COMMIT');
     } catch (error) {
       await db.run('ROLLBACK').catch(() => {});
@@ -7092,6 +7726,30 @@ app.post('/api/productos', (req, res) => {
     const preciosEntrada = req.body.precios ?? req.body.preciosLista ?? req.body.precios_lista;
     const stockIndefinido = normalizarFlag(req.body.stock_indefinido ?? req.body.stockIndefinido, 0);
     const precioValor = Number(precio);
+    const costoBaseEntrada =
+      req.body.costo_base_sin_itbis ?? req.body.costoBaseSinItbis ?? req.body.costo_base ?? req.body.costoBase;
+    const costoBaseValor = Number(normalizarNumero(costoBaseEntrada, 0).toFixed(2));
+    const costoUnitarioRealEntrada =
+      req.body.costo_unitario_real ?? req.body.costoUnitarioReal ?? req.body.costo_real ?? req.body.costoReal;
+    const costoUnitarioRealValor = Number(normalizarNumero(costoUnitarioRealEntrada, 0).toFixed(2));
+    const costoUnitarioRealIncluyeItbis = normalizarFlag(
+      req.body.costo_unitario_real_incluye_itbis ?? req.body.costoUnitarioRealIncluyeItbis,
+      0
+    );
+    const tipoProducto = normalizarTipoProducto(req.body.tipo_producto ?? req.body.tipoProducto, 'FINAL');
+    const insumoVendible =
+      tipoProducto === 'INSUMO'
+        ? normalizarFlag(req.body.insumo_vendible ?? req.body.insumoVendible, 0)
+        : 0;
+    const unidadBase = normalizarUnidadBase(req.body.unidad_base ?? req.body.unidadBase, 'UND');
+    const contenidoPorUnidad = normalizarContenidoPorUnidad(
+      req.body.contenido_por_unidad ?? req.body.contenidoPorUnidad,
+      1
+    );
+    const actualizaCostoCompras = normalizarFlag(
+      req.body.actualiza_costo_con_compras ?? req.body.actualizaCostoCompras,
+      1
+    );
     const preciosLista = normalizarListaPrecios(preciosEntrada);
     const preciosJson = preciosLista.length ? JSON.stringify(preciosLista) : null;
     const categoriaId = categoria_id ?? req.body.categoriaId ?? null;
@@ -7102,6 +7760,15 @@ app.post('/api/productos', (req, res) => {
 
     if (!nombre || !Number.isFinite(precioValor)) {
       return res.status(400).json({ error: 'Nombre y precio numerico son obligatorios' });
+    }
+    if (!Number.isFinite(costoBaseValor) || costoBaseValor < 0) {
+      return res.status(400).json({ error: 'El costo base debe ser un numero mayor o igual a 0' });
+    }
+    if (!Number.isFinite(costoUnitarioRealValor) || costoUnitarioRealValor < 0) {
+      return res.status(400).json({ error: 'El costo real debe ser un numero mayor o igual a 0' });
+    }
+    if (!Number.isFinite(contenidoPorUnidad) || contenidoPorUnidad <= 0) {
+      return res.status(400).json({ error: 'El contenido por unidad debe ser mayor a 0' });
     }
 
     if (!stockIndefinido) {
@@ -7114,13 +7781,28 @@ app.post('/api/productos', (req, res) => {
     const stockFinal = stockIndefinido ? null : Number.isFinite(stockValor) ? stockValor : 0;
 
     const sql = `
-      INSERT INTO productos (nombre, precio, precios, stock, stock_indefinido, categoria_id, activo, negocio_id)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+      INSERT INTO productos (
+        nombre, precio, precios, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
+        actualiza_costo_con_compras, costo_unitario_real, costo_unitario_real_incluye_itbis,
+        tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad,
+        stock, stock_indefinido, categoria_id, activo, negocio_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
     `;
     const params = [
       nombre,
       precioValor,
       preciosJson,
+      costoBaseValor,
+      costoBaseValor,
+      costoBaseValor,
+      actualizaCostoCompras,
+      costoUnitarioRealValor,
+      costoUnitarioRealIncluyeItbis,
+      tipoProducto,
+      insumoVendible,
+      unidadBase,
+      Number(contenidoPorUnidad.toFixed(4)),
       stockFinal,
       stockIndefinido,
       categoriaId,
@@ -7138,6 +7820,16 @@ app.post('/api/productos', (req, res) => {
         nombre,
         precio: precioValor,
         precios: preciosLista,
+        costo_base_sin_itbis: costoBaseValor,
+        costo_promedio_actual: costoBaseValor,
+        ultimo_costo_sin_itbis: costoBaseValor,
+        actualiza_costo_con_compras: actualizaCostoCompras,
+        costo_unitario_real: costoUnitarioRealValor,
+        costo_unitario_real_incluye_itbis: costoUnitarioRealIncluyeItbis,
+        tipo_producto: tipoProducto,
+        insumo_vendible: insumoVendible,
+        unidad_base: unidadBase,
+        contenido_por_unidad: Number(contenidoPorUnidad.toFixed(4)),
         stock: stockIndefinido ? null : stockFinal,
         stock_indefinido: stockIndefinido,
         categoria_id: categoriaId || null,
@@ -7157,9 +7849,24 @@ app.put('/api/productos/:id', (req, res) => {
     const preciosFueEnviado = Boolean(preciosKey);
     const stockIndefinidoEntrada = req.body.stock_indefinido ?? req.body.stockIndefinido;
     const stockEntrada = req.body.stock;
+    const costoBaseEntrada =
+      req.body.costo_base_sin_itbis ?? req.body.costoBaseSinItbis ?? req.body.costo_base ?? req.body.costoBase;
+    const costoUnitarioRealEntrada =
+      req.body.costo_unitario_real ?? req.body.costoUnitarioReal ?? req.body.costo_real ?? req.body.costoReal;
+    const costoUnitarioRealIncluyeItbisEntrada =
+      req.body.costo_unitario_real_incluye_itbis ?? req.body.costoUnitarioRealIncluyeItbis;
+    const tipoProductoEntrada = req.body.tipo_producto ?? req.body.tipoProducto;
+    const insumoVendibleEntrada = req.body.insumo_vendible ?? req.body.insumoVendible;
+    const unidadBaseEntrada = req.body.unidad_base ?? req.body.unidadBase;
+    const contenidoPorUnidadEntrada = req.body.contenido_por_unidad ?? req.body.contenidoPorUnidad;
+    const actualizaCostoComprasEntrada =
+      req.body.actualiza_costo_con_compras ?? req.body.actualizaCostoCompras;
 
     db.get(
-      'SELECT stock, stock_indefinido FROM productos WHERE id = ? AND negocio_id = ?',
+      `SELECT stock, stock_indefinido, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
+              actualiza_costo_con_compras, costo_unitario_real, costo_unitario_real_incluye_itbis,
+              tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad
+         FROM productos WHERE id = ? AND negocio_id = ?`,
       [id, usuarioSesion.negocio_id],
       (productoErr, productoActual) => {
         if (productoErr) {
@@ -7213,6 +7920,70 @@ app.put('/api/productos/:id', (req, res) => {
           stockProporcionado = true;
         }
 
+        let costoBaseValor = null;
+        let costoBaseProporcionado = false;
+        if (costoBaseEntrada !== undefined) {
+          costoBaseProporcionado = true;
+          costoBaseValor = normalizarNumero(costoBaseEntrada, null);
+          if (costoBaseValor === null || costoBaseValor < 0) {
+            return res.status(400).json({ error: 'El costo base debe ser un numero mayor o igual a 0' });
+          }
+        }
+
+        let costoUnitarioRealValor = null;
+        let costoUnitarioRealProporcionado = false;
+        if (costoUnitarioRealEntrada !== undefined) {
+          costoUnitarioRealProporcionado = true;
+          costoUnitarioRealValor = normalizarNumero(costoUnitarioRealEntrada, null);
+          if (costoUnitarioRealValor === null || costoUnitarioRealValor < 0) {
+            return res.status(400).json({ error: 'El costo real debe ser un numero mayor o igual a 0' });
+          }
+        }
+
+        let costoUnitarioRealIncluyeItbis = null;
+        if (costoUnitarioRealIncluyeItbisEntrada !== undefined) {
+          costoUnitarioRealIncluyeItbis = normalizarFlag(
+            costoUnitarioRealIncluyeItbisEntrada,
+            Number(productoActual.costo_unitario_real_incluye_itbis) || 0
+          );
+        }
+
+        let tipoProducto = null;
+        let tipoProductoProporcionado = false;
+        if (tipoProductoEntrada !== undefined) {
+          tipoProductoProporcionado = true;
+          tipoProducto = normalizarTipoProducto(tipoProductoEntrada, 'FINAL');
+        }
+
+        let insumoVendible = null;
+        if (insumoVendibleEntrada !== undefined) {
+          insumoVendible = normalizarFlag(
+            insumoVendibleEntrada,
+            Number(productoActual.insumo_vendible) || 0
+          );
+        }
+
+        let unidadBase = null;
+        if (unidadBaseEntrada !== undefined) {
+          unidadBase = normalizarUnidadBase(unidadBaseEntrada, productoActual.unidad_base || 'UND');
+        }
+
+        let contenidoPorUnidad = null;
+        if (contenidoPorUnidadEntrada !== undefined) {
+          contenidoPorUnidad = normalizarContenidoPorUnidad(contenidoPorUnidadEntrada, 1);
+          if (!Number.isFinite(contenidoPorUnidad) || contenidoPorUnidad <= 0) {
+            return res.status(400).json({ error: 'El contenido por unidad debe ser mayor a 0' });
+          }
+        }
+
+        let actualizaCostoCompras = null;
+        if (actualizaCostoComprasEntrada !== undefined) {
+          actualizaCostoCompras = normalizarFlag(
+            actualizaCostoComprasEntrada,
+            Number(productoActual.actualiza_costo_con_compras) || 0
+          );
+        }
+
         const campos = [
           'nombre = COALESCE(?, nombre)',
           'precio = COALESCE(?, precio)',
@@ -7227,6 +7998,60 @@ app.put('/api/productos/:id', (req, res) => {
           const preciosJson = preciosLista.length ? JSON.stringify(preciosLista) : null;
           campos.push('precios = ?');
           params.push(preciosJson);
+        }
+
+        if (costoBaseProporcionado) {
+          campos.push('costo_base_sin_itbis = ?');
+          params.push(Number(costoBaseValor.toFixed(2)));
+          const costoPromedioActual = Number(productoActual.costo_promedio_actual) || 0;
+          const costoBaseActual = Number(productoActual.costo_base_sin_itbis) || 0;
+          if (Number(costoPromedioActual.toFixed(2)) === Number(costoBaseActual.toFixed(2))) {
+            campos.push('costo_promedio_actual = ?');
+            params.push(Number(costoBaseValor.toFixed(2)));
+          }
+          const ultimoCostoActual = Number(productoActual.ultimo_costo_sin_itbis) || 0;
+          if (Number(ultimoCostoActual.toFixed(2)) === 0) {
+            campos.push('ultimo_costo_sin_itbis = ?');
+            params.push(Number(costoBaseValor.toFixed(2)));
+          }
+        }
+
+        if (costoUnitarioRealProporcionado) {
+          campos.push('costo_unitario_real = ?');
+          params.push(Number(costoUnitarioRealValor.toFixed(2)));
+        }
+
+        if (costoUnitarioRealIncluyeItbis !== null) {
+          campos.push('costo_unitario_real_incluye_itbis = ?');
+          params.push(costoUnitarioRealIncluyeItbis);
+        }
+
+        if (tipoProductoProporcionado) {
+          campos.push('tipo_producto = ?');
+          params.push(tipoProducto);
+          if (tipoProducto !== 'INSUMO') {
+            insumoVendible = 0;
+          }
+        }
+
+        if (insumoVendible !== null) {
+          campos.push('insumo_vendible = ?');
+          params.push(insumoVendible);
+        }
+
+        if (unidadBase !== null) {
+          campos.push('unidad_base = ?');
+          params.push(unidadBase);
+        }
+
+        if (contenidoPorUnidad !== null) {
+          campos.push('contenido_por_unidad = ?');
+          params.push(Number(contenidoPorUnidad.toFixed(4)));
+        }
+
+        if (actualizaCostoCompras !== null) {
+          campos.push('actualiza_costo_con_compras = ?');
+          params.push(actualizaCostoCompras);
         }
 
         if (stockProporcionado) {
@@ -7261,6 +8086,169 @@ app.put('/api/productos/:id', (req, res) => {
         });
       }
     );
+  });
+});
+
+app.get('/api/productos/:id/receta', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const productoId = Number(req.params.id);
+    if (!Number.isFinite(productoId) || productoId <= 0) {
+      return res.status(400).json({ error: 'ID invalido.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const modoInventario = await obtenerModoInventarioCostos(negocioId);
+    if (modoInventario !== 'PREPARACION') {
+      return res.status(400).json({ error: 'Las recetas solo estan disponibles en modo preparacion.' });
+    }
+
+    try {
+      const receta = await db.get(
+        'SELECT id, activo FROM recetas WHERE producto_final_id = ? AND negocio_id = ?',
+        [productoId, negocioId]
+      );
+      if (!receta) {
+        return res.json({ ok: true, receta: null, detalles: [] });
+      }
+
+      const detalles = await db.all(
+        `SELECT rd.id, rd.insumo_id, rd.cantidad, rd.unidad, p.nombre AS insumo_nombre
+           FROM receta_detalle rd
+           LEFT JOIN productos p ON p.id = rd.insumo_id
+          WHERE rd.receta_id = ?
+          ORDER BY rd.id ASC`,
+        [receta.id]
+      );
+
+      res.json({ ok: true, receta, detalles: detalles || [] });
+    } catch (error) {
+      console.error('Error al obtener receta:', error?.message || error);
+      res.status(500).json({ error: 'No se pudo obtener la receta.' });
+    }
+  });
+});
+
+app.put('/api/productos/:id/receta', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const productoId = Number(req.params.id);
+    if (!Number.isFinite(productoId) || productoId <= 0) {
+      return res.status(400).json({ error: 'ID invalido.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const modoInventario = await obtenerModoInventarioCostos(negocioId);
+    if (modoInventario !== 'PREPARACION') {
+      return res.status(400).json({ error: 'Las recetas solo estan disponibles en modo preparacion.' });
+    }
+
+    const detallesEntrada = Array.isArray(req.body?.detalles) ? req.body.detalles : [];
+
+    try {
+      const producto = await db.get(
+        'SELECT id, nombre, tipo_producto FROM productos WHERE id = ? AND negocio_id = ?',
+        [productoId, negocioId]
+      );
+      if (!producto) {
+        return res.status(404).json({ error: 'Producto no encontrado.' });
+      }
+      const tipoProducto = normalizarTipoProducto(producto.tipo_producto, 'FINAL');
+      if (tipoProducto !== 'FINAL') {
+        return res.status(400).json({ error: 'Solo los productos finales pueden tener receta.' });
+      }
+
+      const insumoIds = Array.from(
+        new Set(
+          detallesEntrada
+            .map((detalle) => Number(detalle?.insumo_id ?? detalle?.insumoId))
+            .filter((id) => Number.isFinite(id) && id > 0)
+        )
+      );
+
+      const insumosMap = new Map();
+      if (insumoIds.length) {
+        const placeholders = insumoIds.map(() => '?').join(', ');
+        const insumos = await db.all(
+          `SELECT id, nombre, tipo_producto, unidad_base
+             FROM productos
+            WHERE negocio_id = ? AND id IN (${placeholders})`,
+          [negocioId, ...insumoIds]
+        );
+        (insumos || []).forEach((insumo) => {
+          insumosMap.set(Number(insumo.id), insumo);
+        });
+      }
+
+      const detallesLimpios = [];
+      for (const detalle of detallesEntrada) {
+        const insumoId = Number(detalle?.insumo_id ?? detalle?.insumoId);
+        const cantidad = normalizarNumero(detalle?.cantidad, null);
+        if (!Number.isFinite(insumoId) || insumoId <= 0 || cantidad === null || cantidad <= 0) {
+          return res.status(400).json({ error: 'Cada insumo debe tener cantidad valida.' });
+        }
+        const insumo = insumosMap.get(insumoId);
+        if (!insumo) {
+          return res.status(400).json({ error: `Insumo ${insumoId} no encontrado.` });
+        }
+        const tipoInsumo = normalizarTipoProducto(insumo.tipo_producto, 'FINAL');
+        if (tipoInsumo !== 'INSUMO') {
+          return res.status(400).json({ error: `El producto ${insumo.nombre || insumoId} no es un insumo.` });
+        }
+        const unidad = normalizarUnidadBase(detalle?.unidad ?? detalle?.unidadBase ?? insumo.unidad_base, 'UND');
+        if (unidad !== normalizarUnidadBase(insumo.unidad_base, 'UND')) {
+          return res.status(400).json({
+            error: `La unidad del insumo ${insumo.nombre || insumoId} debe ser ${insumo.unidad_base}.`,
+          });
+        }
+        detallesLimpios.push({
+          insumo_id: insumoId,
+          cantidad: Number(cantidad.toFixed(4)),
+          unidad,
+        });
+      }
+
+      await db.run('BEGIN');
+      const recetaActual = await db.get(
+        'SELECT id FROM recetas WHERE producto_final_id = ? AND negocio_id = ?',
+        [productoId, negocioId]
+      );
+      let recetaId = recetaActual?.id;
+      if (!recetaId) {
+        const insertReceta = await db.run(
+          'INSERT INTO recetas (negocio_id, producto_final_id, activo) VALUES (?, ?, ?)',
+          [negocioId, productoId, detallesLimpios.length ? 1 : 0]
+        );
+        recetaId = insertReceta?.lastID;
+      } else {
+        await db.run('UPDATE recetas SET activo = ? WHERE id = ? AND negocio_id = ?', [
+          detallesLimpios.length ? 1 : 0,
+          recetaId,
+          negocioId,
+        ]);
+      }
+
+      await db.run('DELETE FROM receta_detalle WHERE receta_id = ?', [recetaId]);
+      for (const detalle of detallesLimpios) {
+        await db.run(
+          'INSERT INTO receta_detalle (receta_id, insumo_id, cantidad, unidad) VALUES (?, ?, ?, ?)',
+          [recetaId, detalle.insumo_id, detalle.cantidad, detalle.unidad]
+        );
+      }
+
+      await db.run('COMMIT');
+      res.json({ ok: true, receta_id: recetaId, detalles: detallesLimpios });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al guardar receta:', error?.message || error);
+      res.status(500).json({ error: 'No se pudo guardar la receta.' });
+    }
   });
 });
 
@@ -7589,9 +8577,19 @@ const normalizarAplicaItbis = (valor) => {
   return false;
 };
 
+const ITBIS_RATE = 0.18;
+
+const resolverCostoUnitarioEfectivo = (costoUnitario, aplicaItbis, itbisCapitalizable) => {
+  const base = Number(costoUnitario) || 0;
+  if (aplicaItbis && itbisCapitalizable) {
+    return Number((base * (1 + ITBIS_RATE)).toFixed(2));
+  }
+  return Number(base.toFixed(2));
+};
+
 const calcularTotalesCompraInventario = (subtotal, aplicaItbis) => {
   const base = Number(subtotal) || 0;
-  const itbis = aplicaItbis ? Number((base * 0.18).toFixed(2)) : 0;
+  const itbis = aplicaItbis ? Number((base * ITBIS_RATE).toFixed(2)) : 0;
   const total = Number((base + itbis).toFixed(2));
   return { subtotal: base, itbis, total };
 };
@@ -7620,6 +8618,7 @@ app.get('/api/inventario/compras', (req, res) => {
                CASE WHEN ci.subtotal IS NULL OR ci.subtotal = 0 THEN ci.total ELSE ci.subtotal END AS subtotal,
                COALESCE(ci.itbis, 0) AS itbis,
                COALESCE(ci.aplica_itbis, 0) AS aplica_itbis,
+               COALESCE(ci.itbis_capitalizable, 0) AS itbis_capitalizable,
                ci.total,
                ci.observaciones,
                ci.creado_en, u.nombre AS creado_por,
@@ -7665,6 +8664,7 @@ app.get('/api/inventario/compras/:id', (req, res) => {
                CASE WHEN ci.subtotal IS NULL OR ci.subtotal = 0 THEN ci.total ELSE ci.subtotal END AS subtotal,
                COALESCE(ci.itbis, 0) AS itbis,
                COALESCE(ci.aplica_itbis, 0) AS aplica_itbis,
+               COALESCE(ci.itbis_capitalizable, 0) AS itbis_capitalizable,
                ci.total,
                ci.observaciones,
                ci.creado_en,
@@ -7683,7 +8683,8 @@ app.get('/api/inventario/compras/:id', (req, res) => {
       const detalles = await db.all(
         `
         SELECT cid.id, cid.producto_id, p.nombre AS producto_nombre, cid.cantidad,
-               cid.costo_unitario, cid.total_linea
+               cid.costo_unitario, cid.costo_unitario_sin_itbis, cid.costo_unitario_efectivo,
+               cid.itbis_aplica, cid.itbis_capitalizable, cid.total_linea
           FROM compras_inventario_detalle cid
           LEFT JOIN productos p ON p.id = cid.producto_id
          WHERE cid.compra_id = ? AND cid.negocio_id = ?
@@ -7715,6 +8716,7 @@ app.post('/api/inventario/compras', (req, res) => {
     const metodoPago = normalizarCampoTexto(req.body?.metodo_pago ?? req.body?.metodoPago);
     const observaciones = normalizarCampoTexto(req.body?.observaciones ?? req.body?.comentarios);
     const aplicaItbis = normalizarAplicaItbis(req.body?.aplica_itbis ?? req.body?.aplicaItbis);
+    const itbisCapitalizableEntrada = req.body?.itbis_capitalizable ?? req.body?.itbisCapitalizable;
     const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
 
     if (!proveedor || !esFechaISOValida(fecha)) {
@@ -7742,14 +8744,24 @@ app.post('/api/inventario/compras', (req, res) => {
     }
 
     try {
+      const acreditaItbis = await obtenerConfigAcreditaItbis(negocioId);
+      const itbisCapitalizableDefault = aplicaItbis ? (acreditaItbis ? 0 : 1) : 0;
+      const itbisCapitalizable = aplicaItbis
+        ? normalizarFlag(itbisCapitalizableEntrada ?? itbisCapitalizableDefault, itbisCapitalizableDefault)
+        : 0;
+      const modoInventario = await obtenerModoInventarioCostos(negocioId);
+      const esReventa = modoInventario === 'REVENTA';
       const placeholders = productoIds.map(() => '?').join(',');
       const productos = await db.all(
-        `SELECT id, nombre, stock_indefinido FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
+        `SELECT id, nombre, stock, stock_indefinido, costo_promedio_actual, ultimo_costo_sin_itbis,
+                costo_base_sin_itbis, actualiza_costo_con_compras
+           FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
         [negocioId, ...productoIds]
       );
       const productosMap = new Map((productos || []).map((producto) => [Number(producto.id), producto]));
 
       const detalles = [];
+      const costosPorProducto = new Map();
       let subtotal = 0;
 
       for (const item of itemsEntrada) {
@@ -7759,7 +8771,10 @@ app.post('/api/inventario/compras', (req, res) => {
         }
 
         const cantidad = normalizarNumero(item?.cantidad, null);
-        const costoUnitario = normalizarNumero(item?.costo_unitario ?? item?.costoUnitario, null);
+        const costoUnitario = normalizarNumero(
+          item?.costo_unitario ?? item?.costoUnitario ?? item?.costo_unitario_sin_itbis ?? item?.costoUnitarioSinItbis,
+          null
+        );
 
         if (cantidad === null || cantidad <= 0) {
           return res.status(400).json({ error: 'La cantidad debe ser mayor a 0.' });
@@ -7768,14 +8783,40 @@ app.post('/api/inventario/compras', (req, res) => {
           return res.status(400).json({ error: 'El costo unitario debe ser mayor o igual a 0.' });
         }
 
-        const totalLinea = Number((cantidad * costoUnitario).toFixed(2));
+        const costoUnitarioSinItbis = Number(costoUnitario.toFixed(2));
+        const costoUnitarioEfectivo = resolverCostoUnitarioEfectivo(
+          costoUnitarioSinItbis,
+          aplicaItbis,
+          itbisCapitalizable === 1
+        );
+        const totalLinea = Number((cantidad * costoUnitarioSinItbis).toFixed(2));
         subtotal += totalLinea;
         detalles.push({
           producto_id: productoId,
           cantidad,
-          costo_unitario: Number(costoUnitario.toFixed(2)),
+          costo_unitario: costoUnitarioSinItbis,
+          costo_unitario_sin_itbis: costoUnitarioSinItbis,
+          costo_unitario_efectivo: costoUnitarioEfectivo,
+          itbis_aplica: aplicaItbis ? 1 : 0,
+          itbis_capitalizable: itbisCapitalizable ? 1 : 0,
           total_linea: totalLinea,
         });
+
+        const acumulado = costosPorProducto.get(productoId) || {
+          cantidad: 0,
+          costo_total_efectivo: 0,
+          ultimo_costo_sin_itbis: 0,
+          costo_unitario_real: 0,
+          costo_unitario_real_incluye_itbis: 0,
+        };
+        acumulado.cantidad = Number((acumulado.cantidad + cantidad).toFixed(2));
+        acumulado.costo_total_efectivo = Number(
+          (acumulado.costo_total_efectivo + cantidad * costoUnitarioEfectivo).toFixed(2)
+        );
+        acumulado.ultimo_costo_sin_itbis = costoUnitarioSinItbis;
+        acumulado.costo_unitario_real = costoUnitarioEfectivo;
+        acumulado.costo_unitario_real_incluye_itbis = aplicaItbis && itbisCapitalizable ? 1 : 0;
+        costosPorProducto.set(productoId, acumulado);
       }
 
       subtotal = Number(subtotal.toFixed(2));
@@ -7789,8 +8830,8 @@ app.post('/api/inventario/compras', (req, res) => {
       const insertCompra = await db.run(
         `
           INSERT INTO compras_inventario
-            (fecha, proveedor, origen_fondos, metodo_pago, subtotal, itbis, aplica_itbis, total, observaciones, creado_por, negocio_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (fecha, proveedor, origen_fondos, metodo_pago, subtotal, itbis, aplica_itbis, itbis_capitalizable, total, observaciones, creado_por, negocio_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           fecha,
@@ -7800,6 +8841,7 @@ app.post('/api/inventario/compras', (req, res) => {
           subtotalFinal,
           itbis,
           aplicaItbis ? 1 : 0,
+          itbisCapitalizable ? 1 : 0,
           total,
           observaciones,
           usuarioSesion.id,
@@ -7816,14 +8858,19 @@ app.post('/api/inventario/compras', (req, res) => {
         await db.run(
           `
             INSERT INTO compras_inventario_detalle
-              (compra_id, producto_id, cantidad, costo_unitario, total_linea, negocio_id)
-            VALUES (?, ?, ?, ?, ?, ?)
+              (compra_id, producto_id, cantidad, costo_unitario, costo_unitario_sin_itbis, costo_unitario_efectivo,
+               itbis_aplica, itbis_capitalizable, total_linea, negocio_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             compraId,
             detalle.producto_id,
             detalle.cantidad,
             detalle.costo_unitario,
+            detalle.costo_unitario_sin_itbis,
+            detalle.costo_unitario_efectivo,
+            detalle.itbis_aplica,
+            detalle.itbis_capitalizable,
             detalle.total_linea,
             negocioId,
           ]
@@ -7841,6 +8888,47 @@ app.post('/api/inventario/compras', (req, res) => {
         }
       }
 
+      for (const [productoId, costoData] of costosPorProducto.entries()) {
+        const producto = productosMap.get(productoId);
+        if (!producto) continue;
+        const cantidadComprada = Number(costoData.cantidad) || 0;
+        if (cantidadComprada <= 0) continue;
+        if (esReventa) {
+          const costoUnitarioReal = Number(costoData.costo_unitario_real) || 0;
+          const incluyeItbis = Number(costoData.costo_unitario_real_incluye_itbis) || 0;
+          await db.run(
+            'UPDATE productos SET costo_unitario_real = ?, costo_unitario_real_incluye_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [Number(costoUnitarioReal.toFixed(2)), incluyeItbis, productoId, negocioId]
+          );
+          continue;
+        }
+        const costoTotalEfectivo = Number(costoData.costo_total_efectivo) || 0;
+        const costoPromedioActual = Number(producto.costo_promedio_actual) || 0;
+        const stockActual = esStockIndefinido(producto) ? null : Number(producto.stock) || 0;
+        const actualizaCosto = Number(producto.actualiza_costo_con_compras ?? 1) === 1;
+        const ultimoCostoSinItbis = Number(costoData.ultimo_costo_sin_itbis) || 0;
+
+        if (actualizaCosto) {
+          let nuevoCostoPromedio = costoPromedioActual;
+          if (Number.isFinite(stockActual) && stockActual > 0) {
+            nuevoCostoPromedio =
+              (stockActual * costoPromedioActual + costoTotalEfectivo) / (stockActual + cantidadComprada);
+          } else {
+            nuevoCostoPromedio = costoTotalEfectivo / cantidadComprada;
+          }
+
+          await db.run(
+            'UPDATE productos SET costo_promedio_actual = ?, ultimo_costo_sin_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [Number(nuevoCostoPromedio.toFixed(2)), Number(ultimoCostoSinItbis.toFixed(2)), productoId, negocioId]
+          );
+        } else {
+          await db.run(
+            'UPDATE productos SET ultimo_costo_sin_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [Number(ultimoCostoSinItbis.toFixed(2)), productoId, negocioId]
+          );
+        }
+      }
+
       const compraComentarios = `Compra inventario #${compraId}${observaciones ? ` - ${observaciones}` : ''}`;
       const compraInsert = await db.run(
         `
@@ -7855,8 +8943,9 @@ app.post('/api/inventario/compras', (req, res) => {
       if (compra606Id) {
         for (const detalle of detalles) {
           const producto = productosMap.get(detalle.producto_id);
-          const itbisLinea = aplicaItbis ? Number((detalle.total_linea * 0.18).toFixed(2)) : 0;
+          const itbisLinea = aplicaItbis ? Number((detalle.total_linea * ITBIS_RATE).toFixed(2)) : 0;
           const totalLinea = Number((detalle.total_linea + itbisLinea).toFixed(2));
+          const costoLineaBase = detalle.costo_unitario_sin_itbis ?? detalle.costo_unitario;
           await db.run(
             `
               INSERT INTO detalle_compra
@@ -7867,7 +8956,7 @@ app.post('/api/inventario/compras', (req, res) => {
               compra606Id,
               producto?.nombre || `Producto ${detalle.producto_id}`,
               detalle.cantidad,
-              detalle.costo_unitario,
+              costoLineaBase,
               itbisLinea,
               totalLinea,
               negocioId,
@@ -7924,6 +9013,7 @@ app.post('/api/inventario/compras', (req, res) => {
       );
 
       await db.run('COMMIT');
+      limpiarCacheAnalitica(negocioId);
 
       res.status(201).json({
         ok: true,
@@ -7932,6 +9022,7 @@ app.post('/api/inventario/compras', (req, res) => {
         itbis,
         total,
         aplica_itbis: aplicaItbis ? 1 : 0,
+        itbis_capitalizable: itbisCapitalizable ? 1 : 0,
         compra_id: compra606Id,
         gasto_id: gastoId,
         salida_id: salidaId,
@@ -8724,9 +9815,21 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         paramsBase
       );
 
+      const tipoGastoNormalizadoSql = `
+        CASE
+          WHEN UPPER(TRIM(COALESCE(tipo_gasto, ''))) IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA') THEN UPPER(TRIM(tipo_gasto))
+          WHEN UPPER(TRIM(COALESCE(categoria, ''))) = 'COMPRAS INVENTARIO'
+            OR COALESCE(referencia, '') LIKE 'INV-%' THEN 'INVENTARIO'
+          WHEN UPPER(TRIM(COALESCE(categoria, ''))) = 'SALIDA_CAJA'
+            OR UPPER(TRIM(COALESCE(referencia_tipo, ''))) = 'SALIDA_CAJA' THEN 'RETIRO_CAJA'
+          ELSE 'OPERATIVO'
+        END
+      `;
+
       const gastosResumen = await db.get(
         `
-          SELECT SUM(monto) AS total
+          SELECT SUM(monto) AS total,
+                 SUM(CASE WHEN ${tipoGastoNormalizadoSql} = 'OPERATIVO' THEN monto ELSE 0 END) AS total_operativos
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
@@ -8734,6 +9837,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         paramsBase
       );
       const gastosTotal = Number(gastosResumen?.total) || 0;
+      const gastosOperativosTotal = Number(gastosResumen?.total_operativos) || 0;
 
       const gastosSerie = await db.all(
         `
@@ -8773,8 +9877,39 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         paramsBase
       );
 
+      const cogsResumen = await db.get(
+        `
+          SELECT SUM(cogs_total) AS total
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+      const cogsTotal = Number(cogsResumen?.total) || 0;
+
+      const costosConfiguradosRow = await db.get(
+        `
+          SELECT COUNT(1) AS total
+          FROM productos
+          WHERE negocio_id = ?
+            AND (
+              COALESCE(costo_unitario_real, 0) > 0
+              OR
+              COALESCE(costo_base_sin_itbis, 0) > 0
+              OR COALESCE(costo_promedio_actual, 0) > 0
+              OR COALESCE(ultimo_costo_sin_itbis, 0) > 0
+            )
+        `,
+        [negocioId]
+      );
+      const costosConfigurados = Number(costosConfiguradosRow?.total) > 0;
+
       const gananciaNeta = Number((ingresosTotal - gastosTotal).toFixed(2));
       const margenNeto = ingresosTotal > 0 ? Number((gananciaNeta / ingresosTotal).toFixed(4)) : 0;
+      const utilidadBruta = Number((ingresosTotal - cogsTotal).toFixed(2));
+      const utilidadReal = Number((utilidadBruta - gastosOperativosTotal).toFixed(2));
 
       const rangoAnterior = obtenerRangoAnterior(rango.desde, rango.dias);
       const ventasAnterior = await db.get(
@@ -8949,6 +10084,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         },
         gastos: {
           total: gastosTotal,
+          total_operativos: gastosOperativosTotal,
           top_categorias: (gastosTopCategorias || []).map((row) => ({
             categoria: row.categoria,
             total: Number(row.total) || 0,
@@ -8965,7 +10101,11 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         ganancias: {
           neta: gananciaNeta,
           margen: margenNeto,
+          cogs_total: cogsTotal,
+          utilidad_bruta: utilidadBruta,
+          utilidad_real: utilidadReal,
         },
+        costos_configurados: costosConfigurados,
         rankings: {
           top_productos_cantidad: topProductosCantidad || [],
           top_productos_ingresos: topProductosIngresos || [],
@@ -9034,32 +10174,46 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
 
       const capitalInicial = await obtenerCapitalInicialPeriodo(negocioId, rango.desde, rango.hasta);
       const costoEstimadoCogs = await obtenerCostoEstimadoCogs(negocioId);
+      const ventasResumen = await db.get(
+        `
+          SELECT SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+      const ventasTotal = Number(ventasResumen?.total) || 0;
 
-      const obtenerCogsTotal = async (desde, hasta) => {
-        const row = await db.get(
-          `
-            SELECT SUM(dp.cantidad * COALESCE(costos.costo_promedio, ?)) AS total
-            FROM detalle_pedido dp
-            JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
-            LEFT JOIN (
-              SELECT cid.producto_id,
-                     SUM(cid.cantidad * cid.costo_unitario) / NULLIF(SUM(cid.cantidad), 0) AS costo_promedio
-              FROM compras_inventario_detalle cid
-              JOIN compras_inventario ci ON ci.id = cid.compra_id
-              WHERE cid.negocio_id = ?
-                AND DATE(ci.fecha) <= ?
-              GROUP BY cid.producto_id
-            ) costos ON costos.producto_id = dp.producto_id
-            WHERE dp.negocio_id = ?
-              AND pe.estado = 'pagado'
-              AND ${fechaBase} BETWEEN ? AND ?
-          `,
-          [costoEstimadoCogs, negocioId, negocioId, hasta, negocioId, desde, hasta]
-        );
-        return Number(row?.total) || 0;
-      };
+      const cogsResumen = await db.get(
+        `
+          SELECT SUM(cogs_total) AS total
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+      const cogsTotal = Number(cogsResumen?.total) || 0;
 
-      const cogsTotal = await obtenerCogsTotal(rango.desde, rango.hasta);
+      const costosConfiguradosRow = await db.get(
+        `
+          SELECT COUNT(1) AS total
+          FROM productos
+          WHERE negocio_id = ?
+            AND (
+              COALESCE(costo_unitario_real, 0) > 0
+              OR
+              COALESCE(costo_base_sin_itbis, 0) > 0
+              OR COALESCE(costo_promedio_actual, 0) > 0
+              OR COALESCE(ultimo_costo_sin_itbis, 0) > 0
+            )
+        `,
+        [negocioId]
+      );
+      const costosConfigurados = Number(costosConfiguradosRow?.total) > 0;
 
       const tipoGastoNormalizadoSql = `
         CASE
@@ -9114,6 +10268,8 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
       const gastosSinTipoTotal = Number(gastosTotalesResumen?.total_sin_tipo) || 0;
       const gastosTipoInvalidoCount = Number(gastosTotalesResumen?.cantidad_tipo_invalido) || 0;
       const gastosTipoInvalidoTotal = Number(gastosTotalesResumen?.total_tipo_invalido) || 0;
+      const utilidadBruta = Number((ventasTotal - cogsTotal).toFixed(2));
+      const utilidadNetaReal = Number((utilidadBruta - gastosOperativosTotal).toFixed(2));
 
       const entradasCaja =
         (Number(metodosPago?.efectivo) || 0) +
@@ -9184,6 +10340,11 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
           cogs: cogsTotal,
           final: inventarioFinal,
         },
+        ventas_total: ventasTotal,
+        cogs_total: cogsTotal,
+        utilidad_bruta: utilidadBruta,
+        utilidad_neta_real: utilidadNetaReal,
+        costos_configurados: costosConfigurados,
         capital_inicial: capitalInicial,
         configuracion: {
           costo_estimado_cogs: costoEstimadoCogs,
@@ -9494,6 +10655,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
     const metodoPago = normalizarCampoTexto(req.body?.metodo_pago ?? req.body?.metodoPago);
     const observaciones = normalizarCampoTexto(req.body?.observaciones ?? req.body?.comentarios);
     const aplicaItbis = normalizarAplicaItbis(req.body?.aplica_itbis ?? req.body?.aplicaItbis);
+    const itbisCapitalizableEntrada = req.body?.itbis_capitalizable ?? req.body?.itbisCapitalizable;
     const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
 
     if (!proveedor || !esFechaISOValida(fecha)) {
@@ -9523,7 +10685,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
     try {
       const compraActual = await db.get(
         `
-        SELECT id, origen_fondos, metodo_pago, compra_id, gasto_id, salida_id
+        SELECT id, origen_fondos, metodo_pago, compra_id, gasto_id, salida_id, itbis_capitalizable
           FROM compras_inventario
          WHERE id = ? AND negocio_id = ?
         `,
@@ -9533,6 +10695,18 @@ app.put('/api/inventario/compras/:id', (req, res) => {
       if (!compraActual) {
         return res.status(404).json({ error: 'Compra no encontrada.' });
       }
+
+      const modoInventario = await obtenerModoInventarioCostos(negocioId);
+      const esReventa = modoInventario === 'REVENTA';
+      const acreditaItbis = await obtenerConfigAcreditaItbis(negocioId);
+      const itbisCapitalizableDefault = aplicaItbis ? (acreditaItbis ? 0 : 1) : 0;
+      const itbisCapitalizableBase =
+        itbisCapitalizableEntrada !== undefined && itbisCapitalizableEntrada !== null
+          ? itbisCapitalizableEntrada
+          : compraActual.itbis_capitalizable;
+      const itbisCapitalizable = aplicaItbis
+        ? normalizarFlag(itbisCapitalizableBase ?? itbisCapitalizableDefault, itbisCapitalizableDefault)
+        : 0;
 
       const detallesActuales = await db.all(
         `
@@ -9552,12 +10726,15 @@ app.put('/api/inventario/compras/:id', (req, res) => {
 
       const placeholders = productoIdsUnion.map(() => '?').join(',');
       const productos = await db.all(
-        `SELECT id, nombre, stock_indefinido FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
+        `SELECT id, nombre, stock, stock_indefinido, costo_promedio_actual, ultimo_costo_sin_itbis,
+                costo_base_sin_itbis, actualiza_costo_con_compras
+           FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
         [negocioId, ...productoIdsUnion]
       );
       const productosMap = new Map((productos || []).map((producto) => [Number(producto.id), producto]));
 
       const detalles = [];
+      const costosPorProducto = new Map();
       let subtotal = 0;
 
       for (const item of itemsEntrada) {
@@ -9567,7 +10744,10 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         }
 
         const cantidad = normalizarNumero(item?.cantidad, null);
-        const costoUnitario = normalizarNumero(item?.costo_unitario ?? item?.costoUnitario, null);
+        const costoUnitario = normalizarNumero(
+          item?.costo_unitario ?? item?.costoUnitario ?? item?.costo_unitario_sin_itbis ?? item?.costoUnitarioSinItbis,
+          null
+        );
 
         if (cantidad === null || cantidad <= 0) {
           return res.status(400).json({ error: 'La cantidad debe ser mayor a 0.' });
@@ -9576,14 +10756,40 @@ app.put('/api/inventario/compras/:id', (req, res) => {
           return res.status(400).json({ error: 'El costo unitario debe ser mayor o igual a 0.' });
         }
 
-        const totalLinea = Number((cantidad * costoUnitario).toFixed(2));
+        const costoUnitarioSinItbis = Number(costoUnitario.toFixed(2));
+        const costoUnitarioEfectivo = resolverCostoUnitarioEfectivo(
+          costoUnitarioSinItbis,
+          aplicaItbis,
+          itbisCapitalizable === 1
+        );
+        const totalLinea = Number((cantidad * costoUnitarioSinItbis).toFixed(2));
         subtotal += totalLinea;
         detalles.push({
           producto_id: productoId,
           cantidad,
-          costo_unitario: Number(costoUnitario.toFixed(2)),
+          costo_unitario: costoUnitarioSinItbis,
+          costo_unitario_sin_itbis: costoUnitarioSinItbis,
+          costo_unitario_efectivo: costoUnitarioEfectivo,
+          itbis_aplica: aplicaItbis ? 1 : 0,
+          itbis_capitalizable: itbisCapitalizable ? 1 : 0,
           total_linea: totalLinea,
         });
+
+        const acumulado = costosPorProducto.get(productoId) || {
+          cantidad: 0,
+          costo_total_efectivo: 0,
+          ultimo_costo_sin_itbis: 0,
+          costo_unitario_real: 0,
+          costo_unitario_real_incluye_itbis: 0,
+        };
+        acumulado.cantidad = Number((acumulado.cantidad + cantidad).toFixed(2));
+        acumulado.costo_total_efectivo = Number(
+          (acumulado.costo_total_efectivo + cantidad * costoUnitarioEfectivo).toFixed(2)
+        );
+        acumulado.ultimo_costo_sin_itbis = costoUnitarioSinItbis;
+        acumulado.costo_unitario_real = costoUnitarioEfectivo;
+        acumulado.costo_unitario_real_incluye_itbis = aplicaItbis && itbisCapitalizable ? 1 : 0;
+        costosPorProducto.set(productoId, acumulado);
       }
 
       subtotal = Number(subtotal.toFixed(2));
@@ -9646,18 +10852,55 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         await db.run(
           `
             INSERT INTO compras_inventario_detalle
-              (compra_id, producto_id, cantidad, costo_unitario, total_linea, negocio_id)
-            VALUES (?, ?, ?, ?, ?, ?)
+              (compra_id, producto_id, cantidad, costo_unitario, costo_unitario_sin_itbis, costo_unitario_efectivo,
+               itbis_aplica, itbis_capitalizable, total_linea, negocio_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             compraId,
             detalle.producto_id,
             detalle.cantidad,
             detalle.costo_unitario,
+            detalle.costo_unitario_sin_itbis,
+            detalle.costo_unitario_efectivo,
+            detalle.itbis_aplica,
+            detalle.itbis_capitalizable,
             detalle.total_linea,
             negocioId,
           ]
         );
+      }
+
+      for (const [productoId, costoData] of costosPorProducto.entries()) {
+        const producto = productosMap.get(productoId);
+        if (!producto) continue;
+        if (esReventa) {
+          const costoUnitarioReal = Number(costoData.costo_unitario_real) || 0;
+          const incluyeItbis = Number(costoData.costo_unitario_real_incluye_itbis) || 0;
+          await db.run(
+            'UPDATE productos SET costo_unitario_real = ?, costo_unitario_real_incluye_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [Number(costoUnitarioReal.toFixed(2)), incluyeItbis, productoId, negocioId]
+          );
+          continue;
+        }
+        const ultimoCostoSinItbis = Number(costoData.ultimo_costo_sin_itbis) || 0;
+        const actualizaCosto = Number(producto.actualiza_costo_con_compras ?? 1) === 1;
+        const costoPromedioActual = Number(producto.costo_promedio_actual) || 0;
+        const cantidadComprada = Number(costoData.cantidad) || 0;
+        const costoTotalEfectivo = Number(costoData.costo_total_efectivo) || 0;
+
+        if (actualizaCosto && costoPromedioActual === 0 && cantidadComprada > 0) {
+          const nuevoCostoPromedio = costoTotalEfectivo / cantidadComprada;
+          await db.run(
+            'UPDATE productos SET costo_promedio_actual = ?, ultimo_costo_sin_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [Number(nuevoCostoPromedio.toFixed(2)), Number(ultimoCostoSinItbis.toFixed(2)), productoId, negocioId]
+          );
+        } else {
+          await db.run(
+            'UPDATE productos SET ultimo_costo_sin_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [Number(ultimoCostoSinItbis.toFixed(2)), productoId, negocioId]
+          );
+        }
       }
 
       const compraComentarios = `Compra inventario #${compraId}${observaciones ? ` - ${observaciones}` : ''}`;
@@ -9678,8 +10921,9 @@ app.put('/api/inventario/compras/:id', (req, res) => {
 
         for (const detalle of detalles) {
           const producto = productosMap.get(detalle.producto_id);
-          const itbisLinea = aplicaItbis ? Number((detalle.total_linea * 0.18).toFixed(2)) : 0;
+          const itbisLinea = aplicaItbis ? Number((detalle.total_linea * ITBIS_RATE).toFixed(2)) : 0;
           const totalLinea = Number((detalle.total_linea + itbisLinea).toFixed(2));
+          const costoLineaBase = detalle.costo_unitario_sin_itbis ?? detalle.costo_unitario;
           await db.run(
             `
               INSERT INTO detalle_compra
@@ -9690,7 +10934,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
               compraActual.compra_id,
               producto?.nombre || `Producto ${detalle.producto_id}`,
               detalle.cantidad,
-              detalle.costo_unitario,
+              costoLineaBase,
               itbisLinea,
               totalLinea,
               negocioId,
@@ -9758,6 +11002,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
                  subtotal = ?,
                  itbis = ?,
                  aplica_itbis = ?,
+                 itbis_capitalizable = ?,
                  total = ?,
                  observaciones = ?,
                  salida_id = ?
@@ -9771,6 +11016,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
           subtotalFinal,
           itbis,
           aplicaItbis ? 1 : 0,
+          itbisCapitalizable ? 1 : 0,
           total,
           observaciones,
           salidaId,
@@ -9789,6 +11035,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         itbis,
         total,
         aplica_itbis: aplicaItbis ? 1 : 0,
+        itbis_capitalizable: itbisCapitalizable ? 1 : 0,
       });
     } catch (error) {
       await db.run('ROLLBACK').catch(() => {});
@@ -10868,21 +12115,18 @@ app.put('/api/cotizaciones/:id/estado', (req, res) => {
 app.post('/api/cotizaciones/:id/facturar', (req, res) => {
   const { id } = req.params;
 
-  requireUsuarioSesion(req, res, (usuarioSesion) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const negocioIdFactura = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
 
-    db.get(
-      `SELECT id, codigo, cliente_nombre, cliente_documento, cliente_contacto, fecha_validez, estado,
-            subtotal, impuesto, descuento_monto, descuento_porcentaje, total, notas_internas, notas_cliente,
-            creada_por, pedido_id
-     FROM cotizaciones
-     WHERE id = ? AND negocio_id = ?`,
-    [id, negocioIdFactura],
-    (cotErr, cotizacion) => {
-      if (cotErr) {
-        console.error('Error al obtener cotizaci?n para facturar:', cotErr.message);
-        return res.status(500).json({ error: 'Error al facturar la cotizaci?n' });
-      }
+    try {
+      const cotizacion = await db.get(
+        `SELECT id, codigo, cliente_nombre, cliente_documento, cliente_contacto, fecha_validez, estado,
+                subtotal, impuesto, descuento_monto, descuento_porcentaje, total, notas_internas, notas_cliente,
+                creada_por, pedido_id
+           FROM cotizaciones
+          WHERE id = ? AND negocio_id = ?`,
+        [id, negocioIdFactura]
+      );
 
       if (!cotizacion) {
         return res.status(404).json({ error: 'Cotizaci?n no encontrada' });
@@ -10904,226 +12148,279 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
       const itemsSql = `
         SELECT ci.id, ci.producto_id, ci.descripcion, ci.cantidad, ci.precio_unitario,
                ci.descuento_porcentaje, ci.descuento_monto, ci.subtotal_linea, ci.impuesto_linea, ci.total_linea,
-               p.stock AS stock_producto, p.stock_indefinido
-        FROM cotizacion_items ci
-        LEFT JOIN productos p ON p.id = ci.producto_id AND p.negocio_id = ?
-        WHERE ci.cotizacion_id = ? AND ci.negocio_id = ?
+               p.stock AS stock_producto, p.stock_indefinido, p.tipo_producto, p.insumo_vendible,
+               p.contenido_por_unidad, p.unidad_base, p.nombre AS producto_nombre
+          FROM cotizacion_items ci
+          LEFT JOIN productos p ON p.id = ci.producto_id AND p.negocio_id = ?
+         WHERE ci.cotizacion_id = ? AND ci.negocio_id = ?
       `;
 
-      db.all(itemsSql, [negocioIdFactura, id, negocioIdFactura], (itemsErr, items) => {
-        if (itemsErr) {
-          console.error('Error al obtener items de la cotizaci?n:', itemsErr.message);
-          return res.status(500).json({ error: 'Error al facturar la cotizaci?n' });
-        }
+      const items = await db.all(itemsSql, [negocioIdFactura, id, negocioIdFactura]);
+      if (!items || !items.length) {
+        return res.status(400).json({ error: 'La cotizaci?n no tiene productos para facturar' });
+      }
 
-        if (!items || !items.length) {
-          return res.status(400).json({ error: 'La cotizaci?n no tiene productos para facturar' });
-        }
+      const modoInventario = await obtenerModoInventarioCostos(negocioIdFactura);
+      const usaRecetas = modoInventario === 'PREPARACION';
+      const bloquearInsumosSinStock = usaRecetas ? await obtenerConfigBloqueoInsumos(negocioIdFactura) : false;
+      const advertenciasInsumos = [];
 
-        const cantidades = new Map();
-        for (const item of items) {
-          if (!item?.producto_id) {
-            return res.status(400).json({ error: 'Todos los items deben estar vinculados a un producto para facturar' });
+      const itemsProcesados = [];
+      for (const item of items) {
+        if (!item?.producto_id) {
+          return res.status(400).json({ error: 'Todos los items deben estar vinculados a un producto para facturar' });
+        }
+        const cantidad = normalizarNumero(item.cantidad, 0);
+        if (cantidad <= 0) {
+          return res.status(400).json({ error: 'Hay items sin cantidad v?lida en la cotizaci?n' });
+        }
+        const tipoProducto = normalizarTipoProducto(item.tipo_producto, 'FINAL');
+        const insumoVendible = normalizarFlag(item.insumo_vendible, 0) === 1;
+        if (usaRecetas && tipoProducto === 'INSUMO' && !insumoVendible) {
+          return res.status(400).json({
+            error: `El producto ${item.producto_nombre || item.producto_id} es un insumo no vendible.`,
+          });
+        }
+        const esIndefinido = esStockIndefinido({ stock_indefinido: item.stock_indefinido });
+        if (!esIndefinido) {
+          const stockDisponible = normalizarNumero(item.stock_producto, 0);
+          if (cantidad > stockDisponible) {
+            return res.status(400).json({
+              error: `Stock insuficiente para el producto ${item.producto_id}. Disponible: ${stockDisponible}`,
+            });
           }
-          const esIndefinido = esStockIndefinido(item);
-          const cantidad = normalizarNumero(item.cantidad, 0);
-          if (cantidad <= 0) {
-            return res.status(400).json({ error: 'Hay items sin cantidad v?lida en la cotizaci?n' });
+        }
+        itemsProcesados.push({
+          producto_id: Number(item.producto_id),
+          cantidad,
+          producto_nombre: item.producto_nombre,
+          tipo_producto: tipoProducto,
+          insumo_vendible: insumoVendible ? 1 : 0,
+        });
+      }
+
+      const productoIds = itemsProcesados
+        .map((item) => Number(item.producto_id))
+        .filter((id) => Number.isFinite(id) && id > 0);
+      const recetasMap = usaRecetas ? await obtenerRecetasPorProductos(productoIds, negocioIdFactura) : new Map();
+      const insumosMap = new Map();
+      const consumoPorInsumo = new Map();
+      const consumosPorIndice = new Map();
+
+      if (usaRecetas && recetasMap.size > 0) {
+        itemsProcesados.forEach((item, index) => {
+          const receta = recetasMap.get(item.producto_id);
+          if (!Array.isArray(receta) || receta.length === 0) {
+            return;
           }
-          if (esIndefinido) {
+          const consumos = [];
+          receta.forEach((detalle) => {
+            if (detalle.tipo_producto !== 'INSUMO') {
+              return;
+            }
+            const cantidadBase = Number((item.cantidad * (Number(detalle.cantidad) || 0)).toFixed(4));
+            if (!cantidadBase) {
+              return;
+            }
+            const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
+            const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
+            consumos.push({
+              insumo_id: Number(detalle.insumo_id),
+              cantidad_base: cantidadBase,
+              cantidad_unidades: cantidadUnidades,
+              unidad_base: detalle.unidad_base,
+            });
+            const acumulado = consumoPorInsumo.get(detalle.insumo_id) || 0;
+            consumoPorInsumo.set(detalle.insumo_id, Number((acumulado + cantidadUnidades).toFixed(4)));
+            if (!insumosMap.has(detalle.insumo_id)) {
+              insumosMap.set(detalle.insumo_id, detalle);
+            }
+          });
+          if (consumos.length) {
+            consumosPorIndice.set(index, consumos);
+          }
+        });
+
+        for (const [insumoId, cantidadRequerida] of consumoPorInsumo.entries()) {
+          if (!cantidadRequerida) continue;
+          const insumo = insumosMap.get(insumoId);
+          if (!insumo || esStockIndefinido(insumo)) {
             continue;
           }
-          const acumulado = cantidades.get(item.producto_id) || 0;
-          cantidades.set(item.producto_id, acumulado + cantidad);
-        }
-
-        for (const [productoId, cantidad] of cantidades.entries()) {
-          const fila = items.find((i) => i.producto_id === productoId);
-          const stockDisponible = normalizarNumero(fila?.stock_producto, 0);
-          if (cantidad > stockDisponible) {
-            return res
-              .status(400)
-              .json({ error: `Stock insuficiente para el producto ${productoId}. Disponible: ${stockDisponible}` });
-          }
-        }
-
-        obtenerImpuestoConfigurado(negocioIdFactura, (configErr, impuestoAplicado) => {
-          if (configErr) {
-            console.error('Error al obtener impuesto configurado:', configErr.message);
-            return res.status(500).json({ error: 'Error al facturar la cotizaci?n' });
-          }
-
-          const totales = calcularTotalesCotizacion(
-            items,
-            impuestoAplicado,
-            cotizacion.descuento_porcentaje,
-            cotizacion.descuento_monto
-          );
-
-          if (totales?.error) {
-            return res.status(400).json({ error: totales.error });
-          }
-
-          db.run('BEGIN TRANSACTION', (beginErr) => {
-            if (beginErr) {
-              console.error('No se pudo iniciar la facturaci?n de cotizaci?n:', beginErr.message);
-              return res.status(500).json({ error: 'Error al facturar la cotizaci?n' });
+          const stockDisponible = Number(insumo.stock) || 0;
+          if (cantidadRequerida > stockDisponible) {
+            const mensaje = `Stock insuficiente para insumo ${insumo.insumo_nombre || insumoId}.`;
+            if (bloquearInsumosSinStock) {
+              return res.status(400).json({ error: mensaje });
             }
+            advertenciasInsumos.push(mensaje);
+          }
+        }
+      }
 
-            const rollback = (mensaje, errorObj) => {
-              if (errorObj) {
-                console.error(mensaje, errorObj.message);
-              } else {
-                console.error(mensaje);
-              }
-              db.run('ROLLBACK', (rollbackErr) => {
-                if (rollbackErr) {
-                  console.error('Error al revertir facturaci?n de cotizaci?n:', rollbackErr.message);
-                }
-                res.status(500).json({ error: mensaje });
-              });
-            };
+      const impuestoAplicado = Number(await obtenerImpuestoConfiguradoAsync(negocioIdFactura)) || 0;
+      const totales = calcularTotalesCotizacion(
+        items,
+        impuestoAplicado,
+        cotizacion.descuento_porcentaje,
+        cotizacion.descuento_monto
+      );
 
-            const fechaListo = formatearFechaHoraMySQL(new Date());
-            const insertPedidoSql = `
-              INSERT INTO pedidos (
-                cuenta_id, mesa, cliente, modo_servicio, nota, estado, subtotal, impuesto, total,
-                descuento_porcentaje, descuento_monto, cliente_documento, fecha_listo, creado_por, comentarios,
-                negocio_id
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `;
+      if (totales?.error) {
+        return res.status(400).json({ error: totales.error });
+      }
 
-            db.run(
-              insertPedidoSql,
-              [
-                null,
-                null,
-                cotizacion.cliente_nombre || null,
-                'en_local',
-                cotizacion.notas_cliente || null,
-                'listo',
-                totales.subtotal,
-                totales.impuesto,
-                totales.total,
-                cotizacion.descuento_porcentaje || 0,
-                totales.descuento_global,
-                cotizacion.cliente_documento || null,
-                fechaListo,
-                cotizacion.creada_por || null,
-                cotizacion.notas_internas || null,
-                negocioIdFactura,
-              ],
-              function (pedidoErr) {
-                if (pedidoErr) {
-                  return rollback('Error al crear el pedido desde la cotizaci?n', pedidoErr);
-                }
+      await db.run('BEGIN');
 
-                const pedidoId = this.lastID;
-                const cuentaAsignada = pedidoId;
+      const fechaListo = formatearFechaHoraMySQL(new Date());
+      const insertPedidoSql = `
+        INSERT INTO pedidos (
+          cuenta_id, mesa, cliente, modo_servicio, nota, estado, subtotal, impuesto, total,
+          descuento_porcentaje, descuento_monto, cliente_documento, fecha_listo, creado_por, comentarios,
+          negocio_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
 
-                const asegurarCuentaId = (callback) => {
-                  db.run(
-                    'UPDATE pedidos SET cuenta_id = COALESCE(cuenta_id, ?) WHERE id = ? AND negocio_id = ?',
-                    [cuentaAsignada, pedidoId, negocioIdFactura],
-                    (cuentaErr) => {
-                      if (cuentaErr) {
-                        console.warn('No se pudo asignar cuenta al pedido creado de cotizaci?n:', cuentaErr.message);
-                      }
-                      callback();
-                    }
-                  );
-                };
+      const insertPedido = await db.run(insertPedidoSql, [
+        null,
+        null,
+        cotizacion.cliente_nombre || null,
+        'en_local',
+        cotizacion.notas_cliente || null,
+        'listo',
+        totales.subtotal,
+        totales.impuesto,
+        totales.total,
+        cotizacion.descuento_porcentaje || 0,
+        totales.descuento_global,
+        cotizacion.cliente_documento || null,
+        fechaListo,
+        cotizacion.creada_por || null,
+        cotizacion.notas_internas || null,
+        negocioIdFactura,
+      ]);
 
-                const insertarDetalle = (indice) => {
-                  if (indice >= totales.items.length) {
-                    return asegurarCuentaId(() => actualizarStock(0));
-                  }
+      const pedidoId = insertPedido?.lastID;
+      if (!pedidoId) {
+        throw new Error('No se pudo crear el pedido desde la cotizaci?n');
+      }
 
-                  const item = totales.items[indice];
-                  db.run(
-                    `INSERT INTO detalle_pedido (
-                      pedido_id, producto_id, cantidad, precio_unitario, descuento_porcentaje, descuento_monto, negocio_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                      pedidoId,
-                      item.producto_id,
-                      item.cantidad,
-                      item.precio_unitario,
-                      item.descuento_porcentaje,
-                      item.descuento_monto,
-                      negocioIdFactura,
-                    ],
-                    (detalleErr) => {
-                      if (detalleErr) {
-                        return rollback('Error al guardar el detalle del pedido', detalleErr);
-                      }
-                      insertarDetalle(indice + 1);
-                    }
-                  );
-                };
+      await db.run('UPDATE pedidos SET cuenta_id = COALESCE(cuenta_id, ?) WHERE id = ? AND negocio_id = ?', [
+        pedidoId,
+        pedidoId,
+        negocioIdFactura,
+      ]);
 
-                const cantidadesEntries = Array.from(cantidades.entries());
+      const consumoRegistros = [];
 
-                const actualizarStock = (indice) => {
-                  if (indice >= cantidadesEntries.length) {
-                    return db.run(
-                      "UPDATE cotizaciones SET estado = 'facturada', pedido_id = ? WHERE id = ? AND negocio_id = ?",
-                      [pedidoId, id, negocioIdFactura],
-                      (updateCotErr) => {
-                        if (updateCotErr) {
-                          return rollback('Error al actualizar la cotizaci?n a facturada', updateCotErr);
-                        }
-                        db.run('COMMIT', (commitErr) => {
-                          if (commitErr) {
-                            return rollback('Error al confirmar pedido generado', commitErr);
-                          }
+      for (let index = 0; index < totales.items.length; index += 1) {
+        const item = totales.items[index];
+        const detalleResult = await db.run(
+          `INSERT INTO detalle_pedido (
+            pedido_id, producto_id, cantidad, precio_unitario, descuento_porcentaje, descuento_monto, negocio_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            pedidoId,
+            item.producto_id,
+            item.cantidad,
+            item.precio_unitario,
+            item.descuento_porcentaje,
+            item.descuento_monto,
+            negocioIdFactura,
+          ]
+        );
 
-                          res.status(201).json({
-                            ok: true,
-                            pedido: {
-                              id: pedidoId,
-                              cuenta_id: cuentaAsignada,
-                              estado: 'listo',
-                              subtotal: totales.subtotal,
-                              impuesto: totales.impuesto,
-                              total: totales.total,
-                              descuento_porcentaje: cotizacion.descuento_porcentaje || 0,
-                              descuento_monto: totales.descuento_global,
-                              cliente: cotizacion.cliente_nombre || null,
-                              cliente_documento: cotizacion.cliente_documento || null,
-                              fecha_listo: fechaListo,
-                            },
-                          });
-                        });
-                      }
-                    );
-                  }
-
-                  const [productoId, cantidad] = cantidadesEntries[indice];
-                  db.run(
-                    'UPDATE productos SET stock = stock - ? WHERE id = ? AND negocio_id = ?',
-                    [cantidad, productoId, negocioIdFactura],
-                    function (stockErr) {
-                      if (stockErr) {
-                        return rollback('Error al actualizar stock de productos', stockErr);
-                      }
-                      if (this.changes === 0) {
-                        return rollback('Error al actualizar stock de productos');
-                      }
-                      actualizarStock(indice + 1);
-                    }
-                  );
-                };
-
-                insertarDetalle(0);
-              }
-            );
+        const detalleId = detalleResult?.lastID;
+        const consumos = consumosPorIndice.get(index);
+        if (detalleId && Array.isArray(consumos)) {
+          consumos.forEach((consumo) => {
+            consumoRegistros.push({
+              detalle_pedido_id: detalleId,
+              producto_final_id: item.producto_id,
+              insumo_id: consumo.insumo_id,
+              cantidad_base: consumo.cantidad_base,
+              unidad_base: consumo.unidad_base,
+            });
           });
-        });
-      });
-    }
-  );
+        }
 
+        const itemOriginal = items[index];
+        const esIndefinido = esStockIndefinido({ stock_indefinido: itemOriginal?.stock_indefinido });
+        if (!esIndefinido) {
+          const stockResult = await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+            [item.cantidad, item.producto_id, negocioIdFactura, item.cantidad]
+          );
+          if (stockResult.changes === 0) {
+            throw new Error('Error al actualizar stock de productos');
+          }
+        }
+      }
+
+      if (usaRecetas && consumoPorInsumo.size > 0) {
+        for (const [insumoId, cantidadUnidades] of consumoPorInsumo.entries()) {
+          if (!cantidadUnidades) continue;
+          const insumo = insumosMap.get(insumoId);
+          if (!insumo || esStockIndefinido(insumo)) {
+            continue;
+          }
+          const stockResult = await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+            [cantidadUnidades, insumoId, negocioIdFactura, cantidadUnidades]
+          );
+          if (stockResult.changes === 0) {
+            throw new Error(`No se pudo actualizar stock del insumo ${insumoId}`);
+          }
+        }
+
+        for (const consumo of consumoRegistros) {
+          await db.run(
+            `INSERT INTO consumo_insumos
+              (pedido_id, detalle_pedido_id, producto_final_id, insumo_id, cantidad_base, unidad_base, negocio_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              pedidoId,
+              consumo.detalle_pedido_id,
+              consumo.producto_final_id,
+              consumo.insumo_id,
+              consumo.cantidad_base,
+              consumo.unidad_base,
+              negocioIdFactura,
+            ]
+          );
+        }
+      }
+
+      await db.run("UPDATE cotizaciones SET estado = 'facturada', pedido_id = ? WHERE id = ? AND negocio_id = ?", [
+        pedidoId,
+        id,
+        negocioIdFactura,
+      ]);
+
+      await db.run('COMMIT');
+
+      res.status(201).json({
+        ok: true,
+        pedido: {
+          id: pedidoId,
+          cuenta_id: pedidoId,
+          estado: 'listo',
+          subtotal: totales.subtotal,
+          impuesto: totales.impuesto,
+          total: totales.total,
+          descuento_porcentaje: cotizacion.descuento_porcentaje || 0,
+          descuento_monto: totales.descuento_global,
+          cliente: cotizacion.cliente_nombre || null,
+          cliente_documento: cotizacion.cliente_documento || null,
+          fecha_listo: fechaListo,
+        },
+        advertencias: advertenciasInsumos.length ? advertenciasInsumos : undefined,
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al facturar la cotizaci?n:', error?.message || error);
+      res.status(500).json({ error: error?.message || 'Error al facturar la cotizaci?n' });
+    }
   });
 });
 
@@ -11472,10 +12769,15 @@ app.post('/api/login', async (req, res) => {
       .json({ ok: false, error: estadoNegocio.error, motivo_suspension: estadoNegocio.motivo_suspension });
   }
 
-  const configModulosLogin = await obtenerConfigModulosNegocio(negocioId);
-  if (row.rol === 'bar' && configModulosLogin.bar === false) {
-    return res.status(403).json({ ok: false, error: 'El modulo de Bar esta desactivado para este negocio.' });
-  }
+    const configModulosLogin = await obtenerConfigModulosNegocio(negocioId);
+    if (row.rol === 'bar' && configModulosLogin.bar === false) {
+      return res.status(403).json({ ok: false, error: 'El modulo de Bar esta desactivado para este negocio.' });
+    }
+    if (row.rol === 'vendedor' && configModulosLogin.mostrador === false) {
+      return res
+        .status(403)
+        .json({ ok: false, error: 'El modulo de Mostrador esta desactivado para este negocio.' });
+    }
 
   cerrarSesionesExpiradas(row.id, () => {
     cerrarSesionesActivasDeUsuario(row.id, () => {

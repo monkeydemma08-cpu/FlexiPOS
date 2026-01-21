@@ -84,6 +84,26 @@ let cotizaciones = [];
     }).format(numero);
   };
 
+  const parseMoneyValue = (input, { fallback = 0, allowEmpty = true } = {}) => {
+    const raw =
+      input && typeof input === 'object' && 'value' in input ? input.value : input ?? '';
+    const texto = raw === null || raw === undefined ? '' : String(raw).trim();
+    if (!texto) return allowEmpty ? fallback : NaN;
+    const parsed = window.KANMMoney?.parse
+      ? window.KANMMoney.parse(input)
+      : Number(texto.replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : NaN;
+  };
+
+  const setMoneyInputValue = (input, value) => {
+    if (!input) return;
+    if (window.KANMMoney?.setValue && input.matches?.('input[data-money]')) {
+      window.KANMMoney.setValue(input, value);
+      return;
+    }
+    input.value = value ?? '';
+  };
+
   const refrescarSelectsProductos = () => {
     const opciones = construirOpcionesProducto();
     document.querySelectorAll('.cot-item-producto').forEach((select) => {
@@ -209,13 +229,25 @@ const cargarProductos = async () => {
         <input type="number" class="cot-item-cantidad" min="0" step="0.01" value="${item.cantidad ?? 1}" />
       </td>
       <td data-label="Precio">
-        <input type="number" class="cot-item-precio" min="0" step="0.01" value="${item.precio_unitario ?? ''}" />
+        <input
+          type="text"
+          class="cot-item-precio"
+          inputmode="decimal"
+          data-money
+          value="${item.precio_unitario ?? ''}"
+        />
       </td>
       <td data-label="Desc %">
         <input type="number" class="cot-item-desc-pct" min="0" step="0.01" value="${item.descuento_porcentaje ?? 0}" />
       </td>
       <td data-label="Desc $">
-        <input type="number" class="cot-item-desc-monto" min="0" step="0.01" value="${item.descuento_monto ?? 0}" />
+        <input
+          type="text"
+          class="cot-item-desc-monto"
+          inputmode="decimal"
+          data-money
+          value="${item.descuento_monto ?? 0}"
+        />
       </td>
       <td data-label="Total línea" class="cot-item-total">${formatCurrency(0)}</td>
       <td data-label="Acciones">
@@ -238,13 +270,19 @@ const cargarProductos = async () => {
     if (descInput) {
       descInput.value = item.descripcion || item.producto_nombre || '';
     }
+    if (precioInput && item.precio_unitario !== undefined) {
+      setMoneyInputValue(precioInput, item.precio_unitario ?? '');
+    }
+    if (descMontoInput && item.descuento_monto !== undefined) {
+      setMoneyInputValue(descMontoInput, item.descuento_monto ?? 0);
+    }
 
     const syncProducto = () => {
       const prodId = Number(select?.value) || null;
       const producto = productos.find((p) => p.id === prodId);
       if (producto) {
-        if (!precioInput.value || Number(precioInput.value) === 0) {
-          precioInput.value = producto.precio || 0;
+        if (!precioInput.value || parseMoneyValue(precioInput) === 0) {
+          setMoneyInputValue(precioInput, producto.precio || 0);
         }
         if (!descInput.value) {
           descInput.value = producto.nombre || '';
@@ -284,9 +322,9 @@ const cargarProductos = async () => {
         producto_id: prodSelect?.value ? Number(prodSelect.value) : null,
         descripcion: descInput?.value?.trim() || '',
         cantidad: Number(cantidadInput?.value) || 0,
-        precio_unitario: Number(precioInput?.value) || 0,
+        precio_unitario: parseMoneyValue(precioInput),
         descuento_porcentaje: Number(descPctInput?.value) || 0,
-        descuento_monto: Number(descMontoInput?.value) || 0,
+        descuento_monto: parseMoneyValue(descMontoInput),
       };
     });
   };
@@ -308,7 +346,7 @@ const cargarProductos = async () => {
     });
 
     const descPct = Math.max(Number(inputDescGlobalPct?.value) || 0, 0);
-    const descMonto = Math.max(Number(inputDescGlobalMonto?.value) || 0, 0);
+    const descMonto = Math.max(parseMoneyValue(inputDescGlobalMonto), 0);
     const descuentoGlobal = Math.min(subtotalBase * (descPct / 100) + descMonto, subtotalBase);
     const subtotal = Math.max(subtotalBase - descuentoGlobal, 0);
     const impuesto = subtotal * Math.max(impuestoPorcentaje, 0) * 0.01;
@@ -404,7 +442,7 @@ const cargarProductos = async () => {
     inputNotasCliente.value = '';
     inputNotasInternas.value = '';
     inputDescGlobalPct.value = '';
-    inputDescGlobalMonto.value = '';
+    setMoneyInputValue(inputDescGlobalMonto, '');
     setEstadoEtiqueta('borrador');
     itemsBody.innerHTML = '';
     agregarItemFila();
@@ -511,7 +549,7 @@ const cargarCotizacionDetalle = async (id) => {
       inputNotasCliente.value = cotizacion.notas_cliente || '';
       inputNotasInternas.value = cotizacion.notas_internas || '';
       inputDescGlobalPct.value = cotizacion.descuento_porcentaje || 0;
-      inputDescGlobalMonto.value = cotizacion.descuento_monto || 0;
+      setMoneyInputValue(inputDescGlobalMonto, cotizacion.descuento_monto || 0);
       setEstadoEtiqueta(cotizacion.estado || 'borrador');
       itemsBody.innerHTML = '';
       (items || []).forEach((item) => agregarItemFila(item));
@@ -540,7 +578,7 @@ const cargarCotizacionDetalle = async (id) => {
       estado: estadoForzado || cotizacionActual?.estado || 'borrador',
       items: datos.items,
       descuento_porcentaje: Number(inputDescGlobalPct?.value) || 0,
-      descuento_monto: Number(inputDescGlobalMonto?.value) || 0,
+      descuento_monto: parseMoneyValue(inputDescGlobalMonto),
     };
 
     const esEdicion = Boolean(cotizacionActual?.id);

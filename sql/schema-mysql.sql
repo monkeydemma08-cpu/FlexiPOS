@@ -41,7 +41,17 @@ CREATE TABLE IF NOT EXISTS productos (
   nombre VARCHAR(255) NOT NULL,
   categoria_id INT,
   precio DECIMAL(10,2) NOT NULL,
-  stock INT DEFAULT 0,
+  costo_base_sin_itbis DECIMAL(12,2) NOT NULL DEFAULT 0,
+  costo_promedio_actual DECIMAL(12,2) NOT NULL DEFAULT 0,
+  ultimo_costo_sin_itbis DECIMAL(12,2) NOT NULL DEFAULT 0,
+  actualiza_costo_con_compras TINYINT(1) NOT NULL DEFAULT 1,
+  costo_unitario_real DECIMAL(12,2) NOT NULL DEFAULT 0,
+  costo_unitario_real_incluye_itbis TINYINT(1) NOT NULL DEFAULT 0,
+  tipo_producto ENUM('FINAL', 'INSUMO') NOT NULL DEFAULT 'FINAL',
+  insumo_vendible TINYINT(1) NOT NULL DEFAULT 0,
+  unidad_base ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND',
+  contenido_por_unidad DECIMAL(12,4) NOT NULL DEFAULT 1,
+  stock DECIMAL(12,4) DEFAULT 0,
   stock_indefinido TINYINT(1) NOT NULL DEFAULT 0,
   activo TINYINT DEFAULT 1,
   negocio_id INT NOT NULL,
@@ -169,6 +179,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
   subtotal DECIMAL(10,2) DEFAULT 0,
   impuesto DECIMAL(10,2) DEFAULT 0,
   total DECIMAL(10,2) DEFAULT 0,
+  cogs_total DECIMAL(12,2) NOT NULL DEFAULT 0,
   descuento_porcentaje DECIMAL(5,2) DEFAULT 0,
   descuento_monto DECIMAL(10,2) DEFAULT 0,
   propina_porcentaje DECIMAL(5,2) DEFAULT 0,
@@ -182,6 +193,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
   cocinero_nombre VARCHAR(255),
   bartender_id INT,
   bartender_nombre VARCHAR(255),
+  origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja',
   cierre_id INT,
   creado_por INT,
   preparado_por INT,
@@ -198,6 +210,8 @@ CREATE TABLE IF NOT EXISTS detalle_pedido (
   producto_id INT NOT NULL,
   cantidad INT NOT NULL,
   precio_unitario DECIMAL(10,2) NOT NULL,
+  costo_unitario_snapshot DECIMAL(12,2) NOT NULL DEFAULT 0,
+  cogs_linea DECIMAL(12,2) NOT NULL DEFAULT 0,
   descuento_porcentaje DECIMAL(5,2) DEFAULT 0,
   descuento_monto DECIMAL(10,2) DEFAULT 0,
   cantidad_descuento DECIMAL(10,2),
@@ -362,6 +376,7 @@ CREATE TABLE IF NOT EXISTS compras_inventario (
   subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
   itbis DECIMAL(12,2) NOT NULL DEFAULT 0,
   aplica_itbis TINYINT(1) NOT NULL DEFAULT 0,
+  itbis_capitalizable TINYINT(1) NOT NULL DEFAULT 0,
   total DECIMAL(12,2) NOT NULL DEFAULT 0,
   observaciones TEXT NULL,
   creado_por INT NULL,
@@ -380,11 +395,55 @@ CREATE TABLE IF NOT EXISTS compras_inventario_detalle (
   producto_id INT NOT NULL,
   cantidad DECIMAL(10,2) NOT NULL,
   costo_unitario DECIMAL(10,2) NOT NULL,
+  costo_unitario_sin_itbis DECIMAL(12,2) NOT NULL DEFAULT 0,
+  costo_unitario_efectivo DECIMAL(12,2) NOT NULL DEFAULT 0,
+  itbis_aplica TINYINT(1) NOT NULL DEFAULT 0,
+  itbis_capitalizable TINYINT(1) NOT NULL DEFAULT 0,
   total_linea DECIMAL(10,2) NOT NULL,
   negocio_id INT NOT NULL,
   CONSTRAINT fk_compra_inv_detalle_compra FOREIGN KEY (compra_id) REFERENCES compras_inventario(id),
   CONSTRAINT fk_compra_inv_detalle_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
   CONSTRAINT fk_compra_inv_detalle_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS recetas (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  negocio_id INT NOT NULL,
+  producto_final_id INT NOT NULL,
+  activo TINYINT(1) NOT NULL DEFAULT 1,
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY idx_recetas_producto (negocio_id, producto_final_id),
+  CONSTRAINT fk_recetas_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id),
+  CONSTRAINT fk_recetas_producto FOREIGN KEY (producto_final_id) REFERENCES productos(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS receta_detalle (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  receta_id INT NOT NULL,
+  insumo_id INT NOT NULL,
+  cantidad DECIMAL(12,4) NOT NULL,
+  unidad ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND',
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_receta_detalle_receta FOREIGN KEY (receta_id) REFERENCES recetas(id),
+  CONSTRAINT fk_receta_detalle_insumo FOREIGN KEY (insumo_id) REFERENCES productos(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS consumo_insumos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  pedido_id INT NOT NULL,
+  detalle_pedido_id INT NULL,
+  producto_final_id INT NOT NULL,
+  insumo_id INT NOT NULL,
+  cantidad_base DECIMAL(12,4) NOT NULL,
+  unidad_base ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND',
+  revertido TINYINT(1) NOT NULL DEFAULT 0,
+  creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+  negocio_id INT NOT NULL,
+  CONSTRAINT fk_consumo_insumos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id),
+  CONSTRAINT fk_consumo_insumos_pedido FOREIGN KEY (pedido_id) REFERENCES pedidos(id),
+  CONSTRAINT fk_consumo_insumos_producto FOREIGN KEY (producto_final_id) REFERENCES productos(id),
+  CONSTRAINT fk_consumo_insumos_insumo FOREIGN KEY (insumo_id) REFERENCES productos(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS analisis_capital_inicial (
@@ -445,6 +504,7 @@ CREATE TABLE IF NOT EXISTS cierres_caja (
   fecha_operacion DATETIME NOT NULL,
   usuario VARCHAR(255) NOT NULL,
   usuario_rol VARCHAR(50),
+  origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja',
   fondo_inicial DECIMAL(10,2) DEFAULT 0,
   total_sistema DECIMAL(10,2) DEFAULT 0,
   total_declarado DECIMAL(10,2) DEFAULT 0,
@@ -461,6 +521,7 @@ CREATE TABLE IF NOT EXISTS salidas_caja (
   descripcion TEXT,
   monto DECIMAL(10,2) NOT NULL,
   metodo VARCHAR(50) DEFAULT 'efectivo',
+  origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja',
   usuario_id INT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_salidas_caja_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
@@ -490,6 +551,11 @@ CREATE INDEX idx_compras_inventario_compra ON compras_inventario (compra_id);
 CREATE INDEX idx_compra_inv_detalle_compra ON compras_inventario_detalle (compra_id);
 CREATE INDEX idx_compra_inv_detalle_producto ON compras_inventario_detalle (producto_id);
 CREATE INDEX idx_compra_inv_detalle_negocio ON compras_inventario_detalle (negocio_id);
+CREATE INDEX idx_recetas_negocio ON recetas (negocio_id);
+CREATE INDEX idx_receta_detalle_receta ON receta_detalle (receta_id);
+CREATE INDEX idx_receta_detalle_insumo ON receta_detalle (insumo_id);
+CREATE INDEX idx_consumo_insumos_negocio_pedido ON consumo_insumos (negocio_id, pedido_id);
+CREATE INDEX idx_consumo_insumos_negocio_insumo ON consumo_insumos (negocio_id, insumo_id);
 CREATE INDEX idx_sesiones_usuario ON sesiones_usuarios (usuario_id);
 CREATE INDEX idx_pedidos_cierre_id ON pedidos (cierre_id);
 CREATE INDEX idx_cotizaciones_estado ON cotizaciones (negocio_id, estado, fecha_creacion);

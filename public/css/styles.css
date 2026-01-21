@@ -812,6 +812,41 @@ img {
   background: rgba(0, 0, 0, 0.08);
   border-radius: 10px;
 }
+.mostrador-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mostrador-grid {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 992px) {
+  .mostrador-grid {
+    grid-template-columns: 1.1fr 0.9fr;
+    align-items: stretch;
+  }
+}
+
+.mostrador-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mostrador-acciones {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.mostrador-acciones .kanm-message {
+  flex: 1 1 220px;
+}
 .kanm-scroll-actions {
   position: fixed;
   right: 20px;
@@ -892,6 +927,14 @@ img {
   color: var(--kanm-pink-dark);
   font-size: 1rem;
   pointer-events: none;
+}
+
+.mostrador-main .busqueda-productos input[type='search'] {
+  padding-left: 16px;
+}
+
+.mostrador-main .busqueda-productos .buscador-icono {
+  display: none;
 }
 
 .carrito-item {
@@ -1889,6 +1932,40 @@ img {
   align-items: start;
 }
 
+.admin-grid-two.admin-config-grid {
+  grid-template-columns: repeat(3, minmax(280px, 1fr));
+  align-items: start;
+}
+
+.admin-grid-two.admin-config-grid > .admin-card {
+  height: auto;
+  min-width: 0;
+}
+
+.admin-grid-two.admin-config-grid #factura-config {
+  grid-column: 1 / -1;
+}
+
+.admin-grid-two.admin-config-grid .factura-telefono-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+@media (max-width: 1280px) {
+  .admin-grid-two.admin-config-grid {
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .admin-grid-two.admin-config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-grid-two.admin-config-grid #factura-config {
+    grid-column: auto;
+  }
+}
+
 .cotizaciones-layout {
   display: grid;
   gap: 16px;
@@ -2394,13 +2471,15 @@ img {
 }
 
 .productos-card {
-  max-height: 60vh;
+  min-height: 62vh;
+  max-height: 78vh;
   display: flex;
   flex-direction: column;
 }
 
 .productos-card .productos-lista {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -2433,7 +2512,7 @@ img {
 }
 
 .admin-product-list {
-  max-height: 60vh;
+  max-height: none;
   overflow-y: auto;
   padding-right: 4px;
   display: grid;
@@ -2540,13 +2619,37 @@ img {
 
 .admin-phone-row {
   display: grid;
-  grid-template-columns: 1.5fr auto;
-  gap: 8px;
-  align-items: end;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.admin-phone-row > .kanm-button {
+  justify-self: flex-start;
+}
+
+.admin-phone-list {
+  min-width: 0;
 }
 
 .admin-phone-action .kanm-button {
   width: 100%;
+}
+
+.admin-billing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px 16px;
+}
+
+.admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.admin-field--full {
+  grid-column: 1 / -1;
 }
 
 .producto-form-actions {
@@ -3190,6 +3293,11 @@ img {
     grid-template-columns: 1fr;
   }
 
+  .productos-card {
+    max-height: none;
+    min-height: 0;
+  }
+
   .admin-phone-row {
     grid-template-columns: 1fr;
   }
@@ -3221,6 +3329,7 @@ img {
 
 .factura-telefono-row .kanm-input {
   width: 100%;
+  min-width: 0;
 }
 
 .factura-rangos {

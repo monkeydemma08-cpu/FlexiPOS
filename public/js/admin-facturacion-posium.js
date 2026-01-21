@@ -82,7 +82,10 @@
   };
 
   const parseNumber = (value, fallback = 0) => {
-    const num = Number(value);
+    const raw = value === null || value === undefined ? '' : String(value);
+    const limpio = raw.replace(/,/g, '').trim();
+    if (!limpio) return fallback;
+    const num = Number(limpio);
     return Number.isFinite(num) ? num : fallback;
   };
 
@@ -141,6 +144,10 @@
   const setFieldValue = (id, value) => {
     const el = document.getElementById(id);
     if (!el) return;
+    if (window.KANMMoney?.setValue && el.matches?.('input[data-money]')) {
+      window.KANMMoney.setValue(el, value);
+      return;
+    }
     el.value = value ?? '';
   };
 

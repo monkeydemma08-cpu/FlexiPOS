@@ -3,6 +3,7 @@ const roleRoutes = {
   cocina: '/cocina.html',
   bar: '/bar.html',
   caja: '/caja.html',
+  vendedor: '/mostrador.html',
   admin: '/admin.html',
 };
 
@@ -110,6 +111,7 @@ const roleLabels = {
   cocina: 'Cocina',
   bar: 'Bar',
   caja: 'Caja',
+  vendedor: 'Mostrador',
   admin: 'Admin',
 };
 
@@ -271,6 +273,7 @@ const applyTemaNegocio = (tema) => {
       cocina: true,
       bar: false,
       caja: true,
+      mostrador: true,
       historialCocina: true,
     };
 
@@ -349,6 +352,7 @@ const applyTemaNegocio = (tema) => {
       cocina: true,
       bar: false,
       caja: true,
+      mostrador: true,
       historialCocina: true,
     };
 
@@ -371,6 +375,145 @@ const applyTemaNegocio = (tema) => {
 const resetTemaNegocio = () => {
   applyTemaNegocio(null);
 };
+
+const MONEY_INPUT_SELECTOR = 'input[data-money]';
+const MONEY_DECIMALS = 2;
+const MONEY_FORMATTER = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: MONEY_DECIMALS,
+  maximumFractionDigits: MONEY_DECIMALS,
+});
+
+const limpiarValorMoney = (valor, allowNegative = false) => {
+  const raw = valor === null || valor === undefined ? '' : String(valor);
+  const negativo = allowNegative && raw.trim().startsWith('-');
+  const limpio = raw.replace(/[^0-9.]/g, '');
+  const tienePunto = limpio.includes('.');
+  const partes = limpio.split('.');
+  let entero = (partes[0] || '').replace(/^0+(?=\d)/, '');
+  if (!entero) entero = '0';
+  const decimales = (partes.slice(1).join('') || '').slice(0, MONEY_DECIMALS);
+  const enteroFormateado = entero.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  let texto = enteroFormateado;
+  if (tienePunto || decimales) {
+    texto += `.${decimales}`;
+  }
+  if (negativo && texto !== '0') {
+    texto = `-${texto}`;
+  }
+  const bruto = `${negativo ? '-' : ''}${entero}${decimales ? `.${decimales}` : tienePunto ? '.' : ''}`;
+  return { texto, bruto };
+};
+
+const parseMoneyValue = (valor) => {
+  if (valor && typeof valor === 'object' && 'dataset' in valor) {
+    const raw = valor.dataset?.moneyRaw;
+    if (raw !== undefined && raw !== null && raw !== '') {
+      return parseMoneyValue(raw);
+    }
+    return parseMoneyValue(valor.value ?? '');
+  }
+
+  const texto = valor === null || valor === undefined ? '' : String(valor);
+  if (!texto.trim()) return 0;
+  const limpio = texto.replace(/[^0-9.-]/g, '');
+  const numero = Number(limpio);
+  return Number.isFinite(numero) ? numero : 0;
+};
+
+const buscarPosicionPorDigitos = (texto, digitos) => {
+  if (digitos <= 0) return 0;
+  let cuenta = 0;
+  for (let i = 0; i < texto.length; i += 1) {
+    if (texto[i] >= '0' && texto[i] <= '9') {
+      cuenta += 1;
+      if (cuenta >= digitos) return i + 1;
+    }
+  }
+  return texto.length;
+};
+
+const formatearMoneyInput = (input, { padDecimals = false } = {}) => {
+  if (!input) return;
+  const allowNegative = input.dataset.moneyAllowNegative === 'true';
+  const rawValue = input.value ?? '';
+  if (!rawValue) {
+    input.dataset.moneyRaw = '';
+    return;
+  }
+
+  if (padDecimals) {
+    const numero = parseMoneyValue(rawValue);
+    if (!Number.isFinite(numero) || numero === 0) {
+      input.value = '';
+      input.dataset.moneyRaw = '';
+      return;
+    }
+    const formateado = MONEY_FORMATTER.format(numero);
+    input.value = formateado;
+    input.dataset.moneyRaw = numero.toFixed(MONEY_DECIMALS);
+    return;
+  }
+
+  const { texto, bruto } = limpiarValorMoney(rawValue, allowNegative);
+  const selectionStart = input.selectionStart;
+  const tieneFoco = document.activeElement === input;
+  const digitosAntes =
+    tieneFoco && selectionStart !== null
+      ? rawValue.slice(0, selectionStart).replace(/[^0-9]/g, '').length
+      : null;
+
+  input.value = texto;
+  input.dataset.moneyRaw = bruto;
+
+  if (tieneFoco && selectionStart !== null) {
+    const nuevaPos = buscarPosicionPorDigitos(texto, digitosAntes || 0);
+    input.setSelectionRange(nuevaPos, nuevaPos);
+  }
+};
+
+const setMoneyInputValue = (input, value) => {
+  if (!input) return;
+  const numero = parseMoneyValue(value);
+  if (!Number.isFinite(numero) || numero === 0) {
+    input.value = '';
+    input.dataset.moneyRaw = '';
+    return;
+  }
+  input.value = MONEY_FORMATTER.format(numero);
+  input.dataset.moneyRaw = numero.toFixed(MONEY_DECIMALS);
+};
+
+const inicializarMoneyInputs = () => {
+  document.querySelectorAll(MONEY_INPUT_SELECTOR).forEach((input) => {
+    formatearMoneyInput(input, { padDecimals: true });
+  });
+};
+
+if (!window.KANMMoney) {
+  window.KANMMoney = {
+    parse: parseMoneyValue,
+    formatInput: formatearMoneyInput,
+    setValue: setMoneyInputValue,
+  };
+}
+
+document.addEventListener('input', (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  if (!input.matches(MONEY_INPUT_SELECTOR)) return;
+  formatearMoneyInput(input);
+});
+
+document.addEventListener(
+  'blur',
+  (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement)) return;
+    if (!input.matches(MONEY_INPUT_SELECTOR)) return;
+    formatearMoneyInput(input, { padDecimals: true });
+  },
+  true
+);
 
 const cargarTemaNegocio = async () => {
   const user = getStoredUser();
@@ -410,6 +553,8 @@ document.addEventListener('DOMContentLoaded', () => {
     .map((r) => r.trim())
     .filter(Boolean);
   const isPublic = requiredRoles.includes('public') || requiredRoles.length === 0;
+
+  inicializarMoneyInputs();
 
   if (isPublic) {
     migrateLegacySession();
