@@ -90,7 +90,7 @@ let cotizaciones = [];
     const texto = raw === null || raw === undefined ? '' : String(raw).trim();
     if (!texto) return allowEmpty ? fallback : NaN;
     const parsed = window.KANMMoney?.parse
-      ? window.KANMMoney.parse(input)
+      ? window.KANMMoney.parse(texto)
       : Number(texto.replace(/,/g, ''));
     return Number.isFinite(parsed) ? parsed : NaN;
   };

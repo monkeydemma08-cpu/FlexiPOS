@@ -5,3 +5,19 @@ uploads/
 dist/
 npm-debug.log*
 .DS_Store
+# Archivos temporales de navegadores
+docs/brave-tmp/
+docs/**/brave-tmp/
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Node
+node_modules/
+
+# PDFs generados (si no quieres versionarlos)
+# docs/*.pdf

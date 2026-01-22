@@ -1,0 +1,624 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manual POSIUM</title>
+  <style>
+    :root {
+      --ink: #1f2a2e;
+      --muted: #5a646a;
+      --accent: #2f3f44;
+      --accent-light: #e6e1d6;
+      --paper: #ffffff;
+      --soft: #f4f1eb;
+    }
+    @page { size: Letter; margin: 1in; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, 'Times New Roman', serif;
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.55;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    h1, h2, h3, h4 {
+      font-family: 'Palatino Linotype', 'Book Antiqua', serif;
+      color: var(--accent);
+      letter-spacing: 0.4px;
+      margin: 0 0 0.35em 0;
+    }
+    h1 { font-size: 32px; }
+    h2 { font-size: 22px; margin-top: 1.3em; }
+    h3 { font-size: 18px; margin-top: 1.1em; }
+    h4 { font-size: 15px; margin-top: 0.8em; }
+    p { margin: 0 0 0.85em 0; text-align: justify; hyphens: auto; }
+    ul, ol { margin: 0.5em 0 1em 1.2em; }
+    li { margin: 0.3em 0; text-align: justify; }
+    small { color: var(--muted); }
+
+    .page { page-break-after: always; }
+    .page:last-child { page-break-after: auto; }
+
+    .cover {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: calc(100vh - 2in);
+      text-align: center;
+      padding: 2.5rem;
+      background: linear-gradient(135deg, #efe7db 0%, #f5f2ec 40%, #dde2e4 100%);
+      border: 1px solid #e1d9cc;
+      border-radius: 18px;
+    }
+    .cover .brand {
+      font-size: 34px;
+      letter-spacing: 8px;
+      margin-bottom: 18px;
+    }
+    .cover .subtitle {
+      font-size: 18px;
+      color: var(--muted);
+      max-width: 520px;
+      margin-bottom: 18px;
+    }
+    .cover .meta { font-size: 14px; color: var(--muted); }
+
+    .toc {
+      border: 1px solid #e1d9cc;
+      background: #fbfaf7;
+      padding: 16px 18px;
+      border-radius: 12px;
+    }
+    .toc p { margin: 0.35em 0; }
+
+    .section-card {
+      border-left: 4px solid var(--accent);
+      padding: 6px 0 6px 14px;
+      margin: 1em 0 0.6em;
+      background: linear-gradient(90deg, #f6f4ef, #ffffff 70%);
+    }
+
+    .callout {
+      border: 1px solid #d8d2c8;
+      background: #f8f6f1;
+      padding: 10px 12px;
+      border-radius: 10px;
+      margin: 0.9em 0;
+    }
+    .callout strong { color: var(--accent); }
+
+    .note { font-size: 13px; color: var(--muted); }
+    .page-footer {
+      margin-top: 1.2em;
+      font-size: 11px;
+      color: var(--muted);
+      border-top: 1px solid #e2ddd3;
+      padding-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page cover">
+    <div class="brand">POSIUM</div>
+    <div class="subtitle">Manual integral de operación, configuración y buenas prácticas</div>
+    <p class="subtitle">Guía general + adaptación práctica para tu negocio (ventas, caja, inventario y reportes).</p>
+    <div class="meta">
+      <p><strong>Versión:</strong> 21/01/2026</p>
+      <p><strong>Soporte y adquisición:</strong> 809-967-2501</p>
+      <p><small>Documento elaborado para un uso operativo completo del sistema.</small></p>
+    </div>
+  </div>
+
+  <div class="page">
+    <h1>Índice</h1>
+    <div class="toc">
+      <p>1. Visión general del sistema</p>
+      <p>2. Primeros pasos y configuración inicial</p>
+      <p>3. Configuración base (ITBIS, NCF, inventario)</p>
+      <p>4. Catálogos: productos, categorías, clientes, usuarios</p>
+      <p>5. Operación diaria: Mesera, Mostrador y Caja</p>
+      <p>6. Preparación: Cocina y Bar</p>
+      <p>7. Inventario y compras: 606, abastecimiento y gastos</p>
+      <p>8. Ventas y reporte 607</p>
+      <p>9. Cuadres de caja (normal y mostrador)</p>
+      <p>10. Cotizaciones</p>
+      <p>11. Análisis del negocio</p>
+      <p>12. Historial de preparación</p>
+      <p>13. Chat interno</p>
+      <p>14. Facturación POSIUM</p>
+      <p>15. Negocios (multi-negocio / super admin)</p>
+      <p>16. Detalle de campos por módulo</p>
+      <p>17. Buenas prácticas y recomendaciones</p>
+      <p>18. Resolución de problemas frecuentes</p>
+      <p>19. Glosario</p>
+      <p>20. Soporte</p>
+    </div>
+  </div>
+
+  <div class="page">
+    <h1>1. Visión general del sistema</h1>
+    <p>POSIUM es una suite premium de ventas, caja e inventario en tiempo real. Está diseñada para que el negocio tenga control completo del flujo operativo: desde la venta (mesera, mostrador y caja) hasta la preparación (cocina/bar), inventario, compras, gastos y reportes fiscales (606/607). Todo está conectado para que no haya registros duplicados ni procesos manuales innecesarios.</p>
+
+    <div class="section-card">
+      <h2>¿Cómo se conecta todo?</h2>
+      <p>Los <strong>productos</strong> son la base de la venta. Cada venta registrada impacta la <strong>caja</strong>, genera <strong>factura</strong> y alimenta el reporte de <strong>ventas 607</strong>. Las compras y el abastecimiento ajustan el <strong>inventario</strong> y el <strong>costo</strong>. Los gastos completan la visión financiera y el análisis del negocio muestra la utilidad real. El ciclo diario termina con el <strong>cuadre de caja</strong>.</p>
+    </div>
+
+    <h2>Roles principales y responsabilidades</h2>
+    <ul>
+      <li><strong>Administrador:</strong> configura el negocio, define productos, usuarios y reportes. Es el responsable de que la información esté correcta.</li>
+      <li><strong>Caja:</strong> cobra pedidos, emite comprobantes, registra pagos y realiza cuadre diario.</li>
+      <li><strong>Mesera:</strong> toma pedidos en salón, aplica notas y envía a cocina/bar.</li>
+      <li><strong>Mostrador:</strong> vende rápido, cobra y genera factura en un solo flujo.</li>
+      <li><strong>Cocina/Bar:</strong> prepara pedidos, actualiza estados y controla tiempos.</li>
+    </ul>
+
+    <div class="callout">
+      <p><strong>Aplicación en tu negocio:</strong> establece un flujo claro: mesera toma pedido -> cocina/bar prepara -> caja cobra -> admin analiza. Si tu negocio es de atención rápida, el mostrador cubre todo el ciclo en un solo módulo.</p>
+    </div>
+  </div>
+
+  <div class="page">
+    <h1>2. Primeros pasos y configuración inicial</h1>
+    <h2>Ingreso seguro</h2>
+    <p>El acceso se realiza con usuario y contraseña. Cada rol ve únicamente los módulos habilitados para su trabajo. Esto evita errores y protege la información sensible. Se recomienda cambiar contraseñas periódicamente y desactivar usuarios que ya no trabajen en el negocio.</p>
+
+    <h2>Checklist de arranque completo</h2>
+    <ol>
+      <li><strong>Datos fiscales:</strong> completa nombre comercial, dirección, RNC, teléfonos y logo. Esto se verá en cada factura.</li>
+      <li><strong>ITBIS:</strong> define el porcentaje que se aplicará a las ventas.</li>
+      <li><strong>Modo inventario:</strong> elige Reventa o Preparación según tu modelo.</li>
+      <li><strong>NCF:</strong> configura secuencias B01, B02 y B14 con rangos válidos.</li>
+      <li><strong>Categorías:</strong> crea categorías por área (cocina/bar) para enviar pedidos correctamente.</li>
+      <li><strong>Productos:</strong> registra precios, costos y stock inicial.</li>
+      <li><strong>Usuarios:</strong> crea usuarios por rol y prueba accesos.</li>
+      <li><strong>Clientes:</strong> agrega clientes frecuentes o corporativos.</li>
+      <li><strong>Prueba operativa:</strong> realiza una venta completa, revisa factura y ejecuta cuadre.</li>
+    </ol>
+
+    <div class="callout">
+      <p><strong>Consejo:</strong> antes de abrir al público, realiza una venta de prueba con productos reales para validar que precios, impuestos y comprobantes se generen correctamente.</p>
+    </div>
+  </div>
+
+  <div class="page">
+    <h1>3. Configuración base</h1>
+
+    <h2>Impuesto (ITBIS)</h2>
+    <p>Define el porcentaje de ITBIS que el sistema aplicará automáticamente en ventas. El valor típico en República Dominicana es 18%. Este campo afecta el total de cada venta, el reporte 607 y la facturación general. Si el ITBIS está mal configurado, todo el cálculo fiscal quedará incorrecto.</p>
+
+    <h2>ITBIS acreditable en compras</h2>
+    <p>Indica si el negocio puede acreditar ITBIS. Si el negocio NO acredita ITBIS, el impuesto se suma al costo del inventario (capitalizable). Esto impacta la utilidad real en el análisis y evita subestimar costos.</p>
+
+    <h2>Modo de inventario</h2>
+    <p>Este ajuste define cómo se controla el costo y el inventario:</p>
+    <ul>
+      <li><strong>Reventa:</strong> cada producto tiene un costo unitario real. Recomendado para tiendas, colmados, retail.</li>
+      <li><strong>Preparación:</strong> se usan recetas e insumos. Ideal para restaurantes, cafeterías o negocios que producen productos.</li>
+      <li><strong>Bloquear por insumos:</strong> evita ventas si faltan insumos críticos en modo preparación.</li>
+    </ul>
+
+    <h2>Facturación del negocio</h2>
+    <p>Define lo que aparece en la factura: teléfonos, dirección, RNC, logo y mensaje de pie. Estos datos son claves para facturación fiscal y presentación de marca. Mantenerlos actualizados evita devoluciones o problemas con clientes.</p>
+
+    <h2>Secuencias NCF</h2>
+    <p>Las secuencias determinan la numeración fiscal de tus comprobantes. Se configuran con inicio, fin y habilitación. POSIUM avisa cuando el rango se está agotando para evitar vender sin comprobante válido.</p>
+
+    <div class="callout">
+      <p><strong>Aplicación en tu negocio:</strong> si vendes principalmente a consumidores finales, B02 es el comprobante más usado. Si vendes a empresas, B01 es obligatorio para crédito fiscal. B14 se usa para gastos menores.</p>
+    </div>
+  </div>
+
+  <div class="page">
+    <h1>4. Catálogos</h1>
+
+    <h2>Productos</h2>
+    <p>Los productos son la base de todas las ventas. Cada campo tiene un propósito operativo y financiero. Un producto bien configurado evita errores de precio, inventario y costos.</p>
+    <ul>
+      <li><strong>Nombre:</strong> visible en todos los módulos, debe ser claro y reconocible.</li>
+      <li><strong>Precio:</strong> valor de venta principal. Se usa en caja, mesera y mostrador.</li>
+      <li><strong>Costos:</strong> costo real (reventa) o costo base/promedio (preparación). Permite calcular utilidad.</li>
+      <li><strong>Insumo:</strong> indica si el producto es un insumo interno de recetas.</li>
+      <li><strong>Insumo vendible:</strong> permite vender un insumo como producto final.</li>
+      <li><strong>Unidad base y contenido:</strong> define cómo se descuenta inventario (ml, gr, unidades).</li>
+      <li><strong>Precios adicionales:</strong> variantes por tamaño o presentación.</li>
+      <li><strong>Stock y stock indefinido:</strong> controla disponibilidad real o ignora cantidades.</li>
+      <li><strong>Receta:</strong> lista de insumos y cantidades usadas por unidad vendida.</li>
+      <li><strong>Actualizar costo con compras:</strong> recalcula el costo promedio automáticamente.</li>
+    </ul>
+
+    <div class="callout">
+      <p><strong>Aplicación en tu negocio:</strong> en preparación, las recetas ayudan a controlar costos reales y evitar faltantes. En reventa, el costo unitario real te muestra la utilidad exacta por producto.</p>
+    </div>
+
+    <h2>Categorías</h2>
+    <p>Organizan los productos y definen el área de preparación. Sirven para filtrar, reportar y enviar pedidos al área correcta.</p>
+    <ul>
+      <li>Si un producto es de cocina, la orden va directo a cocina.</li>
+      <li>Si es de bar, llega al área de bebidas.</li>
+      <li>Si no requiere preparación, se marca como “ninguna”.</li>
+    </ul>
+
+    <h2>Clientes</h2>
+    <p>Guardar clientes permite facturar rápido, emitir NCF correctos y reutilizar datos. Es clave para clientes frecuentes, empresas y facturación fiscal.</p>
+
+    <h2>Usuarios</h2>
+    <p>Define quién entra al sistema y qué puede hacer. El rol limita el acceso a módulos, reduce errores y mejora seguridad.</p>
+  </div>
+
+  <div class="page">
+    <h1>5. Operación diaria: Mesera, Mostrador y Caja</h1>
+
+    <h2>Módulo Mesera</h2>
+    <p>El módulo Mesera es el punto de entrada de pedidos en salón. Permite identificar mesas o clientes, agregar productos, enviar a preparación y dar seguimiento al estado del pedido.</p>
+    <h3>Cómo se usa (paso a paso)</h3>
+    <ol>
+      <li>Selecciona mesa o cliente y define tipo de servicio.</li>
+      <li>Busca productos por nombre o categoría.</li>
+      <li>Agrega cantidades y escribe notas si hay cambios.</li>
+      <li>Envía el pedido a cocina/bar.</li>
+      <li>Cuando el pedido esté listo, pasa a caja para cobro.</li>
+    </ol>
+
+    <h2>Módulo Mostrador (venta rápida)</h2>
+    <p>Mostrador combina pedido y cobro en un solo flujo. Está diseñado para ventas rápidas, pedidos para llevar o atención sin mesas.</p>
+    <h3>Cómo se usa</h3>
+    <ol>
+      <li>Busca y agrega productos al carrito.</li>
+      <li>Selecciona cliente o usa Consumidor final.</li>
+      <li>Define descuento o propina si aplica.</li>
+      <li>Elige método de pago (efectivo, tarjeta, transferencia o combinado).</li>
+      <li>Confirma el cobro y genera la factura.</li>
+    </ol>
+    <p>El mostrador tiene su propio cuadre independiente para separar su flujo de caja de la caja principal.</p>
+
+    <h2>Módulo Caja</h2>
+    <p>Caja centraliza el cobro de pedidos. Es el punto donde se aplican descuentos, propinas, datos fiscales y comprobantes. Todo lo que se cobra se refleja en el reporte 607.</p>
+    <h3>Cómo se usa</h3>
+    <ol>
+      <li>Selecciona el pedido pendiente.</li>
+      <li>Confirma datos del cliente y tipo de comprobante.</li>
+      <li>Aplica descuento o propina si corresponde.</li>
+      <li>Selecciona método de pago.</li>
+      <li>Confirma pago y entrega factura.</li>
+    </ol>
+
+    <div class="callout">
+      <p><strong>Aplicación en tu negocio:</strong> usa Mesera para salón, Mostrador para pedidos rápidos y Caja como control central de cobro. Esto reduce errores y evita ventas sin registro.</p>
+    </div>
+  </div>
+
+  <div class="page">
+    <h1>6. Preparación: Cocina y Bar</h1>
+    <p>Las áreas de preparación reciben automáticamente los pedidos según la categoría del producto. Cada área trabaja con su propia cola de pedidos, lo que mejora la organización y los tiempos de entrega.</p>
+
+    <h2>Funcionamiento</h2>
+    <ul>
+      <li><strong>Cola de trabajo:</strong> muestra pedidos en orden de llegada.</li>
+      <li><strong>Estado:</strong> pendiente, en proceso, listo. Esto mantiene informada a mesera y caja.</li>
+      <li><strong>Tiempo de preparación:</strong> permite medir rendimiento y detectar cuellos de botella.</li>
+    </ul>
+
+    <h2>Por qué es importante</h2>
+    <p>Separar cocina y bar evita mezclas de pedidos, reduce errores y agiliza la atención. También permite medir qué área es más lenta y tomar decisiones de personal.</p>
+  </div>
+
+  <div class="page">
+    <h1>7. Inventario y compras</h1>
+
+    <h2>Compras &amp; 606</h2>
+    <p>Este módulo registra facturas de proveedores para fines fiscales. Todo lo que se registra aquí alimenta el reporte 606 y sirve de respaldo contable.</p>
+    <h3>Cómo se usa</h3>
+    <ol>
+      <li>Ingresa proveedor, RNC, fecha y tipo de comprobante.</li>
+      <li>Digita NCF y montos: gravado, ITBIS, exento y total.</li>
+      <li>Agrega detalle de compra para mayor control.</li>
+      <li>Guarda y valida en el historial.</li>
+    </ol>
+    <p>El objetivo es tener todas las compras documentadas para la DGII, evitando multas o inconsistencias en la declaración.</p>
+
+    <h2>Abastecimiento</h2>
+    <p>Abastecimiento es el módulo operativo para actualizar inventario. Registra compras de mercancía y ajusta stock automáticamente.</p>
+    <h3>Cómo se usa</h3>
+    <ol>
+      <li>Selecciona proveedor y fecha.</li>
+      <li>Define origen de fondos (negocio o caja) y método de pago.</li>
+      <li>Agrega productos con cantidad y costo unitario.</li>
+      <li>Confirma si aplica ITBIS o si es capitalizable.</li>
+      <li>Guarda y revisa en historial.</li>
+    </ol>
+    <p>Si el origen es caja, POSIUM registra automáticamente una salida de caja para mantener el cuadre correcto.</p>
+
+    <h2>Gastos</h2>
+    <p>Los gastos registran salidas de dinero que no necesariamente son inventario. Son clave para medir utilidad real y flujo de caja.</p>
+    <ul>
+      <li><strong>Operativos:</strong> alquiler, servicios, nómina, marketing.</li>
+      <li><strong>Inventario:</strong> gastos que deben reflejarse como costo.</li>
+      <li><strong>Retiros:</strong> dinero que sale de caja sin relación a compras.</li>
+    </ul>
+    <p>Registrar gastos correctamente permite que el análisis del negocio muestre la utilidad real y no solo ventas.</p>
+  </div>
+
+  <div class="page">
+    <h1>8. Ventas &amp; Reporte 607</h1>
+    <p>El reporte 607 es el resumen mensual de ventas para la DGII. POSIUM lo genera con base en las facturas emitidas en caja y mostrador.</p>
+
+    <h2>Cómo se usa</h2>
+    <ol>
+      <li>Entra a Admin -> Ventas &amp; 607.</li>
+      <li>Selecciona el mes de consulta.</li>
+      <li>Presiona Consultar para ver el resumen.</li>
+      <li>Revisa los totales y las facturas listadas.</li>
+      <li>Exporta CSV oficial para enviar a contabilidad.</li>
+    </ol>
+
+    <h2>Qué significa cada columna</h2>
+    <ul>
+      <li><strong>Fecha:</strong> día en que se emitió la factura.</li>
+      <li><strong>NCF:</strong> comprobante fiscal generado.</li>
+      <li><strong>Cliente / Documento:</strong> razón social y RNC o cédula.</li>
+      <li><strong>Gravado:</strong> monto sujeto a ITBIS.</li>
+      <li><strong>ITBIS:</strong> impuesto calculado.</li>
+      <li><strong>Descuento:</strong> rebaja aplicada en la venta.</li>
+      <li><strong>Propina:</strong> propina legal calculada.</li>
+      <li><strong>Total:</strong> monto final cobrado.</li>
+    </ul>
+
+    <div class="callout">
+      <p><strong>Aplicación en tu negocio:</strong> revisa el 607 antes de declararlo. Si el total mensual no coincide con ventas reales, revisa facturas anuladas o cambios de NCF.</p>
+    </div>
+  </div>
+
+  <div class="page">
+    <h1>9. Cuadres de caja (normal y mostrador)</h1>
+    <p>El cuadre documenta el efectivo físico contra lo registrado por el sistema. Es un control diario imprescindible para evitar faltantes y detectar errores.</p>
+
+    <h2>Qué se registra</h2>
+    <ul>
+      <li><strong>Fondo inicial:</strong> efectivo con el que se abre la caja.</li>
+      <li><strong>Total declarado:</strong> conteo físico al cierre.</li>
+      <li><strong>Diferencia:</strong> el sistema calcula automáticamente la variación.</li>
+      <li><strong>Observaciones:</strong> notas de faltantes o sobrantes.</li>
+      <li><strong>Salidas:</strong> retiros de caja con motivo y monto.</li>
+    </ul>
+
+    <h2>Cómo se usa</h2>
+    <ol>
+      <li>Abre el cuadre con fecha correcta.</li>
+      <li>Registra fondo inicial.</li>
+      <li>Verifica totales por método (efectivo, tarjeta, transferencia).</li>
+      <li>Ingresa el conteo físico en total declarado.</li>
+      <li>Explica cualquier diferencia en observaciones.</li>
+      <li>Guarda e imprime para respaldo.</li>
+    </ol>
+
+    <p>POSIUM maneja <strong>cuadre independiente para Mostrador</strong>, separando sus ventas del flujo de caja normal.</p>
+  </div>
+
+  <div class="page">
+    <h1>10. Cotizaciones</h1>
+    <p>Las cotizaciones permiten enviar propuestas formales antes de una venta. Son útiles para eventos, pedidos grandes o empresas.</p>
+
+    <h2>Cómo se usa</h2>
+    <ol>
+      <li>Selecciona cliente y agrega productos.</li>
+      <li>Define descuentos, impuestos y notas.</li>
+      <li>Guarda como borrador o envía al cliente.</li>
+      <li>Al aceptar, convierte la cotización en factura o venta.</li>
+    </ol>
+
+    <h2>Estados de la cotización</h2>
+    <ul>
+      <li><strong>Borrador:</strong> aún no enviada.</li>
+      <li><strong>Enviada:</strong> enviada al cliente para revisión.</li>
+      <li><strong>Aceptada:</strong> lista para facturar o cobrar.</li>
+      <li><strong>Rechazada:</strong> no aprobada.</li>
+      <li><strong>Vencida:</strong> expiró su validez.</li>
+      <li><strong>Facturada:</strong> ya convertida en factura.</li>
+    </ul>
+  </div>
+
+  <div class="page">
+    <h1>11. Análisis del negocio</h1>
+    <p>El análisis muestra indicadores clave para medir la salud del negocio. No es solo ventas; incluye gastos, margen y utilidad real.</p>
+
+    <h2>Cómo se usa</h2>
+    <ol>
+      <li>Selecciona periodo (hoy, 7 días, 30 días, mes).</li>
+      <li>Confirma fechas desde/hasta.</li>
+      <li>Presiona actualizar para ver KPIs.</li>
+    </ol>
+
+    <h2>Indicadores principales</h2>
+    <ul>
+      <li><strong>Ventas:</strong> total cobrado en el periodo.</li>
+      <li><strong>Gastos:</strong> total registrado en gastos.</li>
+      <li><strong>Utilidad real:</strong> ventas menos gastos y costo.</li>
+      <li><strong>Margen neto:</strong> porcentaje de ganancia real.</li>
+      <li><strong>Ticket promedio:</strong> venta promedio por cliente.</li>
+    </ul>
+
+    <p>El capital inicial (caja e inventario) ayuda a calcular la utilidad más realista, evitando confundir flujo de caja con ganancia neta.</p>
+  </div>
+
+  <div class="page">
+    <h1>12. Historial de preparación</h1>
+    <p>El historial muestra cómo trabajó cocina y bar en un periodo. Sirve para medir rendimiento y controlar tiempos.</p>
+    <ul>
+      <li>Filtra por fecha, área o preparador.</li>
+      <li>Revisa el tiempo entre creación y finalización.</li>
+      <li>Detecta qué productos demoran más.</li>
+    </ul>
+  </div>
+
+  <div class="page">
+    <h1>13. Chat interno</h1>
+    <p>El chat interno es una herramienta de comunicación rápida entre meseras, cocina y caja. Reduce errores y acelera soluciones en el momento.</p>
+    <ul>
+      <li>Reporta incidencias de pedidos en tiempo real.</li>
+      <li>Coordina cambios con cocina o bar.</li>
+      <li>Evita llamadas o mensajes externos.</li>
+    </ul>
+  </div>
+
+  <div class="page">
+    <h1>14. Facturación POSIUM</h1>
+    <p>Este módulo permite generar facturas internas del servicio POSIUM. Es útil para administrar planes, renovaciones y cobros de suscripción.</p>
+    <ul>
+      <li>Registra datos completos del cliente y emisor.</li>
+      <li>Define plan, precio, moneda e impuestos.</li>
+      <li>Establece periodo facturado y estado (pendiente, pagada, anulada).</li>
+      <li>Guarda y revisa el historial de facturación.</li>
+    </ul>
+  </div>
+
+  <div class="page">
+    <h1>15. Negocios (multi-negocio / super admin)</h1>
+    <p>En modo super admin se gestionan múltiples negocios desde un solo panel.</p>
+    <ul>
+      <li>Crear y editar negocios.</li>
+      <li>Definir tema visual y logo por negocio.</li>
+      <li>Activar o desactivar negocios según contrato.</li>
+    </ul>
+  </div>
+
+  <div class="page">
+    <h1>16. Detalle de campos por módulo</h1>
+    <p>Esta sección explica cada campo principal, su uso y el motivo de existir. Sirve como referencia rápida cuando tengas dudas.</p>
+
+    <h2>Configuración</h2>
+    <ul>
+      <li><strong>Impuesto (%):</strong> porcentaje ITBIS aplicado a cada venta. Se usa en facturas y reportes.</li>
+      <li><strong>Acredita ITBIS:</strong> define si el ITBIS de compras se descuenta o se suma al costo.</li>
+      <li><strong>Modo inventario:</strong> reventa o preparación; cambia cómo se calcula el costo.</li>
+      <li><strong>Bloqueo por insumos:</strong> evita vender si no hay insumos suficientes.</li>
+      <li><strong>Teléfonos, RNC, dirección, logo:</strong> datos impresos en factura, validados por clientes.</li>
+      <li><strong>Mensaje de pie:</strong> texto final de la factura, útil para mensajes de marca.</li>
+      <li><strong>Secuencias NCF:</strong> control fiscal de comprobantes, evita facturar fuera de rango.</li>
+    </ul>
+
+    <h2>Productos</h2>
+    <ul>
+      <li><strong>Precio:</strong> valor de venta. Debe coincidir con el menú real.</li>
+      <li><strong>Costos:</strong> usados para calcular utilidad y reportes.</li>
+      <li><strong>Insumo:</strong> permite usar el producto en recetas.</li>
+      <li><strong>Unidad base:</strong> indica cómo se consume inventario.</li>
+      <li><strong>Receta:</strong> descuenta insumos por cada venta.</li>
+    </ul>
+
+    <h2>Categorías</h2>
+    <ul>
+      <li><strong>Área de preparación:</strong> define si el pedido va a cocina o bar.</li>
+      <li><strong>Activa:</strong> controla si la categoría aparece en los módulos de venta.</li>
+    </ul>
+
+    <h2>Clientes</h2>
+    <ul>
+      <li><strong>Documento:</strong> RNC o cédula para facturación fiscal.</li>
+      <li><strong>Tipo documento:</strong> define la validación del número.</li>
+      <li><strong>Notas internas:</strong> preferencias, crédito o condiciones especiales.</li>
+    </ul>
+
+    <h2>Usuarios</h2>
+    <ul>
+      <li><strong>Rol:</strong> define qué puede ver y hacer cada persona.</li>
+      <li><strong>Activo:</strong> permite bloquear accesos sin borrar registros.</li>
+    </ul>
+
+    <h2>Caja</h2>
+    <ul>
+      <li><strong>Descuento y propina:</strong> afectan el total y el reporte 607.</li>
+      <li><strong>Tipo de comprobante:</strong> define el NCF que se genera.</li>
+      <li><strong>Método de pago:</strong> divide ventas por efectivo, tarjeta o transferencia.</li>
+      <li><strong>Comentarios:</strong> notas internas útiles para auditorías.</li>
+    </ul>
+
+    <h2>Mostrador</h2>
+    <ul>
+      <li><strong>Cliente:</strong> permite facturar rápido y evitar errores en NCF.</li>
+      <li><strong>Pagos:</strong> controla flujo rápido con comprobante inmediato.</li>
+      <li><strong>Cuadre propio:</strong> separa su flujo del resto del negocio.</li>
+    </ul>
+
+    <h2>Compras &amp; 606</h2>
+    <ul>
+      <li><strong>Proveedor y RNC:</strong> validan la factura.</li>
+      <li><strong>Tipo de comprobante:</strong> identifica el tipo fiscal de la compra.</li>
+      <li><strong>Montos gravado/exento:</strong> necesarios para declarar correctamente.</li>
+      <li><strong>Detalle:</strong> ayuda a auditar costos reales.</li>
+    </ul>
+
+    <h2>Abastecimiento</h2>
+    <ul>
+      <li><strong>Origen de fondos:</strong> define si la compra sale de caja o del negocio.</li>
+      <li><strong>ITBIS capitalizable:</strong> determina si se suma al costo real.</li>
+    </ul>
+
+    <h2>Gastos</h2>
+    <ul>
+      <li><strong>Tipo:</strong> operativo, inventario o retiro.</li>
+      <li><strong>Recurrente:</strong> facilita registrar gastos periódicos.</li>
+    </ul>
+
+    <h2>Ventas &amp; 607</h2>
+    <ul>
+      <li><strong>Exportación CSV:</strong> formato oficial para la DGII.</li>
+      <li><strong>Totales mensuales:</strong> resumen fiscal completo.</li>
+    </ul>
+
+    <h2>Cuadres</h2>
+    <ul>
+      <li><strong>Fondo inicial:</strong> base de comparación para efectivo esperado.</li>
+      <li><strong>Declarado:</strong> conteo físico, base para validar diferencias.</li>
+    </ul>
+  </div>
+
+  <div class="page">
+    <h1>17. Buenas prácticas y recomendaciones</h1>
+    <ul>
+      <li>Actualiza costos y recetas cada vez que cambie un proveedor.</li>
+      <li>Realiza cuadre diario en caja y mostrador sin excepción.</li>
+      <li>Capacita al personal en mesera y mostrador para evitar errores de pedido.</li>
+      <li>Registra compras y gastos el mismo día para reportes confiables.</li>
+      <li>Revisa 606 y 607 antes de declarar para detectar diferencias.</li>
+      <li>Usa el análisis del negocio para ajustar precios y controlar gastos.</li>
+    </ul>
+  </div>
+
+  <div class="page">
+    <h1>18. Resolución de problemas frecuentes</h1>
+    <ul>
+      <li><strong>Productos no aparecen:</strong> revisa que estén activos y con categoría asignada.</li>
+      <li><strong>No se genera NCF:</strong> verifica rangos y secuencias activas.</li>
+      <li><strong>Descuadres de caja:</strong> revisa salidas registradas y pagos combinados.</li>
+      <li><strong>Inventario negativo:</strong> confirma recetas y modo inventario.</li>
+      <li><strong>Reportes vacíos:</strong> confirma fechas y que haya ventas en ese periodo.</li>
+      <li><strong>Totales incorrectos:</strong> verifica ITBIS y descuentos aplicados.</li>
+    </ul>
+  </div>
+
+  <div class="page">
+    <h1>19. Glosario</h1>
+    <ul>
+      <li><strong>ITBIS:</strong> impuesto sobre ventas en República Dominicana.</li>
+      <li><strong>NCF:</strong> número de comprobante fiscal.</li>
+      <li><strong>B01/B02/B14:</strong> tipos de comprobantes fiscales.</li>
+      <li><strong>COGS:</strong> costo de ventas / costo de mercancía vendida.</li>
+      <li><strong>Cuadre:</strong> cierre diario de caja con conteo físico.</li>
+      <li><strong>Capitalizable:</strong> se suma al costo real en inventario.</li>
+    </ul>
+  </div>
+
+  <div class="page">
+    <h1>20. Soporte</h1>
+    <p>Para soporte, capacitación o adquisición de POSIUM escribe al: <strong>809-967-2501</strong>.</p>
+    <p class="note">Se recomienda documentar cualquier incidencia con capturas o detalles del módulo donde ocurrió.</p>
+    <div class="page-footer">POSIUM · Manual de operación · 21/01/2026</div>
+  </div>
+</body>
+</html>

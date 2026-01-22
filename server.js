@@ -8579,6 +8579,14 @@ const normalizarAplicaItbis = (valor) => {
 
 const ITBIS_RATE = 0.18;
 
+const resolverCostoUnitarioReal = (costoUnitario, aplicaItbis) => {
+  const base = Number(costoUnitario) || 0;
+  if (aplicaItbis) {
+    return Number((base * (1 + ITBIS_RATE)).toFixed(2));
+  }
+  return Number(base.toFixed(2));
+};
+
 const resolverCostoUnitarioEfectivo = (costoUnitario, aplicaItbis, itbisCapitalizable) => {
   const base = Number(costoUnitario) || 0;
   if (aplicaItbis && itbisCapitalizable) {
@@ -8784,6 +8792,7 @@ app.post('/api/inventario/compras', (req, res) => {
         }
 
         const costoUnitarioSinItbis = Number(costoUnitario.toFixed(2));
+        const costoUnitarioReal = resolverCostoUnitarioReal(costoUnitarioSinItbis, aplicaItbis);
         const costoUnitarioEfectivo = resolverCostoUnitarioEfectivo(
           costoUnitarioSinItbis,
           aplicaItbis,
@@ -8814,8 +8823,8 @@ app.post('/api/inventario/compras', (req, res) => {
           (acumulado.costo_total_efectivo + cantidad * costoUnitarioEfectivo).toFixed(2)
         );
         acumulado.ultimo_costo_sin_itbis = costoUnitarioSinItbis;
-        acumulado.costo_unitario_real = costoUnitarioEfectivo;
-        acumulado.costo_unitario_real_incluye_itbis = aplicaItbis && itbisCapitalizable ? 1 : 0;
+        acumulado.costo_unitario_real = costoUnitarioReal;
+        acumulado.costo_unitario_real_incluye_itbis = aplicaItbis ? 1 : 0;
         costosPorProducto.set(productoId, acumulado);
       }
 
@@ -8893,12 +8902,14 @@ app.post('/api/inventario/compras', (req, res) => {
         if (!producto) continue;
         const cantidadComprada = Number(costoData.cantidad) || 0;
         if (cantidadComprada <= 0) continue;
+        const costoUnitarioReal = Number(costoData.costo_unitario_real) || 0;
+        const incluyeItbis = Number(costoData.costo_unitario_real_incluye_itbis) || 0;
+        const ultimoCostoSinItbis = Number(costoData.ultimo_costo_sin_itbis) || 0;
+        const costoBaseSinItbis = Number(ultimoCostoSinItbis.toFixed(2));
         if (esReventa) {
-          const costoUnitarioReal = Number(costoData.costo_unitario_real) || 0;
-          const incluyeItbis = Number(costoData.costo_unitario_real_incluye_itbis) || 0;
           await db.run(
-            'UPDATE productos SET costo_unitario_real = ?, costo_unitario_real_incluye_itbis = ? WHERE id = ? AND negocio_id = ?',
-            [Number(costoUnitarioReal.toFixed(2)), incluyeItbis, productoId, negocioId]
+            'UPDATE productos SET costo_unitario_real = ?, costo_unitario_real_incluye_itbis = ?, costo_base_sin_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [Number(costoUnitarioReal.toFixed(2)), incluyeItbis, costoBaseSinItbis, productoId, negocioId]
           );
           continue;
         }
@@ -8906,7 +8917,6 @@ app.post('/api/inventario/compras', (req, res) => {
         const costoPromedioActual = Number(producto.costo_promedio_actual) || 0;
         const stockActual = esStockIndefinido(producto) ? null : Number(producto.stock) || 0;
         const actualizaCosto = Number(producto.actualiza_costo_con_compras ?? 1) === 1;
-        const ultimoCostoSinItbis = Number(costoData.ultimo_costo_sin_itbis) || 0;
 
         if (actualizaCosto) {
           let nuevoCostoPromedio = costoPromedioActual;
@@ -8918,13 +8928,28 @@ app.post('/api/inventario/compras', (req, res) => {
           }
 
           await db.run(
-            'UPDATE productos SET costo_promedio_actual = ?, ultimo_costo_sin_itbis = ? WHERE id = ? AND negocio_id = ?',
-            [Number(nuevoCostoPromedio.toFixed(2)), Number(ultimoCostoSinItbis.toFixed(2)), productoId, negocioId]
+            'UPDATE productos SET costo_promedio_actual = ?, ultimo_costo_sin_itbis = ?, costo_base_sin_itbis = ?, costo_unitario_real = ?, costo_unitario_real_incluye_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [
+              Number(nuevoCostoPromedio.toFixed(2)),
+              Number(ultimoCostoSinItbis.toFixed(2)),
+              costoBaseSinItbis,
+              Number(costoUnitarioReal.toFixed(2)),
+              incluyeItbis,
+              productoId,
+              negocioId,
+            ]
           );
         } else {
           await db.run(
-            'UPDATE productos SET ultimo_costo_sin_itbis = ? WHERE id = ? AND negocio_id = ?',
-            [Number(ultimoCostoSinItbis.toFixed(2)), productoId, negocioId]
+            'UPDATE productos SET ultimo_costo_sin_itbis = ?, costo_base_sin_itbis = ?, costo_unitario_real = ?, costo_unitario_real_incluye_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [
+              Number(ultimoCostoSinItbis.toFixed(2)),
+              costoBaseSinItbis,
+              Number(costoUnitarioReal.toFixed(2)),
+              incluyeItbis,
+              productoId,
+              negocioId,
+            ]
           );
         }
       }
@@ -10757,6 +10782,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         }
 
         const costoUnitarioSinItbis = Number(costoUnitario.toFixed(2));
+        const costoUnitarioReal = resolverCostoUnitarioReal(costoUnitarioSinItbis, aplicaItbis);
         const costoUnitarioEfectivo = resolverCostoUnitarioEfectivo(
           costoUnitarioSinItbis,
           aplicaItbis,
@@ -10787,8 +10813,8 @@ app.put('/api/inventario/compras/:id', (req, res) => {
           (acumulado.costo_total_efectivo + cantidad * costoUnitarioEfectivo).toFixed(2)
         );
         acumulado.ultimo_costo_sin_itbis = costoUnitarioSinItbis;
-        acumulado.costo_unitario_real = costoUnitarioEfectivo;
-        acumulado.costo_unitario_real_incluye_itbis = aplicaItbis && itbisCapitalizable ? 1 : 0;
+        acumulado.costo_unitario_real = costoUnitarioReal;
+        acumulado.costo_unitario_real_incluye_itbis = aplicaItbis ? 1 : 0;
         costosPorProducto.set(productoId, acumulado);
       }
 
@@ -10874,16 +10900,17 @@ app.put('/api/inventario/compras/:id', (req, res) => {
       for (const [productoId, costoData] of costosPorProducto.entries()) {
         const producto = productosMap.get(productoId);
         if (!producto) continue;
+        const costoUnitarioReal = Number(costoData.costo_unitario_real) || 0;
+        const incluyeItbis = Number(costoData.costo_unitario_real_incluye_itbis) || 0;
+        const ultimoCostoSinItbis = Number(costoData.ultimo_costo_sin_itbis) || 0;
+        const costoBaseSinItbis = Number(ultimoCostoSinItbis.toFixed(2));
         if (esReventa) {
-          const costoUnitarioReal = Number(costoData.costo_unitario_real) || 0;
-          const incluyeItbis = Number(costoData.costo_unitario_real_incluye_itbis) || 0;
           await db.run(
-            'UPDATE productos SET costo_unitario_real = ?, costo_unitario_real_incluye_itbis = ? WHERE id = ? AND negocio_id = ?',
-            [Number(costoUnitarioReal.toFixed(2)), incluyeItbis, productoId, negocioId]
+            'UPDATE productos SET costo_unitario_real = ?, costo_unitario_real_incluye_itbis = ?, costo_base_sin_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [Number(costoUnitarioReal.toFixed(2)), incluyeItbis, costoBaseSinItbis, productoId, negocioId]
           );
           continue;
         }
-        const ultimoCostoSinItbis = Number(costoData.ultimo_costo_sin_itbis) || 0;
         const actualizaCosto = Number(producto.actualiza_costo_con_compras ?? 1) === 1;
         const costoPromedioActual = Number(producto.costo_promedio_actual) || 0;
         const cantidadComprada = Number(costoData.cantidad) || 0;
@@ -10892,13 +10919,28 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         if (actualizaCosto && costoPromedioActual === 0 && cantidadComprada > 0) {
           const nuevoCostoPromedio = costoTotalEfectivo / cantidadComprada;
           await db.run(
-            'UPDATE productos SET costo_promedio_actual = ?, ultimo_costo_sin_itbis = ? WHERE id = ? AND negocio_id = ?',
-            [Number(nuevoCostoPromedio.toFixed(2)), Number(ultimoCostoSinItbis.toFixed(2)), productoId, negocioId]
+            'UPDATE productos SET costo_promedio_actual = ?, ultimo_costo_sin_itbis = ?, costo_base_sin_itbis = ?, costo_unitario_real = ?, costo_unitario_real_incluye_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [
+              Number(nuevoCostoPromedio.toFixed(2)),
+              Number(ultimoCostoSinItbis.toFixed(2)),
+              costoBaseSinItbis,
+              Number(costoUnitarioReal.toFixed(2)),
+              incluyeItbis,
+              productoId,
+              negocioId,
+            ]
           );
         } else {
           await db.run(
-            'UPDATE productos SET ultimo_costo_sin_itbis = ? WHERE id = ? AND negocio_id = ?',
-            [Number(ultimoCostoSinItbis.toFixed(2)), productoId, negocioId]
+            'UPDATE productos SET ultimo_costo_sin_itbis = ?, costo_base_sin_itbis = ?, costo_unitario_real = ?, costo_unitario_real_incluye_itbis = ? WHERE id = ? AND negocio_id = ?',
+            [
+              Number(ultimoCostoSinItbis.toFixed(2)),
+              costoBaseSinItbis,
+              Number(costoUnitarioReal.toFixed(2)),
+              incluyeItbis,
+              productoId,
+              negocioId,
+            ]
           );
         }
       }

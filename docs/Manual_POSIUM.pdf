@@ -1,0 +1,691 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Times-Bold /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Times-Italic /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Length 483 >>
+stream
+BT /F2 28 Tf 0.00 Tw 246.50 592.00 Td (POSIUM) Tj ET
+BT /F1 14 Tf 0.00 Tw 113.43 554.00 Td (Manual integral de operación, configuración y buenas prácticas) Tj ET
+BT /F1 12 Tf 0.00 Tw 171.24 530.00 Td (Guía general + adaptación práctica para tu negocio) Tj ET
+BT /F3 11 Tf 0.00 Tw 254.74 488.00 Td (Versión: 21/01/2026) Tj ET
+BT /F3 11 Tf 0.00 Tw 216.02 467.00 Td (Soporte y adquisición: 809-967-2501) Tj ET
+BT /F3 9 Tf 0.00 Tw 235.62 40.00 Td (POSIUM · Manual de operación · 1) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Length 1692 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (ÍNDICE) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 678.00 Td (1. Visión general del sistema) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 653.00 Td (2. Primeros pasos y configuración inicial) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 628.00 Td (3. Configuración base \(ITBIS, NCF, inventario\)) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 603.00 Td (4. Catálogos: productos, categorías, clientes, usuarios) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 578.00 Td (5. Operación diaria: Mesera, Mostrador y Caja) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 553.00 Td (6. Preparación: Cocina y Bar) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 528.00 Td (7. Inventario y compras: 606, abastecimiento y gastos) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 503.00 Td (8. Ventas y reporte 607) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 478.00 Td (9. Cuadres de caja \(normal y mostrador\)) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 453.00 Td (10. Cotizaciones) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 428.00 Td (11. Análisis del negocio) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 403.00 Td (12. Historial de preparación) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 378.00 Td (13. Chat interno) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 353.00 Td (14. Facturación POSIUM) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 328.00 Td (15. Negocios \(multi-negocio / super admin\)) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 303.00 Td (16. Detalle de campos por módulo) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 278.00 Td (17. Buenas prácticas y recomendaciones) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 253.00 Td (18. Resolución de problemas frecuentes) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 228.00 Td (19. Glosario) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 203.00 Td (20. Soporte) Tj ET
+BT /F3 9 Tf 0.00 Tw 235.62 40.00 Td (POSIUM · Manual de operación · 2) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Length 2476 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (1. VISIÓN GENERAL DEL SISTEMA) Tj ET
+BT /F1 11 Tf 0.54 Tw 72.00 678.00 Td (POSIUM es una suite premium de ventas, caja e inventario en tiempo real. Está diseñada para) Tj ET
+BT /F1 11 Tf 0.62 Tw 72.00 661.00 Td (que el negocio tenga control completo del flujo operativo: desde la venta \(mesera, mostrador y) Tj ET
+BT /F1 11 Tf 3.79 Tw 72.00 644.00 Td (caja\) hasta la preparación \(cocina/bar\), inventario, compras, gastos y reportes fiscales) Tj ET
+BT /F1 11 Tf 1.69 Tw 72.00 627.00 Td (\(606/607\). Todo está conectado para que no haya registros duplicados ni procesos manuales) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 610.00 Td (innecesarios.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 585.00 Td (¿Cómo se conecta todo?) Tj ET
+BT /F1 11 Tf 0.55 Tw 72.00 549.00 Td (Los productos son la base de la venta. Cada venta registrada impacta la caja, genera factura y) Tj ET
+BT /F1 11 Tf 1.10 Tw 72.00 532.00 Td (alimenta el reporte de ventas 607. Las compras y el abastecimiento ajustan el inventario y el) Tj ET
+BT /F1 11 Tf 0.47 Tw 72.00 515.00 Td (costo. Los gastos completan la visión financiera y el análisis del negocio muestra la utilidad real.) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 498.00 Td (El ciclo diario termina con el cuadre de caja.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 473.00 Td (Roles principales y responsabilidades) Tj ET
+BT /F1 11 Tf 5.35 Tw 84.00 437.00 Td (- Administrador: configura el negocio, define productos, usuarios y reportes. Es el) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 420.00 Td (responsable de que la información esté correcta.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 399.00 Td (- Caja: cobra pedidos, emite comprobantes, registra pagos y realiza cuadre diario.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 378.00 Td (- Mesera: toma pedidos en salón, aplica notas y envía a cocina/bar.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 357.00 Td (- Mostrador: vende rápido, cobra y genera factura en un solo flujo.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 336.00 Td (- Cocina/Bar: prepara pedidos, actualiza estados y controla tiempos.) Tj ET
+BT /F3 10 Tf 1.00 Tw 80.00 315.00 Td (Nota: Aplicación en tu negocio: establece un flujo claro: mesera toma pedido -> cocina/bar prepara ->) Tj ET
+BT /F3 10 Tf 0.74 Tw 80.00 299.00 Td (caja cobra -> admin analiza. Si tu negocio es de atención rápida, el mostrador cubre todo el ciclo en un) Tj ET
+BT /F3 10 Tf 0.00 Tw 80.00 283.00 Td (solo módulo.) Tj ET
+BT /F3 9 Tf 0.00 Tw 235.62 40.00 Td (POSIUM · Manual de operación · 3) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Length 2040 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (2. PRIMEROS PASOS Y CONFIGURACIÓN INICIAL) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 678.00 Td (Ingreso seguro) Tj ET
+BT /F1 11 Tf 1.33 Tw 72.00 642.00 Td (El acceso se realiza con usuario y contraseña. Cada rol ve únicamente los módulos habilitados) Tj ET
+BT /F1 11 Tf 0.96 Tw 72.00 625.00 Td (para su trabajo. Esto evita errores y protege la información sensible. Se recomienda cambiar) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 608.00 Td (contraseñas periódicamente y desactivar usuarios que ya no trabajen en el negocio.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 583.00 Td (Checklist de arranque completo) Tj ET
+BT /F1 11 Tf 0.87 Tw 84.00 547.00 Td (- Datos fiscales: completa nombre comercial, dirección, RNC, teléfonos y logo. Esto se verá) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 530.00 Td (en cada factura.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 509.00 Td (- ITBIS: define el porcentaje que se aplicará a las ventas.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 488.00 Td (- Modo inventario: elige Reventa o Preparación según tu modelo.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 467.00 Td (- NCF: configura secuencias B01, B02 y B14 con rangos válidos.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 446.00 Td (- Categorías: crea categorías por área \(cocina/bar\) para enviar pedidos correctamente.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 425.00 Td (- Productos: registra precios, costos y stock inicial.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 404.00 Td (- Usuarios: crea usuarios por rol y prueba accesos.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 383.00 Td (- Clientes: agrega clientes frecuentes o corporativos.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 362.00 Td (- Prueba operativa: realiza una venta completa, revisa factura y ejecuta cuadre.) Tj ET
+BT /F3 10 Tf 0.91 Tw 80.00 341.00 Td (Nota: Consejo: antes de abrir al público, realiza una venta de prueba con productos reales para validar) Tj ET
+BT /F3 10 Tf 0.00 Tw 80.00 325.00 Td (que precios, impuestos y comprobantes se generen correctamente.) Tj ET
+BT /F3 9 Tf 0.00 Tw 235.62 40.00 Td (POSIUM · Manual de operación · 4) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Length 2963 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (3. CONFIGURACIÓN BASE) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 678.00 Td (Impuesto \(ITBIS\)) Tj ET
+BT /F1 11 Tf 1.43 Tw 72.00 642.00 Td (Define el porcentaje de ITBIS que el sistema aplicará automáticamente en ventas. El valor) Tj ET
+BT /F1 11 Tf 0.18 Tw 72.00 625.00 Td (típico en República Dominicana es 18%. Este campo afecta el total de cada venta, el reporte 607) Tj ET
+BT /F1 11 Tf 2.62 Tw 72.00 608.00 Td (y la facturación general. Si el ITBIS está mal configurado, todo el cálculo fiscal quedará) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 591.00 Td (incorrecto.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 566.00 Td (ITBIS acreditable en compras) Tj ET
+BT /F1 11 Tf 1.15 Tw 72.00 530.00 Td (Indica si el negocio puede acreditar ITBIS. Si el negocio NO acredita ITBIS, el impuesto se) Tj ET
+BT /F1 11 Tf 1.44 Tw 72.00 513.00 Td (suma al costo del inventario \(capitalizable\). Esto impacta la utilidad real en el análisis y evita) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 496.00 Td (subestimar costos.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 471.00 Td (Modo de inventario) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 435.00 Td (Este ajuste define cómo se controla el costo y el inventario:) Tj ET
+BT /F1 11 Tf 1.10 Tw 84.00 410.00 Td (- Reventa: cada producto tiene un costo unitario real. Recomendado para tiendas, colmados,) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 393.00 Td (retail.) Tj ET
+BT /F1 11 Tf 1.47 Tw 84.00 372.00 Td (- Preparación: se usan recetas e insumos. Ideal para restaurantes, cafeterías o negocios) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 355.00 Td (que producen productos.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 334.00 Td (- Bloquear por insumos: evita ventas si faltan insumos críticos en modo preparación.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 313.00 Td (Facturación del negocio) Tj ET
+BT /F1 11 Tf 1.90 Tw 72.00 277.00 Td (Define lo que aparece en la factura: teléfonos, dirección, RNC, logo y mensaje de pie. Estos) Tj ET
+BT /F1 11 Tf 2.02 Tw 72.00 260.00 Td (datos son claves para facturación fiscal y presentación de marca. Mantenerlos actualizados) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 243.00 Td (evita devoluciones o problemas con clientes.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 218.00 Td (Secuencias NCF) Tj ET
+BT /F1 11 Tf 0.87 Tw 72.00 182.00 Td (Las secuencias determinan la numeración fiscal de tus comprobantes. Se configuran con inicio,) Tj ET
+BT /F1 11 Tf 2.75 Tw 72.00 165.00 Td (fin y habilitación. POSIUM avisa cuando el rango se está agotando para evitar vender sin) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 148.00 Td (comprobante válido.) Tj ET
+BT /F3 10 Tf 0.69 Tw 80.00 123.00 Td (Nota: Aplicación en tu negocio: si vendes principalmente a consumidores finales, B02 es el comprobante) Tj ET
+BT /F3 10 Tf 2.35 Tw 80.00 107.00 Td (más usado. Si vendes a empresas, B01 es obligatorio para crédito fiscal. B14 se usa para gastos) Tj ET
+BT /F3 10 Tf 0.00 Tw 80.00 91.00 Td (menores.) Tj ET
+BT /F3 9 Tf 0.00 Tw 235.62 40.00 Td (POSIUM · Manual de operación · 5) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Length 2879 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (4. CATÁLOGOS) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 678.00 Td (Productos) Tj ET
+BT /F1 11 Tf 2.36 Tw 72.00 642.00 Td (Los productos son la base de todas las ventas. Cada campo tiene un propósito operativo y) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 625.00 Td (financiero. Un producto bien configurado evita errores de precio, inventario y costos.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 600.00 Td (- Nombre: visible en todos los módulos, debe ser claro y reconocible.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 579.00 Td (- Precio: valor de venta principal. Se usa en caja, mesera y mostrador.) Tj ET
+BT /F1 11 Tf 3.39 Tw 84.00 558.00 Td (- Costos: costo real \(reventa\) o costo base/promedio \(preparación\). Permite calcular) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 541.00 Td (utilidad.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 520.00 Td (- Insumo: indica si el producto es un insumo interno de recetas.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 499.00 Td (- Insumo vendible: permite vender un insumo como producto final.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 478.00 Td (- Unidad base y contenido: define cómo se descuenta inventario \(ml, gr, unidades\).) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 457.00 Td (- Precios adicionales: variantes por tamaño o presentación.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 436.00 Td (- Stock y stock indefinido: controla disponibilidad real o ignora cantidades.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 415.00 Td (- Receta: lista de insumos y cantidades usadas por unidad vendida.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 394.00 Td (- Actualizar costo con compras: recalcula el costo promedio automáticamente.) Tj ET
+BT /F3 10 Tf 1.43 Tw 80.00 373.00 Td (Nota: Aplicación en tu negocio: en preparación, las recetas ayudan a controlar costos reales y evitar) Tj ET
+BT /F3 10 Tf 0.00 Tw 80.00 357.00 Td (faltantes. En reventa, el costo unitario real te muestra la utilidad exacta por producto.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 333.00 Td (Categorías) Tj ET
+BT /F1 11 Tf 0.52 Tw 72.00 297.00 Td (Organizan los productos y definen el área de preparación. Sirven para filtrar, reportar y enviar) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 280.00 Td (pedidos al área correcta.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 255.00 Td (- Si un producto es de cocina, la orden va directo a cocina.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 234.00 Td (- Si es de bar, llega al área de bebidas.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 213.00 Td (- Si no requiere preparación, se marca como “ninguna”.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 192.00 Td (Clientes) Tj ET
+BT /F1 11 Tf 1.61 Tw 72.00 156.00 Td (Guardar clientes permite facturar rápido, emitir NCF correctos y reutilizar datos. Es clave) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 139.00 Td (para clientes frecuentes, empresas y facturación fiscal.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 114.00 Td (Usuarios) Tj ET
+BT /F3 9 Tf 0.00 Tw 235.62 40.00 Td (POSIUM · Manual de operación · 6) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Length 285 >>
+stream
+BT /F1 11 Tf 2.49 Tw 72.00 720.00 Td (Define quién entra al sistema y qué puede hacer. El rol limita el acceso a módulos, reduce) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 703.00 Td (errores y mejora seguridad.) Tj ET
+BT /F3 9 Tf 0.00 Tw 235.62 40.00 Td (POSIUM · Manual de operación · 7) Tj ET
+endstream
+endobj
+11 0 obj
+<< /Length 2457 >>
+stream
+BT /F2 18 Tf 7.63 Tw 72.00 720.00 Td (5. OPERACIÓN DIARIA: MESERA, MOSTRADOR Y) Tj ET
+BT /F2 18 Tf 0.00 Tw 72.00 696.00 Td (CAJA) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 654.00 Td (Módulo Mesera) Tj ET
+BT /F1 11 Tf 2.37 Tw 72.00 618.00 Td (El módulo Mesera es el punto de entrada de pedidos en salón. Permite identificar mesas o) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 601.00 Td (clientes, agregar productos, enviar a preparación y dar seguimiento al estado del pedido.) Tj ET
+BT /F2 12 Tf 0.00 Tw 72.00 576.00 Td (Cómo se usa \(paso a paso\)) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 544.00 Td (- Selecciona mesa o cliente y define tipo de servicio.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 523.00 Td (- Busca productos por nombre o categoría.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 502.00 Td (- Agrega cantidades y escribe notas si hay cambios.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 481.00 Td (- Envía el pedido a cocina/bar.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 460.00 Td (- Cuando el pedido esté listo, pasa a caja para cobro.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 439.00 Td (Módulo Mostrador \(venta rápida\)) Tj ET
+BT /F1 11 Tf 0.81 Tw 72.00 403.00 Td (Mostrador combina pedido y cobro en un solo flujo. Está diseñado para ventas rápidas, pedidos) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 386.00 Td (para llevar o atención sin mesas.) Tj ET
+BT /F2 12 Tf 0.00 Tw 72.00 361.00 Td (Cómo se usa) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 329.00 Td (- Busca y agrega productos al carrito.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 308.00 Td (- Selecciona cliente o usa Consumidor final.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 287.00 Td (- Define descuento o propina si aplica.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 266.00 Td (- Elige método de pago \(efectivo, tarjeta, transferencia o combinado\).) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 245.00 Td (- Confirma el cobro y genera la factura.) Tj ET
+BT /F1 11 Tf 2.00 Tw 72.00 224.00 Td (El mostrador tiene su propio cuadre independiente para separar su flujo de caja de la caja) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 207.00 Td (principal.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 182.00 Td (Módulo Caja) Tj ET
+BT /F1 11 Tf 1.78 Tw 72.00 146.00 Td (Caja centraliza el cobro de pedidos. Es el punto donde se aplican descuentos, propinas, datos) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 129.00 Td (fiscales y comprobantes. Todo lo que se cobra se refleja en el reporte 607.) Tj ET
+BT /F2 12 Tf 0.00 Tw 72.00 104.00 Td (Cómo se usa) Tj ET
+BT /F3 9 Tf 0.00 Tw 235.62 40.00 Td (POSIUM · Manual de operación · 8) Tj ET
+endstream
+endobj
+12 0 obj
+<< /Length 759 >>
+stream
+BT /F1 11 Tf 0.00 Tw 84.00 720.00 Td (- Selecciona el pedido pendiente.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 699.00 Td (- Confirma datos del cliente y tipo de comprobante.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 678.00 Td (- Aplica descuento o propina si corresponde.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 657.00 Td (- Selecciona método de pago.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 636.00 Td (- Confirma pago y entrega factura.) Tj ET
+BT /F3 10 Tf 1.54 Tw 80.00 615.00 Td (Nota: Aplicación en tu negocio: usa Mesera para salón, Mostrador para pedidos rápidos y Caja como) Tj ET
+BT /F3 10 Tf 0.00 Tw 80.00 599.00 Td (control central de cobro. Esto reduce errores y evita ventas sin registro.) Tj ET
+BT /F3 9 Tf 0.00 Tw 235.62 40.00 Td (POSIUM · Manual de operación · 9) Tj ET
+endstream
+endobj
+13 0 obj
+<< /Length 1217 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (6. PREPARACIÓN: COCINA Y BAR) Tj ET
+BT /F1 11 Tf 0.14 Tw 72.00 678.00 Td (Las áreas de preparación reciben automáticamente los pedidos según la categoría del producto.) Tj ET
+BT /F1 11 Tf 0.72 Tw 72.00 661.00 Td (Cada área trabaja con su propia cola de pedidos, lo que mejora la organización y los tiempos de) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 644.00 Td (entrega.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 619.00 Td (Funcionamiento) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 583.00 Td (- Cola de trabajo: muestra pedidos en orden de llegada.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 562.00 Td (- Estado: pendiente, en proceso, listo. Esto mantiene informada a mesera y caja.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 541.00 Td (- Tiempo de preparación: permite medir rendimiento y detectar cuellos de botella.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 520.00 Td (Por qué es importante) Tj ET
+BT /F1 11 Tf 1.76 Tw 72.00 484.00 Td (Separar cocina y bar evita mezclas de pedidos, reduce errores y agiliza la atención. También) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 467.00 Td (permite medir qué área es más lenta y tomar decisiones de personal.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 10) Tj ET
+endstream
+endobj
+14 0 obj
+<< /Length 2436 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (7. INVENTARIO Y COMPRAS) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 678.00 Td (Compras & 606) Tj ET
+BT /F1 11 Tf 0.37 Tw 72.00 642.00 Td (Este módulo registra facturas de proveedores para fines fiscales. Todo lo que se registra aquí) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 625.00 Td (alimenta el reporte 606 y sirve de respaldo contable.) Tj ET
+BT /F2 12 Tf 0.00 Tw 72.00 600.00 Td (Cómo se usa) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 568.00 Td (- Ingresa proveedor, RNC, fecha y tipo de comprobante.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 547.00 Td (- Digita NCF y montos: gravado, ITBIS, exento y total.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 526.00 Td (- Agrega detalle de compra para mayor control.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 505.00 Td (- Guarda y valida en el historial.) Tj ET
+BT /F1 11 Tf 3.64 Tw 72.00 484.00 Td (El objetivo es tener todas las compras documentadas para la DGII, evitando multas o) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 467.00 Td (inconsistencias en la declaración.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 442.00 Td (Abastecimiento) Tj ET
+BT /F1 11 Tf 4.58 Tw 72.00 406.00 Td (Abastecimiento es el módulo operativo para actualizar inventario. Registra compras de) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 389.00 Td (mercancía y ajusta stock automáticamente.) Tj ET
+BT /F2 12 Tf 0.00 Tw 72.00 364.00 Td (Cómo se usa) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 332.00 Td (- Selecciona proveedor y fecha.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 311.00 Td (- Define origen de fondos \(negocio o caja\) y método de pago.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 290.00 Td (- Agrega productos con cantidad y costo unitario.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 269.00 Td (- Confirma si aplica ITBIS o si es capitalizable.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 248.00 Td (- Guarda y revisa en historial.) Tj ET
+BT /F1 11 Tf 1.21 Tw 72.00 227.00 Td (Si el origen es caja, POSIUM registra automáticamente una salida de caja para mantener el) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 210.00 Td (cuadre correcto.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 185.00 Td (Gastos) Tj ET
+BT /F1 11 Tf 1.78 Tw 72.00 149.00 Td (Los gastos registran salidas de dinero que no necesariamente son inventario. Son clave para) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 132.00 Td (medir utilidad real y flujo de caja.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 107.00 Td (- Operativos: alquiler, servicios, nómina, marketing.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 11) Tj ET
+endstream
+endobj
+15 0 obj
+<< /Length 480 >>
+stream
+BT /F1 11 Tf 0.00 Tw 84.00 720.00 Td (- Inventario: gastos que deben reflejarse como costo.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 699.00 Td (- Retiros: dinero que sale de caja sin relación a compras.) Tj ET
+BT /F1 11 Tf 0.32 Tw 72.00 678.00 Td (Registrar gastos correctamente permite que el análisis del negocio muestre la utilidad real y no) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 661.00 Td (solo ventas.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 12) Tj ET
+endstream
+endobj
+16 0 obj
+<< /Length 1838 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (8. VENTAS & REPORTE 607) Tj ET
+BT /F1 11 Tf 0.63 Tw 72.00 678.00 Td (El reporte 607 es el resumen mensual de ventas para la DGII. POSIUM lo genera con base en) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 661.00 Td (las facturas emitidas en caja y mostrador.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 636.00 Td (Cómo se usa) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 600.00 Td (- Entra a Admin -> Ventas & 607.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 579.00 Td (- Selecciona el mes de consulta.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 558.00 Td (- Presiona Consultar para ver el resumen.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 537.00 Td (- Revisa los totales y las facturas listadas.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 516.00 Td (- Exporta CSV oficial para enviar a contabilidad.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 495.00 Td (Qué significa cada columna) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 459.00 Td (- Fecha: día en que se emitió la factura.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 438.00 Td (- NCF: comprobante fiscal generado.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 417.00 Td (- Cliente / Documento: razón social y RNC o cédula.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 396.00 Td (- Gravado: monto sujeto a ITBIS.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 375.00 Td (- ITBIS: impuesto calculado.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 354.00 Td (- Descuento: rebaja aplicada en la venta.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 333.00 Td (- Propina: propina legal calculada.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 312.00 Td (- Total: monto final cobrado.) Tj ET
+BT /F3 10 Tf 1.72 Tw 80.00 291.00 Td (Nota: Aplicación en tu negocio: revisa el 607 antes de declararlo. Si el total mensual no coincide con) Tj ET
+BT /F3 10 Tf 0.00 Tw 80.00 275.00 Td (ventas reales, revisa facturas anuladas o cambios de NCF.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 13) Tj ET
+endstream
+endobj
+17 0 obj
+<< /Length 1727 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (9. CUADRES DE CAJA \(NORMAL Y MOSTRADOR\)) Tj ET
+BT /F1 11 Tf 0.40 Tw 72.00 678.00 Td (El cuadre documenta el efectivo físico contra lo registrado por el sistema. Es un control diario) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 661.00 Td (imprescindible para evitar faltantes y detectar errores.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 636.00 Td (Qué se registra) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 600.00 Td (- Fondo inicial: efectivo con el que se abre la caja.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 579.00 Td (- Total declarado: conteo físico al cierre.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 558.00 Td (- Diferencia: el sistema calcula automáticamente la variación.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 537.00 Td (- Observaciones: notas de faltantes o sobrantes.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 516.00 Td (- Salidas: retiros de caja con motivo y monto.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 495.00 Td (Cómo se usa) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 459.00 Td (- Abre el cuadre con fecha correcta.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 438.00 Td (- Registra fondo inicial.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 417.00 Td (- Verifica totales por método \(efectivo, tarjeta, transferencia\).) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 396.00 Td (- Ingresa el conteo físico en total declarado.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 375.00 Td (- Explica cualquier diferencia en observaciones.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 354.00 Td (- Guarda e imprime para respaldo.) Tj ET
+BT /F1 11 Tf 0.45 Tw 72.00 333.00 Td (POSIUM maneja cuadre independiente para Mostrador, separando sus ventas del flujo de caja) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 316.00 Td (normal.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 14) Tj ET
+endstream
+endobj
+18 0 obj
+<< /Length 1324 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (10. COTIZACIONES) Tj ET
+BT /F1 11 Tf 2.45 Tw 72.00 678.00 Td (Las cotizaciones permiten enviar propuestas formales antes de una venta. Son útiles para) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 661.00 Td (eventos, pedidos grandes o empresas.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 636.00 Td (Cómo se usa) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 600.00 Td (- Selecciona cliente y agrega productos.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 579.00 Td (- Define descuentos, impuestos y notas.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 558.00 Td (- Guarda como borrador o envía al cliente.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 537.00 Td (- Al aceptar, convierte la cotización en factura o venta.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 516.00 Td (Estados de la cotización) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 480.00 Td (- Borrador: aún no enviada.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 459.00 Td (- Enviada: enviada al cliente para revisión.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 438.00 Td (- Aceptada: lista para facturar o cobrar.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 417.00 Td (- Rechazada: no aprobada.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 396.00 Td (- Vencida: expiró su validez.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 375.00 Td (- Facturada: ya convertida en factura.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 15) Tj ET
+endstream
+endobj
+19 0 obj
+<< /Length 1413 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (11. ANÁLISIS DEL NEGOCIO) Tj ET
+BT /F1 11 Tf 1.06 Tw 72.00 678.00 Td (El análisis muestra indicadores clave para medir la salud del negocio. No es solo ventas; incluye) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 661.00 Td (gastos, margen y utilidad real.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 636.00 Td (Cómo se usa) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 600.00 Td (- Selecciona periodo \(hoy, 7 días, 30 días, mes\).) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 579.00 Td (- Confirma fechas desde/hasta.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 558.00 Td (- Presiona actualizar para ver KPIs.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 537.00 Td (Indicadores principales) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 501.00 Td (- Ventas: total cobrado en el periodo.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 480.00 Td (- Gastos: total registrado en gastos.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 459.00 Td (- Utilidad real: ventas menos gastos y costo.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 438.00 Td (- Margen neto: porcentaje de ganancia real.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 417.00 Td (- Ticket promedio: venta promedio por cliente.) Tj ET
+BT /F1 11 Tf 0.84 Tw 72.00 396.00 Td (El capital inicial \(caja e inventario\) ayuda a calcular la utilidad más realista, evitando confundir) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 379.00 Td (flujo de caja con ganancia neta.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 16) Tj ET
+endstream
+endobj
+20 0 obj
+<< /Length 614 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (12. HISTORIAL DE PREPARACIÓN) Tj ET
+BT /F1 11 Tf 1.11 Tw 72.00 678.00 Td (El historial muestra cómo trabajó cocina y bar en un periodo. Sirve para medir rendimiento y) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 661.00 Td (controlar tiempos.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 636.00 Td (- Filtra por fecha, área o preparador.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 615.00 Td (- Revisa el tiempo entre creación y finalización.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 594.00 Td (- Detecta qué productos demoran más.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 17) Tj ET
+endstream
+endobj
+21 0 obj
+<< /Length 627 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (13. CHAT INTERNO) Tj ET
+BT /F1 11 Tf 0.04 Tw 72.00 678.00 Td (El chat interno es una herramienta de comunicación rápida entre meseras, cocina y caja. Reduce) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 661.00 Td (errores y acelera soluciones en el momento.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 636.00 Td (- Reporta incidencias de pedidos en tiempo real.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 615.00 Td (- Coordina cambios con cocina o bar.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 594.00 Td (- Evita llamadas o mensajes externos.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 18) Tj ET
+endstream
+endobj
+22 0 obj
+<< /Length 763 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (14. FACTURACIÓN POSIUM) Tj ET
+BT /F1 11 Tf 0.33 Tw 72.00 678.00 Td (Este módulo permite generar facturas internas del servicio POSIUM. Es útil para administrar) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 661.00 Td (planes, renovaciones y cobros de suscripción.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 636.00 Td (- Registra datos completos del cliente y emisor.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 615.00 Td (- Define plan, precio, moneda e impuestos.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 594.00 Td (- Establece periodo facturado y estado \(pendiente, pagada, anulada\).) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 573.00 Td (- Guarda y revisa el historial de facturación.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 19) Tj ET
+endstream
+endobj
+23 0 obj
+<< /Length 537 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (15. NEGOCIOS \(MULTI-NEGOCIO / SUPER ADMIN\)) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 678.00 Td (En modo super admin se gestionan múltiples negocios desde un solo panel.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 653.00 Td (- Crear y editar negocios.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 632.00 Td (- Definir tema visual y logo por negocio.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 611.00 Td (- Activar o desactivar negocios según contrato.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 20) Tj ET
+endstream
+endobj
+24 0 obj
+<< /Length 2609 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (16. DETALLE DE CAMPOS POR MÓDULO) Tj ET
+BT /F1 11 Tf 0.92 Tw 72.00 678.00 Td (Esta sección explica cada campo principal, su uso y el motivo de existir. Sirve como referencia) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 661.00 Td (rápida cuando tengas dudas.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 636.00 Td (Configuración) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 600.00 Td (- Impuesto \(%\): porcentaje ITBIS aplicado a cada venta. Se usa en facturas y reportes.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 579.00 Td (- Acredita ITBIS: define si el ITBIS de compras se descuenta o se suma al costo.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 558.00 Td (- Modo inventario: reventa o preparación; cambia cómo se calcula el costo.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 537.00 Td (- Bloqueo por insumos: evita vender si no hay insumos suficientes.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 516.00 Td (- Teléfonos, RNC, dirección, logo: datos impresos en factura, validados por clientes.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 495.00 Td (- Mensaje de pie: texto final de la factura, útil para mensajes de marca.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 474.00 Td (- Secuencias NCF: control fiscal de comprobantes, evita facturar fuera de rango.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 453.00 Td (Productos) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 417.00 Td (- Precio: valor de venta. Debe coincidir con el menú real.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 396.00 Td (- Costos: usados para calcular utilidad y reportes.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 375.00 Td (- Insumo: permite usar el producto en recetas.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 354.00 Td (- Unidad base: indica cómo se consume inventario.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 333.00 Td (- Receta: descuenta insumos por cada venta.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 312.00 Td (Categorías) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 276.00 Td (- Área de preparación: define si el pedido va a cocina o bar.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 255.00 Td (- Activa: controla si la categoría aparece en los módulos de venta.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 234.00 Td (Clientes) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 198.00 Td (- Documento: RNC o cédula para facturación fiscal.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 177.00 Td (- Tipo documento: define la validación del número.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 156.00 Td (- Notas internas: preferencias, crédito o condiciones especiales.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 135.00 Td (Usuarios) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 99.00 Td (- Rol: define qué puede ver y hacer cada persona.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 21) Tj ET
+endstream
+endobj
+25 0 obj
+<< /Length 2368 >>
+stream
+BT /F1 11 Tf 0.00 Tw 84.00 720.00 Td (- Activo: permite bloquear accesos sin borrar registros.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 699.00 Td (Caja) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 663.00 Td (- Descuento y propina: afectan el total y el reporte 607.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 642.00 Td (- Tipo de comprobante: define el NCF que se genera.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 621.00 Td (- Método de pago: divide ventas por efectivo, tarjeta o transferencia.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 600.00 Td (- Comentarios: notas internas útiles para auditorías.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 579.00 Td (Mostrador) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 543.00 Td (- Cliente: permite facturar rápido y evitar errores en NCF.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 522.00 Td (- Pagos: controla flujo rápido con comprobante inmediato.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 501.00 Td (- Cuadre propio: separa su flujo del resto del negocio.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 480.00 Td (Compras & 606) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 444.00 Td (- Proveedor y RNC: validan la factura.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 423.00 Td (- Tipo de comprobante: identifica el tipo fiscal de la compra.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 402.00 Td (- Montos gravado/exento: necesarios para declarar correctamente.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 381.00 Td (- Detalle: ayuda a auditar costos reales.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 360.00 Td (Abastecimiento) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 324.00 Td (- Origen de fondos: define si la compra sale de caja o del negocio.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 303.00 Td (- ITBIS capitalizable: determina si se suma al costo real.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 282.00 Td (Gastos) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 246.00 Td (- Tipo: operativo, inventario o retiro.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 225.00 Td (- Recurrente: facilita registrar gastos periódicos.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 204.00 Td (Ventas & 607) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 168.00 Td (- Exportación CSV: formato oficial para la DGII.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 147.00 Td (- Totales mensuales: resumen fiscal completo.) Tj ET
+BT /F2 14 Tf 0.00 Tw 72.00 126.00 Td (Cuadres) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 90.00 Td (- Fondo inicial: base de comparación para efectivo esperado.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 22) Tj ET
+endstream
+endobj
+26 0 obj
+<< /Length 181 >>
+stream
+BT /F1 11 Tf 0.00 Tw 84.00 720.00 Td (- Declarado: conteo físico, base para validar diferencias.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 23) Tj ET
+endstream
+endobj
+27 0 obj
+<< /Length 831 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (17. BUENAS PRÁCTICAS Y RECOMENDACIONES) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 678.00 Td (- Actualiza costos y recetas cada vez que cambie un proveedor.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 657.00 Td (- Realiza cuadre diario en caja y mostrador sin excepción.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 636.00 Td (- Capacita al personal en mesera y mostrador para evitar errores de pedido.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 615.00 Td (- Registra compras y gastos el mismo día para reportes confiables.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 594.00 Td (- Revisa 606 y 607 antes de declarar para detectar diferencias.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 573.00 Td (- Usa el análisis del negocio para ajustar precios y controlar gastos.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 24) Tj ET
+endstream
+endobj
+28 0 obj
+<< /Length 824 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (18. RESOLUCIÓN DE PROBLEMAS FRECUENTES) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 678.00 Td (- Productos no aparecen: revisa que estén activos y con categoría asignada.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 657.00 Td (- No se genera NCF: verifica rangos y secuencias activas.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 636.00 Td (- Descuadres de caja: revisa salidas registradas y pagos combinados.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 615.00 Td (- Inventario negativo: confirma recetas y modo inventario.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 594.00 Td (- Reportes vacíos: confirma fechas y que haya ventas en ese periodo.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 573.00 Td (- Totales incorrectos: verifica ITBIS y descuentos aplicados.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 25) Tj ET
+endstream
+endobj
+29 0 obj
+<< /Length 704 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (19. GLOSARIO) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 678.00 Td (- ITBIS: impuesto sobre ventas en República Dominicana.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 657.00 Td (- NCF: número de comprobante fiscal.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 636.00 Td (- B01/B02/B14: tipos de comprobantes fiscales.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 615.00 Td (- COGS: costo de ventas / costo de mercancía vendida.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 594.00 Td (- Cuadre: cierre diario de caja con conteo físico.) Tj ET
+BT /F1 11 Tf 0.00 Tw 84.00 573.00 Td (- Capitalizable: se suma al costo real en inventario.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 26) Tj ET
+endstream
+endobj
+30 0 obj
+<< /Length 397 >>
+stream
+BT /F2 18 Tf 0.00 Tw 72.00 720.00 Td (20. SOPORTE) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 678.00 Td (Para soporte, capacitación o adquisición de POSIUM escribe al: 809-967-2501.) Tj ET
+BT /F1 11 Tf 0.00 Tw 72.00 653.00 Td (Se recomienda documentar cualquier incidencia con capturas o detalles del módulo donde ocurrió.) Tj ET
+BT /F3 9 Tf 0.00 Tw 233.14 40.00 Td (POSIUM · Manual de operación · 27) Tj ET
+endstream
+endobj
+31 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 4 0 R >>
+endobj
+32 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 5 0 R >>
+endobj
+33 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 6 0 R >>
+endobj
+34 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 7 0 R >>
+endobj
+35 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 8 0 R >>
+endobj
+36 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 9 0 R >>
+endobj
+37 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 10 0 R >>
+endobj
+38 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 11 0 R >>
+endobj
+39 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 12 0 R >>
+endobj
+40 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 13 0 R >>
+endobj
+41 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 14 0 R >>
+endobj
+42 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 15 0 R >>
+endobj
+43 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 16 0 R >>
+endobj
+44 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 17 0 R >>
+endobj
+45 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 18 0 R >>
+endobj
+46 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 19 0 R >>
+endobj
+47 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 20 0 R >>
+endobj
+48 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 21 0 R >>
+endobj
+49 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 22 0 R >>
+endobj
+50 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 23 0 R >>
+endobj
+51 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 24 0 R >>
+endobj
+52 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 25 0 R >>
+endobj
+53 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 26 0 R >>
+endobj
+54 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 27 0 R >>
+endobj
+55 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 28 0 R >>
+endobj
+56 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 29 0 R >>
+endobj
+57 0 obj
+<< /Type /Page /Parent 58 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 30 0 R >>
+endobj
+58 0 obj
+<< /Type /Pages /Kids [ 31 0 R 32 0 R 33 0 R 34 0 R 35 0 R 36 0 R 37 0 R 38 0 R 39 0 R 40 0 R 41 0 R 42 0 R 43 0 R 44 0 R 45 0 R 46 0 R 47 0 R 48 0 R 49 0 R 50 0 R 51 0 R 52 0 R 53 0 R 54 0 R 55 0 R 56 0 R 57 0 R ] /Count 27 >>
+endobj
+59 0 obj
+<< /Type /Catalog /Pages 58 0 R >>
+endobj
+xref
+0 60
+0000000000 65535 f 
+0000000009 00000 n 
+0000000108 00000 n 
+0000000206 00000 n 
+0000000306 00000 n 
+0000000840 00000 n 
+0000002584 00000 n 
+0000005112 00000 n 
+0000007204 00000 n 
+0000010219 00000 n 
+0000013150 00000 n 
+0000013487 00000 n 
+0000015997 00000 n 
+0000016808 00000 n 
+0000018078 00000 n 
+0000020567 00000 n 
+0000021099 00000 n 
+0000022990 00000 n 
+0000024770 00000 n 
+0000026147 00000 n 
+0000027613 00000 n 
+0000028279 00000 n 
+0000028958 00000 n 
+0000029773 00000 n 
+0000030362 00000 n 
+0000033024 00000 n 
+0000035445 00000 n 
+0000035678 00000 n 
+0000036561 00000 n 
+0000037437 00000 n 
+0000038193 00000 n 
+0000038642 00000 n 
+0000038790 00000 n 
+0000038938 00000 n 
+0000039086 00000 n 
+0000039234 00000 n 
+0000039382 00000 n 
+0000039530 00000 n 
+0000039679 00000 n 
+0000039828 00000 n 
+0000039977 00000 n 
+0000040126 00000 n 
+0000040275 00000 n 
+0000040424 00000 n 
+0000040573 00000 n 
+0000040722 00000 n 
+0000040871 00000 n 
+0000041020 00000 n 
+0000041169 00000 n 
+0000041318 00000 n 
+0000041467 00000 n 
+0000041616 00000 n 
+0000041765 00000 n 
+0000041914 00000 n 
+0000042063 00000 n 
+0000042212 00000 n 
+0000042361 00000 n 
+0000042510 00000 n 
+0000042659 00000 n 
+0000042903 00000 n 
+trailer
+<< /Size 60 /Root 59 0 R >>
+startxref
+42954
+%%EOF

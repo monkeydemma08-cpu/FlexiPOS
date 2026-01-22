@@ -9,7 +9,6 @@ const inputProdCostoPromedio = document.getElementById('prod-costo-promedio');
 const inputProdUltimoCosto = document.getElementById('prod-ultimo-costo');
 const inputProdActualizaCostoCompras = document.getElementById('prod-actualiza-costo');
 const inputProdCostoReal = document.getElementById('prod-costo-real');
-const inputProdCostoRealIncluyeItbis = document.getElementById('prod-costo-real-itbis');
 const inputProdEsInsumo = document.getElementById('prod-es-insumo');
 const inputProdInsumoVendible = document.getElementById('prod-insumo-vendible');
 const inputProdUnidadBase = document.getElementById('prod-unidad-base');
@@ -349,7 +348,7 @@ const parseMoneyValueAdmin = (input, { fallback = 0, allowEmpty = true } = {}) =
     input && typeof input === 'object' && 'value' in input ? input.value : input ?? '';
   const rawText = rawValue === null || rawValue === undefined ? '' : String(rawValue).trim();
   if (!rawText) return allowEmpty ? fallback : NaN;
-  const parsed = window.KANMMoney?.parse ? window.KANMMoney.parse(input) : Number(rawText.replace(/,/g, ''));
+  const parsed = window.KANMMoney?.parse ? window.KANMMoney.parse(rawText) : Number(rawText.replace(/,/g, ''));
   return Number.isFinite(parsed) ? parsed : NaN;
 };
 
@@ -1228,7 +1227,7 @@ const renderProductos = (lista) => {
     const stockTexto = stockEsIndefinido ? 'Indefinido' : Number(producto.stock ?? 0);
     detalle.innerHTML = `
       <span><strong>Stock:</strong> ${stockTexto}</span>
-      <span><strong>CategorÃ­a:</strong> ${producto.categoria_nombre ?? 'Sin asignar'}</span>
+      <span><strong>Categoría:</strong> ${producto.categoria_nombre ?? 'Sin asignar'}</span>
       <span><strong>Costo base:</strong> ${formatCurrency(costoBase)}</span>
       <span><strong>Costo promedio:</strong> ${formatCurrency(costoPromedio)}</span>
       <span><strong>Ultimo costo:</strong> ${formatCurrency(ultimoCosto)}</span>
@@ -1252,9 +1251,6 @@ const renderProductos = (lista) => {
       if (inputProdCostoPromedio) setMoneyInputValueAdmin(inputProdCostoPromedio, producto.costo_promedio_actual ?? 0);
       if (inputProdUltimoCosto) setMoneyInputValueAdmin(inputProdUltimoCosto, producto.ultimo_costo_sin_itbis ?? 0);
       if (inputProdCostoReal) setMoneyInputValueAdmin(inputProdCostoReal, producto.costo_unitario_real ?? 0);
-      if (inputProdCostoRealIncluyeItbis) {
-        inputProdCostoRealIncluyeItbis.checked = Number(producto.costo_unitario_real_incluye_itbis) === 1;
-      }
       const esInsumo =
         String(producto.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
       if (inputProdEsInsumo) inputProdEsInsumo.checked = esInsumo;
@@ -1362,7 +1358,6 @@ const obtenerValoresProducto = () => {
   const costoRealParsed =
     costoRealTexto === '' ? 0 : parseMoneyValueAdmin(inputProdCostoReal, { allowEmpty: false });
   const costoReal = Number.isFinite(costoRealParsed) ? costoRealParsed : NaN;
-  const costoRealIncluyeItbis = inputProdCostoRealIncluyeItbis?.checked ?? false;
   const esInsumo = inputProdEsInsumo?.checked ?? false;
   const tipoProducto = esInsumo ? 'INSUMO' : 'FINAL';
   const insumoVendible = esInsumo ? (inputProdInsumoVendible?.checked ?? false) : false;
@@ -1389,7 +1384,6 @@ const obtenerValoresProducto = () => {
     stockIndefinido,
     costoBase,
     costoReal,
-    costoRealIncluyeItbis,
     tipoProducto,
     insumoVendible,
     unidadBase,
@@ -1461,7 +1455,7 @@ const setCategoriasOptions = (lista = []) => {
   }
   if (filtroCategoriaProductos) {
     const valorFiltro = filtroCategoriaProductos.value;
-    filtroCategoriaProductos.innerHTML = '<option value="">Todas las categorÃ­as</option>';
+    filtroCategoriaProductos.innerHTML = '<option value="">Todas las categorías</option>';
     lista.forEach((cat) => {
       const opt = document.createElement('option');
       opt.value = cat.id;
@@ -1482,10 +1476,10 @@ const cargarCategorias = async () => {
   try {
     const resp = await fetchConAutorizacion('/api/categorias?activos=1');
     const data = await resp.json();
-    if (!resp.ok || data?.error) throw new Error(data?.error || 'No se pudo cargar categorÃ­as');
+    if (!resp.ok || data?.error) throw new Error(data?.error || 'No se pudo cargar categorías');
     setCategoriasOptions(data?.categorias || []);
   } catch (error) {
-    console.error('Error al cargar categorÃ­as:', error);
+    console.error('Error al cargar categorías:', error);
   }
 };
 
@@ -1498,7 +1492,6 @@ const crearProducto = async ({
   stockIndefinido,
   costoBase,
   costoReal,
-  costoRealIncluyeItbis,
   tipoProducto,
   insumoVendible,
   unidadBase,
@@ -1512,7 +1505,6 @@ const crearProducto = async ({
     stock_indefinido: stockIndefinido ? 1 : 0,
     costo_base_sin_itbis: Number(costoBase.toFixed(2)),
     costo_unitario_real: Number(costoReal.toFixed(2)),
-    costo_unitario_real_incluye_itbis: costoRealIncluyeItbis ? 1 : 0,
     tipo_producto: tipoProducto,
     insumo_vendible: insumoVendible ? 1 : 0,
     unidad_base: unidadBase,
@@ -1552,7 +1544,6 @@ const actualizarProducto = async (
     stockIndefinido,
     costoBase,
     costoReal,
-    costoRealIncluyeItbis,
     tipoProducto,
     insumoVendible,
     unidadBase,
@@ -1569,7 +1560,6 @@ const actualizarProducto = async (
     stock_indefinido: stockIndefinido ? 1 : 0,
     costo_base_sin_itbis: Number(costoBase.toFixed(2)),
     costo_unitario_real: Number(costoReal.toFixed(2)),
-    costo_unitario_real_incluye_itbis: costoRealIncluyeItbis ? 1 : 0,
     tipo_producto: tipoProducto,
     insumo_vendible: insumoVendible ? 1 : 0,
     unidad_base: unidadBase,
@@ -2775,7 +2765,7 @@ const renderComprasInventario = (lista) => {
   if (!Array.isArray(lista) || lista.length === 0) {
     const fila = document.createElement('tr');
     const celda = document.createElement('td');
-    celda.colSpan = 6;
+    celda.colSpan = 7;
     celda.className = 'tabla-vacia';
     celda.textContent = 'No hay compras de inventario registradas.';
     fila.appendChild(celda);
@@ -2799,6 +2789,13 @@ const renderComprasInventario = (lista) => {
     const items = document.createElement('td');
     const itemsValor = Number(compra.items) || 0;
     items.textContent = itemsValor ? itemsValor.toString() : '--';
+
+    const subtotal = document.createElement('td');
+    const subtotalBase =
+      compra?.subtotal === undefined || compra?.subtotal === null || compra?.subtotal === ''
+        ? Number(compra?.total || 0)
+        : Number(compra?.subtotal || 0);
+    subtotal.textContent = formatCurrency(subtotalBase || 0);
 
     const total = document.createElement('td');
     total.textContent = formatCurrency(compra.total || 0);
@@ -2826,6 +2823,7 @@ const renderComprasInventario = (lista) => {
     fila.appendChild(proveedor);
     fila.appendChild(origen);
     fila.appendChild(items);
+    fila.appendChild(subtotal);
     fila.appendChild(total);
     fila.appendChild(acciones);
 
