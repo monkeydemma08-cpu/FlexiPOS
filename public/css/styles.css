@@ -1,7 +1,7 @@
 ﻿:root {
-  --color-primario: #ff5c9a;
-  --color-secundario: #5ce0ff;
-  --color-texto: #222222;
+  --color-primario: #36c1b3;
+  --color-secundario: #91a2f4;
+  --color-texto: #1f2a2a;
   --color-header: var(--color-primario);
   --color-boton-texto: var(--color-texto);
   --color-boton-primario: var(--color-primario);
@@ -24,8 +24,8 @@
   --tone-05: color-mix(in srgb, var(--color-primario) 5%, transparent);
   --surface-soft: color-mix(in srgb, var(--color-primario) 6%, #ffffff);
   --surface-soft-strong: color-mix(in srgb, var(--color-primario) 12%, #ffffff);
-  --kanm-gray-100: #f9f5f7;
-  --kanm-gray-200: #f1e7eb;
+  --kanm-gray-100: #f4f6f8;
+  --kanm-gray-200: #e8edf2;
   --kanm-gray-600: #5f5b64;
   --kanm-gray-900: #2d2a32;
   --kanm-success: #3cb179;
@@ -3171,13 +3171,13 @@ img {
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  color: var(--color-primario, #ff5c9a);
+  color: var(--color-primario, #36c1b3);
 }
 
 .factura-info-negocio h1 {
   margin: 0;
   font-size: 1.8rem;
-  color: var(--color-primario, #ff5c9a);
+  color: var(--color-primario, #36c1b3);
 }
 
 .factura-info-negocio p {
@@ -3200,7 +3200,7 @@ img {
 .factura-col h2 {
   margin-top: 0;
   font-size: 1.1rem;
-  color: var(--color-primario, #ff5c9a);
+  color: var(--color-primario, #36c1b3);
 }
 
 .factura-col p {
@@ -3224,7 +3224,7 @@ img {
   margin-top: 12px;
   font-size: 1.2rem;
   font-weight: 600;
-  color: var(--color-primario, #ff5c9a);
+  color: var(--color-primario, #36c1b3);
 }
 
 .factura-footer {

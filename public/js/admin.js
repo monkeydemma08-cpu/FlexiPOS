@@ -404,12 +404,12 @@ const parseDateTimeToUtc = (value) => {
 };
 
 const DEFAULT_TEMA_ADMIN = {
-  colorPrimario: '#ff6699',
-  colorSecundario: '#ff99bb',
-  colorTexto: '#222222',
-  colorHeader: '#ff6699',
-  colorBotonPrimario: '#ff6699',
-  colorBotonSecundario: '#ff99bb',
+  colorPrimario: '#36c1b3',
+  colorSecundario: '#91a2f4',
+  colorTexto: '#1f2a2a',
+  colorHeader: '#36c1b3',
+  colorBotonPrimario: '#36c1b3',
+  colorBotonSecundario: '#91a2f4',
   colorBotonPeligro: '#ff4b4b',
 };
 
@@ -4589,12 +4589,12 @@ const DEFAULT_CONFIG_MODULOS = {
   historialCocina: true,
 };
 const DEFAULT_NEGOCIO_COLORS = {
-  primario: '#ff6699',
-  secundario: '#ff99bb',
-  texto: '#222222',
-  header: '#ff6699',
-  botonPrimario: '#ff6699',
-  botonSecundario: '#ff99bb',
+  primario: '#36c1b3',
+  secundario: '#91a2f4',
+  texto: '#1f2a2a',
+  header: '#36c1b3',
+  botonPrimario: '#36c1b3',
+  botonSecundario: '#91a2f4',
   botonPeligro: '#ff4b4b',
 };
 

@@ -11,12 +11,12 @@ const STORAGE_KEY = 'kanmUser';
 const STORAGE_APP_KEY = 'sesionApp';
 const FORCE_PASSWORD_PATH = '/force-password.html';
 const DEFAULT_THEME = {
-  colorPrimario: '#ff6699',
-  colorSecundario: '#ff99bb',
-  colorTexto: '#222222',
-  colorHeader: '#ff6699',
-  colorBotonPrimario: '#ff6699',
-  colorBotonSecundario: '#ff99bb',
+  colorPrimario: '#36c1b3',
+  colorSecundario: '#91a2f4',
+  colorTexto: '#1f2a2a',
+  colorHeader: '#36c1b3',
+  colorBotonPrimario: '#36c1b3',
+  colorBotonSecundario: '#91a2f4',
   colorBotonPeligro: '#ff4b4b',
 };
 
