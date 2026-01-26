@@ -186,6 +186,18 @@ function normalizarCampoTexto(valor) {
   return limpio === '' ? null : limpio;
 }
 
+function normalizarMonto(valor) {
+  if (valor === undefined || valor === null) {
+    return null;
+  }
+  const texto = String(valor).replace(/,/g, '').trim();
+  if (!texto) {
+    return null;
+  }
+  const numero = Number(texto);
+  return Number.isFinite(numero) ? numero : null;
+}
+
 function normalizarAreaPreparacion(area) {
   const valor = (area || 'ninguna').toString().trim().toLowerCase();
   return AREAS_PREPARACION.includes(valor) ? valor : 'ninguna';
@@ -7498,19 +7510,42 @@ app.get('/api/clientes', (req, res) => {
     const areaSolicitada = normalizarAreaPreparacion(
       req.body?.area_preparacion ?? req.body?.areaPreparacion ?? (esUsuarioBar(usuarioSesion) ? 'bar' : 'cocina')
     );
-    const params = [negocioId];
-    let sql = `SELECT id, nombre, documento, tipo_documento, telefono, email, direccion, notas, activo
-               FROM clientes
-               WHERE negocio_id = ?
-                 AND activo = 1`;
+    const params = [negocioId, negocioId, negocioId];
+    let sql = `SELECT c.id,
+                      c.nombre,
+                      c.documento,
+                      c.tipo_documento,
+                      c.telefono,
+                      c.email,
+                      c.direccion,
+                      c.notas,
+                      c.activo,
+                      COALESCE(d.total_deuda, 0) AS deuda_total,
+                      COALESCE(a.total_abonos, 0) AS abonos_total,
+                      GREATEST(COALESCE(d.total_deuda, 0) - COALESCE(a.total_abonos, 0), 0) AS saldo_pendiente
+               FROM clientes c
+               LEFT JOIN (
+                 SELECT cliente_id, SUM(monto_total) AS total_deuda
+                 FROM clientes_deudas
+                 WHERE negocio_id = ?
+                 GROUP BY cliente_id
+               ) d ON d.cliente_id = c.id
+               LEFT JOIN (
+                 SELECT cliente_id, SUM(monto) AS total_abonos
+                 FROM clientes_abonos
+                 WHERE negocio_id = ?
+                 GROUP BY cliente_id
+               ) a ON a.cliente_id = c.id
+               WHERE c.negocio_id = ?
+                 AND c.activo = 1`;
 
     if (term) {
-      sql += ' AND (nombre LIKE ? OR documento LIKE ?)';
+      sql += ' AND (c.nombre LIKE ? OR c.documento LIKE ?)';
       const like = `%${term}%`;
       params.push(like, like);
     }
 
-    sql += ' ORDER BY nombre ASC LIMIT 50';
+    sql += ' ORDER BY c.nombre ASC LIMIT 50';
 
     db.all(sql, params, (err, rows) => {
       if (err) {
@@ -7627,6 +7662,285 @@ app.put('/api/clientes/:id/estado', (req, res) => {
         res.json({ ok: true });
       }
     );
+  });
+});
+
+// Deudas de clientes
+app.get('/api/clientes/:id/deudas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const clienteId = Number(req.params.id);
+    if (!Number.isInteger(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de cliente inválido' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const cliente = await db.get(
+        'SELECT id, nombre FROM clientes WHERE id = ? AND negocio_id = ? LIMIT 1',
+        [clienteId, negocioId]
+      );
+      if (!cliente) {
+        return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
+      }
+
+      const rows = await db.all(
+        `SELECT d.id,
+                d.fecha,
+                d.descripcion,
+                d.monto_total,
+                d.notas,
+                COALESCE(SUM(a.monto), 0) AS total_abonos
+           FROM clientes_deudas d
+           LEFT JOIN clientes_abonos a
+             ON a.deuda_id = d.id
+            AND a.negocio_id = d.negocio_id
+          WHERE d.cliente_id = ?
+            AND d.negocio_id = ?
+          GROUP BY d.id
+          ORDER BY d.fecha DESC, d.id DESC`,
+        [clienteId, negocioId]
+      );
+
+      const deudas = (rows || []).map((row) => {
+        const monto = Number(row.monto_total) || 0;
+        const pagado = Number(row.total_abonos) || 0;
+        const saldo = Math.max(monto - pagado, 0);
+        const estado = saldo <= 0 ? 'saldada' : pagado > 0 ? 'parcial' : 'pendiente';
+        return {
+          id: row.id,
+          fecha: row.fecha,
+          descripcion: row.descripcion,
+          monto_total: monto,
+          notas: row.notas,
+          total_abonos: pagado,
+          pagado,
+          saldo,
+          estado,
+        };
+      });
+
+      const resumen = deudas.reduce(
+        (acc, deuda) => {
+          acc.total_deuda += deuda.monto_total || 0;
+          acc.total_abonos += deuda.total_abonos || 0;
+          return acc;
+        },
+        { total_deuda: 0, total_abonos: 0 }
+      );
+      resumen.saldo_pendiente = Math.max(resumen.total_deuda - resumen.total_abonos, 0);
+
+      res.json({ ok: true, cliente, resumen, deudas });
+    } catch (error) {
+      console.error('Error al obtener deudas del cliente:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener las deudas' });
+    }
+  });
+});
+
+app.post('/api/clientes/:id/deudas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const clienteId = Number(req.params.id);
+    if (!Number.isInteger(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de cliente inválido' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const descripcion = normalizarCampoTexto(req.body?.descripcion, null);
+    const notas = normalizarCampoTexto(req.body?.notas, null);
+    const fechaEntrada = normalizarCampoTexto(req.body?.fecha, null);
+    const fecha = esFechaISOValida(fechaEntrada) ? fechaEntrada : obtenerFechaLocalISO(new Date());
+    const monto = normalizarMonto(req.body?.monto ?? req.body?.monto_total ?? req.body?.total);
+
+    if (!monto || monto <= 0) {
+      return res.status(400).json({ ok: false, error: 'El monto de la deuda es obligatorio' });
+    }
+
+    try {
+      const cliente = await db.get(
+        'SELECT id FROM clientes WHERE id = ? AND negocio_id = ? LIMIT 1',
+        [clienteId, negocioId]
+      );
+      if (!cliente) {
+        return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
+      }
+
+      const insert = await db.run(
+        `INSERT INTO clientes_deudas (cliente_id, negocio_id, fecha, descripcion, monto_total, notas)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [clienteId, negocioId, fecha, descripcion, monto, notas]
+      );
+
+      res.status(201).json({
+        ok: true,
+        deuda: {
+          id: insert.lastID,
+          cliente_id: clienteId,
+          fecha,
+          descripcion,
+          monto_total: monto,
+          notas,
+        },
+      });
+    } catch (error) {
+      console.error('Error al registrar deuda:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo registrar la deuda' });
+    }
+  });
+});
+
+app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const clienteId = Number(req.params.id);
+    const deudaId = Number(req.params.deudaId);
+    if (!Number.isInteger(clienteId) || clienteId <= 0 || !Number.isInteger(deudaId) || deudaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'IDs inválidos' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const descripcion = normalizarCampoTexto(req.body?.descripcion, null);
+    const notas = normalizarCampoTexto(req.body?.notas, null);
+    const fechaEntrada = normalizarCampoTexto(req.body?.fecha, null);
+    const fecha = esFechaISOValida(fechaEntrada) ? fechaEntrada : obtenerFechaLocalISO(new Date());
+    const monto = normalizarMonto(req.body?.monto ?? req.body?.monto_total ?? req.body?.total);
+
+    if (!monto || monto <= 0) {
+      return res.status(400).json({ ok: false, error: 'El monto de la deuda es obligatorio' });
+    }
+
+    try {
+      const result = await db.run(
+        `UPDATE clientes_deudas
+            SET fecha = ?,
+                descripcion = ?,
+                monto_total = ?,
+                notas = ?,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND cliente_id = ? AND negocio_id = ?`,
+        [fecha, descripcion, monto, notas, deudaId, clienteId, negocioId]
+      );
+
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Deuda no encontrada' });
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al actualizar deuda:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar la deuda' });
+    }
+  });
+});
+
+app.get('/api/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const clienteId = Number(req.params.id);
+    const deudaId = Number(req.params.deudaId);
+    if (!Number.isInteger(clienteId) || clienteId <= 0 || !Number.isInteger(deudaId) || deudaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'IDs inválidos' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    try {
+      const deuda = await db.get(
+        'SELECT id FROM clientes_deudas WHERE id = ? AND cliente_id = ? AND negocio_id = ? LIMIT 1',
+        [deudaId, clienteId, negocioId]
+      );
+      if (!deuda) {
+        return res.status(404).json({ ok: false, error: 'Deuda no encontrada' });
+      }
+
+      const rows = await db.all(
+        `SELECT id, fecha, monto, metodo_pago, notas
+           FROM clientes_abonos
+          WHERE deuda_id = ? AND cliente_id = ? AND negocio_id = ?
+          ORDER BY fecha DESC, id DESC`,
+        [deudaId, clienteId, negocioId]
+      );
+
+      res.json({ ok: true, abonos: rows || [] });
+    } catch (error) {
+      console.error('Error al obtener abonos:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener los abonos' });
+    }
+  });
+});
+
+app.post('/api/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const clienteId = Number(req.params.id);
+    const deudaId = Number(req.params.deudaId);
+    if (!Number.isInteger(clienteId) || clienteId <= 0 || !Number.isInteger(deudaId) || deudaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'IDs inválidos' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const fechaEntrada = normalizarCampoTexto(req.body?.fecha, null);
+    const fecha = esFechaISOValida(fechaEntrada) ? fechaEntrada : obtenerFechaLocalISO(new Date());
+    const monto = normalizarMonto(req.body?.monto);
+    const metodoPago = normalizarCampoTexto(req.body?.metodo_pago ?? req.body?.metodoPago, null);
+    const notas = normalizarCampoTexto(req.body?.notas, null);
+
+    if (!monto || monto <= 0) {
+      return res.status(400).json({ ok: false, error: 'El monto del abono es obligatorio' });
+    }
+
+    try {
+      const deuda = await db.get(
+        'SELECT id FROM clientes_deudas WHERE id = ? AND cliente_id = ? AND negocio_id = ? LIMIT 1',
+        [deudaId, clienteId, negocioId]
+      );
+      if (!deuda) {
+        return res.status(404).json({ ok: false, error: 'Deuda no encontrada' });
+      }
+
+      const insert = await db.run(
+        `INSERT INTO clientes_abonos (deuda_id, cliente_id, negocio_id, fecha, monto, metodo_pago, notas)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [deudaId, clienteId, negocioId, fecha, monto, metodoPago, notas]
+      );
+
+      await db.run(
+        'UPDATE clientes_deudas SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND negocio_id = ?',
+        [deudaId, negocioId]
+      );
+
+      res.status(201).json({
+        ok: true,
+        abono: {
+          id: insert.lastID,
+          deuda_id: deudaId,
+          cliente_id: clienteId,
+          fecha,
+          monto,
+          metodo_pago: metodoPago,
+          notas,
+        },
+      });
+    } catch (error) {
+      console.error('Error al registrar abono:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo registrar el abono' });
+    }
   });
 });
 

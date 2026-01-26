@@ -75,6 +75,36 @@ CREATE TABLE IF NOT EXISTS clientes (
   CONSTRAINT fk_clientes_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS clientes_deudas (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  cliente_id INT NOT NULL,
+  negocio_id INT NOT NULL,
+  fecha DATE NOT NULL,
+  descripcion TEXT,
+  monto_total DECIMAL(12,2) NOT NULL,
+  notas TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_clientes_deudas_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+  CONSTRAINT fk_clientes_deudas_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS clientes_abonos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  deuda_id INT NOT NULL,
+  cliente_id INT NOT NULL,
+  negocio_id INT NOT NULL,
+  fecha DATE NOT NULL,
+  monto DECIMAL(12,2) NOT NULL,
+  metodo_pago VARCHAR(40),
+  notas TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_clientes_abonos_deuda FOREIGN KEY (deuda_id) REFERENCES clientes_deudas(id),
+  CONSTRAINT fk_clientes_abonos_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+  CONSTRAINT fk_clientes_abonos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS configuracion (
   clave VARCHAR(191) NOT NULL,
   valor TEXT NOT NULL,
@@ -561,4 +591,9 @@ CREATE INDEX idx_pedidos_cierre_id ON pedidos (cierre_id);
 CREATE INDEX idx_cotizaciones_estado ON cotizaciones (negocio_id, estado, fecha_creacion);
 CREATE INDEX idx_cotizacion_items_cotizacion ON cotizacion_items (cotizacion_id);
 CREATE INDEX idx_clientes_activo_nombre ON clientes (negocio_id, activo, nombre);
+CREATE INDEX idx_clientes_deudas_cliente ON clientes_deudas (cliente_id);
+CREATE INDEX idx_clientes_deudas_negocio ON clientes_deudas (negocio_id);
+CREATE INDEX idx_clientes_abonos_deuda ON clientes_abonos (deuda_id);
+CREATE INDEX idx_clientes_abonos_cliente ON clientes_abonos (cliente_id);
+CREATE INDEX idx_clientes_abonos_negocio ON clientes_abonos (negocio_id);
 CREATE INDEX idx_configuracion_negocio ON configuracion (negocio_id);

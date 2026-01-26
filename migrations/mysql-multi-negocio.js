@@ -433,6 +433,51 @@ async function ensureTableAnalisisCapitalInicial() {
   `);
 }
 
+async function ensureTableClientesDeudas() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS clientes_deudas (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      cliente_id INT NOT NULL,
+      negocio_id INT NOT NULL,
+      fecha DATE NOT NULL,
+      descripcion TEXT,
+      monto_total DECIMAL(12,2) NOT NULL,
+      notas TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_clientes_deudas_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+      CONSTRAINT fk_clientes_deudas_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_cliente', '(cliente_id)');
+  await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_negocio', '(negocio_id)');
+}
+
+async function ensureTableClientesAbonos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS clientes_abonos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      deuda_id INT NOT NULL,
+      cliente_id INT NOT NULL,
+      negocio_id INT NOT NULL,
+      fecha DATE NOT NULL,
+      monto DECIMAL(12,2) NOT NULL,
+      metodo_pago VARCHAR(40) NULL,
+      notas TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_clientes_abonos_deuda FOREIGN KEY (deuda_id) REFERENCES clientes_deudas(id),
+      CONSTRAINT fk_clientes_abonos_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+      CONSTRAINT fk_clientes_abonos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('clientes_abonos', 'idx_clientes_abonos_deuda', '(deuda_id)');
+  await ensureIndexByName('clientes_abonos', 'idx_clientes_abonos_cliente', '(cliente_id)');
+  await ensureIndexByName('clientes_abonos', 'idx_clientes_abonos_negocio', '(negocio_id)');
+}
+
 async function ensureDefaultNegocio() {
   await query(
     `INSERT INTO negocios (
@@ -702,6 +747,8 @@ async function addNegocioIdToTables() {
     'categorias',
     'productos',
     'clientes',
+    'clientes_deudas',
+    'clientes_abonos',
     'cotizaciones',
     'cotizacion_items',
     'pedidos',
@@ -754,6 +801,8 @@ async function addNegocioIdToTables() {
     'categorias',
     'productos',
     'clientes',
+    'clientes_deudas',
+    'clientes_abonos',
     'cotizaciones',
     'cotizacion_items',
     'pedidos',
@@ -956,6 +1005,8 @@ async function runMigrations() {
   await ensureTableRecetaDetalle();
   await ensureTableConsumoInsumos();
   await ensureTableAnalisisCapitalInicial();
+  await ensureTableClientesDeudas();
+  await ensureTableClientesAbonos();
   await ensureColumn('salidas_caja', 'usuario_id INT NULL');
   await ensureColumn('negocios', 'slug VARCHAR(120) UNIQUE');
   await ensureColumn('negocios', 'color_primario VARCHAR(20) NULL');

@@ -1028,6 +1028,11 @@ img {
   color: var(--kanm-pink-dark);
 }
 
+.kanm-badge.estado-parcial {
+  background: rgba(66, 153, 225, 0.18);
+  color: #2b6cb0;
+}
+
 .kanm-badge.estado-listo {
   background: rgba(60, 177, 121, 0.18);
   color: var(--kanm-success);
@@ -2145,6 +2150,12 @@ img {
   grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
 }
 
+.clientes-side {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .clientes-busqueda {
   display: flex;
   gap: 12px;
@@ -2154,6 +2165,46 @@ img {
 
 .clientes-grid {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.deudas-resumen-grid {
+  margin-bottom: 8px;
+}
+
+@media (min-width: 900px) {
+  .deudas-resumen-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.deudas-grid {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.deudas-abonos-panel {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--tone-12);
+}
+
+.deudas-abonos-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.deuda-row--selected {
+  background: var(--tone-08);
+}
+
+.deuda-row--selected:hover {
+  background: var(--tone-08);
+}
+
+.resumen-value.deuda-saldo {
+  color: var(--kanm-error);
 }
 
 .categorias-layout {
