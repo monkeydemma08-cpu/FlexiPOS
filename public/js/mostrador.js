@@ -58,6 +58,8 @@ const estado = {
   impuestoPorcentaje: 0,
   ventaActiva: false,
   ventaActual: null,
+  detalleCuentaCargado: false,
+  cargandoDetalleCuenta: false,
 };
 
 let calculo = {
@@ -65,10 +67,18 @@ let calculo = {
   impuesto: 0,
   descuentoPorcentaje: 0,
   propinaPorcentaje: PROPINA_DEFAULT,
+  descuentoGeneralMonto: 0,
+  descuentoItemsMonto: 0,
+  descuentoPorcentajeEfectivo: 0,
   descuentoMonto: 0,
   propinaMonto: 0,
+  baseConDescuento: 0,
+  baseSinDescuento: 0,
   total: 0,
 };
+
+let descuentosPorItem = [];
+let itemsDetalleActual = [];
 
 let clientesSugeridos = [];
 let secuenciasConfig = {
@@ -113,6 +123,98 @@ const setMoneyInputValueMostrador = (input, value) => {
     return;
   }
   input.value = value ?? '';
+};
+
+const normalizarNumero = (valor, defecto = 0) => {
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? numero : defecto;
+};
+
+const obtenerKeyItem = (item, index = 0) => {
+  const productoId = item?.producto_id || item?.id || `producto-${index}`;
+  const precio = normalizarNumero(item?.precio_unitario, 0);
+  return `item-${productoId}-${precio}-${index}`;
+};
+
+const obtenerDescuentoItem = (key) => descuentosPorItem.find((d) => d.key === key);
+
+const registrarDescuentoItem = (entrada) => {
+  const idx = descuentosPorItem.findIndex((d) => d.key === entrada.key);
+  if (idx >= 0) {
+    descuentosPorItem[idx] = { ...descuentosPorItem[idx], ...entrada };
+  } else {
+    descuentosPorItem.push(entrada);
+  }
+};
+
+const eliminarDescuentoItem = (key) => {
+  descuentosPorItem = descuentosPorItem.filter((d) => d.key !== key);
+};
+
+const limpiarDescuentosItems = () => {
+  descuentosPorItem = [];
+};
+
+const expandirDescuentosPorDetalle = () => {
+  const payload = [];
+
+  descuentosPorItem.forEach((entrada) => {
+    if (Array.isArray(entrada.detalle_ids) && entrada.detalle_ids.length) {
+      let restante = Number(entrada.cantidad) || 0;
+      const valorPorcentaje = Number(entrada.valor) || 0;
+      const montoPorUnidad = Number(entrada.valor) || 0;
+      const precioUnitario = Number(entrada.precioUnitario) || 0;
+
+      for (const detalle of entrada.detalle_ids) {
+        if (!Number.isFinite(Number(detalle.detalle_id))) continue;
+        const cantidadDetalle = Number(detalle.cantidad) || 0;
+        const cantidadAplicada = Math.min(cantidadDetalle, restante);
+        if (cantidadAplicada <= 0) continue;
+        const registro = {
+          detalle_id: Number(detalle.detalle_id),
+          cantidad_descuento: cantidadAplicada,
+        };
+        if (entrada.tipo === 'porcentaje') {
+          const aplicaCompleto = cantidadAplicada >= cantidadDetalle;
+          if (aplicaCompleto) {
+            registro.descuento_porcentaje = valorPorcentaje;
+            registro.descuento_monto = 0;
+          } else {
+            registro.descuento_porcentaje = 0;
+            const basePrecio = precioUnitario || Number(detalle.precio_unitario) || 0;
+            registro.descuento_monto =
+              Math.round(basePrecio * cantidadAplicada * (valorPorcentaje / 100) * 100) / 100;
+          }
+        } else {
+          registro.descuento_porcentaje = 0;
+          registro.descuento_monto = Math.round(montoPorUnidad * cantidadAplicada * 100) / 100;
+        }
+        payload.push(registro);
+        restante -= cantidadAplicada;
+        if (restante <= 0) break;
+      }
+      return;
+    }
+
+    if (!Number.isFinite(Number(entrada.detalle_id))) {
+      return;
+    }
+
+    const cantidadTotal = Number(entrada.cantidad_total) || Number(entrada.cantidad) || 0;
+    const cantidadAplicada = Number(entrada.cantidad) || 0;
+    const aplicaCompleto =
+      entrada.tipo === 'porcentaje' && cantidadTotal > 0 && cantidadAplicada >= cantidadTotal;
+    const descuentoMonto = Number(entrada.montoCalculado) || 0;
+
+    payload.push({
+      detalle_id: Number(entrada.detalle_id),
+      descuento_porcentaje: aplicaCompleto ? Number(entrada.valor) || 0 : 0,
+      descuento_monto: aplicaCompleto ? 0 : descuentoMonto,
+      cantidad_descuento: cantidadAplicada,
+    });
+  });
+
+  return payload;
 };
 
 const formatDateTime = (valor) => {
@@ -675,6 +777,22 @@ const aplicarPropinaPreferida = ({ force = false } = {}) => {
   delete inputPropina.dataset.dirty;
 };
 
+const obtenerTotalesBaseVenta = () => {
+  if (!estado.ventaActual) {
+    return { subtotal: 0, impuesto: 0 };
+  }
+  const pedidos = Array.isArray(estado.ventaActual.pedidos) ? estado.ventaActual.pedidos : [];
+  if (pedidos.length) {
+    const subtotal = pedidos.reduce((acc, p) => acc + (Number(p.subtotal) || 0), 0);
+    const impuesto = pedidos.reduce((acc, p) => acc + (Number(p.impuesto) || 0), 0);
+    return { subtotal, impuesto };
+  }
+  return {
+    subtotal: Number(estado.ventaActual.subtotal) || 0,
+    impuesto: Number(estado.ventaActual.impuesto) || 0,
+  };
+};
+
 const calcularTotalesCobro = () => {
   if (!estado.ventaActual) {
     calculo = {
@@ -682,30 +800,52 @@ const calcularTotalesCobro = () => {
       impuesto: 0,
       descuentoPorcentaje: 0,
       propinaPorcentaje: PROPINA_DEFAULT,
+      descuentoGeneralMonto: 0,
+      descuentoItemsMonto: 0,
+      descuentoPorcentajeEfectivo: 0,
       descuentoMonto: 0,
       propinaMonto: 0,
+      baseConDescuento: 0,
+      baseSinDescuento: 0,
       total: 0,
     };
     return;
   }
 
-  const subtotal = Number(estado.ventaActual.subtotal) || 0;
-  const impuesto = Number(estado.ventaActual.impuesto) || 0;
-  const base = subtotal + impuesto;
+  const totalesBase = obtenerTotalesBaseVenta();
+  const subtotal = Number(totalesBase.subtotal) || 0;
+  const impuestoBase = Number(totalesBase.impuesto) || 0;
+  const base = subtotal + impuestoBase;
   const descuentoPorcentaje = Math.max(Number(inputDescuento?.value) || 0, 0);
   const propinaPorcentaje = Math.max(Number(inputPropina?.value) || 0, 0);
-  const descuentoMonto = Math.min(base * (descuentoPorcentaje / 100), base);
-  const baseConDescuento = Math.max(base - descuentoMonto, 0);
+
+  const descuentoItemsBruto = descuentosPorItem.reduce(
+    (acc, item) => acc + (Number(item.montoCalculado) || 0),
+    0
+  );
+  const descuentoItemsMonto = Math.min(descuentoItemsBruto, subtotal);
+  const subtotalConDescuento = Math.max(subtotal - descuentoItemsMonto, 0);
+  const impuestoAjustado = subtotal > 0 ? impuestoBase * (subtotalConDescuento / subtotal) : impuestoBase;
+  const baseConItems = subtotalConDescuento + impuestoAjustado;
+  const descuentoGeneralMonto = Math.min(baseConItems * (descuentoPorcentaje / 100), baseConItems);
+  const baseConDescuento = Math.max(baseConItems - descuentoGeneralMonto, 0);
   const propinaMonto = baseConDescuento * (propinaPorcentaje / 100);
   const total = baseConDescuento + propinaMonto;
+  const descuentoTotal = Math.min(descuentoItemsMonto + descuentoGeneralMonto, base);
+  const descuentoPorcentajeEfectivo = base > 0 ? ((base - baseConDescuento) / base) * 100 : 0;
 
   calculo = {
     subtotal,
-    impuesto,
+    impuesto: impuestoAjustado,
     descuentoPorcentaje,
+    descuentoPorcentajeEfectivo,
     propinaPorcentaje,
-    descuentoMonto,
+    descuentoGeneralMonto,
+    descuentoItemsMonto,
+    descuentoMonto: descuentoTotal,
     propinaMonto,
+    baseConDescuento,
+    baseSinDescuento: base,
     total,
   };
 };
@@ -999,16 +1139,231 @@ const limpiarFormularioCobro = () => {
     botonCobrar.textContent = 'Confirmar pago';
     botonCobrar.classList.remove('is-loading');
   }
+  limpiarDescuentosItems();
+  itemsDetalleActual = [];
   calculo = {
     subtotal: 0,
     impuesto: 0,
     descuentoPorcentaje: 0,
     propinaPorcentaje: PROPINA_DEFAULT,
+    descuentoGeneralMonto: 0,
+    descuentoItemsMonto: 0,
+    descuentoPorcentajeEfectivo: 0,
     descuentoMonto: 0,
     propinaMonto: 0,
+    baseConDescuento: 0,
+    baseSinDescuento: 0,
     total: 0,
   };
   actualizarResumenCobro();
+};
+
+const normalizarItemCobro = (item, index = 0) => {
+  const cantidad = normalizarNumero(item?.cantidad, 0);
+  const precioUnitario = normalizarNumero(item?.precio_unitario ?? item?.precio, 0);
+  const subtotalBase = normalizarNumero(
+    item?.total_linea ?? item?.subtotal_sin_descuento,
+    cantidad * precioUnitario
+  );
+  return {
+    ...item,
+    key: obtenerKeyItem(item, index),
+    nombre: item?.nombre || `Producto ${item?.producto_id || ''}`,
+    cantidad,
+    precioUnitario,
+    subtotalBase,
+    detalles: Array.isArray(item?.detalles) ? item.detalles : [],
+  };
+};
+
+const obtenerItemsDetalleVenta = () => {
+  if (!estado.ventaActual) return [];
+  const itemsAgrupados = Array.isArray(estado.ventaActual.items_agregados)
+    ? estado.ventaActual.items_agregados
+    : [];
+  if (itemsAgrupados.length) return itemsAgrupados;
+  return Array.isArray(estado.ventaActual.items) ? estado.ventaActual.items : [];
+};
+
+const renderDetalleItems = () => {
+  if (!itemsContainer) return;
+  itemsContainer.innerHTML = '';
+
+  const items = obtenerItemsDetalleVenta();
+  const tieneDetalleCompleto =
+    estado.detalleCuentaCargado &&
+    Array.isArray(estado.ventaActual?.items_agregados) &&
+    estado.ventaActual.items_agregados.length > 0;
+
+  itemsDetalleActual = items;
+
+  if (!items.length) {
+    itemsContainer.innerHTML = estado.cargandoDetalleCuenta
+      ? '<p class="caja-empty">Cargando productos...</p>'
+      : '<p class="caja-empty">No hay productos registrados.</p>';
+    return;
+  }
+
+  const lista = document.createElement('ul');
+  lista.className = 'caja-items-lista';
+
+  if (!tieneDetalleCompleto) {
+    items.forEach((item, index) => {
+      const normalizado = normalizarItemCobro(item, index);
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <div class="caja-item-line">
+          <div class="caja-item-main">
+            <div class="caja-item-nombre">${normalizado.nombre || 'Producto'}</div>
+            <div class="caja-item-meta">${normalizado.cantidad} x ${formatCurrency(
+              normalizado.precioUnitario
+            )}</div>
+          </div>
+          <div class="caja-item-neto">${formatCurrency(normalizado.subtotalBase)}</div>
+        </div>
+      `;
+      lista.appendChild(li);
+    });
+
+    itemsContainer.appendChild(lista);
+    return;
+  }
+
+  items.forEach((item, itemIndex) => {
+    const normalizado = normalizarItemCobro(item, itemIndex);
+    const li = document.createElement('li');
+    const key = normalizado.key;
+    const cantidad = normalizado.cantidad;
+    const precioLinea = normalizado.precioUnitario;
+    const subtotal = normalizarNumero(item?.total_linea ?? item?.subtotal_sin_descuento, cantidad * precioLinea);
+    const descuentoActual = obtenerDescuentoItem(key);
+    const tipoActual = descuentoActual?.tipo || 'porcentaje';
+    const valorActual = descuentoActual ? descuentoActual.valor : '';
+    const cantidadAplicada = descuentoActual?.cantidad || cantidad || 1;
+    const resumenDescuento = descuentoActual
+      ? `<div class="kanm-badge" style="margin-top: 4px;">Desc: ${
+          descuentoActual.tipo === 'porcentaje'
+            ? `${descuentoActual.valor}% x ${descuentoActual.cantidad}`
+            : `${formatCurrency(descuentoActual.valor)} x ${descuentoActual.cantidad}`
+        } = -${formatCurrency(descuentoActual.montoCalculado)}</div>`
+      : '';
+    const nombreItem = normalizado.nombre || `Producto ${item?.producto_id || ''}`;
+    const nombreSeguro = nombreItem.replace(/"/g, '&quot;');
+
+    li.innerHTML = `
+      <div class="caja-item-header">
+        <label class="caja-item-selector" style="display: flex; gap: 10px; align-items: flex-start; width: 100%;">
+          <input
+            type="checkbox"
+            class="caja-item-descuento-toggle"
+            data-item-key="${key}"
+            ${descuentoActual ? 'checked' : ''}
+            style="margin-top: 4px;"
+          />
+          <div class="caja-item-detalle" style="flex: 1 1 auto;">
+            <div class="caja-item-nombre" style="font-weight: 600;">${nombreItem}</div>
+            <div class="caja-item-meta">${cantidad} x ${formatCurrency(precioLinea)} = ${formatCurrency(
+              subtotal
+            )}</div>
+            ${resumenDescuento}
+          </div>
+        </label>
+      </div>
+      <div class="caja-item-descuento-panel" data-panel-key="${key}" ${descuentoActual ? '' : 'hidden'}>
+        <div class="flex-between" style="align-items: center; gap: 8px; margin: 4px 0;">
+          <span class="pill-label">Descuento por producto</span>
+          <span class="kanm-subtitle">Cantidad disponible: ${cantidad}</span>
+        </div>
+        <div class="kanm-form-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
+          <div class="kanm-input-group">
+            <label>Cantidad a aplicar descuento</label>
+            <input
+              type="number"
+              class="caja-item-descuento-cantidad"
+              data-item-key="${key}"
+              min="1"
+              max="${cantidad}"
+              value="${cantidadAplicada}"
+            />
+          </div>
+          <div class="kanm-input-group">
+            <label>Tipo de descuento</label>
+            <select class="caja-item-descuento-tipo" data-item-key="${key}">
+              <option value="porcentaje" ${tipoActual === 'porcentaje' ? 'selected' : ''}>Porcentaje (%)</option>
+              <option value="monto" ${tipoActual === 'monto' ? 'selected' : ''}>Monto fijo</option>
+            </select>
+          </div>
+          <div class="kanm-input-group">
+            <label>Valor del descuento</label>
+            <input
+              type="number"
+              class="caja-item-descuento-valor"
+              data-item-key="${key}"
+              min="0"
+              step="0.01"
+              value="${valorActual !== '' ? valorActual : ''}"
+              placeholder="0.00"
+            />
+          </div>
+        </div>
+        <div class="caja-acciones" style="justify-content: flex-end; margin-top: 6px;">
+          <button
+            type="button"
+            class="kanm-button ghost caja-item-aplicar-descuento"
+            data-item-key="${key}"
+            data-item-index="${itemIndex}"
+            data-producto="${item?.producto_id}"
+            data-precio="${item?.precio_unitario}"
+            data-max="${cantidad}"
+            data-nombre="${nombreSeguro}"
+          >
+            Aplicar descuento
+          </button>
+        </div>
+      </div>
+    `;
+
+    lista.appendChild(li);
+  });
+
+  itemsContainer.appendChild(lista);
+};
+
+const cargarDetalleCuenta = async () => {
+  if (!estado.ventaActual) return;
+  const cuentaId = Number(estado.ventaActual.cuenta_id || estado.ventaActual.id);
+  if (!Number.isFinite(cuentaId) || cuentaId <= 0) return;
+  if (estado.cargandoDetalleCuenta || estado.detalleCuentaCargado) return;
+
+  estado.cargandoDetalleCuenta = true;
+  if (itemsContainer && !itemsContainer.innerHTML) {
+    itemsContainer.innerHTML = '<p class="caja-empty">Cargando productos...</p>';
+  }
+
+  try {
+    const respuesta = await fetchAutorizado(`/api/cuentas/${cuentaId}/detalle`);
+    const data = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok || !data?.ok || !data.cuenta) {
+      throw new Error(data?.error || 'No se pudo obtener el detalle de la cuenta.');
+    }
+
+    estado.ventaActual = {
+      ...estado.ventaActual,
+      ...data.cuenta,
+    };
+    estado.detalleCuentaCargado = true;
+    renderDetalleItems();
+    actualizarResumenCobro();
+  } catch (error) {
+    console.error('Error al cargar detalle de la cuenta:', error);
+    mostrarMensajeCobro(
+      error.message || 'No se pudo cargar el detalle de la cuenta. Intenta nuevamente.',
+      'error'
+    );
+    renderDetalleItems();
+  } finally {
+    estado.cargandoDetalleCuenta = false;
+  }
 };
 
 const mostrarDetalleVenta = () => {
@@ -1025,6 +1380,9 @@ const mostrarDetalleVenta = () => {
   if (cobroPlaceholder) cobroPlaceholder.hidden = true;
   if (cobroForm) cobroForm.hidden = false;
 
+  const pedidosCuenta = Array.isArray(estado.ventaActual.pedidos) ? estado.ventaActual.pedidos : [];
+  const encabezado = pedidosCuenta[0];
+
   if (infoContainer) {
     const mesaCliente = [];
     if (estado.ventaActual.mesa) mesaCliente.push(estado.ventaActual.mesa);
@@ -1040,38 +1398,13 @@ const mostrarDetalleVenta = () => {
       </div>
       <div class="caja-detalle-linea">
         <span class="caja-detalle-etiqueta">Creado</span>
-        <span>${formatDateTime(estado.ventaActual.fecha_listo)}</span>
+        <span>${formatDateTime(encabezado?.fecha_creacion || estado.ventaActual.fecha_listo)}</span>
       </div>
     `;
   }
 
-  if (itemsContainer) {
-    itemsContainer.innerHTML = '';
-    const items = Array.isArray(estado.ventaActual.items) ? estado.ventaActual.items : [];
-    if (!items.length) {
-      itemsContainer.innerHTML = '<p class="caja-empty">No hay productos registrados.</p>';
-    } else {
-      const lista = document.createElement('ul');
-      lista.className = 'caja-items-lista';
-      items.forEach((item) => {
-        const li = document.createElement('li');
-        const cantidad = Number(item.cantidad) || 0;
-        const precioUnitario = Number(item.precio_unitario) || 0;
-        const subtotalLinea = cantidad * precioUnitario;
-        li.innerHTML = `
-          <div class="caja-item-line">
-            <div class="caja-item-main">
-              <div class="caja-item-nombre">${item.nombre || 'Producto'}</div>
-              <div class="caja-item-meta">${cantidad} x ${formatCurrency(precioUnitario)}</div>
-            </div>
-            <div class="caja-item-neto">${formatCurrency(subtotalLinea)}</div>
-          </div>
-        `;
-        lista.appendChild(li);
-      });
-      itemsContainer.appendChild(lista);
-    }
-  }
+  renderDetalleItems();
+  cargarDetalleCuenta();
 
   limpiarMensajeCobro();
   aplicarPropinaPreferida({ force: true });
@@ -1083,6 +1416,10 @@ const mostrarDetalleVenta = () => {
 const limpiarVenta = () => {
   estado.ventaActiva = false;
   estado.ventaActual = null;
+  estado.detalleCuentaCargado = false;
+  estado.cargandoDetalleCuenta = false;
+  limpiarDescuentosItems();
+  itemsDetalleActual = [];
   estado.carrito.clear();
   if (campoMesa) campoMesa.value = '';
   if (notaInput) notaInput.value = '';
@@ -1130,6 +1467,10 @@ const crearVenta = async () => {
 
     estado.ventaActiva = true;
     estado.ventaActual = data.pedido || null;
+    estado.detalleCuentaCargado = false;
+    estado.cargandoDetalleCuenta = false;
+    limpiarDescuentosItems();
+    itemsDetalleActual = [];
     setVentaActiva(true);
     mostrarDetalleVenta();
     notificarActualizacionGlobal('stock-actualizado', { tipo: 'creado', pedidoId: data.pedido?.id });
@@ -1223,6 +1564,7 @@ const confirmarPago = async () => {
     const sinComprobante = esSinComprobante(tipoComprobante);
     const ncfManual = sinComprobante ? null : inputNcfManual?.value;
     const usuario = obtenerUsuarioActual();
+    const detalleDescuentosPayload = expandirDescuentosPorDetalle();
 
     const respuesta = await fetchAutorizado(`/api/cuentas/${estado.ventaActual.cuenta_id}/cerrar`, {
       method: 'PUT',
@@ -1230,7 +1572,7 @@ const confirmarPago = async () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        descuento_porcentaje: calculo.descuentoPorcentaje,
+        descuento_porcentaje: calculo.descuentoPorcentajeEfectivo ?? calculo.descuentoPorcentaje,
         descuento_monto: calculo.descuentoMonto,
         propina_porcentaje: calculo.propinaPorcentaje,
         cliente: inputClienteNombre?.value,
@@ -1242,7 +1584,7 @@ const confirmarPago = async () => {
         usuario_id: usuario?.id,
         usuario_rol: usuario?.rol,
         origen_caja: 'mostrador',
-        detalle_descuentos: [],
+        detalle_descuentos: detalleDescuentosPayload,
         pagos: {
           efectivo: pagos.efectivoAplicado ?? pagos.efectivo ?? calculo.total,
           efectivo_entregado: pagos.efectivoEntregado,
@@ -1387,6 +1729,79 @@ const inicializarEventos = () => {
   inputPagoEfectivoEntregado?.addEventListener('input', recalcularCambio);
   inputPagoTarjeta?.addEventListener('input', recalcularCambio);
   inputPagoTransferencia?.addEventListener('input', recalcularCambio);
+
+  itemsContainer?.addEventListener('change', (event) => {
+    const toggle = event.target.closest('.caja-item-descuento-toggle');
+    if (toggle) {
+      const key = toggle.dataset.itemKey;
+      const panel = itemsContainer.querySelector(`[data-panel-key="${key}"]`);
+      if (panel) panel.hidden = !toggle.checked;
+      if (!toggle.checked) {
+        eliminarDescuentoItem(key);
+        actualizarResumenCobro();
+        renderDetalleItems();
+      } else {
+        limpiarMensajeCobro();
+      }
+    }
+  });
+
+  itemsContainer?.addEventListener('click', (event) => {
+    const botonAplicar = event.target.closest('.caja-item-aplicar-descuento');
+    if (!botonAplicar) return;
+
+    event.preventDefault();
+    const key = botonAplicar.dataset.itemKey;
+    const panel = itemsContainer.querySelector(`[data-panel-key="${key}"]`);
+    const cantidadInput = panel?.querySelector('.caja-item-descuento-cantidad');
+    const tipoSelect = panel?.querySelector('.caja-item-descuento-tipo');
+    const valorInput = panel?.querySelector('.caja-item-descuento-valor');
+
+    const cantidadMax = Math.max(Number(botonAplicar.dataset.max) || 0, 0);
+    const precioUnitario = Math.max(Number(botonAplicar.dataset.precio) || 0, 0);
+    const itemIndex = Number(botonAplicar.dataset.itemIndex);
+    const item = itemsDetalleActual?.[itemIndex];
+    let cantidad = Math.max(Number(cantidadInput?.value) || 0, 0);
+    cantidad = Math.min(cantidad, cantidadMax);
+
+    if (!cantidad || cantidad <= 0) {
+      mostrarMensajeCobro('Ingresa una cantidad valida para aplicar el descuento.', 'error');
+      return;
+    }
+
+    const tipo = (tipoSelect?.value || 'porcentaje') === 'monto' ? 'monto' : 'porcentaje';
+    const valor = Math.max(Number(valorInput?.value) || 0, 0);
+
+    if (!valor || valor <= 0) {
+      mostrarMensajeCobro('Ingresa un valor de descuento mayor a 0.', 'error');
+      return;
+    }
+
+    const maximoPermitido = precioUnitario * cantidad;
+    let montoCalculado =
+      tipo === 'porcentaje' ? precioUnitario * cantidad * (valor / 100) : valor * cantidad;
+
+    montoCalculado = Math.max(Math.min(montoCalculado, maximoPermitido), 0);
+    montoCalculado = Math.round(montoCalculado * 100) / 100;
+
+    const nombre = (botonAplicar.dataset.nombre || 'Producto').replace(/&quot;/g, '"');
+    registrarDescuentoItem({
+      key,
+      producto_id: Number(botonAplicar.dataset.producto) || null,
+      cantidad_total: cantidadMax,
+      nombre,
+      cantidad,
+      tipo,
+      valor,
+      montoCalculado,
+      precioUnitario,
+      detalle_ids: Array.isArray(item?.detalles) ? item.detalles : [],
+    });
+
+    limpiarMensajeCobro();
+    actualizarResumenCobro();
+    renderDetalleItems();
+  });
 
   inputClienteBuscar?.addEventListener('input', (event) => {
     const valor = event.target.value || '';

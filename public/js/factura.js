@@ -44,6 +44,45 @@
     return new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP' }).format(numero);
   };
 
+  const limpiarTextoFactura = (texto) => String(texto || '').replace(/\s+/g, ' ').trim();
+
+  const recortarTexto = (texto, maxLen) => {
+    if (!texto) return '';
+    if (maxLen <= 0) return '';
+    if (texto.length <= maxLen) return texto;
+    if (maxLen <= 3) return texto.slice(0, maxLen);
+    return `${texto.slice(0, maxLen - 3)}...`;
+  };
+
+  const abreviarNombreProducto = (nombre, maxLen = 18) => {
+    const limpio = limpiarTextoFactura(nombre);
+    if (!limpio) return '';
+    if (limpio.length <= maxLen) return limpio;
+    const palabras = limpio.split(' ');
+    if (palabras.length === 1) return recortarTexto(limpio, maxLen);
+    const abreviadas = palabras.map((palabra, idx) => {
+      if (idx === palabras.length - 1) return palabra;
+      if (palabra.length <= 1) return palabra;
+      return `${palabra.charAt(0)}.`;
+    });
+    let resultado = abreviadas.join(' ');
+    if (resultado.length <= maxLen) return resultado;
+    const ultima = abreviadas.length - 1;
+    const prefijo = abreviadas.slice(0, ultima).join(' ');
+    const espacio = prefijo ? 1 : 0;
+    const maxUltima = maxLen - prefijo.length - espacio;
+    const ultimaRecortada = recortarTexto(abreviadas[ultima], maxUltima);
+    return prefijo ? `${prefijo} ${ultimaRecortada}` : ultimaRecortada;
+  };
+
+  const escaparHtml = (texto) =>
+    String(texto ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
   const parseFechaLocal = (valor) => {
     if (!valor) return null;
     const base = typeof valor === 'string' ? valor.replace(' ', 'T') : valor;
@@ -276,37 +315,24 @@
         const descuentoTotal = descuentoBase > 0 ? Math.min(descuentoBase, subtotalBruto) : descuentoCalculado;
         const subtotalFinal = Math.max(subtotalBruto - descuentoTotal, 0);
         const precioFinal = cantidad > 0 ? subtotalFinal / cantidad : precio;
-        const tieneDescuento = descuentoTotal > 0;
-        const precioHtml = tieneDescuento
-          ? `
-            <div class="factura-price-block">
-              <div class="factura-price-stack">
-                <span class="factura-price-original">${formatCurrency(precio)}</span>
-                <span class="factura-price-final">${formatCurrency(precioFinal)}</span>
-              </div>
-            </div>
-          `
-          : `
-            <div class="factura-price-block">
-              <span class="factura-price-final">${formatCurrency(precio)}</span>
-            </div>
-          `;
-        const subtotalHtml = tieneDescuento
-          ? `
-            <div class="factura-price-block">
-              <div class="factura-price-stack">
-                <span class="factura-price-original">${formatCurrency(subtotalBruto)}</span>
-                <span class="factura-price-final">${formatCurrency(subtotalFinal)}</span>
-              </div>
-            </div>
-          `
-          : `
-            <div class="factura-price-block">
-              <span class="factura-price-final">${formatCurrency(subtotalBruto)}</span>
-            </div>
-          `;
+        const precioHtml = `
+          <div class="factura-price-block">
+            <span class="factura-price-final">${formatCurrency(precioFinal)}</span>
+          </div>
+        `;
+        const subtotalHtml = `
+          <div class="factura-price-block">
+            <span class="factura-price-final">${formatCurrency(subtotalFinal)}</span>
+          </div>
+        `;
+        const nombreCompleto = limpiarTextoFactura(
+          item.nombre || `Producto ${item.producto_id || ''}`
+        );
+        const nombreAbreviado = abreviarNombreProducto(nombreCompleto, 16);
+        const nombreSeguro = escaparHtml(nombreAbreviado || nombreCompleto);
+        const tituloSeguro = escaparHtml(nombreCompleto);
         fila.innerHTML = `
-        <td class="factura-prod-cell"><span class="factura-prod-name">${item.nombre || `Producto ${item.producto_id || ''}`}</span></td>
+        <td class="factura-prod-cell"><span class="factura-prod-name" title="${tituloSeguro}">${nombreSeguro}</span></td>
         <td class="factura-qty-cell">${cantidad}</td>
         <td class="factura-price-cell">${precioHtml}</td>
         <td class="factura-subtotal-cell">${subtotalHtml}</td>

@@ -9,6 +9,7 @@ const inputProdCostoPromedio = document.getElementById('prod-costo-promedio');
 const inputProdUltimoCosto = document.getElementById('prod-ultimo-costo');
 const inputProdActualizaCostoCompras = document.getElementById('prod-actualiza-costo');
 const inputProdCostoReal = document.getElementById('prod-costo-real');
+const inputProdCostoRealIncluyeItbis = document.getElementById('prod-costo-real-incluye-itbis');
 const inputProdEsInsumo = document.getElementById('prod-es-insumo');
 const inputProdInsumoVendible = document.getElementById('prod-insumo-vendible');
 const inputProdUnidadBase = document.getElementById('prod-unidad-base');
@@ -375,6 +376,16 @@ const formatNumber = (value) => {
   const number = Number(value);
   if (Number.isNaN(number)) return '--';
   return new Intl.NumberFormat('es-DO', { maximumFractionDigits: 2 }).format(number);
+};
+
+const formatNumberInput = (value, decimals = 2) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '';
+  const factor = 10 ** Math.max(decimals, 0);
+  const rounded = Math.round(number * factor) / factor;
+  let text = rounded.toFixed(Math.max(decimals, 0));
+  text = text.replace(/(?:\.0+|(\.\d+?)0+)$/, '$1');
+  return text;
 };
 
 const formatCurrencySigned = (value) => {
@@ -1224,7 +1235,10 @@ const renderProductos = (lista) => {
 
     const detalle = document.createElement('div');
     detalle.className = 'producto-detalle';
-    const stockTexto = stockEsIndefinido ? 'Indefinido' : Number(producto.stock ?? 0);
+    const stockValor = Number(producto.stock ?? 0);
+    const stockTexto = stockEsIndefinido
+      ? 'Indefinido'
+      : formatNumber(Number.isFinite(stockValor) ? stockValor : 0);
     detalle.innerHTML = `
       <span><strong>Stock:</strong> ${stockTexto}</span>
       <span><strong>Categoría:</strong> ${producto.categoria_nombre ?? 'Sin asignar'}</span>
@@ -1261,11 +1275,19 @@ const renderProductos = (lista) => {
       if (inputProdContenidoUnidad) {
         const contenidoValor = producto.contenido_por_unidad;
         inputProdContenidoUnidad.value =
-          contenidoValor === null || contenidoValor === undefined ? '' : contenidoValor;
+          contenidoValor === null || contenidoValor === undefined
+            ? ''
+            : formatNumberInput(contenidoValor, 2);
       }
       if (inputProdActualizaCostoCompras) inputProdActualizaCostoCompras.checked = actualizaCostoCompras;
       if (inputProdStockIndefinido) inputProdStockIndefinido.checked = stockEsIndefinido;
-      if (inputProdStock) inputProdStock.value = stockEsIndefinido ? '' : (producto.stock ?? '');
+      if (inputProdStock) {
+        const stockValorForm = producto.stock;
+        inputProdStock.value =
+          stockEsIndefinido || stockValorForm === null || stockValorForm === undefined
+            ? ''
+            : formatNumberInput(stockValorForm, 2);
+      }
       refrescarUiStockIndefinido(false);
       refrescarUiInsumo(false);
       if (inputProdCategoria) inputProdCategoria.value = producto.categoria_id ?? '';

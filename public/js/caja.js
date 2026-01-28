@@ -2181,17 +2181,15 @@ const renderDetallePedido = () => {
 
   const subtotal = Number(totalesBase.subtotal) || 0;
 
-  const impuesto = Number(totalesBase.impuesto) || 0;
+  const impuestoBase = Number(totalesBase.impuesto) || 0;
 
-  const base = subtotal + impuesto;
+  const base = subtotal + impuestoBase;
 
   const descuentoPorcentaje = Math.max(Number(inputDescuento?.value) || 0, 0);
 
   const propinaPorcentaje = Math.max(Number(inputPropina?.value) || 0, 0);
 
 
-
-  const tasaImpuesto = subtotal > 0 ? impuesto / subtotal : 0;
 
   const descuentoItemsBruto = descuentosPorItem.reduce(
 
@@ -2201,25 +2199,25 @@ const renderDetallePedido = () => {
 
   );
 
-  const descuentoItemsMonto = Math.min(descuentoItemsBruto * (1 + tasaImpuesto), base);
+  const descuentoItemsMonto = Math.min(descuentoItemsBruto, subtotal);
 
-  const descuentoGeneralMonto = Math.min(
+  const subtotalConDescuento = Math.max(subtotal - descuentoItemsMonto, 0);
 
-    base * (descuentoPorcentaje / 100),
+  const impuestoAjustado = subtotal > 0 ? impuestoBase * (subtotalConDescuento / subtotal) : impuestoBase;
 
-    Math.max(base - descuentoItemsMonto, 0)
+  const baseConItems = subtotalConDescuento + impuestoAjustado;
 
-  );
+  const descuentoGeneralMonto = Math.min(baseConItems * (descuentoPorcentaje / 100), baseConItems);
 
-  const descuentoTotal = Math.min(descuentoItemsMonto + descuentoGeneralMonto, base);
-
-  const baseConDescuento = Math.max(base - descuentoTotal, 0);
+  const baseConDescuento = Math.max(baseConItems - descuentoGeneralMonto, 0);
 
   const propinaMonto = baseConDescuento * (propinaPorcentaje / 100);
 
   const total = baseConDescuento + propinaMonto;
 
-  const descuentoPorcentajeEfectivo = base > 0 ? (descuentoTotal / base) * 100 : 0;
+  const descuentoTotal = Math.min(descuentoItemsMonto + descuentoGeneralMonto, base);
+
+  const descuentoPorcentajeEfectivo = base > 0 ? ((base - baseConDescuento) / base) * 100 : 0;
 
 
 
@@ -2227,7 +2225,7 @@ const renderDetallePedido = () => {
 
     subtotal,
 
-    impuesto,
+    impuesto: impuestoAjustado,
 
     descuentoPorcentaje,
 
