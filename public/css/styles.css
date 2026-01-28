@@ -39,6 +39,10 @@
   font-family: 'Poppins', sans-serif;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
 }

@@ -26,6 +26,7 @@ const inputProdStock = document.getElementById('prod-stock');
 const inputProdStockIndefinido = document.getElementById('prod-stock-indefinido');
 const inputProdCategoria = document.getElementById('prod-categoria');
 const inputProdActivo = document.getElementById('prod-activo');
+const botonProdCancelar = document.getElementById('prod-cancelar');
 const mensajeProductos = document.getElementById('admin-mensaje');
 const filtroCategoriaProductos = document.getElementById('productos-filtro-categoria');
 
@@ -787,6 +788,7 @@ const ejecutarEliminacionAdmin = async () => {
 const limpiarFormularioProducto = () => {
   formProducto?.reset();
   if (inputProdId) inputProdId.value = '';
+  if (botonProdCancelar) botonProdCancelar.hidden = true;
   if (inputProdActivo) inputProdActivo.checked = true;
   if (inputProdStockIndefinido) inputProdStockIndefinido.checked = false;
   if (inputProdStock) inputProdStock.disabled = false;
@@ -1259,6 +1261,7 @@ const renderProductos = (lista) => {
     botonEditar.textContent = 'Editar';
     botonEditar.addEventListener('click', async () => {
       if (inputProdId) inputProdId.value = producto.id;
+      if (botonProdCancelar) botonProdCancelar.hidden = false;
       if (inputProdNombre) inputProdNombre.value = producto.nombre ?? '';
       if (inputProdPrecio) setMoneyInputValueAdmin(inputProdPrecio, producto.precio ?? '');
       if (inputProdCostoBase) setMoneyInputValueAdmin(inputProdCostoBase, producto.costo_base_sin_itbis ?? 0);
@@ -1369,6 +1372,12 @@ prodRecetaAgregarBtn?.addEventListener('click', (event) => {
 prodRecetaGuardarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   guardarRecetaProducto();
+});
+
+botonProdCancelar?.addEventListener('click', (event) => {
+  event.preventDefault();
+  limpiarFormularioProducto();
+  setMessage(mensajeProductos, 'Edicion cancelada.', 'info');
 });
 
 const obtenerValoresProducto = () => {
@@ -2806,7 +2815,9 @@ const renderComprasInventario = (lista) => {
     proveedor.textContent = compra.proveedor || '--';
 
     const origen = document.createElement('td');
-    origen.textContent = compra.origen_fondos === 'caja' ? 'Caja' : 'Negocio';
+    const origenFondos = String(compra.origen_fondos || '').toLowerCase();
+    origen.textContent =
+      origenFondos === 'caja' ? 'Caja' : origenFondos === 'aporte_externo' ? 'Aporte externo' : 'Negocio';
 
     const items = document.createElement('td');
     const itemsValor = Number(compra.items) || 0;
@@ -2933,7 +2944,9 @@ const prepararEdicionAbastecimiento = (compra, detalles) => {
   if (abastecimientoProveedorInput) abastecimientoProveedorInput.value = compra.proveedor || '';
   if (abastecimientoFechaInput) abastecimientoFechaInput.value = obtenerFechaAbastecimiento(compra.fecha);
   if (abastecimientoOrigenInput) {
-    abastecimientoOrigenInput.value = compra.origen_fondos === 'caja' ? 'caja' : 'negocio';
+    const origenFondos = String(compra.origen_fondos || '').toLowerCase();
+    abastecimientoOrigenInput.value =
+      origenFondos === 'caja' || origenFondos === 'aporte_externo' ? origenFondos : 'negocio';
   }
   if (abastecimientoMetodoInput) abastecimientoMetodoInput.value = compra.metodo_pago || '';
   if (abastecimientoObservacionesInput) {

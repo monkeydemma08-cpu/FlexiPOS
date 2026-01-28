@@ -1991,6 +1991,7 @@ const normalizarContenidoPorUnidad = (valor, predeterminado = 1) => {
 
 const TIPOS_GASTO = ['OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA'];
 const ORIGENES_GASTO = ['manual', 'compra', 'nomina', 'caja'];
+const ORIGENES_FONDOS_COMPRA = ['negocio', 'caja', 'aporte_externo'];
 
 const normalizarTipoGasto = (valor, predeterminado = 'OPERATIVO') => {
   if (!valor) {
@@ -2012,6 +2013,19 @@ const normalizarOrigenGasto = (valor, predeterminado = 'manual') => {
     return limpio;
   }
   return predeterminado;
+};
+
+const normalizarOrigenFondosCompra = (valor, predeterminado = 'negocio') => {
+  if (!valor) {
+    return ORIGENES_FONDOS_COMPRA.includes(predeterminado) ? predeterminado : 'negocio';
+  }
+  const limpio = String(valor).trim().toLowerCase();
+  if (limpio === 'caja') return 'caja';
+  if (limpio === 'negocio') return 'negocio';
+  if (['aporte_externo', 'aporte externo', 'aporte-externo', 'aporte', 'externo'].includes(limpio)) {
+    return 'aporte_externo';
+  }
+  return ORIGENES_FONDOS_COMPRA.includes(predeterminado) ? predeterminado : 'negocio';
 };
 
 const obtenerConfiguracionSecuenciasNegocio = async (negocioId) => {
@@ -9034,7 +9048,7 @@ app.post('/api/inventario/compras', (req, res) => {
     const fecha = req.body?.fecha;
     const origenFondosRaw =
       normalizarCampoTexto(req.body?.origen_fondos ?? req.body?.origenFondos) || 'negocio';
-    const origenFondos = origenFondosRaw === 'caja' ? 'caja' : 'negocio';
+    const origenFondos = normalizarOrigenFondosCompra(origenFondosRaw, 'negocio');
     const metodoPago = normalizarCampoTexto(req.body?.metodo_pago ?? req.body?.metodoPago);
     const observaciones = normalizarCampoTexto(req.body?.observaciones ?? req.body?.comentarios);
     const aplicaItbis = normalizarAplicaItbis(req.body?.aplica_itbis ?? req.body?.aplicaItbis);
@@ -9304,32 +9318,35 @@ app.post('/api/inventario/compras', (req, res) => {
         }
       }
 
-      const descripcionGasto = `Compra inventario #${compraId}${observaciones ? ` - ${observaciones}` : ''}`;
-      const gastoInsert = await db.run(
-        `
+      let gastoId = null;
+      if (origenFondos !== 'aporte_externo') {
+        const descripcionGasto = `Compra inventario #${compraId}${observaciones ? ` - ${observaciones}` : ''}`;
+        const gastoInsert = await db.run(
+          `
           INSERT INTO gastos
             (fecha, monto, moneda, categoria, tipo_gasto, origen, metodo_pago, proveedor, descripcion, referencia, es_recurrente, negocio_id)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        [
-          fecha,
-          total,
-          'DOP',
-          'Compras inventario',
-          'INVENTARIO',
-          'compra',
-          metodoPago,
-          proveedor,
-          descripcionGasto,
-          `INV-${compraId}`,
-          0,
-          negocioId,
-        ]
-      );
+          [
+            fecha,
+            total,
+            'DOP',
+            'Compras inventario',
+            'INVENTARIO',
+            'compra',
+            metodoPago,
+            proveedor,
+            descripcionGasto,
+            `INV-${compraId}`,
+            0,
+            negocioId,
+          ]
+        );
 
-      const gastoId = gastoInsert?.lastID || null;
+        gastoId = gastoInsert?.lastID || null;
+      }
+
       let salidaId = null;
-
       if (origenFondos === 'caja') {
         const descripcionSalida = `Compra inventario #${compraId} - ${proveedor}`;
         const salidaInsert = await db.run(
@@ -10990,7 +11007,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
     const fecha = req.body?.fecha;
     const origenFondosRaw =
       normalizarCampoTexto(req.body?.origen_fondos ?? req.body?.origenFondos) || 'negocio';
-    const origenFondos = origenFondosRaw === 'caja' ? 'caja' : 'negocio';
+    const origenFondos = normalizarOrigenFondosCompra(origenFondosRaw, 'negocio');
     const metodoPago = normalizarCampoTexto(req.body?.metodo_pago ?? req.body?.metodoPago);
     const observaciones = normalizarCampoTexto(req.body?.observaciones ?? req.body?.comentarios);
     const aplicaItbis = normalizarAplicaItbis(req.body?.aplica_itbis ?? req.body?.aplicaItbis);
@@ -11299,26 +11316,57 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         }
       }
 
-      if (compraActual.gasto_id) {
+      let gastoId = compraActual.gasto_id || null;
+      if (origenFondos === 'aporte_externo') {
+        if (gastoId) {
+          await db.run('DELETE FROM gastos WHERE id = ? AND negocio_id = ?', [gastoId, negocioId]);
+          gastoId = null;
+        }
+      } else {
         const descripcionGasto = `Compra inventario #${compraId}${observaciones ? ` - ${observaciones}` : ''}`;
-        await db.run(
-          `
+        if (gastoId) {
+          await db.run(
+            `
             UPDATE gastos
                SET fecha = ?, monto = ?, tipo_gasto = ?, origen = ?, metodo_pago = ?, proveedor = ?, descripcion = ?
              WHERE id = ? AND negocio_id = ?
           `,
-          [
-            fecha,
-            total,
-            'INVENTARIO',
-            'compra',
-            metodoPago,
-            proveedor,
-            descripcionGasto,
-            compraActual.gasto_id,
-            negocioId,
-          ]
-        );
+            [
+              fecha,
+              total,
+              'INVENTARIO',
+              'compra',
+              metodoPago,
+              proveedor,
+              descripcionGasto,
+              gastoId,
+              negocioId,
+            ]
+          );
+        } else {
+          const gastoInsert = await db.run(
+            `
+            INSERT INTO gastos
+              (fecha, monto, moneda, categoria, tipo_gasto, origen, metodo_pago, proveedor, descripcion, referencia, es_recurrente, negocio_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+            [
+              fecha,
+              total,
+              'DOP',
+              'Compras inventario',
+              'INVENTARIO',
+              'compra',
+              metodoPago,
+              proveedor,
+              descripcionGasto,
+              `INV-${compraId}`,
+              0,
+              negocioId,
+            ]
+          );
+          gastoId = gastoInsert?.lastID || null;
+        }
       }
 
       let salidaId = compraActual.salida_id || null;
@@ -11361,6 +11409,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
                  itbis_capitalizable = ?,
                  total = ?,
                  observaciones = ?,
+                 gasto_id = ?,
                  salida_id = ?
            WHERE id = ? AND negocio_id = ?
         `,
@@ -11375,6 +11424,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
           itbisCapitalizable ? 1 : 0,
           total,
           observaciones,
+          gastoId,
           salidaId,
           compraId,
           negocioId,
