@@ -1007,6 +1007,7 @@ async function runMigrations() {
   await ensureTableAnalisisCapitalInicial();
   await ensureTableClientesDeudas();
   await ensureTableClientesAbonos();
+  await modifyColumn('configuracion', 'valor LONGTEXT NOT NULL');
   await ensureColumn('salidas_caja', 'usuario_id INT NULL');
   await ensureColumn('negocios', 'slug VARCHAR(120) UNIQUE');
   await ensureColumn('negocios', 'color_primario VARCHAR(20) NULL');

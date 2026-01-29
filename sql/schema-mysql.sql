@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS clientes_abonos (
 
 CREATE TABLE IF NOT EXISTS configuracion (
   clave VARCHAR(191) NOT NULL,
-  valor TEXT NOT NULL,
+  valor LONGTEXT NOT NULL,
   negocio_id INT NOT NULL,
   PRIMARY KEY (clave, negocio_id),
   CONSTRAINT fk_configuracion_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)

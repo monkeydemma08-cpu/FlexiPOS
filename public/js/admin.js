@@ -1382,16 +1382,21 @@ botonProdCancelar?.addEventListener('click', (event) => {
 
 const obtenerValoresProducto = () => {
   const nombre = inputProdNombre?.value.trim();
-  const precio = parseMoneyValueAdmin(inputProdPrecio, { allowEmpty: false });
+  const esInsumo = inputProdEsInsumo?.checked ?? false;
+  const tipoProducto = esInsumo ? 'INSUMO' : 'FINAL';
+  const insumoVendible = esInsumo ? (inputProdInsumoVendible?.checked ?? false) : false;
+  const allowEmptyPrecio = esInsumo && !insumoVendible;
+  const precioParsed = parseMoneyValueAdmin(inputProdPrecio, {
+    allowEmpty: allowEmptyPrecio,
+    fallback: 0,
+  });
+  const precio = Number.isFinite(precioParsed) ? precioParsed : NaN;
   const costoBaseParsed = parseMoneyValueAdmin(inputProdCostoBase);
   const costoBase = Number.isFinite(costoBaseParsed) ? costoBaseParsed : 0;
   const costoRealTexto = (inputProdCostoReal?.value ?? '').trim();
   const costoRealParsed =
     costoRealTexto === '' ? 0 : parseMoneyValueAdmin(inputProdCostoReal, { allowEmpty: false });
   const costoReal = Number.isFinite(costoRealParsed) ? costoRealParsed : NaN;
-  const esInsumo = inputProdEsInsumo?.checked ?? false;
-  const tipoProducto = esInsumo ? 'INSUMO' : 'FINAL';
-  const insumoVendible = esInsumo ? (inputProdInsumoVendible?.checked ?? false) : false;
   const unidadBase = (inputProdUnidadBase?.value || 'UND').toUpperCase();
   const contenidoTexto = (inputProdContenidoUnidad?.value ?? '').trim();
   const contenidoParsed = contenidoTexto === '' ? 1 : parseFloat(contenidoTexto);
@@ -1431,13 +1436,21 @@ const validarProducto = ({
   costoBase,
   costoReal,
   contenidoPorUnidad,
+  tipoProducto,
+  insumoVendible,
 }) => {
   if (!nombre) {
     setMessage(mensajeProductos, 'El nombre del producto es obligatorio.', 'error');
     return false;
   }
   if (Number.isNaN(precio)) {
-    setMessage(mensajeProductos, 'El precio del producto es obligatorio y debe ser numerico.', 'error');
+    const esInsumoNoVendible =
+      String(tipoProducto || '').toUpperCase() === 'INSUMO' && !insumoVendible;
+    if (!esInsumoNoVendible) {
+      setMessage(mensajeProductos, 'El precio del producto es obligatorio y debe ser numerico.', 'error');
+      return false;
+    }
+    setMessage(mensajeProductos, 'El precio debe ser numerico si lo ingresas.', 'error');
     return false;
   }
   const { invalido } = leerPreciosProductoUI();
@@ -1616,7 +1629,7 @@ const actualizarProducto = async (
 };
 
 /* =====================
- * ConfiguraciÃ³n de impuesto
+ * Configuracion de impuesto
  * ===================== */
 const cargarImpuesto = async () => {
   if (!impuestoValorInput) return;
@@ -1624,7 +1637,7 @@ const cargarImpuesto = async () => {
     setMessage(impuestoMensaje, '', 'info');
     const respuesta = await fetchConAutorizacion('/api/configuracion/impuesto');
     if (!respuesta.ok) {
-      throw new Error('Error al obtener la configuraciÃ³n de impuesto');
+      throw new Error('Error al obtener la configuracion de impuesto');
     }
     const data = await respuesta.json();
     if (data.ok) {
@@ -1634,13 +1647,13 @@ const cargarImpuesto = async () => {
     } else {
       setMessage(
         impuestoMensaje,
-        data.error || 'No se pudo obtener la configuraciÃ³n de impuesto.',
+        data.error || 'No se pudo obtener la configuracion de impuesto.',
         'error'
       );
     }
   } catch (error) {
     console.error('Error al cargar el impuesto:', error);
-    setMessage(impuestoMensaje, 'Error al obtener la configuraciÃ³n de impuesto.', 'error');
+    setMessage(impuestoMensaje, 'Error al obtener la configuracion de impuesto.', 'error');
   }
 };
 
@@ -1671,7 +1684,7 @@ const guardarImpuesto = async () => {
 
     const data = await respuesta.json().catch(() => ({ ok: false }));
     if (!respuesta.ok || !data.ok) {
-      const mensaje = data.error || 'Error al guardar la configuraciÃ³n de impuesto.';
+      const mensaje = data.error || 'Error al guardar la configuracion de impuesto.';
       setMessage(impuestoMensaje, mensaje, 'error');
       return;
     }
@@ -1680,7 +1693,7 @@ const guardarImpuesto = async () => {
     setMessage(impuestoMensaje, 'Impuesto actualizado correctamente.', 'info');
   } catch (error) {
     console.error('Error al guardar el impuesto:', error);
-    setMessage(impuestoMensaje, 'Error al guardar la configuraciÃ³n de impuesto.', 'error');
+    setMessage(impuestoMensaje, 'Error al guardar la configuracion de impuesto.', 'error');
   } finally {
     if (impuestoGuardarBtn) {
       impuestoGuardarBtn.disabled = false;
@@ -1690,7 +1703,7 @@ const guardarImpuesto = async () => {
 };
 
 /* =====================
- * ConfiguraciÃ³n de facturaciÃ³n
+ * Configuracion de facturacion
  * ===================== */
 const pintarRango = (inicioInput, finInput, restanteEl, alertaEl, datos, umbral) => {
   if (inicioInput) inicioInput.value = datos?.inicio ?? '';
@@ -1968,11 +1981,11 @@ const cargarConfiguracionFactura = async (options = {}) => {
   try {
     const respuesta = await fetchConAutorizacion('/api/configuracion/factura');
     if (!respuesta.ok) {
-      throw new Error('No se pudo obtener la configuraciÃ³n de facturaciÃ³n');
+      throw new Error('No se pudo obtener la configuracion de facturacion');
     }
     const data = await respuesta.json();
     if (!data.ok || !data.configuracion) {
-      throw new Error(data.error || 'Error al obtener la configuraciÃ³n de facturaciÃ³n');
+      throw new Error(data.error || 'Error al obtener la configuracion de facturacion');
     }
 
     const { configuracion } = data;
@@ -1992,8 +2005,8 @@ const cargarConfiguracionFactura = async (options = {}) => {
     facturaConfigDirty = false;
     setMessage(facturaMensaje, '');
   } catch (error) {
-    console.error('Error al cargar configuraciÃ³n de factura:', error);
-    setMessage(facturaMensaje, 'No se pudo cargar la configuraciÃ³n de facturaciÃ³n.', 'error');
+    console.error('Error al cargar configuracion de factura:', error);
+    setMessage(facturaMensaje, 'No se pudo cargar la configuracion de facturacion.', 'error');
   }
 };
 
@@ -2023,7 +2036,7 @@ const guardarConfiguracionFactura = async () => {
 
     const data = await respuesta.json().catch(() => ({ ok: false }));
     if (!respuesta.ok || !data.ok || !data.configuracion) {
-      throw new Error(data.error || 'No se pudo guardar la configuraciÃ³n de factura');
+      throw new Error(data.error || 'No se pudo guardar la configuracion de factura');
     }
 
     const { configuracion } = data;
@@ -2031,10 +2044,10 @@ const guardarConfiguracionFactura = async () => {
     pintarRango(ncfB02InicioInput, ncfB02FinInput, ncfB02Restante, ncfB02Alerta, configuracion.b02, 20);
     pintarRango(ncfB01InicioInput, ncfB01FinInput, ncfB01Restante, ncfB01Alerta, configuracion.b01, 5);
     facturaConfigDirty = false;
-    setMessage(facturaMensaje, 'ConfiguraciÃ³n de factura guardada correctamente.', 'info');
+    setMessage(facturaMensaje, 'Configuracion de factura guardada correctamente.', 'info');
   } catch (error) {
-    console.error('Error al guardar configuraciÃ³n de factura:', error);
-    setMessage(facturaMensaje, error.message || 'No se pudo guardar la configuraciÃ³n.', 'error');
+    console.error('Error al guardar configuracion de factura:', error);
+    setMessage(facturaMensaje, error.message || 'No se pudo guardar la configuracion.', 'error');
   } finally {
     if (facturaGuardarBtn) {
       facturaGuardarBtn.disabled = false;
@@ -4422,7 +4435,7 @@ const actualizarPaginacionHistorialCocina = (total, pageSize, page) => {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const pageNum = Math.min(page, totalPages);
 
-  histCocinaInfo.textContent = `PÃ¡gina ${pageNum} de ${totalPages}`;
+  histCocinaInfo.textContent = `Pagina ${pageNum} de ${totalPages}`;
   histCocinaPrev.disabled = pageNum <= 1;
   histCocinaNext.disabled = pageNum >= totalPages;
 };

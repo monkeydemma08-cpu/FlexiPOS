@@ -16,7 +16,8 @@ console.log('server.js cargó correctamente');
 const app = express();
 let io = null;
 
-app.use(express.json());
+// Allow larger payloads for long logo URLs or data URIs in configuration.
+app.use(express.json({ limit: '5mb' }));
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
