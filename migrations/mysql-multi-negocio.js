@@ -381,7 +381,7 @@ async function ensureTableRecetaDetalle() {
       receta_id INT NOT NULL,
       insumo_id INT NOT NULL,
       cantidad DECIMAL(12,4) NOT NULL,
-      unidad ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND',
+      unidad ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND',
       creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT fk_receta_detalle_receta FOREIGN KEY (receta_id) REFERENCES recetas(id),
       CONSTRAINT fk_receta_detalle_insumo FOREIGN KEY (insumo_id) REFERENCES productos(id)
@@ -401,7 +401,7 @@ async function ensureTableConsumoInsumos() {
       producto_final_id INT NOT NULL,
       insumo_id INT NOT NULL,
       cantidad_base DECIMAL(12,4) NOT NULL,
-      unidad_base ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND',
+      unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND',
       revertido TINYINT(1) NOT NULL DEFAULT 0,
       creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
       negocio_id INT NOT NULL,
@@ -452,6 +452,29 @@ async function ensureTableClientesDeudas() {
 
   await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_cliente', '(cliente_id)');
   await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_negocio', '(negocio_id)');
+}
+
+async function ensureTableClientesDeudasDetalle() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS clientes_deudas_detalle (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      deuda_id INT NOT NULL,
+      producto_id INT NOT NULL,
+      nombre_producto VARCHAR(255),
+      cantidad DECIMAL(12,2) NOT NULL,
+      precio_unitario DECIMAL(12,2) NOT NULL,
+      total_linea DECIMAL(12,2) NOT NULL,
+      negocio_id INT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_clientes_deudas_detalle_deuda FOREIGN KEY (deuda_id) REFERENCES clientes_deudas(id),
+      CONSTRAINT fk_clientes_deudas_detalle_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
+      CONSTRAINT fk_clientes_deudas_detalle_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('clientes_deudas_detalle', 'idx_clientes_deudas_detalle_deuda', '(deuda_id)');
+  await ensureIndexByName('clientes_deudas_detalle', 'idx_clientes_deudas_detalle_producto', '(producto_id)');
+  await ensureIndexByName('clientes_deudas_detalle', 'idx_clientes_deudas_detalle_negocio', '(negocio_id)');
 }
 
 async function ensureTableClientesAbonos() {
@@ -748,6 +771,7 @@ async function addNegocioIdToTables() {
     'productos',
     'clientes',
     'clientes_deudas',
+    'clientes_deudas_detalle',
     'clientes_abonos',
     'cotizaciones',
     'cotizacion_items',
@@ -802,6 +826,7 @@ async function addNegocioIdToTables() {
     'productos',
     'clientes',
     'clientes_deudas',
+    'clientes_deudas_detalle',
     'clientes_abonos',
     'cotizaciones',
     'cotizacion_items',
@@ -1006,6 +1031,7 @@ async function runMigrations() {
   await ensureTableConsumoInsumos();
   await ensureTableAnalisisCapitalInicial();
   await ensureTableClientesDeudas();
+  await ensureTableClientesDeudasDetalle();
   await ensureTableClientesAbonos();
   await modifyColumn('configuracion', 'valor LONGTEXT NOT NULL');
   await ensureColumn('salidas_caja', 'usuario_id INT NULL');
@@ -1025,7 +1051,10 @@ async function runMigrations() {
   await ensureColumn('productos', 'costo_unitario_real_incluye_itbis TINYINT(1) NOT NULL DEFAULT 0');
   await ensureColumn('productos', "tipo_producto ENUM('FINAL', 'INSUMO') NOT NULL DEFAULT 'FINAL'");
   await ensureColumn('productos', 'insumo_vendible TINYINT(1) NOT NULL DEFAULT 0');
-  await ensureColumn('productos', "unidad_base ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND'");
+  await ensureColumn('productos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND'");
+  await modifyColumn('productos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND'");
+  await modifyColumn('receta_detalle', "unidad ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND'");
+  await modifyColumn('consumo_insumos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND'");
   await ensureColumn('productos', 'contenido_por_unidad DECIMAL(12,4) NOT NULL DEFAULT 1');
   await modifyColumn('productos', 'stock DECIMAL(12,4) NULL DEFAULT 0');
   await ensureColumn('pedidos', 'bartender_id INT NULL');

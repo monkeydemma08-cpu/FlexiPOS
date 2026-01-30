@@ -29,6 +29,15 @@ const inputProdActivo = document.getElementById('prod-activo');
 const botonProdCancelar = document.getElementById('prod-cancelar');
 const mensajeProductos = document.getElementById('admin-mensaje');
 const filtroCategoriaProductos = document.getElementById('productos-filtro-categoria');
+const productosVistaCompletaBtn = document.getElementById('productos-vista-completa');
+const productosVistaModal = document.getElementById('kanm-productos-vista-modal');
+const productosVistaCerrarBtn = document.getElementById('productos-vista-cerrar');
+const productosVistaBuscarInput = document.getElementById('productos-vista-buscar');
+const productosVistaCategoriaInput = document.getElementById('productos-vista-categoria');
+const productosVistaTipoInput = document.getElementById('productos-vista-tipo');
+const productosVistaOrdenInput = document.getElementById('productos-vista-orden');
+const productosVistaLista = document.getElementById('productos-vista-lista');
+const productosVistaBackdrop = productosVistaModal?.querySelector('.kanm-modal-backdrop');
 
 
 const impuestoForm = document.getElementById('impuesto-form');
@@ -812,6 +821,27 @@ const limpiarFormularioProducto = () => {
 };
 
 const esProductoStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
+const esProductoInsumo = (producto) =>
+  String(producto?.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
+const esProductoVendible = (producto) => {
+  if (!producto) return false;
+  return !esProductoInsumo(producto) || Number(producto.insumo_vendible) === 1;
+};
+
+const obtenerCostoProducto = (producto) => {
+  const candidatos = [
+    producto?.costo_unitario_real,
+    producto?.costo_promedio_actual,
+    producto?.costo_base_sin_itbis,
+    producto?.ultimo_costo_sin_itbis,
+  ];
+  for (const valor of candidatos) {
+    if (valor === null || valor === undefined || valor === '') continue;
+    const numero = Number(valor);
+    if (Number.isFinite(numero)) return numero;
+  }
+  return 0;
+};
 
 const refrescarUiStockIndefinido = (limpiarValor = false) => {
   const indefinido = inputProdStockIndefinido?.checked ?? false;
@@ -930,13 +960,24 @@ const leerPreciosProductoUI = () => {
 const UNIDADES_RECETA = [
   { value: 'UND', label: 'Unidades' },
   { value: 'ML', label: 'ML' },
+  { value: 'LT', label: 'LT' },
   { value: 'GR', label: 'GR' },
+  { value: 'KG', label: 'KG' },
+  { value: 'OZ', label: 'OZ' },
+  { value: 'LB', label: 'LB' },
 ];
 
+const limpiarCerosDecimales = (valor) => {
+  if (valor === null || valor === undefined) return '';
+  const texto = String(valor).trim();
+  if (!texto) return '';
+  if (!texto.includes('.')) return texto;
+  const limpio = texto.replace(/0+$/, '').replace(/\.$/, '');
+  return limpio === '' ? '0' : limpio;
+};
+
 const obtenerInsumosDisponibles = () =>
-  (Array.isArray(productos) ? productos : []).filter(
-    (producto) => String(producto?.tipo_producto || '').toUpperCase() === 'INSUMO'
-  );
+  (Array.isArray(productos) ? productos : []).filter((producto) => esProductoInsumo(producto));
 
 const obtenerInsumoPorId = (id) =>
   (Array.isArray(productos) ? productos : []).find(
@@ -1004,8 +1045,11 @@ const crearFilaReceta = (detalle = {}) => {
   inputCantidad.placeholder = 'Cantidad';
   inputCantidad.className = 'receta-cantidad-input';
   if (detalle.cantidad !== undefined && detalle.cantidad !== null) {
-    inputCantidad.value = detalle.cantidad;
+    inputCantidad.value = limpiarCerosDecimales(detalle.cantidad);
   }
+  inputCantidad.addEventListener('blur', () => {
+    inputCantidad.value = limpiarCerosDecimales(inputCantidad.value);
+  });
 
   const selectUnidad = document.createElement('select');
   selectUnidad.className = 'receta-unidad-select';
@@ -1195,6 +1239,52 @@ const guardarRecetaProducto = async () => {
 /* =====================
  * Productos de venta
  * ===================== */
+const seleccionarProductoEdicion = (producto) => {
+  if (!producto) return;
+  const activo = Number(producto.activo) === 1;
+  const stockEsIndefinido = esProductoStockIndefinido(producto);
+  const actualizaCostoCompras = Number(producto.actualiza_costo_con_compras ?? 1) === 1;
+  const esInsumo = esProductoInsumo(producto);
+
+  if (inputProdId) inputProdId.value = producto.id;
+  if (botonProdCancelar) botonProdCancelar.hidden = false;
+  if (inputProdNombre) inputProdNombre.value = producto.nombre ?? '';
+  if (inputProdPrecio) setMoneyInputValueAdmin(inputProdPrecio, producto.precio ?? '');
+  if (inputProdCostoBase) setMoneyInputValueAdmin(inputProdCostoBase, producto.costo_base_sin_itbis ?? 0);
+  if (inputProdCostoPromedio) setMoneyInputValueAdmin(inputProdCostoPromedio, producto.costo_promedio_actual ?? 0);
+  if (inputProdUltimoCosto) setMoneyInputValueAdmin(inputProdUltimoCosto, producto.ultimo_costo_sin_itbis ?? 0);
+  if (inputProdCostoReal) setMoneyInputValueAdmin(inputProdCostoReal, producto.costo_unitario_real ?? 0);
+  if (inputProdEsInsumo) inputProdEsInsumo.checked = esInsumo;
+  if (inputProdInsumoVendible) {
+    inputProdInsumoVendible.checked = esInsumo && Number(producto.insumo_vendible) === 1;
+  }
+  if (inputProdUnidadBase) inputProdUnidadBase.value = producto.unidad_base || 'UND';
+  if (inputProdContenidoUnidad) {
+    const contenidoValor = producto.contenido_por_unidad;
+    inputProdContenidoUnidad.value =
+      contenidoValor === null || contenidoValor === undefined
+        ? ''
+        : formatNumberInput(contenidoValor, 2);
+  }
+  if (inputProdActualizaCostoCompras) inputProdActualizaCostoCompras.checked = actualizaCostoCompras;
+  if (inputProdStockIndefinido) inputProdStockIndefinido.checked = stockEsIndefinido;
+  if (inputProdStock) {
+    const stockValorForm = producto.stock;
+    inputProdStock.value =
+      stockEsIndefinido || stockValorForm === null || stockValorForm === undefined
+        ? ''
+        : formatNumberInput(stockValorForm, 2);
+  }
+  refrescarUiStockIndefinido(false);
+  refrescarUiInsumo(false);
+  if (inputProdCategoria) inputProdCategoria.value = producto.categoria_id ?? '';
+  if (inputProdActivo) inputProdActivo.checked = activo;
+  setPreciosProductoUI(producto.precios || []);
+  setMessage(mensajeProductos, `Editando producto: ${producto.nombre}`, 'info');
+  cargarRecetaProducto(producto.id);
+  inputProdNombre?.focus();
+};
+
 const renderProductos = (lista) => {
   if (!productosLista) return;
   productosLista.innerHTML = '';
@@ -1213,7 +1303,6 @@ const renderProductos = (lista) => {
     const costoBase = Number(producto.costo_base_sin_itbis) || 0;
     const costoPromedio = Number(producto.costo_promedio_actual) || 0;
     const ultimoCosto = Number(producto.ultimo_costo_sin_itbis) || 0;
-    const actualizaCostoCompras = Number(producto.actualiza_costo_con_compras ?? 1) === 1;
     const preciosExtra = Array.isArray(producto.precios) ? producto.precios : [];
     const preciosTexto = preciosExtra.length
       ? preciosExtra.map((p) => `${p.label || 'Precio'}: ${formatCurrency(p.valor)}`).join(' | ')
@@ -1259,46 +1348,8 @@ const renderProductos = (lista) => {
     botonEditar.type = 'button';
     botonEditar.className = 'kanm-button';
     botonEditar.textContent = 'Editar';
-    botonEditar.addEventListener('click', async () => {
-      if (inputProdId) inputProdId.value = producto.id;
-      if (botonProdCancelar) botonProdCancelar.hidden = false;
-      if (inputProdNombre) inputProdNombre.value = producto.nombre ?? '';
-      if (inputProdPrecio) setMoneyInputValueAdmin(inputProdPrecio, producto.precio ?? '');
-      if (inputProdCostoBase) setMoneyInputValueAdmin(inputProdCostoBase, producto.costo_base_sin_itbis ?? 0);
-      if (inputProdCostoPromedio) setMoneyInputValueAdmin(inputProdCostoPromedio, producto.costo_promedio_actual ?? 0);
-      if (inputProdUltimoCosto) setMoneyInputValueAdmin(inputProdUltimoCosto, producto.ultimo_costo_sin_itbis ?? 0);
-      if (inputProdCostoReal) setMoneyInputValueAdmin(inputProdCostoReal, producto.costo_unitario_real ?? 0);
-      const esInsumo =
-        String(producto.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
-      if (inputProdEsInsumo) inputProdEsInsumo.checked = esInsumo;
-      if (inputProdInsumoVendible) {
-        inputProdInsumoVendible.checked = esInsumo && Number(producto.insumo_vendible) === 1;
-      }
-      if (inputProdUnidadBase) inputProdUnidadBase.value = producto.unidad_base || 'UND';
-      if (inputProdContenidoUnidad) {
-        const contenidoValor = producto.contenido_por_unidad;
-        inputProdContenidoUnidad.value =
-          contenidoValor === null || contenidoValor === undefined
-            ? ''
-            : formatNumberInput(contenidoValor, 2);
-      }
-      if (inputProdActualizaCostoCompras) inputProdActualizaCostoCompras.checked = actualizaCostoCompras;
-      if (inputProdStockIndefinido) inputProdStockIndefinido.checked = stockEsIndefinido;
-      if (inputProdStock) {
-        const stockValorForm = producto.stock;
-        inputProdStock.value =
-          stockEsIndefinido || stockValorForm === null || stockValorForm === undefined
-            ? ''
-            : formatNumberInput(stockValorForm, 2);
-      }
-      refrescarUiStockIndefinido(false);
-      refrescarUiInsumo(false);
-      if (inputProdCategoria) inputProdCategoria.value = producto.categoria_id ?? '';
-      if (inputProdActivo) inputProdActivo.checked = activo;
-      setPreciosProductoUI(producto.precios || []);
-      setMessage(mensajeProductos, `Editando producto: ${producto.nombre}`, 'info');
-      cargarRecetaProducto(producto.id);
-      inputProdNombre?.focus();
+    botonEditar.addEventListener('click', () => {
+      seleccionarProductoEdicion(producto);
     });
 
     const footer = document.createElement('div');
@@ -1310,6 +1361,190 @@ const renderProductos = (lista) => {
     item.appendChild(footer);
     productosLista.appendChild(item);
   });
+};
+
+const renderProductosVistaCompleta = (lista) => {
+  if (!productosVistaLista) return;
+  productosVistaLista.innerHTML = '';
+
+  if (!Array.isArray(lista) || lista.length === 0) {
+    const vacio = document.createElement('div');
+    vacio.className = 'kanm-empty-message';
+    vacio.textContent = 'No hay productos registrados.';
+    productosVistaLista.appendChild(vacio);
+    return;
+  }
+
+  lista.forEach((producto) => {
+    const activo = Number(producto.activo) === 1;
+    const esInsumo = esProductoInsumo(producto);
+    const esVendible = esProductoVendible(producto);
+    const stockEsIndefinido = esProductoStockIndefinido(producto);
+    const stockValor = Number(producto.stock ?? 0);
+    const stockTexto = stockEsIndefinido
+      ? 'Indefinido'
+      : formatNumber(Number.isFinite(stockValor) ? stockValor : 0);
+    const costo = obtenerCostoProducto(producto);
+    const costoLabel = producto.costo_unitario_real_calculado ? 'Costo real (receta)' : 'Costo real';
+    const categoriaNombre = producto.categoria_nombre ?? 'Sin asignar';
+    const unidadBase = producto.unidad_base || 'UND';
+
+    const card = document.createElement('article');
+    card.className = 'producto-vista-card';
+
+    const header = document.createElement('div');
+    header.className = 'producto-vista-head';
+
+    const headerInfo = document.createElement('div');
+
+    const titulo = document.createElement('h4');
+    titulo.textContent = producto.nombre ?? '';
+
+    const tags = document.createElement('div');
+    tags.className = 'producto-vista-tags';
+
+    const tagTipo = document.createElement('span');
+    tagTipo.className = `producto-vista-tag ${esInsumo ? 'tag-insumo' : 'tag-final'}`;
+    tagTipo.textContent = esInsumo ? 'Insumo' : 'Producto final';
+    tags.appendChild(tagTipo);
+
+    if (esInsumo && esVendible) {
+      const tagVendible = document.createElement('span');
+      tagVendible.className = 'producto-vista-tag tag-vendible';
+      tagVendible.textContent = 'Vendible';
+      tags.appendChild(tagVendible);
+    }
+
+    const tagEstado = document.createElement('span');
+    tagEstado.className = `producto-vista-tag ${activo ? '' : 'tag-inactivo'}`.trim();
+    tagEstado.textContent = activo ? 'Activo' : 'Inactivo';
+    tags.appendChild(tagEstado);
+
+    headerInfo.appendChild(titulo);
+    headerInfo.appendChild(tags);
+
+    const precio = document.createElement('div');
+    precio.className = 'producto-vista-precio';
+    precio.textContent = formatCurrency(producto.precio);
+
+    header.appendChild(headerInfo);
+    header.appendChild(precio);
+
+    const body = document.createElement('div');
+    body.className = 'producto-vista-body';
+
+    const crearDetalle = (label, value) => {
+      const item = document.createElement('div');
+      const strong = document.createElement('strong');
+      strong.textContent = `${label}:`;
+      item.appendChild(strong);
+      item.appendChild(document.createTextNode(` ${value}`));
+      return item;
+    };
+
+    body.appendChild(crearDetalle('Categoria', categoriaNombre));
+    body.appendChild(crearDetalle('Stock', stockTexto));
+    body.appendChild(crearDetalle(costoLabel, formatCurrency(costo)));
+    body.appendChild(crearDetalle('Unidad', unidadBase));
+
+    const footer = document.createElement('div');
+    footer.className = 'producto-vista-footer';
+
+    const botonEditar = document.createElement('button');
+    botonEditar.type = 'button';
+    botonEditar.className = 'kanm-button';
+    botonEditar.textContent = 'Editar';
+    botonEditar.addEventListener('click', () => {
+      seleccionarProductoEdicion(producto);
+      cerrarVistaCompletaProductos();
+    });
+
+    footer.appendChild(botonEditar);
+
+    card.appendChild(header);
+    card.appendChild(body);
+    card.appendChild(footer);
+    productosVistaLista.appendChild(card);
+  });
+};
+
+const ordenarProductosVistaCompleta = (lista, criterio) => {
+  const orden = criterio || 'nombre-asc';
+  const comparadorNombre = (a, b) => {
+    const nombreA = String(a?.nombre || '');
+    const nombreB = String(b?.nombre || '');
+    const resultado = nombreA.localeCompare(nombreB, 'es', { sensitivity: 'base' });
+    if (resultado !== 0) return resultado;
+    return Number(a?.id || 0) - Number(b?.id || 0);
+  };
+
+  return lista.sort((a, b) => {
+    switch (orden) {
+      case 'nombre-desc':
+        return -comparadorNombre(a, b);
+      case 'costo-desc': {
+        const costoA = obtenerCostoProducto(a);
+        const costoB = obtenerCostoProducto(b);
+        if (costoA !== costoB) return costoB - costoA;
+        return comparadorNombre(a, b);
+      }
+      case 'costo-asc': {
+        const costoA = obtenerCostoProducto(a);
+        const costoB = obtenerCostoProducto(b);
+        if (costoA !== costoB) return costoA - costoB;
+        return comparadorNombre(a, b);
+      }
+      case 'nombre-asc':
+      default:
+        return comparadorNombre(a, b);
+    }
+  });
+};
+
+const filtrarProductosVistaCompleta = () => {
+  if (!productosVistaLista) return;
+  const termino = (productosVistaBuscarInput?.value || '').toLowerCase();
+  const categoriaFiltro = productosVistaCategoriaInput?.value || '';
+  const tipoFiltro = productosVistaTipoInput?.value || '';
+  const orden = productosVistaOrdenInput?.value || 'nombre-asc';
+  let lista = Array.isArray(productos) ? [...productos] : [];
+
+  if (termino) {
+    lista = lista.filter(
+      (p) =>
+        p.nombre?.toLowerCase().includes(termino) ||
+        p.categoria_nombre?.toLowerCase().includes(termino) ||
+        String(p.id || '').includes(termino)
+    );
+  }
+
+  if (categoriaFiltro) {
+    const catId = Number(categoriaFiltro);
+    lista = lista.filter((p) => Number(p.categoria_id) === catId);
+  }
+
+  if (tipoFiltro === 'insumo') {
+    lista = lista.filter((p) => esProductoInsumo(p));
+  }
+
+  if (tipoFiltro === 'vendible') {
+    lista = lista.filter((p) => esProductoVendible(p));
+  }
+
+  ordenarProductosVistaCompleta(lista, orden);
+  renderProductosVistaCompleta(lista);
+};
+
+const abrirVistaCompletaProductos = () => {
+  if (!productosVistaModal) return;
+  productosVistaModal.classList.remove('oculto');
+  filtrarProductosVistaCompleta();
+  productosVistaBuscarInput?.focus();
+};
+
+const cerrarVistaCompletaProductos = () => {
+  if (!productosVistaModal) return;
+  productosVistaModal.classList.add('oculto');
 };
 
 const filtrarProductos = () => {
@@ -1343,6 +1578,9 @@ const cargarProductos = async () => {
     const data = await respuesta.json();
     productos = Array.isArray(data) ? data : [];
     filtrarProductos();
+    if (productosVistaModal && !productosVistaModal.classList.contains('oculto')) {
+      filtrarProductosVistaCompleta();
+    }
     refrescarSelectsAbastecimiento();
     refrescarOpcionesReceta();
   } catch (error) {
@@ -1353,6 +1591,13 @@ const cargarProductos = async () => {
 
 productosBuscarInput?.addEventListener('input', () => filtrarProductos());
 filtroCategoriaProductos?.addEventListener('change', () => filtrarProductos());
+productosVistaCompletaBtn?.addEventListener('click', () => abrirVistaCompletaProductos());
+productosVistaCerrarBtn?.addEventListener('click', () => cerrarVistaCompletaProductos());
+productosVistaBackdrop?.addEventListener('click', () => cerrarVistaCompletaProductos());
+productosVistaBuscarInput?.addEventListener('input', () => filtrarProductosVistaCompleta());
+productosVistaCategoriaInput?.addEventListener('change', () => filtrarProductosVistaCompleta());
+productosVistaTipoInput?.addEventListener('change', () => filtrarProductosVistaCompleta());
+productosVistaOrdenInput?.addEventListener('change', () => filtrarProductosVistaCompleta());
 inputProdStockIndefinido?.addEventListener('change', () => refrescarUiStockIndefinido(true));
 inputProdEsInsumo?.addEventListener('change', () => refrescarUiInsumo(false));
 refrescarUiStockIndefinido(false);
@@ -1508,6 +1753,19 @@ const setCategoriasOptions = (lista = []) => {
     });
     if (valorFiltro) {
       filtroCategoriaProductos.value = valorFiltro;
+    }
+  }
+  if (productosVistaCategoriaInput) {
+    const valorVista = productosVistaCategoriaInput.value;
+    productosVistaCategoriaInput.innerHTML = '<option value="">Todas las categorías</option>';
+    lista.forEach((cat) => {
+      const opt = document.createElement('option');
+      opt.value = cat.id;
+      opt.textContent = cat.nombre;
+      productosVistaCategoriaInput.appendChild(opt);
+    });
+    if (valorVista) {
+      productosVistaCategoriaInput.value = valorVista;
     }
   }
 };
@@ -5754,8 +6012,13 @@ histCocinaAreaSelect?.addEventListener('change', () => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && modalEliminarOverlay && !modalEliminarOverlay.hidden) {
+  if (event.key !== 'Escape') return;
+  if (modalEliminarOverlay && !modalEliminarOverlay.hidden) {
     cerrarModalEliminar();
+    return;
+  }
+  if (productosVistaModal && !productosVistaModal.classList.contains('oculto')) {
+    cerrarVistaCompletaProductos();
   }
 });
 

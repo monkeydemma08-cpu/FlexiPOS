@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS productos (
   costo_unitario_real_incluye_itbis TINYINT(1) NOT NULL DEFAULT 0,
   tipo_producto ENUM('FINAL', 'INSUMO') NOT NULL DEFAULT 'FINAL',
   insumo_vendible TINYINT(1) NOT NULL DEFAULT 0,
-  unidad_base ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND',
+  unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND',
   contenido_por_unidad DECIMAL(12,4) NOT NULL DEFAULT 1,
   stock DECIMAL(12,4) DEFAULT 0,
   stock_indefinido TINYINT(1) NOT NULL DEFAULT 0,
@@ -87,6 +87,21 @@ CREATE TABLE IF NOT EXISTS clientes_deudas (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_clientes_deudas_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id),
   CONSTRAINT fk_clientes_deudas_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS clientes_deudas_detalle (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  deuda_id INT NOT NULL,
+  producto_id INT NOT NULL,
+  nombre_producto VARCHAR(255),
+  cantidad DECIMAL(12,2) NOT NULL,
+  precio_unitario DECIMAL(12,2) NOT NULL,
+  total_linea DECIMAL(12,2) NOT NULL,
+  negocio_id INT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_clientes_deudas_detalle_deuda FOREIGN KEY (deuda_id) REFERENCES clientes_deudas(id),
+  CONSTRAINT fk_clientes_deudas_detalle_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
+  CONSTRAINT fk_clientes_deudas_detalle_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS clientes_abonos (
@@ -453,7 +468,7 @@ CREATE TABLE IF NOT EXISTS receta_detalle (
   receta_id INT NOT NULL,
   insumo_id INT NOT NULL,
   cantidad DECIMAL(12,4) NOT NULL,
-  unidad ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND',
+  unidad ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND',
   creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_receta_detalle_receta FOREIGN KEY (receta_id) REFERENCES recetas(id),
   CONSTRAINT fk_receta_detalle_insumo FOREIGN KEY (insumo_id) REFERENCES productos(id)
@@ -466,7 +481,7 @@ CREATE TABLE IF NOT EXISTS consumo_insumos (
   producto_final_id INT NOT NULL,
   insumo_id INT NOT NULL,
   cantidad_base DECIMAL(12,4) NOT NULL,
-  unidad_base ENUM('UND', 'ML', 'GR') NOT NULL DEFAULT 'UND',
+  unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND',
   revertido TINYINT(1) NOT NULL DEFAULT 0,
   creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
   negocio_id INT NOT NULL,
@@ -593,6 +608,9 @@ CREATE INDEX idx_cotizacion_items_cotizacion ON cotizacion_items (cotizacion_id)
 CREATE INDEX idx_clientes_activo_nombre ON clientes (negocio_id, activo, nombre);
 CREATE INDEX idx_clientes_deudas_cliente ON clientes_deudas (cliente_id);
 CREATE INDEX idx_clientes_deudas_negocio ON clientes_deudas (negocio_id);
+CREATE INDEX idx_clientes_deudas_detalle_deuda ON clientes_deudas_detalle (deuda_id);
+CREATE INDEX idx_clientes_deudas_detalle_producto ON clientes_deudas_detalle (producto_id);
+CREATE INDEX idx_clientes_deudas_detalle_negocio ON clientes_deudas_detalle (negocio_id);
 CREATE INDEX idx_clientes_abonos_deuda ON clientes_abonos (deuda_id);
 CREATE INDEX idx_clientes_abonos_cliente ON clientes_abonos (cliente_id);
 CREATE INDEX idx_clientes_abonos_negocio ON clientes_abonos (negocio_id);

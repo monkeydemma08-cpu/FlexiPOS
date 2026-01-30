@@ -33,7 +33,7 @@ const DEFAULT_CONFIG_MODULOS = {
 };
 const AREAS_PREPARACION = ['ninguna', 'cocina', 'bar'];
 const TIPOS_PRODUCTO = new Set(['FINAL', 'INSUMO']);
-const UNIDADES_BASE = new Set(['UND', 'ML', 'GR']);
+const UNIDADES_BASE = new Set(['UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB']);
 const MODOS_INVENTARIO_COSTOS = new Set(['REVENTA', 'PREPARACION']);
 const DEFAULT_COLOR_TEXTO = '#222222';
 const DEFAULT_COLOR_PELIGRO = '#ff4b4b';
@@ -2729,6 +2729,7 @@ const obtenerCostosRecetaPorProductos = async (productoIds, negocioId) => {
     `
       SELECT r.producto_final_id,
              rd.cantidad,
+             COALESCE(i.costo_unitario_real, 0) AS costo_unitario_real,
              COALESCE(i.costo_promedio_actual, 0) AS costo_promedio_actual,
              COALESCE(i.contenido_por_unidad, 1) AS contenido_por_unidad
       FROM recetas r
@@ -2746,7 +2747,11 @@ const obtenerCostosRecetaPorProductos = async (productoIds, negocioId) => {
     const productoId = Number(row.producto_final_id);
     if (!Number.isFinite(productoId)) return;
     const contenido = normalizarContenidoPorUnidad(row.contenido_por_unidad, 1);
-    const costoUnitario = contenido > 0 ? (Number(row.costo_promedio_actual) || 0) / contenido : 0;
+    let costoBase = Number(row.costo_unitario_real) || 0;
+    if (costoBase <= 0) {
+      costoBase = Number(row.costo_promedio_actual) || 0;
+    }
+    const costoUnitario = contenido > 0 ? costoBase / contenido : costoBase;
     const costoInsumo = Number(row.cantidad) * costoUnitario;
     const acumulado = costosMap.get(productoId) || 0;
     costosMap.set(productoId, Number((acumulado + costoInsumo).toFixed(4)));
@@ -4742,18 +4747,34 @@ app.get('/api/productos', (req, res) => {
         params.push(tipoFiltro);
       }
 
-      db.all(sql, params, (err, rows) => {
-        if (err) {
-          console.error('Error al obtener productos:', err.message);
-          return res.status(500).json({ error: 'Error al obtener productos' });
-        }
+      const rows = await db.all(sql, params);
+      const productosBase = (rows || []).map((row) => ({
+        ...row,
+        precios: normalizarListaPrecios(row.precios),
+      }));
 
-        const productos = (rows || []).map((row) => ({
-          ...row,
-          precios: normalizarListaPrecios(row.precios),
-        }));
-        res.json(productos);
+      const productosRecetaIds = productosBase
+        .filter((row) => Number(row.stock_indefinido) === 1)
+        .map((row) => Number(row.id))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      const costosReceta = productosRecetaIds.length
+        ? await obtenerCostosRecetaPorProductos(productosRecetaIds, negocioId)
+        : new Map();
+
+      const productos = productosBase.map((row) => {
+        const costoReceta = costosReceta.get(Number(row.id));
+        if (costoReceta !== undefined) {
+          return {
+            ...row,
+            costo_unitario_real: Number(costoReceta.toFixed(4)),
+            costo_unitario_real_calculado: 1,
+          };
+        }
+        return row;
       });
+
+      res.json(productos);
     } catch (error) {
       console.error('Error al construir consulta de productos:', error?.message || error);
       res.status(500).json({ error: 'Error al obtener productos' });
@@ -7680,6 +7701,224 @@ app.put('/api/clientes/:id/estado', (req, res) => {
   });
 });
 
+const construirResumenDeudaProductos = (items = []) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return null;
+  }
+  const partes = items
+    .map((item) => {
+      const cantidad = Number(item?.cantidad) || 0;
+      if (!cantidad) return null;
+      const cantidadTexto = Number.isInteger(cantidad) ? cantidad : cantidad.toFixed(2);
+      const nombre = item?.nombre || item?.producto_nombre || item?.nombre_producto || '';
+      return nombre ? `${cantidadTexto}x ${nombre}` : null;
+    })
+    .filter(Boolean);
+  if (!partes.length) return null;
+  const resumen = partes.slice(0, 3).join(', ');
+  return partes.length > 3 ? `${resumen} y ${partes.length - 3} más` : resumen;
+};
+
+const calcularConsumoInsumosPorProductos = async (itemsPorProducto, negocioId) => {
+  const consumoPorInsumo = new Map();
+  const insumosMap = new Map();
+
+  const productoIds = Array.from(itemsPorProducto.keys()).filter((id) => Number.isFinite(id) && id > 0);
+  if (productoIds.length === 0) {
+    return { consumoPorInsumo, insumosMap };
+  }
+
+  const recetasMap = await obtenerRecetasPorProductos(productoIds, negocioId);
+  if (!recetasMap.size) {
+    return { consumoPorInsumo, insumosMap };
+  }
+
+  for (const [productoId, cantidadProducto] of itemsPorProducto.entries()) {
+    const receta = recetasMap.get(Number(productoId));
+    if (!Array.isArray(receta) || receta.length === 0) {
+      continue;
+    }
+    receta.forEach((detalle) => {
+      if (detalle.tipo_producto !== 'INSUMO') {
+        return;
+      }
+      const cantidadBase = Number((Number(cantidadProducto) * (Number(detalle.cantidad) || 0)).toFixed(4));
+      if (!cantidadBase) return;
+      const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
+      const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
+      if (!cantidadUnidades) return;
+      const acumulado = consumoPorInsumo.get(detalle.insumo_id) || 0;
+      consumoPorInsumo.set(detalle.insumo_id, Number((acumulado + cantidadUnidades).toFixed(4)));
+      if (!insumosMap.has(detalle.insumo_id)) {
+        insumosMap.set(detalle.insumo_id, detalle);
+      }
+    });
+  }
+
+  return { consumoPorInsumo, insumosMap };
+};
+
+const validarStockInsumos = (consumoPorInsumo, insumosMap, bloquearInsumosSinStock) => {
+  const advertencias = [];
+  for (const [insumoId, cantidadRequerida] of consumoPorInsumo.entries()) {
+    if (!cantidadRequerida) continue;
+    const insumo = insumosMap.get(insumoId);
+    if (!insumo || esStockIndefinido(insumo)) {
+      continue;
+    }
+    const stockDisponible = Number(insumo.stock) || 0;
+    if (cantidadRequerida > stockDisponible) {
+      const mensaje = `Stock insuficiente para insumo ${insumo.insumo_nombre || insumoId}.`;
+      if (bloquearInsumosSinStock) {
+        const error = new Error(mensaje);
+        error.status = 400;
+        throw error;
+      }
+      advertencias.push(mensaje);
+    }
+  }
+  return advertencias;
+};
+
+const prepararItemsDeuda = async (
+  itemsEntrada,
+  negocioId,
+  { validarStock = true, usaRecetas = false, bloquearInsumosSinStock = false } = {}
+) => {
+  const itemsLista = Array.isArray(itemsEntrada) ? itemsEntrada : [];
+  const ids = Array.from(
+    new Set(
+      itemsLista
+        .map((item) => Number(item?.producto_id ?? item?.productoId ?? item?.id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    )
+  );
+
+  if (!ids.length) {
+    const error = new Error('Selecciona productos válidos.');
+    error.status = 400;
+    throw error;
+  }
+
+  const placeholders = ids.map(() => '?').join(', ');
+  const productos = await db.all(
+    `SELECT id, nombre, precio, precios, stock, stock_indefinido, tipo_producto, insumo_vendible,
+            contenido_por_unidad, unidad_base
+       FROM productos
+      WHERE negocio_id = ? AND id IN (${placeholders})`,
+    [negocioId, ...ids]
+  );
+  const productosMap = new Map((productos || []).map((producto) => [Number(producto.id), producto]));
+
+  if (productosMap.size !== ids.length) {
+    const error = new Error('Hay productos inválidos en la deuda.');
+    error.status = 400;
+    throw error;
+  }
+
+  const itemsProcesados = [];
+
+  for (const item of itemsLista) {
+    const productoId = Number(item?.producto_id ?? item?.productoId ?? item?.id);
+    const cantidad = normalizarNumero(item?.cantidad, 0);
+    if (!Number.isFinite(productoId) || productoId <= 0) {
+      const error = new Error('Hay un producto inválido en la deuda.');
+      error.status = 400;
+      throw error;
+    }
+    if (!Number.isFinite(cantidad) || cantidad <= 0) {
+      const error = new Error('Todas las cantidades deben ser mayores a cero.');
+      error.status = 400;
+      throw error;
+    }
+
+    const producto = productosMap.get(productoId);
+    if (!producto) {
+      const error = new Error(`Producto ${productoId} no encontrado.`);
+      error.status = 404;
+      throw error;
+    }
+
+    const tipoProducto = normalizarTipoProducto(producto.tipo_producto, 'FINAL');
+    const esInsumo = tipoProducto === 'INSUMO';
+    const insumoVendible = normalizarFlag(producto.insumo_vendible, 0) === 1;
+    if (usaRecetas && esInsumo && !insumoVendible) {
+      const error = new Error(`El producto ${producto.nombre || productoId} es un insumo no vendible.`);
+      error.status = 400;
+      throw error;
+    }
+
+    const stockIndefinido = esStockIndefinido(producto);
+    if (validarStock && !stockIndefinido) {
+      const stockDisponible = Number(producto.stock) || 0;
+      if (cantidad > stockDisponible) {
+        const error = new Error(`Stock insuficiente para ${producto.nombre || `el producto ${productoId}`}.`);
+        error.status = 400;
+        throw error;
+      }
+    }
+
+    const opcionesPrecio = construirOpcionesPrecioProducto(producto);
+    let precioUnitario = opcionesPrecio.length ? opcionesPrecio[0].valor : normalizarNumero(producto.precio, 0);
+    const precioSolicitadoRaw = item?.precio_unitario ?? item?.precioUnitario ?? null;
+    if (precioSolicitadoRaw !== null && precioSolicitadoRaw !== undefined && precioSolicitadoRaw !== '') {
+      const precioSolicitado = normalizarNumero(precioSolicitadoRaw, null);
+      if (precioSolicitado === null || precioSolicitado < 0) {
+        const error = new Error(`Precio invalido para ${producto.nombre || productoId}.`);
+        error.status = 400;
+        throw error;
+      }
+      precioUnitario = Number(precioSolicitado.toFixed(2));
+    }
+
+    itemsProcesados.push({
+      producto_id: productoId,
+      nombre: producto.nombre,
+      cantidad,
+      precio_unitario: Number(precioUnitario) || 0,
+      stock_indefinido: stockIndefinido ? 1 : 0,
+      tipo_producto: tipoProducto,
+      insumo_vendible: insumoVendible ? 1 : 0,
+    });
+  }
+
+  const total = Number(
+    itemsProcesados.reduce((acc, item) => acc + item.cantidad * (Number(item.precio_unitario) || 0), 0).toFixed(2)
+  );
+
+  const itemsPorProducto = new Map();
+  itemsProcesados.forEach((item) => {
+    const acumulado = itemsPorProducto.get(item.producto_id) || 0;
+    itemsPorProducto.set(item.producto_id, Number((acumulado + item.cantidad).toFixed(4)));
+  });
+
+  let consumoPorInsumo = new Map();
+  let insumosMap = new Map();
+  let advertenciasInsumos = [];
+
+  if (usaRecetas && itemsPorProducto.size > 0) {
+    const resultadoConsumo = await calcularConsumoInsumosPorProductos(itemsPorProducto, negocioId);
+    consumoPorInsumo = resultadoConsumo.consumoPorInsumo;
+    insumosMap = resultadoConsumo.insumosMap;
+    if (validarStock) {
+      advertenciasInsumos = validarStockInsumos(
+        consumoPorInsumo,
+        insumosMap,
+        bloquearInsumosSinStock
+      );
+    }
+  }
+
+  return {
+    itemsProcesados,
+    itemsPorProducto,
+    total,
+    consumoPorInsumo,
+    insumosMap,
+    advertenciasInsumos,
+  };
+};
+
 // Deudas de clientes
 app.get('/api/clientes/:id/deudas', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
@@ -7756,6 +7995,44 @@ app.get('/api/clientes/:id/deudas', (req, res) => {
   });
 });
 
+app.get('/api/clientes/:id/deudas/:deudaId/detalle', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const clienteId = Number(req.params.id);
+    const deudaId = Number(req.params.deudaId);
+    if (!Number.isInteger(clienteId) || clienteId <= 0 || !Number.isInteger(deudaId) || deudaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'IDs inválidos' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const deuda = await db.get(
+        'SELECT id FROM clientes_deudas WHERE id = ? AND cliente_id = ? AND negocio_id = ? LIMIT 1',
+        [deudaId, clienteId, negocioId]
+      );
+      if (!deuda) {
+        return res.status(404).json({ ok: false, error: 'Deuda no encontrada' });
+      }
+
+      const items = await db.all(
+        `SELECT id, producto_id, nombre_producto, cantidad, precio_unitario, total_linea
+           FROM clientes_deudas_detalle
+          WHERE deuda_id = ? AND negocio_id = ?
+          ORDER BY id ASC`,
+        [deudaId, negocioId]
+      );
+
+      res.json({ ok: true, items: items || [] });
+    } catch (error) {
+      console.error('Error al obtener detalle de deuda:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el detalle de la deuda' });
+    }
+  });
+});
+
 app.post('/api/clientes/:id/deudas', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     if (!tienePermisoAdmin(usuarioSesion)) {
@@ -7768,15 +8045,12 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
-    const descripcion = normalizarCampoTexto(req.body?.descripcion, null);
+    const descripcionEntrada = normalizarCampoTexto(req.body?.descripcion, null);
     const notas = normalizarCampoTexto(req.body?.notas, null);
     const fechaEntrada = normalizarCampoTexto(req.body?.fecha, null);
     const fecha = esFechaISOValida(fechaEntrada) ? fechaEntrada : obtenerFechaLocalISO(new Date());
-    const monto = normalizarMonto(req.body?.monto ?? req.body?.monto_total ?? req.body?.total);
-
-    if (!monto || monto <= 0) {
-      return res.status(400).json({ ok: false, error: 'El monto de la deuda es obligatorio' });
-    }
+    const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
+    const usaItems = itemsEntrada.length > 0;
 
     try {
       const cliente = await db.get(
@@ -7787,26 +8061,120 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
         return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
       }
 
+      const modoInventario = await obtenerModoInventarioCostos(negocioId);
+      const usaRecetas = modoInventario === 'PREPARACION';
+      const bloquearInsumosSinStock = usaRecetas ? await obtenerConfigBloqueoInsumos(negocioId) : false;
+
+      let itemsProcesados = [];
+      let consumoPorInsumo = new Map();
+      let insumosMap = new Map();
+      let advertenciasInsumos = [];
+      let montoTotal = null;
+
+      if (usaItems) {
+        const resultado = await prepararItemsDeuda(itemsEntrada, negocioId, {
+          validarStock: true,
+          usaRecetas,
+          bloquearInsumosSinStock,
+        });
+        itemsProcesados = resultado.itemsProcesados;
+        consumoPorInsumo = resultado.consumoPorInsumo;
+        insumosMap = resultado.insumosMap;
+        advertenciasInsumos = resultado.advertenciasInsumos;
+        montoTotal = resultado.total;
+      } else {
+        montoTotal = normalizarMonto(req.body?.monto ?? req.body?.monto_total ?? req.body?.total);
+      }
+
+      if (!montoTotal || montoTotal <= 0) {
+        return res.status(400).json({ ok: false, error: 'El monto de la deuda es obligatorio' });
+      }
+
+      const descripcion =
+        descripcionEntrada || (usaItems ? construirResumenDeudaProductos(itemsProcesados) : null);
+
+      await db.run('BEGIN');
+
       const insert = await db.run(
         `INSERT INTO clientes_deudas (cliente_id, negocio_id, fecha, descripcion, monto_total, notas)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [clienteId, negocioId, fecha, descripcion, monto, notas]
+        [clienteId, negocioId, fecha, descripcion, montoTotal, notas]
       );
+
+      const deudaId = insert.lastID;
+
+      if (usaItems && deudaId) {
+        for (const item of itemsProcesados) {
+          const totalLinea = Number(
+            (Number(item.precio_unitario || 0) * Number(item.cantidad || 0)).toFixed(2)
+          );
+          await db.run(
+            `INSERT INTO clientes_deudas_detalle
+              (deuda_id, producto_id, nombre_producto, cantidad, precio_unitario, total_linea, negocio_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              deudaId,
+              item.producto_id,
+              item.nombre || null,
+              item.cantidad,
+              item.precio_unitario,
+              totalLinea,
+              negocioId,
+            ]
+          );
+
+          if (!item.stock_indefinido) {
+            const stockResult = await db.run(
+              'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+              [item.cantidad, item.producto_id, negocioId, item.cantidad]
+            );
+            if (stockResult.changes === 0) {
+              const error = new Error(`No se pudo actualizar el stock del producto ${item.producto_id}.`);
+              error.status = 400;
+              throw error;
+            }
+          }
+        }
+
+        if (usaRecetas && consumoPorInsumo.size > 0) {
+          for (const [insumoId, cantidadUnidades] of consumoPorInsumo.entries()) {
+            if (!cantidadUnidades) continue;
+            const insumo = insumosMap.get(insumoId);
+            if (!insumo || esStockIndefinido(insumo)) {
+              continue;
+            }
+            const stockResult = await db.run(
+              'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+              [cantidadUnidades, insumoId, negocioId, cantidadUnidades]
+            );
+            if (stockResult.changes === 0) {
+              const error = new Error(`No se pudo actualizar el stock del insumo ${insumoId}.`);
+              error.status = 400;
+              throw error;
+            }
+          }
+        }
+      }
+
+      await db.run('COMMIT');
 
       res.status(201).json({
         ok: true,
         deuda: {
-          id: insert.lastID,
+          id: deudaId,
           cliente_id: clienteId,
           fecha,
           descripcion,
-          monto_total: monto,
+          monto_total: montoTotal,
           notas,
         },
+        advertencias: advertenciasInsumos.length ? advertenciasInsumos : undefined,
       });
     } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      const status = error?.status || 500;
       console.error('Error al registrar deuda:', error?.message || error);
-      res.status(500).json({ ok: false, error: 'No se pudo registrar la deuda' });
+      res.status(status).json({ ok: false, error: error?.message || 'No se pudo registrar la deuda' });
     }
   });
 });
@@ -7824,17 +8192,171 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
-    const descripcion = normalizarCampoTexto(req.body?.descripcion, null);
+    const descripcionEntrada = normalizarCampoTexto(req.body?.descripcion, null);
     const notas = normalizarCampoTexto(req.body?.notas, null);
     const fechaEntrada = normalizarCampoTexto(req.body?.fecha, null);
     const fecha = esFechaISOValida(fechaEntrada) ? fechaEntrada : obtenerFechaLocalISO(new Date());
-    const monto = normalizarMonto(req.body?.monto ?? req.body?.monto_total ?? req.body?.total);
-
-    if (!monto || monto <= 0) {
-      return res.status(400).json({ ok: false, error: 'El monto de la deuda es obligatorio' });
-    }
+    const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
+    const usaItems = itemsEntrada.length > 0;
 
     try {
+      const deuda = await db.get(
+        'SELECT id FROM clientes_deudas WHERE id = ? AND cliente_id = ? AND negocio_id = ? LIMIT 1',
+        [deudaId, clienteId, negocioId]
+      );
+      if (!deuda) {
+        return res.status(404).json({ ok: false, error: 'Deuda no encontrada' });
+      }
+
+      let montoTotal = null;
+      let itemsProcesados = [];
+      let itemsPorProducto = new Map();
+      let consumoPorInsumoNuevo = new Map();
+      let insumosNuevoMap = new Map();
+      let advertenciasInsumos = [];
+      let usaRecetas = false;
+      let bloquearInsumosSinStock = false;
+
+      if (usaItems) {
+        const modoInventario = await obtenerModoInventarioCostos(negocioId);
+        usaRecetas = modoInventario === 'PREPARACION';
+        bloquearInsumosSinStock = usaRecetas ? await obtenerConfigBloqueoInsumos(negocioId) : false;
+
+        const resultado = await prepararItemsDeuda(itemsEntrada, negocioId, {
+          validarStock: false,
+          usaRecetas,
+          bloquearInsumosSinStock,
+        });
+        itemsProcesados = resultado.itemsProcesados;
+        itemsPorProducto = resultado.itemsPorProducto;
+        consumoPorInsumoNuevo = resultado.consumoPorInsumo;
+        insumosNuevoMap = resultado.insumosMap;
+        montoTotal = resultado.total;
+      } else {
+        montoTotal = normalizarMonto(req.body?.monto ?? req.body?.monto_total ?? req.body?.total);
+      }
+
+      if (!montoTotal || montoTotal <= 0) {
+        return res.status(400).json({ ok: false, error: 'El monto de la deuda es obligatorio' });
+      }
+
+      const descripcion =
+        descripcionEntrada || (usaItems ? construirResumenDeudaProductos(itemsProcesados) : null);
+
+      if (!usaItems) {
+        const detalleExistente = await db.get(
+          'SELECT COUNT(1) AS total FROM clientes_deudas_detalle WHERE deuda_id = ? AND negocio_id = ?',
+          [deudaId, negocioId]
+        );
+        if (Number(detalleExistente?.total) > 0) {
+          return res.status(400).json({
+            ok: false,
+            error: 'La deuda tiene productos registrados. Modifica el detalle para actualizar el monto.',
+          });
+        }
+
+        const result = await db.run(
+          `UPDATE clientes_deudas
+              SET fecha = ?,
+                  descripcion = ?,
+                  monto_total = ?,
+                  notas = ?,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND cliente_id = ? AND negocio_id = ?`,
+          [fecha, descripcion, montoTotal, notas, deudaId, clienteId, negocioId]
+        );
+
+        if (result.changes === 0) {
+          return res.status(404).json({ ok: false, error: 'Deuda no encontrada' });
+        }
+
+        return res.json({ ok: true });
+      }
+
+      const prevRows = await db.all(
+        'SELECT producto_id, cantidad FROM clientes_deudas_detalle WHERE deuda_id = ? AND negocio_id = ?',
+        [deudaId, negocioId]
+      );
+      const prevItemsPorProducto = new Map();
+      (prevRows || []).forEach((row) => {
+        const productoId = Number(row.producto_id);
+        if (!Number.isFinite(productoId) || productoId <= 0) return;
+        const cantidad = normalizarNumero(row.cantidad, 0);
+        const acumulado = prevItemsPorProducto.get(productoId) || 0;
+        prevItemsPorProducto.set(productoId, Number((acumulado + cantidad).toFixed(4)));
+      });
+
+      const idsUnion = Array.from(
+        new Set([...prevItemsPorProducto.keys(), ...itemsPorProducto.keys()])
+      );
+      if (idsUnion.length === 0) {
+        return res.status(400).json({ ok: false, error: 'Selecciona productos válidos.' });
+      }
+
+      const placeholders = idsUnion.map(() => '?').join(', ');
+      const productosUnion = await db.all(
+        `SELECT id, nombre, stock, stock_indefinido
+           FROM productos
+          WHERE negocio_id = ? AND id IN (${placeholders})`,
+        [negocioId, ...idsUnion]
+      );
+      const productosUnionMap = new Map(
+        (productosUnion || []).map((producto) => [Number(producto.id), producto])
+      );
+
+      if (productosUnionMap.size !== idsUnion.length) {
+        return res.status(400).json({ ok: false, error: 'Hay productos inválidos en la deuda.' });
+      }
+
+      const consumoAnteriorResultado = usaRecetas
+        ? await calcularConsumoInsumosPorProductos(prevItemsPorProducto, negocioId)
+        : { consumoPorInsumo: new Map(), insumosMap: new Map() };
+      const consumoPorInsumoPrevio = consumoAnteriorResultado.consumoPorInsumo;
+      const insumosPrevMap = consumoAnteriorResultado.insumosMap;
+
+      const insumosUnionMap = new Map([...insumosPrevMap.entries(), ...insumosNuevoMap.entries()]);
+      const insumoIdsUnion = Array.from(
+        new Set([...consumoPorInsumoPrevio.keys(), ...consumoPorInsumoNuevo.keys()])
+      );
+
+      for (const productoId of idsUnion) {
+        const producto = productosUnionMap.get(productoId);
+        if (!producto) continue;
+        if (esStockIndefinido(producto)) continue;
+        const cantidadPrev = prevItemsPorProducto.get(productoId) || 0;
+        const cantidadNueva = itemsPorProducto.get(productoId) || 0;
+        const delta = Number((cantidadNueva - cantidadPrev).toFixed(4));
+        if (delta <= 0) continue;
+        const stockDisponible = Number(producto.stock) || 0;
+        if (delta > stockDisponible) {
+          return res.status(400).json({
+            ok: false,
+            error: `Stock insuficiente para ${producto.nombre || `el producto ${productoId}`}.`,
+          });
+        }
+      }
+
+      if (usaRecetas && insumoIdsUnion.length > 0) {
+        for (const insumoId of insumoIdsUnion) {
+          const nuevo = consumoPorInsumoNuevo.get(insumoId) || 0;
+          const previo = consumoPorInsumoPrevio.get(insumoId) || 0;
+          const delta = Number((nuevo - previo).toFixed(4));
+          if (delta <= 0) continue;
+          const insumo = insumosUnionMap.get(insumoId);
+          if (!insumo || esStockIndefinido(insumo)) continue;
+          const stockDisponible = Number(insumo.stock) || 0;
+          if (delta > stockDisponible) {
+            const mensaje = `Stock insuficiente para insumo ${insumo.insumo_nombre || insumoId}.`;
+            if (bloquearInsumosSinStock) {
+              return res.status(400).json({ ok: false, error: mensaje });
+            }
+            advertenciasInsumos.push(mensaje);
+          }
+        }
+      }
+
+      await db.run('BEGIN');
+
       const result = await db.run(
         `UPDATE clientes_deudas
             SET fecha = ?,
@@ -7843,17 +8365,99 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
                 notas = ?,
                 updated_at = CURRENT_TIMESTAMP
           WHERE id = ? AND cliente_id = ? AND negocio_id = ?`,
-        [fecha, descripcion, monto, notas, deudaId, clienteId, negocioId]
+        [fecha, descripcion, montoTotal, notas, deudaId, clienteId, negocioId]
       );
 
       if (result.changes === 0) {
+        await db.run('ROLLBACK');
         return res.status(404).json({ ok: false, error: 'Deuda no encontrada' });
       }
 
-      res.json({ ok: true });
+      await db.run('DELETE FROM clientes_deudas_detalle WHERE deuda_id = ? AND negocio_id = ?', [
+        deudaId,
+        negocioId,
+      ]);
+
+      for (const item of itemsProcesados) {
+        const totalLinea = Number(
+          (Number(item.precio_unitario || 0) * Number(item.cantidad || 0)).toFixed(2)
+        );
+        await db.run(
+          `INSERT INTO clientes_deudas_detalle
+            (deuda_id, producto_id, nombre_producto, cantidad, precio_unitario, total_linea, negocio_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            deudaId,
+            item.producto_id,
+            item.nombre || null,
+            item.cantidad,
+            item.precio_unitario,
+            totalLinea,
+            negocioId,
+          ]
+        );
+      }
+
+      for (const productoId of idsUnion) {
+        const producto = productosUnionMap.get(productoId);
+        if (!producto || esStockIndefinido(producto)) continue;
+        const cantidadPrev = prevItemsPorProducto.get(productoId) || 0;
+        const cantidadNueva = itemsPorProducto.get(productoId) || 0;
+        const delta = Number((cantidadNueva - cantidadPrev).toFixed(4));
+        if (!delta) continue;
+        if (delta > 0) {
+          const stockResult = await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+            [delta, productoId, negocioId, delta]
+          );
+          if (stockResult.changes === 0) {
+            const error = new Error(`No se pudo actualizar el stock del producto ${productoId}.`);
+            error.status = 400;
+            throw error;
+          }
+        } else {
+          await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?',
+            [Math.abs(delta), productoId, negocioId]
+          );
+        }
+      }
+
+      if (usaRecetas && insumoIdsUnion.length > 0) {
+        for (const insumoId of insumoIdsUnion) {
+          const nuevo = consumoPorInsumoNuevo.get(insumoId) || 0;
+          const previo = consumoPorInsumoPrevio.get(insumoId) || 0;
+          const delta = Number((nuevo - previo).toFixed(4));
+          if (!delta) continue;
+          const insumo = insumosUnionMap.get(insumoId);
+          if (!insumo || esStockIndefinido(insumo)) continue;
+          if (delta > 0) {
+            const stockResult = await db.run(
+              'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+              [delta, insumoId, negocioId, delta]
+            );
+            if (stockResult.changes === 0) {
+              const error = new Error(`No se pudo actualizar el stock del insumo ${insumoId}.`);
+              error.status = 400;
+              throw error;
+            }
+          } else {
+            await db.run(
+              'UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?',
+              [Math.abs(delta), insumoId, negocioId]
+            );
+          }
+        }
+      }
+
+      await db.run('COMMIT');
+
+      res.json({ ok: true, advertencias: advertenciasInsumos.length ? advertenciasInsumos : undefined });
     } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
       console.error('Error al actualizar deuda:', error?.message || error);
-      res.status(500).json({ ok: false, error: 'No se pudo actualizar la deuda' });
+      const status = error?.status || 500;
+      res.status(status).json({ ok: false, error: error?.message || 'No se pudo actualizar la deuda' });
     }
   });
 });
@@ -10628,6 +11232,43 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
       const utilidadBruta = Number((ventasTotal - cogsTotal).toFixed(2));
       const utilidadNetaReal = Number((utilidadBruta - gastosOperativosTotal).toFixed(2));
 
+      const inventarioStockResumen = await db.get(
+        `
+          SELECT
+            SUM(
+              CASE
+                WHEN COALESCE(stock_indefinido, 0) = 0
+                  AND COALESCE(costo_unitario_real, 0) > 0
+                THEN COALESCE(stock, 0) * COALESCE(costo_unitario_real, 0)
+                ELSE 0
+              END
+            ) AS total,
+            SUM(
+              CASE
+                WHEN COALESCE(stock_indefinido, 0) = 0
+                  AND COALESCE(costo_unitario_real, 0) > 0
+                THEN 1
+                ELSE 0
+              END
+            ) AS cantidad
+          FROM productos
+          WHERE negocio_id = ?
+        `,
+        [negocioId]
+      );
+
+      const inventarioStockTotal = Number(inventarioStockResumen?.total) || 0;
+      const inventarioStockCount = Number(inventarioStockResumen?.cantidad) || 0;
+      const inventarioFinalEstimado = Number(
+        (inventarioStockCount > 0
+          ? inventarioStockTotal
+          : capitalInicial.inventario_inicial + gastosInventarioTotal - cogsTotal).toFixed(2)
+      );
+      const inventarioInicialEstimado =
+        inventarioStockCount > 0
+          ? Number((inventarioFinalEstimado - gastosInventarioTotal + cogsTotal).toFixed(2))
+          : capitalInicial.inventario_inicial;
+
       const entradasCaja =
         (Number(metodosPago?.efectivo) || 0) +
         (Number(metodosPago?.tarjeta) || 0) +
@@ -10635,15 +11276,15 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
       const salidasCaja = Number((gastosOperativosTotal + gastosInventarioTotal + gastosRetirosTotal).toFixed(2));
       const variacionCaja = Number((entradasCaja - salidasCaja).toFixed(2));
       const cajaFinal = Number((capitalInicial.caja_inicial + variacionCaja).toFixed(2));
-      const inventarioFinal = Number(
-        (capitalInicial.inventario_inicial + gastosInventarioTotal - cogsTotal).toFixed(2)
-      );
 
       const alertas = [];
       if (!capitalInicial?.encontrado) {
         alertas.push({
           nivel: 'warning',
-          mensaje: 'Configura capital inicial para obtener un inventario y caja final mas precisos.',
+          mensaje:
+            inventarioStockCount > 0
+              ? 'Configura capital inicial para obtener una caja final mas precisa.'
+              : 'Configura capital inicial para obtener un inventario y caja final mas precisos.',
         });
       }
       if (gastosPeriodoTotal > 0 && gastosOperativosTotal === 0) {
@@ -10692,10 +11333,11 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
           },
         },
         inventario: {
-          inicial: capitalInicial.inventario_inicial,
+          inicial: inventarioInicialEstimado,
           compras: gastosInventarioTotal,
           cogs: cogsTotal,
-          final: inventarioFinal,
+          final: inventarioFinalEstimado,
+          calculado_por_stock: inventarioStockCount > 0,
         },
         ventas_total: ventasTotal,
         cogs_total: cogsTotal,

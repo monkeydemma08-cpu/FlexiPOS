@@ -33,6 +33,10 @@
   const inputDeudaNotas = document.getElementById('deuda-notas');
   const btnDeudaNueva = document.getElementById('deuda-nueva');
   const mensajeDeuda = document.getElementById('deuda-mensaje');
+  const selectDeudaProducto = document.getElementById('deuda-producto-select');
+  const inputDeudaCantidad = document.getElementById('deuda-producto-cantidad');
+  const btnDeudaProductoAgregar = document.getElementById('deuda-producto-agregar');
+  const tablaDeudaProductos = document.getElementById('deuda-productos-tabla');
 
   const abonoForm = document.getElementById('deuda-abono-form');
   const inputAbonoFecha = document.getElementById('abono-fecha');
@@ -48,6 +52,9 @@
   let deudas = [];
   let deudaActual = null;
   let abonos = [];
+  let productos = [];
+  let productosMap = new Map();
+  let deudaItems = [];
 
   const setMessage = (element, text, type = 'info') => {
     if (!element) return;
@@ -95,6 +102,186 @@
     const fecha = new Date(value);
     if (Number.isNaN(fecha.getTime())) return value;
     return fecha.toLocaleDateString('es-DO');
+  };
+
+  const construirOpcionesProductos = () =>
+    ['<option value="">Selecciona producto</option>']
+      .concat(productos.map((p) => `<option value="${p.id}">${p.nombre}</option>`))
+      .join('');
+
+  const refrescarSelectDeudaProductos = () => {
+    if (!selectDeudaProducto) return;
+    selectDeudaProducto.innerHTML = construirOpcionesProductos();
+  };
+
+  const cargarProductos = async () => {
+    try {
+      const resp = await fetchAutorizado('/api/productos');
+      if (!resp.ok) throw new Error('No se pudieron cargar los productos');
+      productos = ((await resp.json()) || []).filter((p) => Number(p?.activo ?? 1) !== 0);
+      productosMap = new Map(productos.map((p) => [Number(p.id), p]));
+      refrescarSelectDeudaProductos();
+    } catch (error) {
+      console.error('Error al cargar productos:', error);
+      productos = [];
+      productosMap = new Map();
+      refrescarSelectDeudaProductos();
+    }
+  };
+
+  const calcularTotalDeudaItems = (items = deudaItems) =>
+    items.reduce((acc, item) => {
+      const cantidad = Number(item.cantidad) || 0;
+      const precio = Number(item.precio_unitario) || 0;
+      return acc + precio * cantidad;
+    }, 0);
+
+  const obtenerResumenDeudaItems = (items = deudaItems) => {
+    if (!items.length) return null;
+    const partes = items
+      .map((item) => {
+        const cantidad = Number(item.cantidad) || 0;
+        if (!cantidad) return null;
+        const cantidadTexto = Number.isInteger(cantidad) ? cantidad : cantidad.toFixed(2);
+        return `${cantidadTexto}x ${item.nombre}`;
+      })
+      .filter(Boolean);
+    if (!partes.length) return null;
+    const resumen = partes.slice(0, 3).join(', ');
+    return partes.length > 3 ? `${resumen} y ${partes.length - 3} más` : resumen;
+  };
+
+  const actualizarMontoDeuda = () => {
+    if (!inputDeudaMonto) return;
+    if (deudaItems.length) {
+      const total = Number(calcularTotalDeudaItems().toFixed(2));
+      setMoneyInputValue(inputDeudaMonto, total);
+      inputDeudaMonto.readOnly = true;
+      inputDeudaMonto.dataset.auto = '1';
+      return;
+    }
+    if (inputDeudaMonto.dataset.auto === '1') {
+      setMoneyInputValue(inputDeudaMonto, '');
+      inputDeudaMonto.dataset.auto = '';
+    }
+    inputDeudaMonto.readOnly = false;
+  };
+
+  const renderDeudaItems = () => {
+    if (!tablaDeudaProductos) return;
+    tablaDeudaProductos.innerHTML = '';
+
+    if (!deudaItems.length) {
+      const fila = document.createElement('tr');
+      const celda = document.createElement('td');
+      celda.colSpan = 5;
+      celda.className = 'tabla-vacia';
+      celda.textContent = 'No hay productos agregados.';
+      fila.appendChild(celda);
+      tablaDeudaProductos.appendChild(fila);
+      actualizarMontoDeuda();
+      return;
+    }
+
+    deudaItems.forEach((item) => {
+      const fila = document.createElement('tr');
+      const totalLinea = (Number(item.precio_unitario) || 0) * (Number(item.cantidad) || 0);
+      fila.innerHTML = `
+        <td>${item.nombre || '--'}</td>
+        <td class="text-right">
+          <input
+            type="number"
+            min="0.01"
+            step="0.01"
+            class="deuda-item-cantidad"
+            data-deuda-item="${item.producto_id}"
+            value="${item.cantidad}"
+          />
+        </td>
+        <td class="text-right">${formatCurrency(item.precio_unitario)}</td>
+        <td class="text-right">${formatCurrency(totalLinea)}</td>
+        <td>
+          <button type="button" class="kanm-button ghost" data-deuda-item-remove="${item.producto_id}">
+            Quitar
+          </button>
+        </td>
+      `;
+      tablaDeudaProductos.appendChild(fila);
+    });
+
+    actualizarMontoDeuda();
+  };
+
+  const limpiarDeudaItems = () => {
+    deudaItems = [];
+    renderDeudaItems();
+  };
+
+  const cargarDetalleDeuda = async (deudaId) => {
+    if (!clienteActual?.id || !deudaId) {
+      limpiarDeudaItems();
+      return;
+    }
+
+    try {
+      const resp = await fetchAutorizado(
+        `/api/clientes/${clienteActual.id}/deudas/${deudaId}/detalle`
+      );
+      const data = await resp.json();
+      if (!resp.ok || data?.error) {
+        throw new Error(data?.error || 'No se pudo cargar el detalle de la deuda');
+      }
+      const items = Array.isArray(data.items) ? data.items : [];
+      deudaItems = items.map((item) => ({
+        producto_id: Number(item.producto_id),
+        nombre: item.nombre || item.producto_nombre || '--',
+        cantidad: Number(item.cantidad) || 0,
+        precio_unitario: Number(item.precio_unitario) || 0,
+      }));
+      renderDeudaItems();
+    } catch (error) {
+      console.error('Error al cargar detalle de deuda:', error);
+      limpiarDeudaItems();
+    }
+  };
+
+  const agregarProductoDeuda = () => {
+    if (!selectDeudaProducto) return;
+    const productoId = Number(selectDeudaProducto.value);
+    const cantidad = Number(inputDeudaCantidad?.value);
+
+    if (!Number.isFinite(productoId) || productoId <= 0) {
+      setMessage(mensajeDeuda, 'Selecciona un producto válido.', 'error');
+      return;
+    }
+
+    if (!Number.isFinite(cantidad) || cantidad <= 0) {
+      setMessage(mensajeDeuda, 'Ingresa una cantidad válida.', 'error');
+      return;
+    }
+
+    const producto = productosMap.get(productoId);
+    if (!producto) {
+      setMessage(mensajeDeuda, 'Producto no encontrado.', 'error');
+      return;
+    }
+
+    const existente = deudaItems.find((item) => item.producto_id === productoId);
+    if (existente) {
+      existente.cantidad = Number((Number(existente.cantidad) + cantidad).toFixed(2));
+    } else {
+      deudaItems.push({
+        producto_id: productoId,
+        nombre: producto.nombre || '--',
+        cantidad,
+        precio_unitario: Number(producto.precio) || 0,
+      });
+    }
+
+    renderDeudaItems();
+    setMessage(mensajeDeuda, '');
+    if (inputDeudaCantidad) inputDeudaCantidad.value = '1';
+    selectDeudaProducto.value = '';
   };
 
   const obtenerTotalesDeuda = (deuda) => {
@@ -164,7 +351,14 @@
     if (inputDeudaDescripcion) inputDeudaDescripcion.value = '';
     if (inputDeudaNotas) inputDeudaNotas.value = '';
     if (inputDeudaFecha && !mantenerFecha) inputDeudaFecha.value = getLocalDateISO();
-    if (inputDeudaMonto) setMoneyInputValue(inputDeudaMonto, '');
+    if (selectDeudaProducto) selectDeudaProducto.value = '';
+    if (inputDeudaCantidad) inputDeudaCantidad.value = '1';
+    limpiarDeudaItems();
+    if (inputDeudaMonto) {
+      setMoneyInputValue(inputDeudaMonto, '');
+      inputDeudaMonto.dataset.auto = '';
+      inputDeudaMonto.readOnly = false;
+    }
     setMessage(mensajeDeuda, '');
   };
 
@@ -488,7 +682,9 @@
     }
     if (inputDeudaMonto) {
       setMoneyInputValue(inputDeudaMonto, deuda.monto_total ?? deuda.monto ?? 0);
+      inputDeudaMonto.dataset.auto = '';
     }
+    cargarDetalleDeuda(deuda.id);
     setMessage(mensajeDeuda, '');
   };
 
@@ -498,17 +694,39 @@
       return;
     }
 
-    const monto = parseMoneyValue(inputDeudaMonto, { allowEmpty: false });
+    const tieneItems = deudaItems.length > 0;
+    if (tieneItems) {
+      const invalido = deudaItems.find(
+        (item) => !Number.isFinite(Number(item.cantidad)) || Number(item.cantidad) <= 0
+      );
+      if (invalido) {
+        setMessage(mensajeDeuda, 'Todas las cantidades deben ser mayores a cero.', 'error');
+        return;
+      }
+    }
+
+    const monto = tieneItems
+      ? Number(calcularTotalDeudaItems().toFixed(2))
+      : parseMoneyValue(inputDeudaMonto, { allowEmpty: false });
     if (!Number.isFinite(monto) || monto <= 0) {
       setMessage(mensajeDeuda, 'Ingresa un monto válido.', 'error');
       return;
     }
 
+    const descripcionManual = inputDeudaDescripcion?.value?.trim() || null;
+    const descripcionFinal = descripcionManual || (tieneItems ? obtenerResumenDeudaItems() : null);
     const payload = {
-      descripcion: inputDeudaDescripcion?.value?.trim() || null,
+      descripcion: descripcionFinal,
       fecha: inputDeudaFecha?.value || null,
       monto,
       notas: inputDeudaNotas?.value?.trim() || null,
+      items: tieneItems
+        ? deudaItems.map((item) => ({
+            producto_id: item.producto_id,
+            cantidad: Number(item.cantidad),
+            precio_unitario: Number(item.precio_unitario),
+          }))
+        : undefined,
     };
 
     const deudaId = inputDeudaId?.value ? Number(inputDeudaId.value) : null;
@@ -647,6 +865,41 @@
     }
   });
 
+  btnDeudaProductoAgregar?.addEventListener('click', (e) => {
+    e.preventDefault();
+    agregarProductoDeuda();
+  });
+
+  inputDeudaCantidad?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      agregarProductoDeuda();
+    }
+  });
+
+  tablaDeudaProductos?.addEventListener('click', (event) => {
+    const btnRemove = event.target.closest('[data-deuda-item-remove]');
+    if (!btnRemove) return;
+    const productoId = Number(btnRemove.dataset.deudaItemRemove);
+    deudaItems = deudaItems.filter((item) => item.producto_id !== productoId);
+    renderDeudaItems();
+  });
+
+  tablaDeudaProductos?.addEventListener('change', (event) => {
+    const inputCantidad = event.target.closest('[data-deuda-item]');
+    if (!inputCantidad) return;
+    const productoId = Number(inputCantidad.dataset.deudaItem);
+    const cantidad = Number(inputCantidad.value);
+    const item = deudaItems.find((dato) => dato.producto_id === productoId);
+    if (!item) return;
+    if (!Number.isFinite(cantidad) || cantidad <= 0) {
+      deudaItems = deudaItems.filter((dato) => dato.producto_id !== productoId);
+    } else {
+      item.cantidad = cantidad;
+    }
+    renderDeudaItems();
+  });
+
   btnBuscar?.addEventListener('click', (e) => {
     e.preventDefault();
     cargarClientes();
@@ -687,4 +940,5 @@
 
   resetDeudasUI();
   cargarClientes();
+  cargarProductos();
 })();
