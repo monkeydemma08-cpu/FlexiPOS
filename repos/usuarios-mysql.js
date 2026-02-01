@@ -1,9 +1,9 @@
 const { query } = require('../db-mysql');
 
 const authColumns =
-  'id, nombre, usuario, password, rol, activo, negocio_id, es_super_admin, force_password_change, password_reset_at';
+  'id, nombre, usuario, password, rol, activo, negocio_id, empresa_id, es_super_admin, force_password_change, password_reset_at';
 const publicColumns =
-  'id, nombre, usuario, rol, activo, negocio_id, es_super_admin, force_password_change, password_reset_at';
+  'id, nombre, usuario, rol, activo, negocio_id, empresa_id, es_super_admin, force_password_change, password_reset_at';
 
 async function findByUsuario(usuario) {
   try {
@@ -68,14 +68,15 @@ async function create(usuarioData) {
       rol,
       activo = 1,
       negocio_id = 1,
+      empresa_id = null,
       es_super_admin = 0,
       force_password_change = 0,
       password_reset_at = null,
     } = usuarioData;
     const result = await query(
       `INSERT INTO usuarios (
-        nombre, usuario, password, rol, activo, negocio_id, es_super_admin, force_password_change, password_reset_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        nombre, usuario, password, rol, activo, negocio_id, empresa_id, es_super_admin, force_password_change, password_reset_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         nombre,
         usuario,
@@ -83,6 +84,7 @@ async function create(usuarioData) {
         rol,
         activo ? 1 : 0,
         negocio_id || 1,
+        empresa_id,
         es_super_admin ? 1 : 0,
         force_password_change ? 1 : 0,
         password_reset_at,
@@ -124,6 +126,10 @@ async function update(id, usuarioData) {
     if (usuarioData.negocio_id !== undefined) {
       fields.push('negocio_id = ?');
       params.push(usuarioData.negocio_id || 1);
+    }
+    if (usuarioData.empresa_id !== undefined) {
+      fields.push('empresa_id = ?');
+      params.push(usuarioData.empresa_id || null);
     }
     if (usuarioData.es_super_admin !== undefined) {
       fields.push('es_super_admin = ?');

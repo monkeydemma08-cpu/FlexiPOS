@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Empresa</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body data-role="empresa,admin">
+    <header class="kanm-header">
+      <div class="kanm-header-left">
+        <div class="kanm-header-logo-container">
+          <img id="kanm-header-logo" alt="" />
+          <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
+        </div>
+        <div class="kanm-header-texts">
+          <div id="kanm-header-negocio-nombre-principal" class="kanm-header-title" data-negocio-titulo></div>
+          <div id="kanm-header-negocio-subtitulo" class="kanm-header-subtitle">Panel de empresa</div>
+        </div>
+      </div>
+
+      <div class="kanm-header-right">
+        <div class="kanm-header-actions">
+          <span class="tag-rol">Empresa</span>
+          <a class="kanm-button ghost chat-link" href="/chat.html">
+            Chat interno
+            <span id="chat-unread-badge" class="chat-unread-badge"></span>
+          </a>
+          <button type="button" class="kanm-button ghost" onclick="logout()">Cerrar sesion</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="empresa-container">
+      <section class="kanm-card empresa-resumen">
+        <header class="kanm-card-header">
+          <h2>Resumen general</h2>
+          <p class="kanm-subtitle">Totales de todas las sucursales en el periodo seleccionado.</p>
+        </header>
+        <div class="empresa-resumen-grid">
+          <div class="empresa-kpi">
+            <span class="empresa-kpi-label">Ventas</span>
+            <strong id="empresa-kpi-ventas">RD$0.00</strong>
+            <span class="empresa-kpi-sub" id="empresa-kpi-ventas-count">0 ventas</span>
+          </div>
+          <div class="empresa-kpi">
+            <span class="empresa-kpi-label">Gastos</span>
+            <strong id="empresa-kpi-gastos">RD$0.00</strong>
+            <span class="empresa-kpi-sub">Total gastos</span>
+          </div>
+          <div class="empresa-kpi">
+            <span class="empresa-kpi-label">Ganancia neta</span>
+            <strong id="empresa-kpi-ganancia">RD$0.00</strong>
+            <span class="empresa-kpi-sub">Ventas - Gastos</span>
+          </div>
+          <div class="empresa-kpi">
+            <span class="empresa-kpi-label">Ticket promedio</span>
+            <strong id="empresa-kpi-ticket">RD$0.00</strong>
+            <span class="empresa-kpi-sub">Promedio por venta</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="kanm-card empresa-sucursales">
+        <header class="kanm-card-header">
+          <h2>Analisis por sucursal</h2>
+          <p class="kanm-subtitle">Selecciona el rango de fechas para comparar sucursales.</p>
+        </header>
+        <div class="empresa-filtros">
+          <div class="kanm-input-group">
+            <label for="empresa-desde">Desde</label>
+            <input type="date" id="empresa-desde" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="empresa-hasta">Hasta</label>
+            <input type="date" id="empresa-hasta" />
+          </div>
+          <button type="button" class="kanm-button" id="empresa-actualizar">Actualizar</button>
+          <span id="empresa-mensaje" class="kanm-subtitle"></span>
+        </div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Sucursal</th>
+                <th>Ventas</th>
+                <th>Gastos</th>
+                <th>Ganancia</th>
+                <th>Ticket</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="empresa-sucursales-body">
+              <tr>
+                <td colspan="6">Cargando...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <div class="kanm-modal-overlay" id="empresa-supervisor-modal" hidden>
+      <div class="kanm-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-supervisor-titulo">
+        <h3 id="empresa-supervisor-titulo">Crear supervisor</h3>
+        <p class="kanm-subtitle" id="empresa-supervisor-subtitulo">Sucursal: --</p>
+        <div class="kanm-input-group">
+          <label for="empresa-supervisor-nombre">Nombre</label>
+          <input type="text" id="empresa-supervisor-nombre" placeholder="Nombre del supervisor" />
+        </div>
+        <div class="kanm-input-group">
+          <label for="empresa-supervisor-usuario">Usuario</label>
+          <input type="text" id="empresa-supervisor-usuario" placeholder="usuario.supervisor" />
+        </div>
+        <div class="kanm-input-group">
+          <label for="empresa-supervisor-password">Contraseña</label>
+          <input type="password" id="empresa-supervisor-password" placeholder="Contraseña" autocomplete="new-password" />
+        </div>
+        <div class="kanm-modal-actions">
+          <button type="button" class="kanm-button ghost" id="empresa-supervisor-cancelar">Cancelar</button>
+          <button type="button" class="kanm-button primary" id="empresa-supervisor-guardar">Crear supervisor</button>
+        </div>
+        <div id="empresa-supervisor-mensaje" class="kanm-message"></div>
+      </div>
+    </div>
+
+    <script src="/js/auth.js"></script>
+    <script src="/js/empresa.js"></script>
+  </body>
+</html>

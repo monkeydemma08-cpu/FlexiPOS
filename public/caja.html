@@ -76,6 +76,10 @@
               <div class="kanm-message" id="caja-mensaje"></div>
 
               <div class="caja-detalle-info" id="caja-detalle-info"></div>
+              <div class="caja-detalle-acciones" id="caja-cuenta-acciones">
+                <button type="button" class="kanm-button ghost" id="caja-separar">Separar cuenta</button>
+                <button type="button" class="kanm-button ghost" id="caja-juntar">Juntar cuentas</button>
+              </div>
               <div class="caja-items" id="caja-detalle-items"></div>
 
               <div class="kanm-form-grid">
@@ -415,6 +419,54 @@
         </div>
       </section>
     </main>
+
+    <div class="kanm-modal-overlay" id="caja-split-modal" hidden>
+      <div class="kanm-modal kanm-modal--wide caja-split-modal" role="dialog" aria-modal="true" aria-labelledby="caja-split-title">
+        <div class="caja-split-header">
+          <div>
+            <h3 id="caja-split-title">Separar cuenta</h3>
+            <p class="kanm-subtitle" id="caja-split-subtitle"></p>
+          </div>
+          <button type="button" class="kanm-button ghost" id="caja-split-cerrar">Cerrar</button>
+        </div>
+        <div class="caja-split-grid">
+          <div class="caja-split-col">
+            <h4>Cuenta actual</h4>
+            <div class="caja-split-items" id="caja-split-origen"></div>
+            <div class="caja-split-totales" id="caja-split-totales-origen"></div>
+          </div>
+          <div class="caja-split-col">
+            <h4>Cuenta nueva</h4>
+            <div class="caja-split-items" id="caja-split-destino"></div>
+            <div class="caja-split-totales" id="caja-split-totales-destino"></div>
+          </div>
+        </div>
+        <div class="kanm-message" id="caja-split-mensaje"></div>
+        <div class="kanm-modal-actions kanm-modal-actions--between">
+          <button type="button" class="kanm-button ghost" id="caja-split-limpiar">Limpiar selección</button>
+          <button type="button" class="kanm-button secondary" id="caja-split-confirmar">Separar cuenta</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="caja-merge-modal" hidden>
+      <div class="kanm-modal kanm-modal--wide caja-merge-modal" role="dialog" aria-modal="true" aria-labelledby="caja-merge-title">
+        <div class="caja-split-header">
+          <div>
+            <h3 id="caja-merge-title">Juntar cuentas</h3>
+            <p class="kanm-subtitle" id="caja-merge-subtitle"></p>
+          </div>
+          <button type="button" class="kanm-button ghost" id="caja-merge-cerrar">Cerrar</button>
+        </div>
+        <div class="caja-merge-lista" id="caja-merge-lista"></div>
+        <div class="caja-merge-totales" id="caja-merge-resumen"></div>
+        <div class="kanm-message" id="caja-merge-mensaje"></div>
+        <div class="kanm-modal-actions">
+          <button type="button" class="kanm-button secondary" id="caja-merge-confirmar">Juntar cuentas</button>
+        </div>
+      </div>
+    </div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script src="/js/notifications.js" defer></script>
   </body>

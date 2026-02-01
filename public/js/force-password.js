@@ -11,6 +11,8 @@
     caja: '/caja.html',
     vendedor: '/mostrador.html',
     admin: '/admin.html',
+    supervisor: '/admin.html',
+    empresa: '/empresa.html',
   };
 
   const showError = (message) => {

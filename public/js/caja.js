@@ -50,6 +50,25 @@ const facturaInfo = document.getElementById('caja-factura-info');
 
 const botonImprimir = document.getElementById('caja-imprimir');
 
+const botonSepararCuenta = document.getElementById('caja-separar');
+const botonJuntarCuentas = document.getElementById('caja-juntar');
+const splitModal = document.getElementById('caja-split-modal');
+const splitModalCerrar = document.getElementById('caja-split-cerrar');
+const splitModalConfirmar = document.getElementById('caja-split-confirmar');
+const splitModalLimpiar = document.getElementById('caja-split-limpiar');
+const splitModalOrigen = document.getElementById('caja-split-origen');
+const splitModalDestino = document.getElementById('caja-split-destino');
+const splitModalTotalesOrigen = document.getElementById('caja-split-totales-origen');
+const splitModalTotalesDestino = document.getElementById('caja-split-totales-destino');
+const splitModalMensaje = document.getElementById('caja-split-mensaje');
+const splitModalSubtitle = document.getElementById('caja-split-subtitle');
+const mergeModal = document.getElementById('caja-merge-modal');
+const mergeModalCerrar = document.getElementById('caja-merge-cerrar');
+const mergeModalConfirmar = document.getElementById('caja-merge-confirmar');
+const mergeModalLista = document.getElementById('caja-merge-lista');
+const mergeModalMensaje = document.getElementById('caja-merge-mensaje');
+const mergeModalResumen = document.getElementById('caja-merge-resumen');
+const mergeModalSubtitle = document.getElementById('caja-merge-subtitle');
 
 
 const cuadreFechaInput = document.getElementById('cuadre-fecha');
@@ -442,6 +461,10 @@ const expandirPedidosAgrupados = (grupos = []) =>
 let cuentas = [];
 
 let cuentaSeleccionada = null;
+let splitItems = [];
+let splitItemsMap = new Map();
+const splitSeleccion = new Map();
+const mergeSeleccion = new Set();
 
 let calculo = {
 
@@ -1163,6 +1186,50 @@ const totalesBaseCuenta = (cuenta) => {
 
 };
 
+const obtenerTasaImpuestoCuenta = (cuenta) => {
+  const lista = cuenta?.pedidos || [];
+  const subtotal = lista.reduce((acc, p) => acc + (Number(p.subtotal) || 0), 0);
+  const impuesto = lista.reduce((acc, p) => acc + (Number(p.impuesto) || 0), 0);
+  if (!subtotal) return 0;
+  const tasa = impuesto / subtotal;
+  return Number.isFinite(tasa) && tasa >= 0 ? tasa : 0;
+};
+
+const obtenerTotalCuenta = (cuenta) => {
+  const base = totalesBaseCuenta(cuenta);
+  return Number(base.total || 0);
+};
+
+const construirItemsSeparar = () => {
+  if (!cuentaSeleccionada || !Array.isArray(cuentaSeleccionada.pedidos)) return [];
+  const items = [];
+  const seen = new Set();
+
+  cuentaSeleccionada.pedidos.forEach((pedido) => {
+    (pedido.items || []).forEach((item) => {
+      const detalleId = Number(item.detalle_id ?? item.detalleId);
+      if (!Number.isFinite(detalleId) || detalleId <= 0 || seen.has(detalleId)) return;
+      seen.add(detalleId);
+      const cantidad = Number(item.cantidad) || 0;
+      const precio = Number(item.precio_unitario) || 0;
+      const descuento = Number(item.descuento_monto) || 0;
+      const totalLinea = Math.max(cantidad * precio - descuento, 0);
+      items.push({
+        detalle_id: detalleId,
+        pedido_id: Number(item.pedido_id ?? pedido.id) || null,
+        producto_id: item.producto_id,
+        nombre: item.nombre || `Producto ${item.producto_id || ''}`,
+        cantidad,
+        precio_unitario: precio,
+        descuento_monto: descuento,
+        total_linea: Number(totalLinea.toFixed(2)),
+      });
+    });
+  });
+
+  return items;
+};
+
 
 
 const normalizarNumero = (valor, defecto = 0) => {
@@ -1508,6 +1575,34 @@ const setMensajeDetalle = (texto, tipo = 'info') => {
 
 };
 
+const setMensajeSplit = (texto, tipo = 'info') => {
+  if (!splitModalMensaje) return;
+  splitModalMensaje.textContent = texto;
+  splitModalMensaje.dataset.type = texto ? tipo : '';
+};
+
+const setMensajeMerge = (texto, tipo = 'info') => {
+  if (!mergeModalMensaje) return;
+  mergeModalMensaje.textContent = texto;
+  mergeModalMensaje.dataset.type = texto ? tipo : '';
+};
+
+const mostrarModal = (overlay) => {
+  if (!overlay) return;
+  overlay.hidden = false;
+  requestAnimationFrame(() => {
+    overlay.classList.add('is-visible');
+  });
+};
+
+const ocultarModal = (overlay) => {
+  if (!overlay) return;
+  overlay.classList.remove('is-visible');
+  setTimeout(() => {
+    overlay.hidden = true;
+  }, 200);
+};
+
 
 
 const setCuadreMensaje = (texto, tipo = 'info') => {
@@ -1575,6 +1670,10 @@ const obtenerFechaLocalHoy = () => {
 const limpiarSeleccion = () => {
 
   cuentaSeleccionada = null;
+  splitItems = [];
+  splitItemsMap = new Map();
+  splitSeleccion.clear();
+  mergeSeleccion.clear();
 
   limpiarDescuentosItems();
 
@@ -1623,6 +1722,8 @@ const limpiarSeleccion = () => {
     botonCobrar.classList.remove('is-loading');
 
   }
+  if (botonSepararCuenta) botonSepararCuenta.disabled = true;
+  if (botonJuntarCuentas) botonJuntarCuentas.disabled = true;
 
   calculo = {
 
@@ -1657,6 +1758,380 @@ const limpiarSeleccion = () => {
 };
 
 
+
+const prepararSplitItems = () => {
+  splitItems = construirItemsSeparar();
+  splitItemsMap = new Map(splitItems.map((item) => [item.detalle_id, item]));
+};
+
+const calcularTotalesSplit = () => {
+  const subtotalTotal = splitItems.reduce((acc, item) => acc + (Number(item.total_linea) || 0), 0);
+  const subtotalSeleccion = Array.from(splitSeleccion.values()).reduce(
+    (acc, item) => acc + (Number(item.total_linea) || 0),
+    0
+  );
+  const subtotalRestante = Math.max(subtotalTotal - subtotalSeleccion, 0);
+  return { subtotalTotal, subtotalSeleccion, subtotalRestante };
+};
+
+const renderSplitModalContenido = () => {
+  if (!splitModalOrigen || !splitModalDestino) return;
+
+  splitModalOrigen.innerHTML = '';
+  splitModalDestino.innerHTML = '';
+
+  if (!splitItems.length) {
+    splitModalOrigen.innerHTML = '<div class="caja-merge-lista-vacia">No hay productos para separar.</div>';
+  }
+
+  splitItems.forEach((item) => {
+    const seleccionado = splitSeleccion.has(item.detalle_id);
+    const row = document.createElement('div');
+    row.className = `caja-split-item${seleccionado ? ' caja-split-item--selected' : ''}`;
+
+    const label = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.dataset.detalleId = item.detalle_id;
+    checkbox.checked = seleccionado;
+    label.appendChild(checkbox);
+
+    const info = document.createElement('div');
+    const nombre = document.createElement('div');
+    nombre.textContent = item.nombre;
+    const meta = document.createElement('div');
+    meta.className = 'caja-split-item-meta';
+    const pedidoLabel = item.pedido_id ? `Pedido #${item.pedido_id}` : 'Pedido';
+    meta.textContent = `${pedidoLabel} • ${item.cantidad} x ${formatCurrency(item.precio_unitario)}`;
+    info.appendChild(nombre);
+    info.appendChild(meta);
+    label.appendChild(info);
+    row.appendChild(label);
+
+    const acciones = document.createElement('div');
+    acciones.className = 'caja-split-item-actions';
+    const total = document.createElement('div');
+    total.className = 'caja-split-item-total';
+    total.textContent = formatCurrency(item.total_linea);
+    acciones.appendChild(total);
+    row.appendChild(acciones);
+
+    splitModalOrigen.appendChild(row);
+  });
+
+  const seleccionados = Array.from(splitSeleccion.values());
+  if (!seleccionados.length) {
+    splitModalDestino.innerHTML = '<div class="caja-merge-lista-vacia">Selecciona productos para mover.</div>';
+  } else {
+    seleccionados.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'caja-split-item caja-split-item--selected';
+      const info = document.createElement('div');
+      const nombre = document.createElement('div');
+      nombre.textContent = item.nombre;
+      const meta = document.createElement('div');
+      meta.className = 'caja-split-item-meta';
+      const pedidoLabel = item.pedido_id ? `Pedido #${item.pedido_id}` : 'Pedido';
+      meta.textContent = `${pedidoLabel} • ${item.cantidad} x ${formatCurrency(item.precio_unitario)}`;
+      info.appendChild(nombre);
+      info.appendChild(meta);
+      row.appendChild(info);
+
+      const acciones = document.createElement('div');
+      acciones.className = 'caja-split-item-actions';
+      const total = document.createElement('div');
+      total.className = 'caja-split-item-total';
+      total.textContent = formatCurrency(item.total_linea);
+      acciones.appendChild(total);
+
+      const quitar = document.createElement('button');
+      quitar.type = 'button';
+      quitar.className = 'kanm-button ghost';
+      quitar.dataset.detalleId = item.detalle_id;
+      quitar.dataset.accion = 'quitar';
+      quitar.textContent = 'Quitar';
+      acciones.appendChild(quitar);
+
+      row.appendChild(acciones);
+      splitModalDestino.appendChild(row);
+    });
+  }
+
+  const tasa = obtenerTasaImpuestoCuenta(cuentaSeleccionada);
+  const { subtotalSeleccion, subtotalRestante } = calcularTotalesSplit();
+  const impuestoSeleccion = Number((subtotalSeleccion * tasa).toFixed(2));
+  const impuestoRestante = Number((subtotalRestante * tasa).toFixed(2));
+
+  if (splitModalTotalesOrigen) {
+    splitModalTotalesOrigen.innerHTML = `
+      <div class="flex-between"><span>Subtotal</span><strong>${formatCurrency(subtotalRestante)}</strong></div>
+      <div class="flex-between"><span>ITBIS</span><strong>${formatCurrency(impuestoRestante)}</strong></div>
+      <div class="flex-between total"><span>Total</span><strong>${formatCurrency(subtotalRestante + impuestoRestante)}</strong></div>
+    `;
+  }
+
+  if (splitModalTotalesDestino) {
+    splitModalTotalesDestino.innerHTML = `
+      <div class="flex-between"><span>Subtotal</span><strong>${formatCurrency(subtotalSeleccion)}</strong></div>
+      <div class="flex-between"><span>ITBIS</span><strong>${formatCurrency(impuestoSeleccion)}</strong></div>
+      <div class="flex-between total"><span>Total</span><strong>${formatCurrency(subtotalSeleccion + impuestoSeleccion)}</strong></div>
+    `;
+  }
+
+  if (splitModalConfirmar) {
+    splitModalConfirmar.disabled = splitSeleccion.size === 0;
+  }
+};
+
+const abrirSplitModal = () => {
+  if (!cuentaSeleccionada) {
+    setMensajeDetalle('Selecciona una cuenta para separar.', 'error');
+    return;
+  }
+
+  prepararSplitItems();
+  splitSeleccion.clear();
+  setMensajeSplit('');
+
+  if (splitModalSubtitle) {
+    const mesaCliente = [];
+    if (cuentaSeleccionada.mesa) mesaCliente.push(cuentaSeleccionada.mesa);
+    if (cuentaSeleccionada.cliente) mesaCliente.push(cuentaSeleccionada.cliente);
+    splitModalSubtitle.textContent = `Cuenta #${cuentaSeleccionada.cuenta_id}${
+      mesaCliente.length ? ` • ${mesaCliente.join(' - ')}` : ''
+    }`;
+  }
+
+  renderSplitModalContenido();
+  mostrarModal(splitModal);
+};
+
+const cerrarSplitModal = () => {
+  ocultarModal(splitModal);
+  splitSeleccion.clear();
+  setMensajeSplit('');
+};
+
+const confirmarSeparacion = async () => {
+  if (!cuentaSeleccionada) return;
+  const ids = Array.from(splitSeleccion.keys());
+  const cuentaOriginal = cuentaSeleccionada.cuenta_id;
+  if (!ids.length) {
+    setMensajeSplit('Selecciona productos para separar.', 'error');
+    return;
+  }
+
+  try {
+    setMensajeSplit('Separando cuenta...', 'info');
+    if (splitModalConfirmar) {
+      splitModalConfirmar.disabled = true;
+      splitModalConfirmar.classList.add('is-loading');
+    }
+
+    const respuesta = await fetchAutorizadoCaja(`/api/cuentas/${cuentaSeleccionada.cuenta_id}/separar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ detalle_ids: ids }),
+    });
+
+    const { data, esJson, contentType } = await leerRespuestaJsonCaja(respuesta);
+    if (!esJson) {
+      throw construirErrorNoJsonCaja(respuesta, data, contentType);
+    }
+    if (!respuesta.ok || !data?.ok) {
+      throw new Error(data?.error || 'No se pudo separar la cuenta.');
+    }
+
+    cerrarSplitModal();
+    await recargarEstadoCaja(false);
+    if (data?.cuenta_nueva_id) {
+      const nuevaId = Number(data.cuenta_nueva_id);
+      if (Number.isFinite(nuevaId) && cuentas.some((cuenta) => cuenta.cuenta_id === nuevaId)) {
+        seleccionarCuenta(nuevaId);
+      }
+    }
+    notificarActualizacionGlobal('pedido-actualizado', {
+      cuentaId: cuentaOriginal,
+      cuentaNuevaId: data?.cuenta_nueva_id,
+    });
+  } catch (error) {
+    console.error('Error al separar cuenta:', error);
+    setMensajeSplit(error.message || 'No se pudo separar la cuenta.', 'error');
+  } finally {
+    if (splitModalConfirmar) {
+      splitModalConfirmar.disabled = splitSeleccion.size === 0;
+      splitModalConfirmar.classList.remove('is-loading');
+    }
+  }
+};
+
+const obtenerCuentasDisponiblesMerge = () => {
+  if (!cuentaSeleccionada) return [];
+  const mesaBase = (cuentaSeleccionada.mesa || '').toString().trim();
+  return (cuentas || []).filter((cuenta) => {
+    if (cuenta.cuenta_id === cuentaSeleccionada.cuenta_id) return false;
+    if (!mesaBase) return true;
+    const mesaCuenta = (cuenta.mesa || '').toString().trim();
+    return !mesaCuenta || mesaCuenta === mesaBase;
+  });
+};
+
+const renderMergeModalContenido = () => {
+  if (!mergeModalLista) return;
+  mergeModalLista.innerHTML = '';
+
+  const disponibles = obtenerCuentasDisponiblesMerge();
+  if (!disponibles.length) {
+    mergeModalLista.innerHTML = '<div class="caja-merge-lista-vacia">No hay cuentas disponibles para juntar.</div>';
+    if (mergeModalConfirmar) mergeModalConfirmar.disabled = true;
+    if (mergeModalResumen) mergeModalResumen.innerHTML = '';
+    return;
+  }
+
+  disponibles.forEach((cuenta) => {
+    const cuentaId = cuenta.cuenta_id;
+    const seleccionado = mergeSeleccion.has(cuentaId);
+    const row = document.createElement('div');
+    row.className = `caja-merge-item${seleccionado ? ' caja-split-item--selected' : ''}`;
+
+    const label = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.dataset.cuentaId = cuentaId;
+    checkbox.checked = seleccionado;
+    label.appendChild(checkbox);
+
+    const info = document.createElement('div');
+    const nombre = document.createElement('div');
+    nombre.textContent = `Cuenta #${cuentaId}`;
+    const meta = document.createElement('div');
+    meta.className = 'caja-merge-item-meta';
+    const mesaTexto = cuenta.mesa ? `Mesa ${cuenta.mesa}` : 'Sin mesa';
+    meta.textContent = `${mesaTexto} • Total ${formatCurrency(obtenerTotalCuenta(cuenta))}`;
+    info.appendChild(nombre);
+    info.appendChild(meta);
+    label.appendChild(info);
+    row.appendChild(label);
+
+    const total = document.createElement('div');
+    total.className = 'caja-merge-item-total';
+    total.textContent = formatCurrency(obtenerTotalCuenta(cuenta));
+    row.appendChild(total);
+
+    mergeModalLista.appendChild(row);
+  });
+
+  const totalDestino = obtenerTotalCuenta(cuentaSeleccionada);
+  const totalSeleccion = disponibles.reduce(
+    (acc, cuenta) => (mergeSeleccion.has(cuenta.cuenta_id) ? acc + obtenerTotalCuenta(cuenta) : acc),
+    0
+  );
+
+  if (mergeModalResumen) {
+    mergeModalResumen.innerHTML = `
+      <div class="flex-between"><span>Cuenta destino</span><strong>#${cuentaSeleccionada.cuenta_id}</strong></div>
+      <div class="flex-between"><span>Total actual</span><strong>${formatCurrency(totalDestino)}</strong></div>
+      <div class="flex-between"><span>Cuentas seleccionadas</span><strong>${mergeSeleccion.size}</strong></div>
+      <div class="flex-between total"><span>Total combinado</span><strong>${formatCurrency(
+        totalDestino + totalSeleccion
+      )}</strong></div>
+    `;
+  }
+
+  if (mergeModalConfirmar) {
+    mergeModalConfirmar.disabled = mergeSeleccion.size === 0;
+  }
+};
+
+const abrirMergeModal = () => {
+  if (!cuentaSeleccionada) {
+    setMensajeDetalle('Selecciona una cuenta para juntar.', 'error');
+    return;
+  }
+
+  mergeSeleccion.clear();
+  setMensajeMerge('');
+  if (mergeModalSubtitle) {
+    const mesaCliente = [];
+    if (cuentaSeleccionada.mesa) mesaCliente.push(cuentaSeleccionada.mesa);
+    if (cuentaSeleccionada.cliente) mesaCliente.push(cuentaSeleccionada.cliente);
+    mergeModalSubtitle.textContent = `Cuenta destino #${cuentaSeleccionada.cuenta_id}${
+      mesaCliente.length ? ` • ${mesaCliente.join(' - ')}` : ''
+    }`;
+  }
+
+  renderMergeModalContenido();
+  mostrarModal(mergeModal);
+};
+
+const cerrarMergeModal = () => {
+  ocultarModal(mergeModal);
+  mergeSeleccion.clear();
+  setMensajeMerge('');
+};
+
+const confirmarMerge = async () => {
+  if (!cuentaSeleccionada) return;
+  if (!mergeSeleccion.size) {
+    setMensajeMerge('Selecciona al menos una cuenta para juntar.', 'error');
+    return;
+  }
+
+  const cuentaDestino = cuentaSeleccionada.cuenta_id;
+  const cuentaIds = [cuentaDestino, ...Array.from(mergeSeleccion)];
+
+  try {
+    setMensajeMerge('Juntando cuentas...', 'info');
+    if (mergeModalConfirmar) {
+      mergeModalConfirmar.disabled = true;
+      mergeModalConfirmar.classList.add('is-loading');
+    }
+
+    const respuesta = await fetchAutorizadoCaja('/api/cuentas/juntar', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ cuenta_ids: cuentaIds, cuenta_destino_id: cuentaDestino }),
+    });
+
+    const { data, esJson, contentType } = await leerRespuestaJsonCaja(respuesta);
+    if (!esJson) {
+      throw construirErrorNoJsonCaja(respuesta, data, contentType);
+    }
+    if (!respuesta.ok || !data?.ok) {
+      throw new Error(data?.error || 'No se pudieron juntar las cuentas.');
+    }
+
+    cerrarMergeModal();
+    await recargarEstadoCaja(false);
+    if (cuentas.some((cuenta) => cuenta.cuenta_id === cuentaDestino)) {
+      seleccionarCuenta(cuentaDestino);
+    }
+    notificarActualizacionGlobal('pedido-actualizado', { cuentaId: cuentaDestino });
+  } catch (error) {
+    console.error('Error al juntar cuentas:', error);
+    setMensajeMerge(error.message || 'No se pudieron juntar las cuentas.', 'error');
+  } finally {
+    if (mergeModalConfirmar) {
+      mergeModalConfirmar.disabled = mergeSeleccion.size === 0;
+      mergeModalConfirmar.classList.remove('is-loading');
+    }
+  }
+};
+
+const actualizarAccionesCuenta = () => {
+  if (botonSepararCuenta) {
+    prepararSplitItems();
+    botonSepararCuenta.disabled = !cuentaSeleccionada || splitItems.length === 0;
+  }
+  if (botonJuntarCuentas) {
+    const disponibles = obtenerCuentasDisponiblesMerge();
+    botonJuntarCuentas.disabled = !cuentaSeleccionada || disponibles.length === 0;
+  }
+};
 
 const renderPedidos = () => {
 
@@ -3067,6 +3542,7 @@ const seleccionarCuenta = async (cuentaId) => {
 
 
     renderDetallePedido();
+    actualizarAccionesCuenta();
 
     const totales = totalesBaseCuenta(cuentaSeleccionada);
 
@@ -3125,6 +3601,7 @@ const cargarPedidos = async (mostrarCarga = true) => {
     }
 
     renderPedidos();
+    actualizarAccionesCuenta();
 
 
 
@@ -3387,6 +3864,86 @@ const cerrarCuenta = async () => {
 
 
 const inicializarEventos = () => {
+
+  botonSepararCuenta?.addEventListener('click', (event) => {
+    event.preventDefault();
+    abrirSplitModal();
+  });
+
+  botonJuntarCuentas?.addEventListener('click', (event) => {
+    event.preventDefault();
+    abrirMergeModal();
+  });
+
+  splitModalCerrar?.addEventListener('click', (event) => {
+    event.preventDefault();
+    cerrarSplitModal();
+  });
+
+  splitModalLimpiar?.addEventListener('click', (event) => {
+    event.preventDefault();
+    splitSeleccion.clear();
+    renderSplitModalContenido();
+  });
+
+  splitModalConfirmar?.addEventListener('click', (event) => {
+    event.preventDefault();
+    confirmarSeparacion();
+  });
+
+  splitModal?.addEventListener('click', (event) => {
+    if (event.target === splitModal) cerrarSplitModal();
+  });
+
+  splitModalOrigen?.addEventListener('change', (event) => {
+    const checkbox = event.target.closest('input[data-detalle-id]');
+    if (!checkbox) return;
+    const detalleId = Number(checkbox.dataset.detalleId);
+    if (!Number.isFinite(detalleId)) return;
+    const item = splitItemsMap.get(detalleId);
+    if (checkbox.checked && item) {
+      splitSeleccion.set(detalleId, item);
+    } else {
+      splitSeleccion.delete(detalleId);
+    }
+    renderSplitModalContenido();
+  });
+
+  splitModalDestino?.addEventListener('click', (event) => {
+    const btn = event.target.closest('button[data-accion="quitar"]');
+    if (!btn) return;
+    const detalleId = Number(btn.dataset.detalleId);
+    if (!Number.isFinite(detalleId)) return;
+    splitSeleccion.delete(detalleId);
+    renderSplitModalContenido();
+  });
+
+  mergeModalCerrar?.addEventListener('click', (event) => {
+    event.preventDefault();
+    cerrarMergeModal();
+  });
+
+  mergeModalConfirmar?.addEventListener('click', (event) => {
+    event.preventDefault();
+    confirmarMerge();
+  });
+
+  mergeModal?.addEventListener('click', (event) => {
+    if (event.target === mergeModal) cerrarMergeModal();
+  });
+
+  mergeModalLista?.addEventListener('change', (event) => {
+    const checkbox = event.target.closest('input[data-cuenta-id]');
+    if (!checkbox) return;
+    const cuentaId = Number(checkbox.dataset.cuentaId);
+    if (!Number.isFinite(cuentaId)) return;
+    if (checkbox.checked) {
+      mergeSeleccion.add(cuentaId);
+    } else {
+      mergeSeleccion.delete(cuentaId);
+    }
+    renderMergeModalContenido();
+  });
 
   botonRecalcular?.addEventListener('click', (event) => {
 

@@ -10,6 +10,8 @@ const roleRoutes = {
   caja: '/caja.html',
   vendedor: '/mostrador.html',
   admin: '/admin.html',
+  supervisor: '/admin.html',
+  empresa: '/empresa.html',
 };
 
 const showError = (message) => {
@@ -42,6 +44,7 @@ const handleSuccess = (payload) => {
     id: payload.id ?? payload.usuarioId,
     usuarioId: payload.id ?? payload.usuarioId,
     negocioId: payload.negocioId,
+    empresaId: payload.empresaId ?? payload.empresa_id,
     esSuperAdmin: payload.esSuperAdmin === true,
     forcePasswordChange: payload.forcePasswordChange === true || payload.force_password_change === true,
     impersonated: payload.impersonated === true,
@@ -118,6 +121,7 @@ form?.addEventListener('submit', async (event) => {
       nombre: data.nombre,
       token: data.token,
       negocioId: data.negocio_id ?? data.negocioId,
+      empresaId: data.empresa_id ?? data.empresaId,
       esSuperAdmin: data.es_super_admin ?? data.esSuperAdmin,
       forcePasswordChange: data.force_password_change ?? data.forcePasswordChange,
     });

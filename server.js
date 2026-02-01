@@ -52,11 +52,36 @@ const seedUsuariosIniciales = async () => {
       rol: 'admin',
       activo: 1,
       negocio_id: NEGOCIO_ID_DEFAULT,
+      empresa_id: 1,
       es_super_admin: 1,
     },
-    { nombre: 'Mesera', usuario: 'mesera', password: 'mesera123', rol: 'mesera', activo: 1, negocio_id: NEGOCIO_ID_DEFAULT },
-    { nombre: 'Cocina', usuario: 'cocina', password: 'cocina123', rol: 'cocina', activo: 1, negocio_id: NEGOCIO_ID_DEFAULT },
-    { nombre: 'Caja', usuario: 'caja', password: 'caja123', rol: 'caja', activo: 1, negocio_id: NEGOCIO_ID_DEFAULT },
+    {
+      nombre: 'Mesera',
+      usuario: 'mesera',
+      password: 'mesera123',
+      rol: 'mesera',
+      activo: 1,
+      negocio_id: NEGOCIO_ID_DEFAULT,
+      empresa_id: 1,
+    },
+    {
+      nombre: 'Cocina',
+      usuario: 'cocina',
+      password: 'cocina123',
+      rol: 'cocina',
+      activo: 1,
+      negocio_id: NEGOCIO_ID_DEFAULT,
+      empresa_id: 1,
+    },
+    {
+      nombre: 'Caja',
+      usuario: 'caja',
+      password: 'caja123',
+      rol: 'caja',
+      activo: 1,
+      negocio_id: NEGOCIO_ID_DEFAULT,
+      empresa_id: 1,
+    },
   ];
 
   for (const usuario of iniciales) {
@@ -92,7 +117,9 @@ const limpiarCacheAnalitica = (negocioId) => {
   }
 };
 
-const usuarioRolesPermitidos = ['mesera', 'cocina', 'bar', 'caja', 'vendedor'];
+const ROLES_OPERATIVOS = ['mesera', 'cocina', 'bar', 'caja', 'vendedor'];
+const ROLES_GESTION = ['admin', 'supervisor', 'empresa'];
+const usuarioRolesPermitidos = [...ROLES_OPERATIVOS, 'supervisor'];
 
 const generarTokenSesion = () => crypto.randomBytes(24).toString('hex');
 const generarPasswordTemporal = (length = 12) => {
@@ -113,6 +140,17 @@ const verificarPassword = async (password, stored) => {
     return bcrypt.compare(password, stored);
   }
   return password === stored;
+};
+const validarPasswordUsuario = async (usuarioId, password) => {
+  if (!usuarioId || !password) return false;
+  try {
+    const usuario = await usuariosRepo.findById(usuarioId);
+    if (!usuario) return false;
+    return verificarPassword(password, usuario.password);
+  } catch (error) {
+    console.warn('No se pudo validar password del usuario:', error?.message || error);
+    return false;
+  }
 };
 
 const base64UrlEncode = (value) =>
@@ -303,6 +341,14 @@ async function asegurarAdminPrincipalNegocio({ negocioId, negocioNombre, payload
     throw { status: 500, message: 'Error al validar usuario admin principal' };
   }
 
+  let empresaIdNegocio = null;
+  try {
+    const rowEmpresa = await db.get('SELECT empresa_id FROM negocios WHERE id = ? LIMIT 1', [negocioId]);
+    empresaIdNegocio = rowEmpresa?.empresa_id ?? null;
+  } catch (error) {
+    console.warn('No se pudo obtener empresa del negocio:', error?.message || error);
+  }
+
   if (usuarioExistente && Number(usuarioExistente.negocio_id) !== Number(negocioId)) {
     throw { status: 400, message: 'Ya existe un usuario con ese usuario en otro negocio' };
   }
@@ -320,6 +366,9 @@ async function asegurarAdminPrincipalNegocio({ negocioId, negocioNombre, payload
       const updates = {};
       if (usuarioExistente.rol !== 'admin') updates.rol = 'admin';
       if (!usuarioExistente.activo) updates.activo = 1;
+      if (empresaIdNegocio && usuarioExistente.empresa_id !== empresaIdNegocio) {
+        updates.empresa_id = empresaIdNegocio;
+      }
       if (adminPassword) {
         updates.password = await hashPasswordIfNeeded(adminPassword);
         updates.password_reset_at = new Date();
@@ -340,6 +389,7 @@ async function asegurarAdminPrincipalNegocio({ negocioId, negocioNombre, payload
         rol: 'admin',
         activo: 1,
         negocio_id: negocioId,
+        empresa_id: empresaIdNegocio,
         es_super_admin: 0,
         force_password_change: passwordGenerada ? 1 : 0,
         password_reset_at: passwordGenerada ? new Date() : null,
@@ -363,6 +413,150 @@ async function asegurarAdminPrincipalNegocio({ negocioId, negocioNombre, payload
   } catch (err) {
     console.error('Error gestionando admin principal del negocio:', err?.message || err);
     throw { status: 500, message: 'No se pudo procesar el admin principal del negocio' };
+  }
+}
+
+async function asegurarUsuarioEmpresa({ empresaId, negocioId, negocioNombre, empresaNombre, payload }) {
+  const empresaUsuario =
+    normalizarCampoTexto(payload.adminPrincipalUsuario, null) ||
+    normalizarCampoTexto(payload.admin_usuario, null) ||
+    null;
+  const empresaPassword =
+    normalizarCampoTexto(payload.adminPrincipalPassword, null) ||
+    normalizarCampoTexto(payload.admin_password, null) ||
+    normalizarCampoTexto(payload.adminPassword, null) ||
+    null;
+  const empresaNombreUsuario =
+    normalizarCampoTexto(payload.adminPrincipalCorreo, null) ||
+    normalizarCampoTexto(payload.admin_principal_correo, null) ||
+    null;
+
+  const rowEmpresaUser = await db.get(
+    `SELECT id, usuario
+       FROM usuarios
+      WHERE rol = 'empresa'
+        AND empresa_id = ?
+      LIMIT 1`,
+    [empresaId]
+  );
+  if (rowEmpresaUser && (!empresaUsuario || rowEmpresaUser.usuario !== empresaUsuario)) {
+    const nombreParaUsuario =
+      empresaNombreUsuario ||
+      empresaNombre ||
+      `Empresa ${negocioNombre || ''}`.trim() ||
+      `Empresa ${empresaId}`.trim();
+    return {
+      usuarioId: rowEmpresaUser.id,
+      usuario: rowEmpresaUser.usuario,
+      nombre: nombreParaUsuario,
+      existente: true,
+    };
+  }
+
+  if (!empresaUsuario) {
+    return null;
+  }
+
+  let usuarioExistente = null;
+  try {
+    usuarioExistente = await usuariosRepo.findByUsuario(empresaUsuario);
+  } catch (err) {
+    console.error('Error buscando usuario empresa:', err?.message || err);
+    throw { status: 500, message: 'Error al validar usuario empresa' };
+  }
+
+  const empresaExistenteId = usuarioExistente?.empresa_id ?? null;
+  if (
+    usuarioExistente &&
+    empresaExistenteId === null &&
+    usuarioExistente.rol &&
+    !['admin', 'empresa'].includes(usuarioExistente.rol)
+  ) {
+    throw {
+      status: 400,
+      message: `El usuario ya existe con rol ${usuarioExistente.rol}. Usa otro usuario.`,
+    };
+  }
+  if (
+    usuarioExistente &&
+    empresaExistenteId !== null &&
+    Number(empresaExistenteId) !== Number(empresaId)
+  ) {
+    throw { status: 400, message: 'Ya existe un usuario con ese usuario en otra empresa' };
+  }
+
+  let passwordGenerada = null;
+  const nombreParaUsuario =
+    empresaNombreUsuario ||
+    empresaNombre ||
+    `Empresa ${negocioNombre || ''}`.trim() ||
+    `Empresa ${empresaId}`.trim();
+
+  let usuarioFinalId = usuarioExistente?.id || null;
+
+  try {
+    if (usuarioExistente) {
+      const updates = {};
+      if (usuarioExistente.rol !== 'empresa') updates.rol = 'empresa';
+      if (!usuarioExistente.activo) updates.activo = 1;
+      if (empresaId && usuarioExistente.empresa_id !== empresaId) {
+        updates.empresa_id = empresaId;
+      }
+      if (empresaPassword) {
+        updates.password = await hashPasswordIfNeeded(empresaPassword);
+        updates.password_reset_at = new Date();
+      }
+      updates.negocio_id = negocioId || usuarioExistente.negocio_id || null;
+      await usuariosRepo.update(usuarioExistente.id, updates);
+    } else {
+      let passwordFinal = empresaPassword;
+      if (!passwordFinal) {
+        passwordFinal = generarPasswordTemporal(12);
+        passwordGenerada = passwordFinal;
+      }
+      const passwordHash = await hashPasswordIfNeeded(passwordFinal);
+      const nuevo = await usuariosRepo.create({
+        nombre: nombreParaUsuario,
+        usuario: empresaUsuario,
+        password: passwordHash,
+        rol: 'empresa',
+        activo: 1,
+        negocio_id: negocioId || null,
+        empresa_id: empresaId,
+        es_super_admin: 0,
+        force_password_change: passwordGenerada ? 1 : 0,
+        password_reset_at: passwordGenerada ? new Date() : null,
+      });
+      usuarioFinalId = nuevo?.id || null;
+    }
+
+    return {
+      usuarioId: usuarioFinalId,
+      usuario: empresaUsuario,
+      nombre: nombreParaUsuario,
+      passwordGenerada,
+    };
+  } catch (err) {
+    console.error('Error gestionando usuario empresa:', err?.message || err);
+    throw { status: 500, message: 'No se pudo procesar el usuario empresa' };
+  }
+}
+
+async function resolverEmpresaId({ empresaId, empresaNombre } = {}) {
+  const empresaIdNum = empresaId === undefined || empresaId === null ? null : Number(empresaId);
+  if (Number.isFinite(empresaIdNum) && empresaIdNum > 0) {
+    return empresaIdNum;
+  }
+  const nombre = normalizarCampoTexto(empresaNombre, null);
+  if (!nombre) return null;
+  try {
+    const existente = await db.get('SELECT id FROM empresas WHERE LOWER(nombre) = LOWER(?) LIMIT 1', [nombre]);
+    if (existente?.id) return Number(existente.id);
+    const insert = await db.run('INSERT INTO empresas (nombre, activo) VALUES (?, 1)', [nombre]);
+    return insert?.lastID || insert?.lastId || insert?.insertId || null;
+  } catch (error) {
+    console.warn('No se pudo resolver empresa:', error?.message || error);
+    return null;
   }
 }
 
@@ -394,6 +588,13 @@ function mapNegocioWithDefaults(row = {}) {
       row.admin_principal_usuario ?? row.adminPrincipalUsuario ?? row.admin_usuario ?? row.usuarioAdminPrincipal,
       null
     ) || null;
+  const empresaIdRaw = row.empresa_id ?? row.empresaId;
+  const empresaId = empresaIdRaw === undefined || empresaIdRaw === null ? null : Number(empresaIdRaw);
+  const empresaIdFinal = Number.isFinite(empresaId) ? empresaId : null;
+  const empresaNombre =
+    normalizarCampoTexto(row.empresa_nombre ?? row.empresaNombre, null) ||
+    normalizarCampoTexto(row.empresaNombre, null) ||
+    null;
   const rawConfigModulos = row.config_modulos ?? row.configModulos;
   const configModulos = parseConfigModulos(rawConfigModulos);
   const configModulosString =
@@ -424,6 +625,10 @@ function mapNegocioWithDefaults(row = {}) {
     colorBotonPeligro,
     configModulos,
     adminPrincipalUsuarioId: adminPrincipalUsuarioIdFinal,
+    empresa_id: empresaIdFinal,
+    empresaId: empresaIdFinal,
+    empresa_nombre: empresaNombre,
+    empresaNombre,
     motivo_suspension: motivoSuspension,
     motivoSuspension,
     deleted_at: deletedAt,
@@ -514,11 +719,11 @@ const validarEstadoNegocio = async (negocioId) => {
 
 const obtenerNegocioAdmin = async (negocioId) =>
   db.get(
-    'SELECT id, activo, suspendido, deleted_at, motivo_suspension, admin_principal_usuario_id FROM negocios WHERE id = ? LIMIT 1',
+    'SELECT id, activo, suspendido, deleted_at, motivo_suspension, admin_principal_usuario_id, empresa_id FROM negocios WHERE id = ? LIMIT 1',
     [negocioId]
   );
 
-runMultiNegocioMigrations()
+const migrationsReady = runMultiNegocioMigrations()
   .then(() => runChatMigrations())
   .then(() => seedUsuariosIniciales())
   .catch((err) => {
@@ -634,6 +839,8 @@ async function obtenerUsuarioSesionPorToken(token) {
       rol: usuario.rol,
       negocio_id: negocioId,
       negocioId,
+      empresa_id: usuario.empresa_id ?? null,
+      empresaId: usuario.empresa_id ?? null,
       es_super_admin: !!usuario.es_super_admin,
       force_password_change: !!usuario.force_password_change,
       config_modulos: configModulosSesion,
@@ -662,10 +869,14 @@ async function obtenerUsuarioSesionPorToken(token) {
     rol: payload.role || usuario.rol || 'admin',
     negocio_id: negocioId,
     negocioId,
+    empresa_id: usuario.empresa_id ?? null,
+    empresaId: usuario.empresa_id ?? null,
     es_super_admin: false,
     force_password_change: !!usuario.force_password_change,
     impersonated: true,
     impersonated_by: payload.admin_id,
+    impersonated_by_role: payload.impersonated_by_role ?? payload.impersonatedByRole ?? null,
+    impersonatedByRole: payload.impersonated_by_role ?? payload.impersonatedByRole ?? null,
     config_modulos: configModulosSesion,
     configModulos: configModulosSesion,
     token,
@@ -759,9 +970,25 @@ const requireUsuarioSesion = (req, res, next) => {
 
 const esUsuarioCocina = (usuario) => usuario?.rol === 'cocina';
 const esUsuarioBar = (usuario) => usuario?.rol === 'bar';
-const esUsuarioAdmin = (usuario) => usuario?.rol === 'admin';
+const esUsuarioAdmin = (usuario) => usuario?.rol === 'admin' || usuario?.rol === 'empresa';
+const esUsuarioSupervisor = (usuario) => usuario?.rol === 'supervisor';
+const esUsuarioEmpresa = (usuario) => usuario?.rol === 'empresa';
 const esSuperAdmin = (usuario) => Boolean(usuario?.es_super_admin || usuario?.esSuperAdmin);
-const tienePermisoAdmin = (usuario) => esUsuarioAdmin(usuario) || esSuperAdmin(usuario);
+const tienePermisoAdmin = (usuario) =>
+  esUsuarioAdmin(usuario) || esUsuarioSupervisor(usuario) || esUsuarioEmpresa(usuario) || esSuperAdmin(usuario);
+const esImpersonacionEmpresa = (usuario) =>
+  Boolean(
+    usuario?.impersonated &&
+      (usuario?.impersonated_by_role === 'empresa' || usuario?.impersonatedByRole === 'empresa')
+  );
+const puedeGestionarSupervisores = (usuario) =>
+  esSuperAdmin(usuario) || esUsuarioAdmin(usuario) || esUsuarioEmpresa(usuario) || esImpersonacionEmpresa(usuario);
+const puedeGestionarRol = (usuario, rolObjetivo) => {
+  if (!rolObjetivo) return true;
+  if (rolObjetivo === 'empresa') return esSuperAdmin(usuario);
+  if (rolObjetivo === 'supervisor') return puedeGestionarSupervisores(usuario);
+  return true;
+};
 const requireSuperAdmin = (req, res, next) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     if (!esSuperAdmin(usuarioSesion)) {
@@ -2318,6 +2545,10 @@ const calcularEstadoAreaPedido = (pedido, items = [], area, historialesPorArea =
     return 'cancelado';
   }
 
+  if (pedido.estado === 'listo') {
+    return 'listo';
+  }
+
   const historialSet = areaNormalizada === 'bar' ? historialesPorArea.bar : historialesPorArea.cocina;
   const yaListo = historialSet instanceof Set && historialSet.has(Number(pedido.id));
   if (yaListo) {
@@ -2536,6 +2767,64 @@ const agruparItemsCuenta = (itemsMap = new Map()) => {
     descuento_monto: Number(item.descuento_monto.toFixed(2)),
     total_linea: Number(item.total_linea.toFixed(2)),
   }));
+};
+
+const normalizarTasaImpuestoPedido = (subtotal, impuesto, fallback = 0) => {
+  const base = Number(subtotal) || 0;
+  const impuestoValor = Number(impuesto) || 0;
+  if (base > 0) {
+    const tasa = impuestoValor / base;
+    if (Number.isFinite(tasa) && tasa >= 0) {
+      return tasa;
+    }
+  }
+  return fallback;
+};
+
+const recalcularTotalesPedido = async (pedidoId, negocioId, tasaImpuesto = null) => {
+  const detalles = await db.all(
+    `SELECT cantidad, precio_unitario, COALESCE(descuento_monto, 0) AS descuento_monto
+       FROM detalle_pedido
+      WHERE pedido_id = ? AND negocio_id = ?`,
+    [pedidoId, negocioId]
+  );
+
+  if (!detalles || detalles.length === 0) {
+    return { subtotal: 0, impuesto: 0, total: 0, cantidadDetalles: 0 };
+  }
+
+  let subtotal = 0;
+  (detalles || []).forEach((det) => {
+    const cantidad = Number(det.cantidad) || 0;
+    const precio = Number(det.precio_unitario) || 0;
+    const descuento = Number(det.descuento_monto) || 0;
+    const linea = Math.max(cantidad * precio - descuento, 0);
+    subtotal += linea;
+  });
+
+  subtotal = Number(subtotal.toFixed(2));
+
+  let tasa = tasaImpuesto;
+  if (tasa === null || tasa === undefined) {
+    const pedidoBase = await db.get(
+      'SELECT subtotal, impuesto FROM pedidos WHERE id = ? AND negocio_id = ?',
+      [pedidoId, negocioId]
+    );
+    tasa = normalizarTasaImpuestoPedido(pedidoBase?.subtotal, pedidoBase?.impuesto, 0);
+  }
+
+  const impuesto = Number((subtotal * (Number(tasa) || 0)).toFixed(2));
+  const total = Number((subtotal + impuesto).toFixed(2));
+
+  await db.run('UPDATE pedidos SET subtotal = ?, impuesto = ?, total = ? WHERE id = ? AND negocio_id = ?', [
+    subtotal,
+    impuesto,
+    total,
+    pedidoId,
+    negocioId,
+  ]);
+
+  return { subtotal, impuesto, total, cantidadDetalles: detalles.length };
 };
 
 const obtenerCuentasPorEstados = async (estados, negocioId, opciones = {}) => {
@@ -4246,7 +4535,7 @@ app.get('/api/caja/cierres/:id/detalle', (req, res) => {
 
 app.delete('/api/admin/eliminar/cierre-caja/:id', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
-    if (usuarioSesion?.rol !== 'admin') {
+    if (!esUsuarioAdmin(usuarioSesion) && !esUsuarioSupervisor(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso denegado' });
     }
 
@@ -5457,6 +5746,362 @@ app.get('/api/cuentas/:id/detalle', (req, res) => {
   });
 });
 
+app.post('/api/cuentas/:id/separar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const cuentaId = Number(req.params.id);
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cuenta inválida.' });
+    }
+
+    const detallesEntrada =
+      req.body?.detalle_ids ??
+      req.body?.detalleIds ??
+      req.body?.detalles ??
+      req.body?.detalle_ids;
+
+    if (!Array.isArray(detallesEntrada) || !detallesEntrada.length) {
+      return res.status(400).json({ ok: false, error: 'Selecciona al menos un producto para separar.' });
+    }
+
+    const detalleIds = Array.from(
+      new Set(
+        detallesEntrada
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
+    );
+
+    if (!detalleIds.length) {
+      return res.status(400).json({ ok: false, error: 'No se identificaron productos válidos para separar.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    try {
+      await db.run('BEGIN');
+
+      const cuentaPagada = await db.get(
+        `SELECT COUNT(1) AS total
+           FROM pedidos
+          WHERE (cuenta_id = ? OR id = ?)
+            AND negocio_id = ?
+            AND estado = 'pagado'`,
+        [cuentaId, cuentaId, negocioId]
+      );
+
+      if (Number(cuentaPagada?.total || 0) > 0) {
+        await db.run('ROLLBACK');
+        return res
+          .status(400)
+          .json({ ok: false, error: 'No se puede separar una cuenta que ya fue cobrada.' });
+      }
+
+      const placeholders = detalleIds.map(() => '?').join(', ');
+      const detalles = await db.all(
+        `
+          SELECT dp.id AS detalle_id,
+                 dp.pedido_id,
+                 dp.cantidad,
+                 dp.precio_unitario,
+                 COALESCE(dp.descuento_monto, 0) AS descuento_monto,
+                 COALESCE(dp.descuento_porcentaje, 0) AS descuento_porcentaje,
+                 COALESCE(dp.cantidad_descuento, 0) AS cantidad_descuento,
+                 p.cuenta_id,
+                 p.mesa,
+                 p.cliente,
+                 p.modo_servicio,
+                 p.nota,
+                 p.estado,
+                 p.fecha_listo,
+                 p.cocinero_id,
+                 p.cocinero_nombre,
+                 p.bartender_id,
+                 p.bartender_nombre,
+                 p.origen_caja,
+                 p.creado_por,
+                 p.subtotal AS pedido_subtotal,
+                 p.impuesto AS pedido_impuesto
+            FROM detalle_pedido dp
+            JOIN pedidos p ON p.id = dp.pedido_id
+           WHERE dp.id IN (${placeholders})
+             AND dp.negocio_id = ?
+             AND p.negocio_id = ?
+        `,
+        [...detalleIds, negocioId, negocioId]
+      );
+
+      if (!detalles || detalles.length !== detalleIds.length) {
+        await db.run('ROLLBACK');
+        return res.status(404).json({ ok: false, error: 'No se encontraron todos los productos seleccionados.' });
+      }
+
+      const impuestoConfig = Number(await obtenerImpuestoConfiguradoAsync(negocioId)) || 0;
+      const tasaImpuestoFallback = impuestoConfig / 100;
+      const detallesPorPedido = new Map();
+      const tasaPorPedido = new Map();
+
+      for (const detalle of detalles) {
+        const cuentaReferencia = Number(detalle.cuenta_id || detalle.pedido_id);
+        if (cuentaReferencia !== cuentaId) {
+          await db.run('ROLLBACK');
+          return res
+            .status(400)
+            .json({ ok: false, error: 'Los productos seleccionados no pertenecen a esta cuenta.' });
+        }
+
+        if (detalle.estado === 'pagado' || detalle.estado === 'cancelado') {
+          await db.run('ROLLBACK');
+          return res
+            .status(400)
+            .json({ ok: false, error: 'No se pueden mover productos de pedidos ya cobrados o cancelados.' });
+        }
+
+        const lista = detallesPorPedido.get(detalle.pedido_id) || [];
+        lista.push(detalle);
+        detallesPorPedido.set(detalle.pedido_id, lista);
+
+        if (!tasaPorPedido.has(detalle.pedido_id)) {
+          const tasa = normalizarTasaImpuestoPedido(
+            detalle.pedido_subtotal,
+            detalle.pedido_impuesto,
+            tasaImpuestoFallback
+          );
+          tasaPorPedido.set(detalle.pedido_id, tasa);
+        }
+      }
+
+      if (!detallesPorPedido.size) {
+        await db.run('ROLLBACK');
+        return res.status(400).json({ ok: false, error: 'No se pudieron preparar los productos para separar.' });
+      }
+
+      let cuentaNuevaId = null;
+      const pedidoNuevoPorOrigen = new Map();
+      const tasaPorPedidoNuevo = new Map();
+
+      for (const [pedidoId, listaDetalles] of detallesPorPedido.entries()) {
+        const base = listaDetalles[0];
+        const insertResult = await db.run(
+          `
+            INSERT INTO pedidos (
+              cuenta_id,
+              mesa,
+              cliente,
+              modo_servicio,
+              nota,
+              estado,
+              subtotal,
+              impuesto,
+              total,
+              fecha_listo,
+              cocinero_id,
+              cocinero_nombre,
+              bartender_id,
+              bartender_nombre,
+              origen_caja,
+              creado_por,
+              negocio_id
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          [
+            cuentaNuevaId,
+            base.mesa,
+            base.cliente,
+            base.modo_servicio,
+            base.nota,
+            base.estado,
+            base.fecha_listo,
+            base.cocinero_id,
+            base.cocinero_nombre,
+            base.bartender_id,
+            base.bartender_nombre,
+            base.origen_caja,
+            base.creado_por || usuarioSesion.id,
+            negocioId,
+          ]
+        );
+
+        const nuevoPedidoId = insertResult?.lastID;
+        if (!nuevoPedidoId) {
+          throw new Error('No se pudo crear la nueva cuenta.');
+        }
+
+        if (!cuentaNuevaId) {
+          cuentaNuevaId = nuevoPedidoId;
+          await db.run('UPDATE pedidos SET cuenta_id = ? WHERE id = ? AND negocio_id = ?', [
+            cuentaNuevaId,
+            nuevoPedidoId,
+            negocioId,
+          ]);
+        }
+
+        pedidoNuevoPorOrigen.set(pedidoId, nuevoPedidoId);
+        const tasa = tasaPorPedido.get(pedidoId) ?? tasaImpuestoFallback;
+        tasaPorPedidoNuevo.set(nuevoPedidoId, tasa);
+      }
+
+      for (const [pedidoId, listaDetalles] of detallesPorPedido.entries()) {
+        const nuevoPedidoId = pedidoNuevoPorOrigen.get(pedidoId);
+        const ids = listaDetalles.map((d) => d.detalle_id);
+        const groupPlaceholders = ids.map(() => '?').join(', ');
+
+        await db.run(
+          `UPDATE detalle_pedido
+              SET pedido_id = ?
+            WHERE id IN (${groupPlaceholders})
+              AND negocio_id = ?`,
+          [nuevoPedidoId, ...ids, negocioId]
+        );
+
+        await db.run(
+          `UPDATE consumo_insumos
+              SET pedido_id = ?
+            WHERE detalle_pedido_id IN (${groupPlaceholders})
+              AND negocio_id = ?`,
+          [nuevoPedidoId, ...ids, negocioId]
+        );
+      }
+
+      const pedidosAjustar = new Set([
+        ...Array.from(detallesPorPedido.keys()),
+        ...Array.from(pedidoNuevoPorOrigen.values()),
+      ]);
+
+      for (const pedidoId of pedidosAjustar) {
+        const tasa = tasaPorPedidoNuevo.get(pedidoId) ?? tasaPorPedido.get(pedidoId) ?? tasaImpuestoFallback;
+        const resultado = await recalcularTotalesPedido(pedidoId, negocioId, tasa);
+        if (resultado.cantidadDetalles === 0) {
+          await db.run('DELETE FROM pedidos WHERE id = ? AND negocio_id = ?', [pedidoId, negocioId]);
+        }
+      }
+
+      await db.run('COMMIT');
+      return res.json({
+        ok: true,
+        cuenta_nueva_id: cuentaNuevaId,
+        pedidos_nuevos: Array.from(pedidoNuevoPorOrigen.values()),
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al separar cuenta:', error?.message || error);
+      return res.status(500).json({ ok: false, error: 'No se pudo separar la cuenta.' });
+    }
+  });
+});
+
+app.post('/api/cuentas/juntar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const cuentasEntrada = req.body?.cuentas ?? req.body?.cuenta_ids ?? req.body?.cuentaIds ?? [];
+    const cuentaDestinoRaw = req.body?.cuenta_destino_id ?? req.body?.cuentaDestinoId ?? null;
+
+    if (!Array.isArray(cuentasEntrada) || cuentasEntrada.length < 2) {
+      return res.status(400).json({ ok: false, error: 'Debes seleccionar al menos dos cuentas para juntar.' });
+    }
+
+    const cuentaIds = Array.from(
+      new Set(
+        cuentasEntrada
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
+    );
+
+    const cuentaDestino = Number(cuentaDestinoRaw ?? cuentaIds[0]);
+    if (!Number.isFinite(cuentaDestino) || cuentaDestino <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cuenta destino inválida.' });
+    }
+
+    if (!cuentaIds.includes(cuentaDestino)) {
+      cuentaIds.unshift(cuentaDestino);
+    }
+
+    if (cuentaIds.length < 2) {
+      return res.status(400).json({ ok: false, error: 'Debes seleccionar al menos dos cuentas válidas.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    try {
+      await db.run('BEGIN');
+      const placeholders = cuentaIds.map(() => '?').join(', ');
+      const pedidos = await db.all(
+        `
+          SELECT id, cuenta_id, mesa, estado
+            FROM pedidos
+           WHERE negocio_id = ?
+             AND (cuenta_id IN (${placeholders}) OR id IN (${placeholders}))
+        `,
+        [negocioId, ...cuentaIds, ...cuentaIds]
+      );
+
+      if (!pedidos || pedidos.length === 0) {
+        await db.run('ROLLBACK');
+        return res.status(404).json({ ok: false, error: 'No se encontraron las cuentas seleccionadas.' });
+      }
+
+      const cuentasEncontradas = new Set(
+        pedidos.map((pedido) => Number(pedido.cuenta_id || pedido.id)).filter((id) => Number.isFinite(id))
+      );
+
+      const faltantes = cuentaIds.filter((id) => !cuentasEncontradas.has(id));
+      if (faltantes.length) {
+        await db.run('ROLLBACK');
+        return res.status(404).json({ ok: false, error: 'Una o más cuentas no existen o no pertenecen a tu negocio.' });
+      }
+
+      const tienePagados = pedidos.some((pedido) => pedido.estado === 'pagado');
+      if (tienePagados) {
+        await db.run('ROLLBACK');
+        return res
+          .status(400)
+          .json({ ok: false, error: 'No se pueden juntar cuentas que ya fueron cobradas.' });
+      }
+
+      const mesasDistintas = new Set(
+        pedidos
+          .map((pedido) => (pedido.mesa || '').toString().trim())
+          .filter((mesa) => mesa)
+      );
+      if (mesasDistintas.size > 1) {
+        await db.run('ROLLBACK');
+        return res
+          .status(400)
+          .json({ ok: false, error: 'No se pueden juntar cuentas de mesas diferentes.' });
+      }
+
+      await db.run(
+        `
+          UPDATE pedidos
+             SET cuenta_id = ?
+           WHERE negocio_id = ?
+             AND (cuenta_id IN (${placeholders}) OR id IN (${placeholders}))
+        `,
+        [cuentaDestino, negocioId, ...cuentaIds, ...cuentaIds]
+      );
+
+      const pedidoIds = Array.from(new Set((pedidos || []).map((pedido) => Number(pedido.id)).filter(Boolean)));
+      if (pedidoIds.length) {
+        const placeholdersPedidos = pedidoIds.map(() => '?').join(', ');
+        await db.run(
+          `UPDATE historial_cocina SET cuenta_id = ? WHERE pedido_id IN (${placeholdersPedidos}) AND negocio_id = ?`,
+          [cuentaDestino, ...pedidoIds, negocioId]
+        );
+        await db.run(
+          `UPDATE historial_bar SET cuenta_id = ? WHERE pedido_id IN (${placeholdersPedidos}) AND negocio_id = ?`,
+          [cuentaDestino, ...pedidoIds, negocioId]
+        );
+      }
+
+      await db.run('COMMIT');
+      return res.json({ ok: true, cuenta_id: cuentaDestino });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al juntar cuentas:', error?.message || error);
+      return res.status(500).json({ ok: false, error: 'No se pudo juntar las cuentas.' });
+    }
+  });
+});
+
 app.put('/api/cuentas/:id/cerrar', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const cuentaId = Number(req.params.id);
@@ -6050,7 +6695,16 @@ app.post('/api/bar/marcar-listo', (req, res) => {
     }
 
     const { rol, negocio_id: negocioFiltro } = req.query;
-    const filtroRol = rol && usuarioRolesPermitidos.includes(rol) ? rol : undefined;
+    const rolSolicitado = (rol || '').toString().trim();
+    const puedeVerSupervisores = puedeGestionarSupervisores(usuarioSesion);
+    const puedeVerEmpresa = esSuperAdmin(usuarioSesion);
+    if (rolSolicitado === 'supervisor' && !puedeVerSupervisores) {
+      return res.status(403).json({ error: 'Acceso restringido' });
+    }
+    if (rolSolicitado === 'empresa' && !puedeVerEmpresa) {
+      return res.status(403).json({ error: 'Acceso restringido' });
+    }
+    const filtroRol = rolSolicitado && usuarioRolesPermitidos.includes(rolSolicitado) ? rolSolicitado : undefined;
     const esSuper = esSuperAdmin(usuarioSesion);
     const negocioId = esSuper && negocioFiltro ? Number(negocioFiltro) || null : usuarioSesion.negocio_id;
     const incluirTodos = esSuper && !negocioFiltro;
@@ -6062,7 +6716,16 @@ app.post('/api/bar/marcar-listo', (req, res) => {
           negocioId,
           incluirTodosNegocios: incluirTodos,
         });
-        const usuarios = rows || [];
+        let usuarios = rows || [];
+        if (!puedeVerSupervisores) {
+          usuarios = usuarios.filter((usuario) => usuario.rol !== 'supervisor');
+        }
+        if (!puedeVerEmpresa) {
+          usuarios = usuarios.filter((usuario) => usuario.rol !== 'empresa');
+        }
+        if (esUsuarioSupervisor(usuarioSesion)) {
+          usuarios = usuarios.filter((usuario) => usuario.rol !== 'admin');
+        }
         if (!usuarios.length) {
           return res.json([]);
         }
@@ -6151,12 +6814,15 @@ app.get('/api/negocios', (req, res) => {
     const sql = `
       SELECT n.id, n.nombre, n.slug, n.rnc, n.telefono, n.direccion, n.color_primario, n.color_secundario,
              n.color_texto, n.color_header, n.color_boton_primario, n.color_boton_secundario, n.color_boton_peligro,
-             n.config_modulos, n.admin_principal_correo, n.admin_principal_usuario_id,
+             n.config_modulos, n.admin_principal_correo, n.admin_principal_usuario_id, n.empresa_id,
+             e.nombre AS empresa_nombre,
              u.usuario AS admin_principal_usuario,
              n.logo_url, n.titulo_sistema, n.activo, n.suspendido, n.deleted_at, n.motivo_suspension, n.updated_at,
              n.creado_en
         FROM negocios n
         LEFT JOIN usuarios u ON u.id = n.admin_principal_usuario_id
+        LEFT JOIN empresas e ON e.id = n.empresa_id
+       WHERE n.deleted_at IS NULL
        ORDER BY n.id ASC
     `;
     db.all(sql, [], (err, rows) => {
@@ -6199,10 +6865,16 @@ app.post('/api/negocios', (req, res) => {
     const telefono = normalizarCampoTexto(payload.telefono ?? payload.telefonoNegocio, null);
     const direccion = normalizarCampoTexto(payload.direccion ?? payload.direccionNegocio, null);
     const activo = payload.activo === 0 || payload.activo === false ? 0 : 1;
+    const empresaNombre = normalizarCampoTexto(payload.empresa_nombre ?? payload.empresaNombre, null);
+    const empresaIdProvided = payload.empresa_id ?? payload.empresaId;
     const adminPrincipalCorreo = normalizarCampoTexto(payload.adminPrincipalCorreo, null);
     const adminPrincipalUsuario =
       normalizarCampoTexto(payload.adminPrincipalUsuario, null) || normalizarCampoTexto(payload.admin_usuario, null);
     const adminPrincipalPassword = payload.adminPrincipalPassword || payload.admin_password || payload.adminPassword;
+    const tieneSucursales = normalizarFlag(
+      payload.tiene_sucursales ?? payload.tieneSucursales,
+      0
+    );
 
     if (!slug) {
       return res.status(400).json({ ok: false, error: 'El slug es obligatorio' });
@@ -6210,22 +6882,52 @@ app.post('/api/negocios', (req, res) => {
     if (!nombre) {
       return res.status(400).json({ ok: false, error: 'El nombre del negocio es obligatorio' });
     }
-
-    db.get('SELECT id FROM negocios WHERE slug = ? LIMIT 1', [slug], (slugErr, existente) => {
+    db.get(
+      'SELECT id, deleted_at FROM negocios WHERE slug = ? LIMIT 1',
+      [slug],
+      async (slugErr, existente) => {
       if (slugErr) {
         console.error('Error al validar slug de negocio:', slugErr.message);
         return res.status(500).json({ ok: false, error: 'No se pudo validar el slug' });
       }
 
-      if (existente) {
-        return res.status(400).json({ ok: false, error: 'Ya existe un negocio con ese slug' });
-      }
+        if (existente && !existente.deleted_at) {
+          return res.status(400).json({ ok: false, error: 'Ya existe un negocio con ese slug' });
+        }
+        if (existente && existente.deleted_at) {
+          const slugArchivado = `${slug}-eliminado-${existente.id}-${Date.now()}`;
+          try {
+            await db.run('UPDATE negocios SET slug = ? WHERE id = ?', [slugArchivado, existente.id]);
+          } catch (error) {
+            console.warn('No se pudo liberar slug de negocio eliminado:', error?.message || error);
+            return res.status(400).json({
+              ok: false,
+              error: 'Existe un negocio eliminado con ese slug. Cambia el slug o elimina definitivamente.',
+            });
+          }
+        }
 
+      const empresaNombreFinal = empresaNombre || nombre;
+      const empresaIdFinal =
+        (await resolverEmpresaId({ empresaId: empresaIdProvided, empresaNombre: empresaNombreFinal })) || 1;
+      if (tieneSucursales && !adminPrincipalUsuario) {
+        const empresaUsuarioExistente = await db.get(
+          `SELECT id
+             FROM usuarios
+            WHERE rol = 'empresa'
+              AND empresa_id = ?
+            LIMIT 1`,
+          [empresaIdFinal]
+        );
+        if (!empresaUsuarioExistente) {
+          return res.status(400).json({ ok: false, error: 'El usuario empresa es obligatorio' });
+        }
+      }
       const insertSql = `
         INSERT INTO negocios (nombre, slug, rnc, telefono, direccion, color_primario, color_secundario, color_texto, color_header,
                               color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos, admin_principal_correo,
-                              admin_principal_usuario_id, logo_url, titulo_sistema, activo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              admin_principal_usuario_id, logo_url, titulo_sistema, activo, empresa_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       const params = [
@@ -6247,6 +6949,7 @@ app.post('/api/negocios', (req, res) => {
         logoUrl,
         tituloSistema,
         activo,
+        empresaIdFinal,
       ];
 
       db.run(insertSql, params, async function (err) {
@@ -6276,6 +6979,8 @@ app.post('/api/negocios', (req, res) => {
           logo_url: logoUrl,
           titulo_sistema: tituloSistema,
           activo,
+          empresa_id: empresaIdFinal,
+          empresa_nombre: empresaNombreFinal,
           suspendido: 0,
           deleted_at: null,
           motivo_suspension: null,
@@ -6284,17 +6989,34 @@ app.post('/api/negocios', (req, res) => {
         const responsePayload = { ok: true, negocio: negocioCreado };
 
         try {
-          const adminInfo = await asegurarAdminPrincipalNegocio({
-            negocioId: negocioCreado.id,
-            negocioNombre: negocioCreado.nombre,
-            payload: {
-              adminPrincipalCorreo,
-              adminPrincipalUsuario,
-              adminPrincipalPassword,
-            },
-          });
-          if (adminInfo) {
-            responsePayload.adminPrincipal = adminInfo;
+          if (tieneSucursales) {
+            const empresaInfo = await asegurarUsuarioEmpresa({
+              empresaId: empresaIdFinal,
+              negocioId: negocioCreado.id,
+              negocioNombre: negocioCreado.nombre,
+              empresaNombre: empresaNombreFinal,
+              payload: {
+                adminPrincipalCorreo,
+                adminPrincipalUsuario,
+                adminPrincipalPassword,
+              },
+            });
+            if (empresaInfo) {
+              responsePayload.empresaUsuario = empresaInfo;
+            }
+          } else {
+            const adminInfo = await asegurarAdminPrincipalNegocio({
+              negocioId: negocioCreado.id,
+              negocioNombre: negocioCreado.nombre,
+              payload: {
+                adminPrincipalCorreo,
+                adminPrincipalUsuario,
+                adminPrincipalPassword,
+              },
+            });
+            if (adminInfo) {
+              responsePayload.adminPrincipal = adminInfo;
+            }
           }
         } catch (admErr) {
           if (admErr?.status === 400) {
@@ -6310,7 +7032,7 @@ app.post('/api/negocios', (req, res) => {
 });
 
 app.put('/api/negocios/:id', (req, res) => {
-  requireSuperAdmin(req, res, () => {
+  requireSuperAdmin(req, res, async () => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ ok: false, error: 'ID de negocio inválido' });
@@ -6341,6 +7063,8 @@ app.put('/api/negocios/:id', (req, res) => {
     const rncProvided = payload.rnc;
     const telefonoProvided = payload.telefono ?? payload.telefonoNegocio;
     const direccionProvided = payload.direccion ?? payload.direccionNegocio;
+    const empresaNombre = normalizarCampoTexto(payload.empresa_nombre ?? payload.empresaNombre, null);
+    const empresaIdProvided = payload.empresa_id ?? payload.empresaId;
 
     if (payload.nombre !== undefined || payload.titulo_sistema !== undefined || payload.tituloSistema !== undefined) {
       const nombre =
@@ -6423,6 +7147,16 @@ app.put('/api/negocios/:id', (req, res) => {
     if (direccionProvided !== undefined) {
       fields.push('direccion = ?');
       params.push(normalizarCampoTexto(direccionProvided, null));
+    }
+    if (empresaNombre !== null || empresaIdProvided !== undefined) {
+      const empresaIdFinal = await resolverEmpresaId({
+        empresaId: empresaIdProvided,
+        empresaNombre,
+      });
+      if (empresaIdFinal) {
+        fields.push('empresa_id = ?');
+        params.push(empresaIdFinal);
+      }
     }
     if (payload.activo !== undefined) {
       fields.push('activo = ?');
@@ -7197,16 +7931,32 @@ app.post('/api/admin/negocios/:id/impersonar', (req, res) => {
         return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
       }
 
-      const adminUsuario = await obtenerAdminPrincipalNegocio(id, negocio.admin_principal_usuario_id);
-      if (!adminUsuario) {
-        return res.status(404).json({ ok: false, error: 'Admin principal no encontrado' });
+      let usuarioImpersonar = await obtenerAdminPrincipalNegocio(id, negocio.admin_principal_usuario_id);
+      let rolImpersonado = 'admin';
+      if (!usuarioImpersonar) {
+        const supervisor = await db.get(
+          `SELECT id
+             FROM usuarios
+            WHERE negocio_id = ? AND rol = 'supervisor' AND activo = 1
+            ORDER BY id ASC
+            LIMIT 1`,
+          [id]
+        );
+        if (!supervisor?.id) {
+          return res.status(404).json({ ok: false, error: 'No hay usuario supervisor disponible' });
+        }
+        usuarioImpersonar = await usuariosRepo.findById(supervisor.id);
+        rolImpersonado = 'supervisor';
+      }
+      if (!usuarioImpersonar) {
+        return res.status(404).json({ ok: false, error: 'Usuario principal no encontrado' });
       }
 
       const token = crearTokenImpersonacion({
-        role: 'admin',
+        role: rolImpersonado,
         impersonated: true,
         negocio_id: id,
-        usuario_id: adminUsuario.id,
+        usuario_id: usuarioImpersonar.id,
         admin_id: usuarioSesion.id,
       });
 
@@ -7216,12 +7966,12 @@ app.post('/api/admin/negocios/:id/impersonar', (req, res) => {
       res.json({
         ok: true,
         token,
-        rol: 'admin',
-        usuario_id: adminUsuario.id,
-        usuario: adminUsuario.usuario,
-        nombre: adminUsuario.nombre,
+        rol: rolImpersonado,
+        usuario_id: usuarioImpersonar.id,
+        usuario: usuarioImpersonar.usuario,
+        nombre: usuarioImpersonar.nombre,
         negocio_id: id,
-        force_password_change: !!adminUsuario.force_password_change,
+        force_password_change: !!usuarioImpersonar.force_password_change,
         impersonated: true,
         expires_in: IMPERSONATION_TOKEN_TTL_SECONDS,
       });
@@ -7277,15 +8027,34 @@ app.post('/api/usuarios', (req, res) => {
     if (!usuarioRolesPermitidos.includes(rol)) {
       return res.status(400).json({ error: 'Rol inv\u00e1lido' });
     }
+    if (rol === 'supervisor' && !puedeGestionarSupervisores(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido' });
+    }
 
     const esSuper = esSuperAdmin(usuarioSesion);
     const negocioDestino =
       esSuper && negocio_id ? Number(negocio_id) || NEGOCIO_ID_DEFAULT : usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
     const flagSuperNuevo = esSuper ? !!es_super_admin : false;
+    let empresaDestino = null;
+    try {
+      const rowEmpresa = await db.get('SELECT empresa_id FROM negocios WHERE id = ? LIMIT 1', [negocioDestino]);
+      empresaDestino = rowEmpresa?.empresa_id ?? null;
+    } catch (error) {
+      console.warn('No se pudo obtener empresa del negocio para usuario:', error?.message || error);
+    }
     if (rol === 'bar') {
       const barActivo = await moduloActivoParaNegocio('bar', negocioDestino);
       if (!barActivo) {
         return res.status(403).json({ error: 'El m�dulo de bar est� desactivado para este negocio.' });
+      }
+    }
+    if (rol === 'supervisor') {
+      const existenteSupervisor = await db.get(
+        'SELECT id FROM usuarios WHERE rol = "supervisor" AND negocio_id = ? LIMIT 1',
+        [negocioDestino]
+      );
+      if (existenteSupervisor) {
+        return res.status(400).json({ error: 'Ya existe un supervisor asignado a esta sucursal.' });
       }
     }
 
@@ -7303,6 +8072,7 @@ app.post('/api/usuarios', (req, res) => {
         rol,
         activo,
         negocio_id: negocioDestino,
+        empresa_id: empresaDestino,
         es_super_admin: flagSuperNuevo,
       });
 
@@ -7349,6 +8119,10 @@ app.put('/api/usuarios/:id', (req, res) => {
         return res.status(404).json({ error: 'Usuario no encontrado' });
       }
 
+      if (!puedeGestionarRol(usuarioSesion, existente.rol)) {
+        return res.status(403).json({ error: 'Acceso restringido' });
+      }
+
       if (!esSuper && existente.negocio_id !== usuarioSesion.negocio_id) {
         return res.status(403).json({ error: 'Acceso restringido' });
       }
@@ -7359,15 +8133,35 @@ app.put('/api/usuarios/:id', (req, res) => {
       }
       const negocioDestino = esSuper && negocio_id !== undefined ? negocio_id || NEGOCIO_ID_DEFAULT : existente.negocio_id;
       const rolDestino = rol || existente.rol;
+      if (!puedeGestionarRol(usuarioSesion, rolDestino)) {
+        return res.status(403).json({ error: 'Acceso restringido' });
+      }
       if (rolDestino === 'bar') {
         const barActivo = await moduloActivoParaNegocio('bar', negocioDestino);
         if (!barActivo) {
           return res.status(403).json({ error: 'El m�dulo de bar est� desactivado para este negocio.' });
         }
       }
+      if (rolDestino === 'supervisor') {
+        const existenteSupervisor = await db.get(
+          'SELECT id FROM usuarios WHERE rol = "supervisor" AND negocio_id = ? AND id != ? LIMIT 1',
+          [negocioDestino, existente.id]
+        );
+        if (existenteSupervisor) {
+          return res.status(400).json({ error: 'Ya existe un supervisor asignado a esta sucursal.' });
+        }
+      }
 
       if (esSuper && negocio_id !== undefined) {
         payload.negocio_id = negocio_id || NEGOCIO_ID_DEFAULT;
+        try {
+          const rowEmpresa = await db.get('SELECT empresa_id FROM negocios WHERE id = ? LIMIT 1', [
+            payload.negocio_id,
+          ]);
+          payload.empresa_id = rowEmpresa?.empresa_id ?? null;
+        } catch (error) {
+          console.warn('No se pudo actualizar empresa_id del usuario:', error?.message || error);
+        }
       }
 
       if (esSuper && es_super_admin !== undefined) {
@@ -7418,6 +8212,10 @@ app.put('/api/usuarios/:id/activar', (req, res) => {
         return res.status(400).json({ error: 'No se puede desactivar el usuario administrador' });
       }
 
+      if (!puedeGestionarRol(usuarioSesion, existente.rol)) {
+        return res.status(403).json({ error: 'Acceso restringido' });
+      }
+
       if (!esSuper && existente.negocio_id !== usuarioSesion.negocio_id) {
         return res.status(403).json({ error: 'Acceso restringido' });
       }
@@ -7455,6 +8253,10 @@ app.delete('/api/usuarios/:id', (req, res) => {
       const existente = await usuariosRepo.findById(usuarioId);
       if (!existente || existente.rol === 'admin') {
         return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+
+      if (!puedeGestionarRol(usuarioSesion, existente.rol)) {
+        return res.status(403).json({ error: 'Acceso restringido' });
       }
 
       if (!esSuper && existente.negocio_id !== usuarioSesion.negocio_id) {
@@ -7509,6 +8311,10 @@ app.post('/api/usuarios/:id/cerrar-sesiones', (req, res) => {
       const existente = await usuariosRepo.findById(usuarioId);
       if (!existente) {
         return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+      }
+
+      if (!puedeGestionarRol(usuarioSesion, existente.rol)) {
+        return res.status(403).json({ ok: false, error: 'Acceso restringido' });
       }
 
       if (!esSuper && existente.negocio_id !== usuarioSesion.negocio_id) {
@@ -7698,6 +8504,403 @@ app.put('/api/clientes/:id/estado', (req, res) => {
         res.json({ ok: true });
       }
     );
+  });
+});
+
+// --- Empresa: gestion de sucursales ---
+app.get('/api/empresa/negocios', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    try {
+      const rows = await db.all(
+        `SELECT id, nombre, slug, activo, suspendido, deleted_at, empresa_id
+           FROM negocios
+          WHERE empresa_id = ?
+          ORDER BY nombre ASC`,
+        [empresaId]
+      );
+      res.json({ ok: true, negocios: rows || [] });
+    } catch (error) {
+      console.error('Error al listar sucursales de empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener las sucursales' });
+    }
+  });
+});
+
+app.get('/api/empresa/analytics/overview', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const rango = normalizarRangoAnalisis(req.query?.from ?? req.query?.desde, req.query?.to ?? req.query?.hasta);
+    try {
+      const negocios = await db.all(
+        `SELECT id, nombre, slug
+           FROM negocios
+          WHERE empresa_id = ?
+            AND deleted_at IS NULL`,
+        [empresaId]
+      );
+      const ids = (negocios || []).map((n) => Number(n.id)).filter((id) => Number.isFinite(id));
+      if (!ids.length) {
+        return res.json({
+          ok: true,
+          rango,
+          resumen: {
+            ventas_total: 0,
+            ventas_count: 0,
+            gastos_total: 0,
+            ganancia_neta: 0,
+            ticket_promedio: 0,
+          },
+          sucursales: [],
+        });
+      }
+      const placeholders = ids.map(() => '?').join(', ');
+      const fechaBaseRaw = 'COALESCE(fecha_factura, fecha_cierre, fecha_creacion)';
+      const fechaBase = `DATE(${fechaBaseRaw})`;
+      const paramsBase = [...ids, rango.desde, rango.hasta];
+
+      const supervisoresRows = await db.all(
+        `SELECT u.id, u.nombre, u.usuario, u.negocio_id
+           FROM usuarios u
+          WHERE u.rol = 'supervisor'
+            AND u.activo = 1
+            AND u.empresa_id = ?`,
+        [empresaId]
+      );
+
+      const ventasRows = await db.all(
+        `
+          SELECT negocio_id,
+                 COUNT(DISTINCT COALESCE(cuenta_id, id)) AS total_ventas,
+                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
+            FROM pedidos
+           WHERE estado = 'pagado'
+             AND negocio_id IN (${placeholders})
+             AND ${fechaBase} BETWEEN ? AND ?
+           GROUP BY negocio_id
+        `,
+        paramsBase
+      );
+
+      const gastosRows = await db.all(
+        `
+          SELECT negocio_id, SUM(monto) AS total
+            FROM gastos
+           WHERE negocio_id IN (${placeholders})
+             AND DATE(fecha) BETWEEN ? AND ?
+           GROUP BY negocio_id
+        `,
+        paramsBase
+      );
+
+      const ventasMap = new Map((ventasRows || []).map((row) => [Number(row.negocio_id), row]));
+      const gastosMap = new Map((gastosRows || []).map((row) => [Number(row.negocio_id), row]));
+      let totalVentas = 0;
+      let totalGastos = 0;
+      let totalVentasCount = 0;
+      (negocios || []).forEach((neg) => {
+        const ventasRow = ventasMap.get(Number(neg.id)) || {};
+        const gastosRow = gastosMap.get(Number(neg.id)) || {};
+        const ventasTotal = Number(ventasRow.total) || 0;
+        const ventasCount = Number(ventasRow.total_ventas) || 0;
+        const gastosTotal = Number(gastosRow.total) || 0;
+        totalVentas += ventasTotal;
+        totalGastos += gastosTotal;
+        totalVentasCount += ventasCount;
+      });
+
+      const supervisorMap = new Map();
+      (supervisoresRows || []).forEach((row) => {
+        const negocioId = Number(row.negocio_id);
+        if (!Number.isFinite(negocioId)) return;
+        if (!supervisorMap.has(negocioId)) {
+          supervisorMap.set(negocioId, row);
+        }
+      });
+
+      const sucursales = (negocios || []).map((neg) => {
+        const negocioId = Number(neg.id);
+        const ventasRow = ventasMap.get(negocioId) || {};
+        const gastosRow = gastosMap.get(negocioId) || {};
+        const ventasTotal = Number(ventasRow.total) || 0;
+        const ventasCount = Number(ventasRow.total_ventas) || 0;
+        const gastosTotal = Number(gastosRow.total) || 0;
+        const gananciaNeta = Number((ventasTotal - gastosTotal).toFixed(2));
+        const ticketPromedio = ventasCount > 0 ? Number((ventasTotal / ventasCount).toFixed(2)) : 0;
+        const supervisor = supervisorMap.get(negocioId) || null;
+
+        return {
+          id: negocioId,
+          nombre: neg.nombre,
+          slug: neg.slug,
+          sucursal_nombre: neg.nombre,
+          sucursal_slug: neg.slug,
+          supervisor_id: supervisor?.id || null,
+          supervisor_nombre: supervisor?.nombre || null,
+          supervisor_usuario: supervisor?.usuario || null,
+          ventas_total: ventasTotal,
+          ventas_count: ventasCount,
+          gastos_total: gastosTotal,
+          ganancia_neta: gananciaNeta,
+          ticket_promedio: ticketPromedio,
+        };
+      });
+
+      const resumen = {
+        ventas_total: Number(totalVentas.toFixed(2)),
+        ventas_count: totalVentasCount,
+        gastos_total: Number(totalGastos.toFixed(2)),
+        ganancia_neta: Number((totalVentas - totalGastos).toFixed(2)),
+        ticket_promedio: totalVentasCount > 0 ? Number((totalVentas / totalVentasCount).toFixed(2)) : 0,
+      };
+
+      res.json({ ok: true, rango, resumen, sucursales });
+    } catch (error) {
+      console.error('Error al generar analisis empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo generar el analisis de la empresa' });
+    }
+  });
+});
+
+app.post('/api/empresa/negocios/:id/supervisor', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!puedeGestionarSupervisores(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido' });
+    }
+
+    const negocioId = Number(req.params.id);
+    if (!Number.isFinite(negocioId) || negocioId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Sucursal invalida' });
+    }
+
+    const empresaIdSesion = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaIdSesion && !esSuperAdmin(usuarioSesion)) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const nombre = normalizarCampoTexto(req.body?.nombre, null);
+    const usuario = normalizarCampoTexto(req.body?.usuario, null);
+    const password = (req.body?.password || '').toString().trim();
+
+    if (!nombre || !usuario || !password) {
+      return res.status(400).json({ ok: false, error: 'Nombre, usuario y contrasena son obligatorios' });
+    }
+
+    try {
+      const negocio = await db.get(
+        'SELECT id, empresa_id, deleted_at FROM negocios WHERE id = ? LIMIT 1',
+        [negocioId]
+      );
+      if (!negocio || negocio.deleted_at) {
+        return res.status(404).json({ ok: false, error: 'Sucursal no encontrada' });
+      }
+      if (!esSuperAdmin(usuarioSesion) && Number(negocio.empresa_id) !== Number(empresaIdSesion)) {
+        return res.status(403).json({ ok: false, error: 'Acceso restringido' });
+      }
+
+      const existenteSupervisor = await db.get(
+        'SELECT id FROM usuarios WHERE rol = "supervisor" AND negocio_id = ? LIMIT 1',
+        [negocioId]
+      );
+      if (existenteSupervisor) {
+        return res.status(400).json({ ok: false, error: 'Ya existe un supervisor asignado a esta sucursal.' });
+      }
+
+      const existenteUsuario = await usuariosRepo.findByUsuario(usuario);
+      if (existenteUsuario) {
+        return res.status(400).json({ ok: false, error: 'Ya existe un usuario con ese nombre de usuario.' });
+      }
+
+      const passwordHash = await hashPasswordIfNeeded(password);
+      const creado = await usuariosRepo.create({
+        nombre,
+        usuario,
+        password: passwordHash,
+        rol: 'supervisor',
+        activo: 1,
+        negocio_id: negocioId,
+        empresa_id: negocio.empresa_id ?? null,
+        es_super_admin: 0,
+      });
+
+      res.status(201).json({
+        ok: true,
+        supervisor: {
+          id: creado.id,
+          nombre: creado.nombre,
+          usuario: creado.usuario,
+          rol: creado.rol,
+          negocio_id: creado.negocio_id,
+        },
+      });
+    } catch (error) {
+      console.error('Error al crear supervisor:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo crear el supervisor' });
+    }
+  });
+});
+
+app.post('/api/empresa/negocios/:id/impersonar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      if (negocio.deleted_at) {
+        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
+      }
+      if (!esSuperAdmin(usuarioSesion)) {
+        const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+        if (!empresaId || Number(negocio.empresa_id) !== Number(empresaId)) {
+          return res.status(403).json({ ok: false, error: 'Acceso restringido a esta sucursal.' });
+        }
+      }
+
+      let usuarioImpersonar = await obtenerAdminPrincipalNegocio(id, negocio.admin_principal_usuario_id);
+      let rolImpersonado = 'admin';
+      if (!usuarioImpersonar) {
+        const supervisor = await db.get(
+          `SELECT id
+             FROM usuarios
+            WHERE negocio_id = ? AND rol = 'supervisor' AND activo = 1
+            ORDER BY id ASC
+            LIMIT 1`,
+          [id]
+        );
+        if (!supervisor?.id) {
+          return res.status(404).json({ ok: false, error: 'No hay usuario supervisor disponible' });
+        }
+        usuarioImpersonar = await usuariosRepo.findById(supervisor.id);
+        rolImpersonado = 'supervisor';
+      }
+      if (!usuarioImpersonar) {
+        return res.status(404).json({ ok: false, error: 'Usuario principal no encontrado' });
+      }
+
+      const token = crearTokenImpersonacion({
+        role: rolImpersonado,
+        impersonated: true,
+        negocio_id: id,
+        usuario_id: usuarioImpersonar.id,
+        admin_id: usuarioSesion.id,
+        impersonated_by_role: usuarioSesion.rol,
+      });
+
+      res.json({
+        ok: true,
+        token,
+        rol: rolImpersonado,
+        usuario_id: usuarioImpersonar.id,
+        usuario: usuarioImpersonar.usuario,
+        nombre: usuarioImpersonar.nombre,
+        negocio_id: id,
+        force_password_change: !!usuarioImpersonar.force_password_change,
+        impersonated: true,
+        impersonated_by_role: usuarioSesion.rol,
+        expires_in: IMPERSONATION_TOKEN_TTL_SECONDS,
+      });
+    } catch (error) {
+      console.error('Error impersonando negocio (empresa):', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo impersonar el negocio' });
+    }
+  });
+});
+
+app.post('/api/admin/empresas/:id/usuarios', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
+    const empresaId = Number(req.params.id);
+    if (!Number.isInteger(empresaId) || empresaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Empresa invalida' });
+    }
+
+    const { nombre, usuario, password, negocio_id } = req.body || {};
+    const usuarioNormalizado = (usuario || '').trim();
+    if (!nombre || !usuarioNormalizado || !password) {
+      return res.status(400).json({ ok: false, error: 'Nombre, usuario y contraseña son obligatorios' });
+    }
+
+    try {
+      const empresa = await db.get('SELECT id, nombre FROM empresas WHERE id = ? LIMIT 1', [empresaId]);
+      if (!empresa) {
+        return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+      }
+
+      let negocioDestino = null;
+      if (negocio_id) {
+        const negocioRow = await db.get(
+          'SELECT id FROM negocios WHERE id = ? AND empresa_id = ? LIMIT 1',
+          [negocio_id, empresaId]
+        );
+        negocioDestino = negocioRow?.id || null;
+      }
+      if (!negocioDestino) {
+        const negocioRow = await db.get(
+          'SELECT id FROM negocios WHERE empresa_id = ? AND deleted_at IS NULL ORDER BY id ASC LIMIT 1',
+          [empresaId]
+        );
+        negocioDestino = negocioRow?.id || null;
+      }
+      if (!negocioDestino) {
+        return res.status(400).json({ ok: false, error: 'La empresa no tiene sucursales registradas' });
+      }
+
+      const existente = await usuariosRepo.findByUsuario(usuarioNormalizado);
+      if (existente) {
+        return res.status(400).json({ ok: false, error: 'Ya existe un usuario con ese nombre de usuario.' });
+      }
+
+      const passwordHash = await hashPasswordIfNeeded(password);
+      const creado = await usuariosRepo.create({
+        nombre,
+        usuario: usuarioNormalizado,
+        password: passwordHash,
+        rol: 'empresa',
+        activo: 1,
+        negocio_id: negocioDestino,
+        empresa_id: empresaId,
+      });
+
+      if (!creado) {
+        return res.status(500).json({ ok: false, error: 'No se pudo crear el usuario empresa' });
+      }
+
+      res.status(201).json({
+        ok: true,
+        usuario: {
+          id: creado.id,
+          nombre: creado.nombre,
+          usuario: creado.usuario,
+          rol: creado.rol,
+          empresa_id: empresaId,
+          negocio_id: negocioDestino,
+        },
+      });
+    } catch (error) {
+      console.error('Error al crear usuario empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo crear el usuario empresa' });
+    }
   });
 });
 
@@ -8801,7 +10004,7 @@ app.put('/api/productos/:id', (req, res) => {
               tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad
          FROM productos WHERE id = ? AND negocio_id = ?`,
       [id, usuarioSesion.negocio_id],
-      (productoErr, productoActual) => {
+      async (productoErr, productoActual) => {
         if (productoErr) {
           console.error('Error al obtener producto para actualizar:', productoErr.message);
           return res.status(500).json({ error: 'Error al actualizar producto' });
@@ -8851,6 +10054,19 @@ app.put('/api/productos/:id', (req, res) => {
         if (stockIndefinido) {
           stockValor = null;
           stockProporcionado = true;
+        }
+
+        const stockIndefinidoActual = Number(productoActual.stock_indefinido) === 1;
+        const stockActual = productoActual.stock;
+        const stockNuevo = stockIndefinido ? null : stockValor;
+        const cambioStock =
+          stockIndefinido !== stockIndefinidoActual ||
+          (!stockIndefinido && Number(stockNuevo) !== Number(stockActual));
+        if (esUsuarioSupervisor(usuarioSesion) && cambioStock) {
+          const okPassword = await validarPasswordUsuario(usuarioSesion.id, req.body?.password);
+          if (!okPassword) {
+            return res.status(403).json({ error: 'Credenciales inválidas' });
+          }
         }
 
         let costoBaseValor = null;
@@ -9191,7 +10407,10 @@ app.put('/api/productos/:id/stock', (req, res) => {
     const stockEntrada = req.body.stock;
     const negocioId = usuarioSesion.negocio_id;
 
-    db.get('SELECT stock_indefinido FROM productos WHERE id = ? AND negocio_id = ?', [id, negocioId], (err, producto) => {
+    db.get(
+      'SELECT stock_indefinido FROM productos WHERE id = ? AND negocio_id = ?',
+      [id, negocioId],
+      async (err, producto) => {
       if (err) {
         console.error('Error al validar producto:', err.message);
         return res.status(500).json({ error: 'Error al actualizar stock' });
@@ -9199,6 +10418,13 @@ app.put('/api/productos/:id/stock', (req, res) => {
 
       if (!producto) {
         return res.status(404).json({ error: 'Producto no encontrado' });
+      }
+
+      if (esUsuarioSupervisor(usuarioSesion)) {
+        const okPassword = await validarPasswordUsuario(usuarioSesion.id, req.body?.password);
+        if (!okPassword) {
+          return res.status(403).json({ error: 'Credenciales inválidas' });
+        }
       }
 
       if (esStockIndefinido(producto)) {
@@ -9987,7 +11213,8 @@ app.post('/api/inventario/compras', (req, res) => {
         compra_id: compra606Id,
         gasto_id: gastoId,
         salida_id: salidaId,
-      });
+      }
+    );
     } catch (error) {
       await db.run('ROLLBACK').catch(() => {});
       console.error('Error al registrar compra de inventario:', error?.message || error);
@@ -13805,10 +15032,27 @@ app.post('/api/login', async (req, res) => {
     return res.status(403).json({ ok: false, error: 'El usuario esta inactivo' });
   }
 
-  const negocioId = row.negocio_id || NEGOCIO_ID_DEFAULT;
+  let negocioId = row.negocio_id || NEGOCIO_ID_DEFAULT;
   const passwordValido = await verificarPassword(password, row.password);
   if (!passwordValido) {
     return res.status(400).json({ ok: false, error: 'Contrasena incorrecta' });
+  }
+
+  if (row.rol === 'empresa') {
+    const empresaId = row.empresa_id;
+    if (!empresaId) {
+      return res.status(403).json({ ok: false, error: 'El usuario empresa no tiene empresa asignada.' });
+    }
+    if (!row.negocio_id) {
+      const negocioEmpresa = await db.get(
+        'SELECT id FROM negocios WHERE empresa_id = ? AND deleted_at IS NULL AND activo = 1 LIMIT 1',
+        [empresaId]
+      );
+      if (!negocioEmpresa?.id) {
+        return res.status(403).json({ ok: false, error: 'No hay sucursales activas para esta empresa.' });
+      }
+      negocioId = negocioEmpresa.id;
+    }
   }
 
   const estadoNegocio = await validarEstadoNegocio(negocioId);
@@ -13848,6 +15092,7 @@ app.post('/api/login', async (req, res) => {
             nombre: row.nombre,
             usuario: row.usuario,
             negocio_id: negocioId,
+            empresa_id: row.empresa_id ?? null,
             es_super_admin: esSuperAdminUsuario,
             activo: row.activo,
             force_password_change: !!row.force_password_change,
@@ -14104,6 +15349,8 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`Servidor iniciado en http://${HOST}:${PORT}`);
+migrationsReady.finally(() => {
+  server.listen(PORT, HOST, () => {
+    console.log(`Servidor iniciado en http://${HOST}:${PORT}`);
+  });
 });

@@ -258,6 +258,7 @@ let paginaHistorialCocina = 1;
 const HIST_COCINA_PAGE_SIZE = 50;
 
 let productos = [];
+let productoEdicionBase = null;
 let compras = [];
 let comprasInventario = [];
 let gastos = [];
@@ -284,6 +285,7 @@ const modalEliminarPassword = document.getElementById('admin-eliminar-password')
 const modalEliminarCancelar = document.getElementById('admin-eliminar-cancelar');
 const modalEliminarConfirmar = document.getElementById('admin-eliminar-confirmar');
 const modalEliminarMensaje = document.getElementById('admin-eliminar-mensaje');
+const btnEmpresaPanel = document.getElementById('kanm-empresa-panel');
 
 const sessionApi = window.KANMSession;
 let usuarioActual = null;
@@ -306,8 +308,34 @@ try {
 
 let modalEliminarEstado = null;
 const authApi = window.kanmAuth;
-const puedeImprimirCierres = () => {
+const esRolAdmin = (rol) => rol === 'admin' || rol === 'supervisor' || rol === 'empresa';
+const esSupervisor = () => usuarioActual?.rol === 'supervisor';
+const esImpersonacionEmpresa = () =>
+  Boolean(
+    usuarioActual?.impersonated &&
+      (usuarioActual?.impersonated_by_role === 'empresa' || usuarioActual?.impersonatedByRole === 'empresa')
+  );
+const puedeGestionarSupervisores = () => {
+  if (usuarioActual?.es_super_admin || usuarioActual?.esSuperAdmin) return true;
   if (usuarioActual?.rol === 'admin') return true;
+  if (usuarioActual?.rol === 'empresa') return true;
+  if (esImpersonacionEmpresa()) return true;
+  return false;
+};
+const EMPRESA_BACKUP_KEY = 'kanmEmpresaBackup';
+const solicitarPasswordSupervisor = (motivo = 'continuar') => {
+  if (!esSupervisor()) return null;
+  const texto = `Confirma tu contraseña para ${motivo}.`;
+  const password = window.prompt(texto);
+  const limpio = password ? password.trim() : '';
+  return limpio || null;
+};
+const puedeVerPanelEmpresa = () => {
+  if (usuarioActual?.es_super_admin || usuarioActual?.esSuperAdmin) return true;
+  return usuarioActual?.rol === 'admin' || usuarioActual?.rol === 'empresa';
+};
+const puedeImprimirCierres = () => {
+  if (esRolAdmin(usuarioActual?.rol)) return true;
   if (usuarioActual?.es_super_admin || usuarioActual?.esSuperAdmin) return true;
   return Boolean(authApi?.isSuperAdmin?.());
 };
@@ -352,6 +380,60 @@ const fetchJsonAutorizado = async (url, options = {}) => {
     authApi?.handleUnauthorized?.();
   }
   return response;
+};
+
+const restaurarSesionEmpresa = () => {
+  const sessionApi = window.KANMSession;
+  try {
+    const raw = localStorage.getItem(EMPRESA_BACKUP_KEY);
+    if (!raw) return false;
+    const sesion = JSON.parse(raw);
+    if (!sesion) return false;
+    if (sessionApi && typeof sessionApi.setUser === 'function') {
+      sessionApi.setUser(sesion);
+    } else {
+      sessionStorage.setItem('kanmUser', JSON.stringify(sesion));
+      localStorage.setItem('sesionApp', JSON.stringify(sesion));
+    }
+    window.APP_SESION = sesion;
+    localStorage.removeItem(EMPRESA_BACKUP_KEY);
+    return true;
+  } catch (error) {
+    console.warn('No se pudo restaurar sesion empresa:', error);
+    return false;
+  }
+};
+
+const mostrarBotonVolverEmpresa = () => {
+  if (!usuarioActual?.impersonated) return;
+  const raw = localStorage.getItem(EMPRESA_BACKUP_KEY);
+  if (!raw) return;
+  const headerActions = document.querySelector('.kanm-header-actions');
+  if (!headerActions) return;
+  if (document.getElementById('kanm-volver-empresa')) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = 'kanm-volver-empresa';
+  btn.className = 'kanm-button ghost';
+  btn.textContent = 'Volver a empresa';
+  btn.addEventListener('click', () => {
+    if (restaurarSesionEmpresa()) {
+      window.location.href = '/empresa.html';
+    }
+  });
+  headerActions.prepend(btn);
+};
+
+const configurarBotonPanelEmpresa = () => {
+  if (!btnEmpresaPanel) return;
+  if (!puedeVerPanelEmpresa()) {
+    btnEmpresaPanel.hidden = true;
+    return;
+  }
+  btnEmpresaPanel.hidden = false;
+  btnEmpresaPanel.addEventListener('click', () => {
+    window.location.href = '/empresa.html';
+  });
 };
 
 const parseMoneyValueAdmin = (input, { fallback = 0, allowEmpty = true } = {}) => {
@@ -620,7 +702,7 @@ const ocultarTabsNoPermitidos = () => {
       return;
     }
 
-    if (usuarioActual?.rol === 'admin') {
+    if (esRolAdmin(usuarioActual?.rol)) {
       return;
     }
 
@@ -636,7 +718,7 @@ const ocultarTabsNoPermitidos = () => {
       return;
     }
 
-    if (usuarioActual?.rol === 'admin') {
+    if (esRolAdmin(usuarioActual?.rol)) {
       return;
     }
 
@@ -650,7 +732,7 @@ const obtenerTabInicialAdmin = () => {
   if (typeof window !== 'undefined' && window.location?.pathname?.includes('/admin/cotizaciones')) {
     return 'cotizaciones';
   }
-  if (usuarioActual?.rol && usuarioActual.rol !== 'admin') {
+  if (usuarioActual?.rol && !esRolAdmin(usuarioActual.rol)) {
     return 'cotizaciones';
   }
   return 'productos';
@@ -817,6 +899,7 @@ const limpiarFormularioProducto = () => {
   refrescarUiInsumo(true);
   limpiarRecetaUI();
   recetaProductoIdActivo = null;
+  productoEdicionBase = null;
   actualizarEstadoRecetaUI();
 };
 
@@ -1245,6 +1328,12 @@ const seleccionarProductoEdicion = (producto) => {
   const stockEsIndefinido = esProductoStockIndefinido(producto);
   const actualizaCostoCompras = Number(producto.actualiza_costo_con_compras ?? 1) === 1;
   const esInsumo = esProductoInsumo(producto);
+
+  productoEdicionBase = {
+    id: producto.id,
+    stock: producto.stock,
+    stock_indefinido: producto.stock_indefinido,
+  };
 
   if (inputProdId) inputProdId.value = producto.id;
   if (botonProdCancelar) botonProdCancelar.hidden = false;
@@ -1875,6 +1964,29 @@ const actualizarProducto = async (
     body.stock = stockEnviar;
   }
 
+  if (esSupervisor()) {
+    let cambioStock = true;
+    if (productoEdicionBase) {
+      const baseIndef = Number(productoEdicionBase.stock_indefinido) === 1;
+      if (baseIndef !== stockIndefinido) {
+        cambioStock = true;
+      } else if (!stockIndefinido) {
+        const baseStock = Number(productoEdicionBase.stock ?? 0);
+        const nuevoStock = Number(stock ?? 0);
+        cambioStock = baseStock !== nuevoStock;
+      } else {
+        cambioStock = false;
+      }
+    }
+    if (cambioStock) {
+      const password = solicitarPasswordSupervisor('modificar el stock');
+      if (!password) {
+        throw new Error('Se requiere contraseña para actualizar el stock.');
+      }
+      body.password = password;
+    }
+  }
+
   const respuesta = await fetchJsonAutorizado(`/api/productos/${id}`, {
     method: 'PUT',
     body: JSON.stringify(body),
@@ -2317,7 +2429,41 @@ const guardarConfiguracionFactura = async () => {
 /* =====================
  * GestiÃ³n de usuarios
  * ===================== */
-const ROLES_PERMITIDOS = ['mesera', 'cocina', 'bar', 'caja', 'vendedor'];
+const ROLES_PERMITIDOS_BASE = ['mesera', 'cocina', 'bar', 'caja', 'vendedor', 'supervisor'];
+const obtenerRolesPermitidos = () =>
+  puedeGestionarSupervisores()
+    ? ROLES_PERMITIDOS_BASE
+    : ROLES_PERMITIDOS_BASE.filter((rol) => rol !== 'supervisor');
+
+const ajustarRolesUsuariosUI = () => {
+  const puedeSupervisores = puedeGestionarSupervisores();
+  const limpiarOpcion = (select, value) => {
+    if (!select) return;
+    const opcion = select.querySelector(`option[value="${value}"]`);
+    if (opcion) {
+      if (select.value === value) {
+        select.value = 'mesera';
+      }
+      opcion.remove();
+    }
+  };
+  const asegurarOpcion = (select, value, label) => {
+    if (!select) return;
+    if (select.querySelector(`option[value="${value}"]`)) return;
+    const opcion = document.createElement('option');
+    opcion.value = value;
+    opcion.textContent = label;
+    select.appendChild(opcion);
+  };
+
+  if (puedeSupervisores) {
+    asegurarOpcion(usuarioRolInput, 'supervisor', 'Supervisor');
+    asegurarOpcion(usuariosRolSelect, 'supervisor', 'Supervisor');
+  } else {
+    limpiarOpcion(usuarioRolInput, 'supervisor');
+    limpiarOpcion(usuariosRolSelect, 'supervisor');
+  }
+};
 
 const limpiarFormularioUsuario = () => {
   usuarioForm?.reset();
@@ -2482,8 +2628,16 @@ const validarFormularioUsuario = ({ nombre, usuario, password, rol }, esEdicion)
     return false;
   }
 
-  if (!ROLES_PERMITIDOS.includes(rol)) {
-    setMessage(usuarioFormMensaje, 'Selecciona un rol valido (mesera, cocina, bar, caja o mostrador).', 'error');
+  const rolesPermitidos = obtenerRolesPermitidos();
+  if (!rolesPermitidos.includes(rol)) {
+    const textoRoles = rolesPermitidos.includes('supervisor')
+      ? 'mesera, cocina, bar, caja, mostrador o supervisor'
+      : 'mesera, cocina, bar, caja o mostrador';
+    setMessage(
+      usuarioFormMensaje,
+      `Selecciona un rol valido (${textoRoles}).`,
+      'error'
+    );
     return false;
   }
 
@@ -4266,6 +4420,14 @@ const renderAnalisisAvanzado = (data) => {
 };
 
 const guardarCapitalInicialAnalisis = async () => {
+  let passwordSupervisor = null;
+  if (esSupervisor()) {
+    passwordSupervisor = solicitarPasswordSupervisor('configurar el capital inicial');
+    if (!passwordSupervisor) {
+      setMessage(analisisCapitalMensaje, 'Se requiere contraseña para guardar el capital inicial.', 'warning');
+      return;
+    }
+  }
   const periodoInicio = analisisCapitalDesdeInput?.value || analisisDesdeInput?.value || '';
   const periodoFin = analisisCapitalHastaInput?.value || analisisHastaInput?.value || '';
   const cajaInicial = parseMoneyValueAdmin(analisisCapitalCajaInput, { allowEmpty: false });
@@ -4299,6 +4461,9 @@ const guardarCapitalInicialAnalisis = async () => {
   };
   if (costoValor !== null) {
     payload.costo_estimado_cogs = Number(costoValor.toFixed(2));
+  }
+  if (passwordSupervisor) {
+    payload.password = passwordSupervisor;
   }
 
   try {
@@ -4885,6 +5050,9 @@ const procesarSyncGlobal = (valor) => {
  * ===================== */
 let KANM_NEGOCIOS_CACHE = [];
 let KANM_NEGOCIOS_CARGADO = false;
+let empresaUsuarioEstado = null;
+let EMPRESAS_TEMPLATE_CACHE = [];
+let EMPRESAS_TEMPLATE_MAP = new Map();
 const DEFAULT_CONFIG_MODULOS = {
   admin: true,
   mesera: true,
@@ -4919,6 +5087,10 @@ const getNegociosDom = () => ({
   inputId: document.getElementById('kanm-negocios-id'),
   inputNombre: document.getElementById('kanm-negocios-nombre'),
   inputSlug: document.getElementById('kanm-negocios-slug'),
+  inputEmpresaNombre: document.getElementById('kanm-negocios-empresa-nombre'),
+  selectEmpresa: document.getElementById('kanm-negocios-empresa-select'),
+  selectEmpresaGroup: document.getElementById('kanm-negocios-empresa-select-group'),
+  chkTieneSucursales: document.getElementById('kanm-negocios-tiene-sucursales'),
   inputColorPrimario: document.getElementById('kanm-negocios-color-primario'),
   inputColorSecundario: document.getElementById('kanm-negocios-color-secundario'),
   inputColorTexto: document.getElementById('kanm-negocios-color-texto'),
@@ -4937,9 +5109,27 @@ const getNegociosDom = () => ({
   inputAdminUsuario: document.getElementById('kanm-negocios-admin-usuario'),
   chkCambiarPassword: document.getElementById('kanm-negocios-cambiar-password'),
   inputAdminPassword: document.getElementById('kanm-negocios-admin-password'),
+  adminTitulo: document.getElementById('kanm-negocios-admin-titulo'),
+  adminCorreoLabel: document.getElementById('kanm-negocios-admin-correo-label'),
+  adminUsuarioLabel: document.getElementById('kanm-negocios-admin-usuario-label'),
+  adminUsuarioHelp: document.getElementById('kanm-negocios-admin-usuario-help'),
+  adminPasswordLabel: document.getElementById('kanm-negocios-admin-password-label'),
+  adminPasswordHelp: document.getElementById('kanm-negocios-admin-password-help'),
   inputLogoUrl: document.getElementById('kanm-negocios-logo-url'),
   btnCerrar: document.getElementById('kanm-negocios-btn-cerrar'),
   mensajeForm: document.getElementById('kanm-negocios-form-mensaje'),
+});
+
+const getEmpresaUsuarioDom = () => ({
+  modal: document.getElementById('empresa-usuario-modal'),
+  titulo: document.getElementById('empresa-usuario-titulo'),
+  subtitulo: document.getElementById('empresa-usuario-subtitulo'),
+  inputNombre: document.getElementById('empresa-usuario-nombre'),
+  inputUsuario: document.getElementById('empresa-usuario-usuario'),
+  inputPassword: document.getElementById('empresa-usuario-password'),
+  btnCancelar: document.getElementById('empresa-usuario-cancelar'),
+  btnGuardar: document.getElementById('empresa-usuario-guardar'),
+  mensaje: document.getElementById('empresa-usuario-mensaje'),
 });
 
 const setNegociosMsg = (msg = '', type = 'info') => {
@@ -4960,6 +5150,78 @@ const normalizarTextoNegocio = (valor = '') =>
     .trim();
 
 const obtenerNombreNegocio = (negocio = {}) => negocio?.nombre || negocio?.titulo_sistema || '';
+
+const construirEmpresasTemplate = () => {
+  const lista = KANM_NEGOCIOS_CACHE || [];
+  const map = new Map();
+  (lista || []).forEach((negocio) => {
+    const nombreEmpresa = (negocio?.empresa_nombre || negocio?.empresaNombre || '').trim();
+    if (!nombreEmpresa) return;
+    const key = normalizarTextoNegocio(nombreEmpresa);
+    const id = Number(negocio?.id);
+    const existente = map.get(key);
+    if (!existente || (Number.isFinite(id) && id < existente.id)) {
+      map.set(key, { key, nombre: nombreEmpresa, negocio, id });
+    }
+  });
+  const listaOrdenada = Array.from(map.values()).sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' })
+  );
+  EMPRESAS_TEMPLATE_CACHE = listaOrdenada;
+  EMPRESAS_TEMPLATE_MAP = map;
+  return listaOrdenada;
+};
+
+const aplicarTemaDesdeEmpresa = (negocio = {}, dom) => {
+  if (!dom) return;
+  const colorPrimario = negocio?.color_primario || negocio?.colorPrimario || DEFAULT_NEGOCIO_COLORS.primario;
+  const colorSecundario = negocio?.color_secundario || negocio?.colorSecundario || DEFAULT_NEGOCIO_COLORS.secundario;
+  const colorTexto = negocio?.color_texto || negocio?.colorTexto || DEFAULT_NEGOCIO_COLORS.texto;
+  const colorHeader =
+    negocio?.color_header ||
+    negocio?.colorHeader ||
+    colorPrimario ||
+    colorSecundario ||
+    DEFAULT_NEGOCIO_COLORS.header;
+  const colorBotonPrimario =
+    negocio?.color_boton_primario ||
+    negocio?.colorBotonPrimario ||
+    colorPrimario ||
+    DEFAULT_NEGOCIO_COLORS.botonPrimario;
+  const colorBotonSecundario =
+    negocio?.color_boton_secundario ||
+    negocio?.colorBotonSecundario ||
+    colorSecundario ||
+    DEFAULT_NEGOCIO_COLORS.botonSecundario;
+  const colorBotonPeligro =
+    negocio?.color_boton_peligro || negocio?.colorBotonPeligro || DEFAULT_NEGOCIO_COLORS.botonPeligro;
+  const logo = negocio?.logo_url || negocio?.logoUrl || '';
+
+  if (dom.inputColorPrimario) dom.inputColorPrimario.value = colorPrimario;
+  if (dom.inputColorSecundario) dom.inputColorSecundario.value = colorSecundario;
+  if (dom.inputColorTexto) dom.inputColorTexto.value = colorTexto;
+  if (dom.inputColorHeader) dom.inputColorHeader.value = colorHeader;
+  if (dom.inputColorBotonPrimario) dom.inputColorBotonPrimario.value = colorBotonPrimario;
+  if (dom.inputColorBotonSecundario) dom.inputColorBotonSecundario.value = colorBotonSecundario;
+  if (dom.inputColorBotonPeligro) dom.inputColorBotonPeligro.value = colorBotonPeligro;
+  if (dom.inputLogoUrl) dom.inputLogoUrl.value = logo;
+};
+
+const actualizarEmpresasSelect = (selectedNombre = '') => {
+  const dom = getNegociosDom();
+  if (!dom.selectEmpresa) return;
+  const empresas = construirEmpresasTemplate();
+  const selectedKey = selectedNombre ? normalizarTextoNegocio(selectedNombre) : '';
+  dom.selectEmpresa.innerHTML = [
+    '<option value="">Selecciona un grupo...</option>',
+    ...empresas.map((item) => `<option value="${item.key}">${item.nombre}</option>`),
+  ].join('');
+  if (selectedKey && EMPRESAS_TEMPLATE_MAP.has(selectedKey)) {
+    dom.selectEmpresa.value = selectedKey;
+  } else {
+    dom.selectEmpresa.value = '';
+  }
+};
 
 const obtenerEstadoNegocio = (neg = {}) => {
   if (neg.deleted_at) {
@@ -4999,10 +5261,78 @@ const renderAccionesNegocio = (neg = {}) => {
   const btnHistorial = `<button type="button" class="kanm-button ghost" data-negocio-action="historial-posium" data-negocio-id="${id}" ${disabled}>Historial facturas</button>`;
   const btnReset = `<button type="button" class="kanm-button ghost" data-negocio-action="reset-password" data-negocio-id="${id}" ${disabled}>Resetear password</button>`;
   const btnForce = `<button type="button" class="kanm-button ghost" data-negocio-action="force-password" data-negocio-id="${id}" ${disabled}>Forzar cambio</button>`;
+  const btnEmpresaUser = `<button type="button" class="kanm-button ghost" data-negocio-action="empresa-user" data-negocio-id="${id}" ${disabled}>Usuario empresa</button>`;
   const btnImpersonar = `<button type="button" class="kanm-button ghost" data-negocio-action="impersonar" data-negocio-id="${id}" ${disabled}>Entrar como negocio</button>`;
   const btnEliminar = `<button type="button" class="kanm-button danger" data-negocio-action="eliminar" data-negocio-id="${id}" ${disabled}>Eliminar</button>`;
 
-  return `${btnEditar}${btnActivar}${btnFacturar}${btnHistorial}${btnReset}${btnForce}${btnImpersonar}${btnEliminar}`;
+  return `${btnEditar}${btnActivar}${btnFacturar}${btnHistorial}${btnReset}${btnForce}${btnEmpresaUser}${btnImpersonar}${btnEliminar}`;
+};
+
+const abrirModalEmpresaUsuario = (negocio = {}) => {
+  const dom = getEmpresaUsuarioDom();
+  if (!dom.modal) return;
+  empresaUsuarioEstado = {
+    empresaId: negocio?.empresa_id ?? negocio?.empresaId ?? null,
+    empresaNombre: negocio?.empresa_nombre || negocio?.empresaNombre || '',
+    negocioId: negocio?.id ?? null,
+  };
+  if (dom.titulo) dom.titulo.textContent = 'Crear usuario empresa';
+  if (dom.subtitulo) {
+    const etiqueta = empresaUsuarioEstado.empresaNombre || 'Empresa sin nombre';
+    dom.subtitulo.textContent = `Empresa: ${etiqueta}`;
+  }
+  if (dom.inputNombre) dom.inputNombre.value = '';
+  if (dom.inputUsuario) dom.inputUsuario.value = '';
+  if (dom.inputPassword) dom.inputPassword.value = '';
+  if (dom.mensaje) dom.mensaje.textContent = '';
+  dom.modal.hidden = false;
+  requestAnimationFrame(() => {
+    dom.modal.classList.add('is-visible');
+  });
+};
+
+const cerrarModalEmpresaUsuario = () => {
+  const dom = getEmpresaUsuarioDom();
+  if (!dom.modal) return;
+  dom.modal.classList.remove('is-visible');
+  dom.modal.hidden = true;
+  empresaUsuarioEstado = null;
+  if (dom.mensaje) dom.mensaje.textContent = '';
+};
+
+const guardarUsuarioEmpresa = async () => {
+  const dom = getEmpresaUsuarioDom();
+  if (!dom.modal || !empresaUsuarioEstado?.empresaId) return;
+  const nombre = dom.inputNombre?.value?.trim() || '';
+  const usuario = dom.inputUsuario?.value?.trim() || '';
+  const password = dom.inputPassword?.value?.trim() || '';
+
+  if (!nombre || !usuario || !password) {
+    if (dom.mensaje) dom.mensaje.textContent = 'Completa nombre, usuario y contraseña.';
+    return;
+  }
+
+  try {
+    if (dom.mensaje) dom.mensaje.textContent = 'Creando usuario empresa...';
+    const resp = await fetchJsonAutorizado(`/api/admin/empresas/${empresaUsuarioEstado.empresaId}/usuarios`, {
+      method: 'POST',
+      body: JSON.stringify({
+        nombre,
+        usuario,
+        password,
+        negocio_id: empresaUsuarioEstado.negocioId || null,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo crear el usuario empresa');
+    }
+    if (dom.mensaje) dom.mensaje.textContent = 'Usuario empresa creado.';
+    cerrarModalEmpresaUsuario();
+  } catch (error) {
+    console.error('Error al crear usuario empresa:', error);
+    if (dom.mensaje) dom.mensaje.textContent = error.message || 'No se pudo crear el usuario empresa.';
+  }
 };
 
 
@@ -5012,7 +5342,7 @@ const renderNegociosTabla = (lista = [], opciones = {}) => {
   tablaBody.innerHTML = '';
   const emptyText = opciones.emptyText || 'No hay negocios registrados.';
   if (!lista.length) {
-    tablaBody.innerHTML = `<tr><td colspan="6">${emptyText}</td></tr>`;
+    tablaBody.innerHTML = `<tr><td colspan="7">${emptyText}</td></tr>`;
     return;
   }
   tablaBody.innerHTML = lista
@@ -5029,6 +5359,7 @@ const renderNegociosTabla = (lista = [], opciones = {}) => {
         <tr>
           <td>${nombre}</td>
           <td>${neg.slug || '-'}</td>
+          <td>${neg.empresa_nombre || neg.empresaNombre || '-'}</td>
           <td>${estadoHtml}</td>
           <td class="negocios-colores">${swatchPrim} ${swatchSec}</td>
           <td>${logo}</td>
@@ -5073,6 +5404,75 @@ const setEstadoPasswordAdmin = (habilitar = false) => {
   }
 };
 
+let negocioModalEsEdicion = false;
+const defaultNegocioAdminTexts = {
+  titulo: 'Admin principal',
+  correo: 'Correo del admin principal',
+  usuario: 'Usuario admin (opcional)',
+  usuarioHelp: 'Este usuario sera el admin principal del negocio.',
+  password: 'Contrase?a admin (opcional)',
+  passwordHelp: 'Solo se aplica si activas "Actualizar contrase?a".',
+};
+
+const actualizarModoSucursales = (esSucursales) => {
+  const dom = getNegociosDom();
+  if (!dom) return;
+  const usarSucursales = Boolean(esSucursales);
+  if (dom.chkTieneSucursales) {
+    dom.chkTieneSucursales.checked = usarSucursales;
+    dom.chkTieneSucursales.disabled = negocioModalEsEdicion;
+  }
+  if (dom.selectEmpresaGroup) {
+    dom.selectEmpresaGroup.style.display = usarSucursales ? 'none' : '';
+  }
+  if (!usarSucursales) {
+    actualizarEmpresasSelect(dom.inputEmpresaNombre?.value || '');
+  } else if (dom.selectEmpresa) {
+    dom.selectEmpresa.value = '';
+  }
+  if (dom.adminTitulo) {
+    dom.adminTitulo.textContent = usarSucursales ? 'Usuario empresa' : defaultNegocioAdminTexts.titulo;
+  }
+  if (dom.adminCorreoLabel) {
+    dom.adminCorreoLabel.textContent = usarSucursales
+      ? 'Nombre del usuario empresa'
+      : defaultNegocioAdminTexts.correo;
+  }
+  if (dom.inputAdminCorreo) {
+    dom.inputAdminCorreo.type = usarSucursales ? 'text' : 'email';
+    dom.inputAdminCorreo.placeholder = usarSucursales ? 'Nombre del usuario empresa' : 'admin@negocio.com';
+  }
+  if (dom.adminUsuarioLabel) {
+    dom.adminUsuarioLabel.textContent = usarSucursales
+      ? 'Usuario empresa (si es nuevo)'
+      : defaultNegocioAdminTexts.usuario;
+  }
+  if (dom.inputAdminUsuario) {
+    dom.inputAdminUsuario.placeholder = usarSucursales ? 'empresa.usuario' : 'admin.negocio';
+  }
+  if (dom.adminUsuarioHelp) {
+    dom.adminUsuarioHelp.textContent = usarSucursales
+      ? 'Si ya existe para esta empresa, puedes dejarlo vacio.'
+      : defaultNegocioAdminTexts.usuarioHelp;
+  }
+  if (dom.adminPasswordLabel) {
+    dom.adminPasswordLabel.textContent = usarSucursales
+      ? 'Contrase?a del usuario empresa (opcional)'
+      : defaultNegocioAdminTexts.password;
+  }
+  if (dom.adminPasswordHelp) {
+    dom.adminPasswordHelp.textContent = usarSucursales
+      ? 'Se puede dejar vacia para generar una contrase?a temporal.'
+      : defaultNegocioAdminTexts.passwordHelp;
+  }
+
+  if (usarSucursales && dom.inputEmpresaNombre && dom.inputNombre) {
+    if (!dom.inputEmpresaNombre.value) {
+      dom.inputEmpresaNombre.value = dom.inputNombre.value || '';
+    }
+  }
+};
+
 const cargarNegocios = async () => {
   const sesion = obtenerSesionNegocios();
   if (!sesion?.esSuperAdmin) return;
@@ -5086,6 +5486,7 @@ const cargarNegocios = async () => {
     KANM_NEGOCIOS_CACHE = data?.negocios || [];
     KANM_NEGOCIOS_CARGADO = true;
     renderNegociosFiltrados();
+    actualizarEmpresasSelect(getNegociosDom().inputEmpresaNombre?.value || '');
     setNegociosMsg('', 'info');
   } catch (error) {
     console.error('Error al cargar negocios:', error);
@@ -5152,6 +5553,15 @@ const procesarAccionNegocio = async (accion, id) => {
       }
       return;
     }
+    if (accion === 'empresa-user') {
+      const negocio = (KANM_NEGOCIOS_CACHE || []).find((neg) => String(neg.id) === String(id));
+      if (!negocio) {
+        setNegociosMsg('Negocio no encontrado para crear usuario empresa.', 'error');
+        return;
+      }
+      abrirModalEmpresaUsuario(negocio);
+      return;
+    }
 
     setNegociosMsg('Procesando accion...', 'info');
     if (accion === 'activar') {
@@ -5200,6 +5610,7 @@ const abrirModalNegocio = async (id = null) => {
     }
   }
   const esEdicion = Boolean(negocioSeleccionado?.id);
+  negocioModalEsEdicion = esEdicion;
   dom.form.reset();
   if (dom.mensajeForm) {
     dom.mensajeForm.textContent = '';
@@ -5209,6 +5620,15 @@ const abrirModalNegocio = async (id = null) => {
   if (dom.inputSlug) {
     dom.inputSlug.value = negocioSeleccionado?.slug || '';
     dom.inputSlug.disabled = Boolean(negocioSeleccionado?.id);
+  }
+  if (dom.inputEmpresaNombre) {
+    dom.inputEmpresaNombre.value =
+      negocioSeleccionado?.empresa_nombre || negocioSeleccionado?.empresaNombre || '';
+  }
+  actualizarEmpresasSelect(dom.inputEmpresaNombre?.value || '');
+  if (dom.chkTieneSucursales) {
+    dom.chkTieneSucursales.checked = false;
+    dom.chkTieneSucursales.disabled = esEdicion;
   }
   if (dom.inputColorPrimario) {
     dom.inputColorPrimario.value = negocioSeleccionado?.color_primario || DEFAULT_NEGOCIO_COLORS.primario;
@@ -5286,6 +5706,7 @@ const abrirModalNegocio = async (id = null) => {
     dom.inputAdminPassword.value = '';
   }
   setEstadoPasswordAdmin(!esEdicion);
+  actualizarModoSucursales(dom.chkTieneSucursales?.checked);
 
   if (dom.modalTitulo) {
     dom.modalTitulo.textContent = negocioSeleccionado?.id ? 'Editar negocio' : 'Nuevo negocio';
@@ -5317,6 +5738,7 @@ const guardarNegocio = async (event) => {
   if (!dom.form) return;
   if (dom.mensajeForm) setMessage(dom.mensajeForm, '', 'info');
   const esEdicion = Boolean(dom.inputId?.value);
+  const tieneSucursales = dom.chkTieneSucursales?.checked === true;
 
     const configModulos = {
       admin: dom.chkModuloAdmin?.checked !== false,
@@ -5334,6 +5756,7 @@ const guardarNegocio = async (event) => {
     setMessage(dom.mensajeForm, 'Ingresa la nueva contrasena del admin principal.', 'warning');
     return;
   }
+  // El usuario empresa puede existir previamente; el backend valida si es obligatorio.
 
   const payload = {
     nombre: dom.inputNombre?.value?.trim(),
@@ -5351,6 +5774,8 @@ const guardarNegocio = async (event) => {
     adminPrincipalUsuario: dom.inputAdminUsuario?.value?.trim() || null,
     adminPrincipalPassword: adminPassword,
     logo_url: dom.inputLogoUrl?.value?.trim() || null,
+    empresa_nombre: dom.inputEmpresaNombre?.value?.trim() || null,
+    tiene_sucursales: tieneSucursales ? 1 : 0,
   };
 
   const id = dom.inputId?.value;
@@ -5368,9 +5793,15 @@ const guardarNegocio = async (event) => {
     }
     if (dom.inputAdminPassword) dom.inputAdminPassword.value = '';
     const adminInfo = data?.adminPrincipal;
+    const empresaInfo = data?.empresaUsuario;
     if (adminInfo?.passwordGenerada) {
       alert(
         `Se creÃ³ el usuario admin ${adminInfo.correo} con la contraseÃ±a: ${adminInfo.passwordGenerada}. GuÃ¡rdala, no se mostrarÃ¡ de nuevo.`
+      );
+    }
+    if (empresaInfo?.passwordGenerada) {
+      alert(
+        `Se creÃ³ el usuario empresa ${empresaInfo.usuario} con la contraseÃ±a: ${empresaInfo.passwordGenerada}. GuÃ¡rdala, no se mostrarÃ¡ de nuevo.`
       );
     }
     cerrarModalNegocio();
@@ -5453,6 +5884,42 @@ const initNegociosAdmin = () => {
 
   if (dom.btnCerrar) {
     dom.btnCerrar.addEventListener('click', () => cerrarModalNegocio());
+  }
+
+  if (dom.chkTieneSucursales) {
+    dom.chkTieneSucursales.addEventListener('change', (event) => {
+      actualizarModoSucursales(event.target.checked);
+    });
+  }
+  if (dom.selectEmpresa) {
+    dom.selectEmpresa.addEventListener('change', (event) => {
+      const key = event.target.value;
+      const template = EMPRESAS_TEMPLATE_MAP.get(key);
+      if (!template) return;
+      if (dom.inputEmpresaNombre) {
+        dom.inputEmpresaNombre.value = template.nombre;
+      }
+      aplicarTemaDesdeEmpresa(template.negocio, dom);
+    });
+  }
+  if (dom.inputEmpresaNombre) {
+    dom.inputEmpresaNombre.addEventListener('input', (event) => {
+      if (!dom.selectEmpresa) return;
+      const key = normalizarTextoNegocio(event.target.value || '');
+      if (key && EMPRESAS_TEMPLATE_MAP.has(key)) {
+        dom.selectEmpresa.value = key;
+      } else {
+        dom.selectEmpresa.value = '';
+      }
+    });
+  }
+
+  const domEmpresa = getEmpresaUsuarioDom();
+  if (domEmpresa.btnCancelar) {
+    domEmpresa.btnCancelar.addEventListener('click', () => cerrarModalEmpresaUsuario());
+  }
+  if (domEmpresa.btnGuardar) {
+    domEmpresa.btnGuardar.addEventListener('click', () => guardarUsuarioEmpresa());
   }
 
   cargarNegocios();
@@ -6023,6 +6490,8 @@ document.addEventListener('keydown', (event) => {
 });
 
 window.addEventListener('DOMContentLoaded', async () => {
+  mostrarBotonVolverEmpresa();
+  configurarBotonPanelEmpresa();
   const mesActual = obtenerMesActual();
   if (reporte607MesInput) reporte607MesInput.value = mesActual.valor;
   if (reporte606MesInput) reporte606MesInput.value = mesActual.valor;
@@ -6059,11 +6528,12 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   ocultarTabsNoPermitidos();
   aplicarModulosUI();
+  ajustarRolesUsuariosUI();
   await cargarCategorias();
   const tabInicial = obtenerTabInicialAdmin();
   mostrarTabAdmin(tabInicial);
 
-  const esAdmin = usuarioActual?.rol === 'admin';
+  const esAdmin = esRolAdmin(usuarioActual?.rol);
   if (!esAdmin) {
     return;
   }

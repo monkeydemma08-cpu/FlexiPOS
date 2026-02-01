@@ -529,14 +529,29 @@ img {
 }
 
 .negocio-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 6px;
+  align-items: center;
+  padding: 8px;
+  border-radius: 14px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-boton-primario) 12%, transparent),
+    color-mix(in srgb, var(--color-boton-secundario) 12%, transparent)
+  );
+  border: 1px solid color-mix(in srgb, var(--color-boton-primario) 18%, transparent);
 }
 
 .negocio-actions .kanm-button {
-  padding: 8px 12px;
-  font-size: 0.85rem;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  line-height: 1.1;
+  border-radius: 999px;
+  box-shadow: none;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .kanm-card--panel {
@@ -1682,6 +1697,13 @@ img {
   color: var(--kanm-gray-900);
 }
 
+.caja-detalle-acciones {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .caja-resumen {
   display: grid;
   gap: 8px;
@@ -1718,6 +1740,128 @@ img {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.kanm-modal--wide {
+  max-width: 980px;
+}
+
+.caja-split-modal {
+  max-width: 980px;
+}
+
+.caja-split-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.caja-split-grid {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+@media (min-width: 900px) {
+  .caja-split-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.caja-split-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--kanm-gray-200);
+  border-radius: 14px;
+  padding: 12px;
+  background: #fff;
+}
+
+.caja-split-col h4 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--kanm-gray-800);
+}
+
+.caja-split-items,
+.caja-merge-lista {
+  display: grid;
+  gap: 10px;
+  max-height: 42vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.caja-split-item,
+.caja-merge-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--kanm-gray-200);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--kanm-gray-100);
+}
+
+.caja-split-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.caja-split-item--selected {
+  border-color: rgba(240, 98, 146, 0.6);
+  background: rgba(240, 98, 146, 0.08);
+}
+
+.caja-split-item label,
+.caja-merge-item label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  flex: 1 1 auto;
+}
+
+.caja-split-item-meta,
+.caja-merge-item-meta {
+  font-size: 0.85rem;
+  color: var(--kanm-gray-600);
+}
+
+.caja-split-item-total,
+.caja-merge-item-total {
+  font-weight: 600;
+  color: var(--kanm-gray-900);
+  white-space: nowrap;
+}
+
+.caja-split-totales,
+.caja-merge-totales {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--kanm-gray-100);
+  font-size: 0.9rem;
+}
+
+.caja-split-totales .total,
+.caja-merge-totales .total {
+  font-weight: 700;
+  color: var(--kanm-pink-dark);
+}
+
+.caja-merge-lista-vacia {
+  padding: 12px;
+  color: var(--kanm-gray-600);
+  background: var(--kanm-gray-100);
+  border-radius: 12px;
+  text-align: center;
 }
 
 .cuadre-display,
@@ -4702,4 +4846,71 @@ img {
   .kanm-mesera-productos-lista-scroll {
     max-height: calc(100vh - 200px);
   }
+}
+
+/* Empresa */
+.empresa-container {
+  max-width: 1200px;
+  margin: 32px auto;
+  padding: 0 20px 40px;
+}
+
+.empresa-resumen-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.empresa-kpi {
+  background: #f7f7f7;
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.empresa-kpi-label {
+  font-size: 12px;
+  color: #6b6b6b;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.empresa-kpi-sub {
+  font-size: 11px;
+  color: #6b6b6b;
+}
+
+.empresa-sucursal-nombre {
+  font-weight: 600;
+  color: #1f1f1f;
+}
+
+.empresa-sucursal-nombre.is-empty {
+  color: #8a8a8a;
+  font-weight: 500;
+  font-style: italic;
+}
+
+.empresa-sucursal-supervisor {
+  font-size: 11px;
+  color: #6b6b6b;
+  margin-top: 2px;
+}
+
+.empresa-filtros {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.empresa-filtros .kanm-input-group {
+  min-width: 160px;
+}
+
+#empresa-mensaje {
+  margin-left: auto;
 }

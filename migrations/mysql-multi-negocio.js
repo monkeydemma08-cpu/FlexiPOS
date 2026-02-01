@@ -146,6 +146,31 @@ async function ensureTableNegocios() {
   `);
 }
 
+async function ensureTableEmpresas() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS empresas (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      nombre VARCHAR(150) NOT NULL,
+      activo TINYINT(1) NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_empresas_nombre (nombre)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureDefaultEmpresa() {
+  if (!(await tableExists('empresas'))) return;
+  try {
+    const row = await query('SELECT id FROM empresas WHERE id = 1 LIMIT 1');
+    if (!row || row.length === 0) {
+      await query('INSERT INTO empresas (id, nombre, activo) VALUES (1, ?, 1)', ['Empresa Principal']);
+    }
+  } catch (error) {
+    console.warn('No se pudo asegurar empresa por defecto:', error?.message || error);
+  }
+}
+
 async function ensureTableHistorialBar() {
   await query(`
     CREATE TABLE IF NOT EXISTS historial_bar (
@@ -728,6 +753,20 @@ async function ensureNegocioThemeAndModulesColumns() {
   }
 }
 
+async function ensureEmpresaColumns() {
+  await ensureColumn('negocios', 'empresa_id INT NOT NULL DEFAULT 1');
+  await ensureColumn('usuarios', 'empresa_id INT NULL');
+  try {
+    await query('UPDATE negocios SET empresa_id = 1 WHERE empresa_id IS NULL OR empresa_id = 0');
+  } catch (error) {
+    console.warn('No se pudo normalizar empresa_id en negocios:', error?.message || error);
+  }
+  await ensureIndexByName('negocios', 'idx_negocios_empresa', '(empresa_id)');
+  await ensureIndexByName('usuarios', 'idx_usuarios_empresa', '(empresa_id)');
+  await ensureForeignKey('negocios', 'empresa_id', 'empresas');
+  await ensureForeignKey('usuarios', 'empresa_id', 'empresas');
+}
+
 async function ensureLogoUrlCapacity() {
   if (!(await tableExists('negocios'))) return;
   try {
@@ -1019,6 +1058,7 @@ async function normalizeSecuenciasPk() {
 }
 
 async function runMigrations() {
+  await ensureTableEmpresas();
   await ensureTableNegocios();
   await ensureTableHistorialBar();
   await ensureTablePosiumFacturacionConfig();
@@ -1066,6 +1106,8 @@ async function runMigrations() {
   await ensureColumn('detalle_pedido', 'costo_unitario_snapshot DECIMAL(12,2) NOT NULL DEFAULT 0');
   await ensureColumn('detalle_pedido', 'cogs_linea DECIMAL(12,2) NOT NULL DEFAULT 0');
   await ensureNegocioThemeAndModulesColumns();
+  await ensureDefaultEmpresa();
+  await ensureEmpresaColumns();
   await ensureLogoUrlCapacity();
   await ensureNegocioStatusColumns();
   await ensureDefaultNegocio();

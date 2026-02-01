@@ -29,6 +29,8 @@ const privateStartEl = document.getElementById('chat-private-start');
 
 const ROLES_HOME = {
   admin: '/admin.html',
+  supervisor: '/admin.html',
+  empresa: '/empresa.html',
   mesera: '/mesera.html',
   cocina: '/cocina.html',
   bar: '/bar.html',

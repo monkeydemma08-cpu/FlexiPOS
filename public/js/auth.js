@@ -5,6 +5,8 @@ const roleRoutes = {
   caja: '/caja.html',
   vendedor: '/mostrador.html',
   admin: '/admin.html',
+  supervisor: '/admin.html',
+  empresa: '/empresa.html',
 };
 
 const STORAGE_KEY = 'kanmUser';
@@ -113,6 +115,8 @@ const roleLabels = {
   caja: 'Caja',
   vendedor: 'Mostrador',
   admin: 'Admin',
+  supervisor: 'Supervisor',
+  empresa: 'Empresa',
 };
 
 const formatUserLabel = (user) => {
@@ -592,7 +596,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const allowBySuper = isSuperAdminUser(user);
-  const allowByRole = requiredRoles.includes(user.rol);
+  const allowByRole =
+    requiredRoles.includes(user.rol) ||
+    (user.rol === 'admin' && requiredRoles.includes('empresa')) ||
+    (user.rol === 'empresa' && requiredRoles.includes('admin'));
 
   if (!allowByRole && !allowBySuper) {
     const destination = roleRoutes[user.rol];

@@ -74,7 +74,7 @@
     }
   </style>
 </head>
-<body data-role="admin,caja">
+<body data-role="admin,caja,supervisor">
   <header class="kanm-header">
     <div class="kanm-header-left">
       <div class="kanm-header-logo-container">
@@ -98,6 +98,7 @@
           Chat interno
           <span id="chat-unread-badge" class="chat-unread-badge"></span>
         </a>
+        <button type="button" class="kanm-button ghost" id="kanm-empresa-panel" hidden>Panel empresa</button>
         <button type="button" class="kanm-button ghost" onclick="logout()">Cerrar sesión</button>
       </div>
     </div>
@@ -638,7 +639,7 @@
                   <option value="bar">Bar</option>
                   <option value="caja">Caja</option>
                   <option value="vendedor">Mostrador</option>
-                  <option value="admin">Administrador</option>
+                  <option value="supervisor">Supervisor</option>
                 </select>
               </div>
             </div>
@@ -2118,6 +2119,7 @@
               <tr>
                 <th>Nombre</th>
                 <th>Slug</th>
+                <th>Empresa</th>
                 <th>Estado</th>
                 <th>Colores</th>
                 <th>Logo</th>
@@ -2126,7 +2128,7 @@
             </thead>
             <tbody id="kanm-negocios-tbody">
               <tr>
-                <td colspan="5">Cargando...</td>
+                <td colspan="7">Cargando...</td>
               </tr>
             </tbody>
           </table>
@@ -2155,6 +2157,29 @@
             <div class="kanm-input-group" id="kanm-negocios-slug-group">
               <label for="kanm-negocios-slug">Slug</label>
               <input type="text" id="kanm-negocios-slug" placeholder="mi-cafeteria" required />
+            </div>
+            <div class="kanm-input-group">
+              <label for="kanm-negocios-empresa-nombre">Empresa</label>
+              <input type="text" id="kanm-negocios-empresa-nombre" placeholder="Grupo empresarial" />
+              <span class="kanm-input-help">Usa el mismo nombre para agrupar sucursales.</span>
+            </div>
+            <div class="kanm-input-group" id="kanm-negocios-empresa-select-group">
+              <label for="kanm-negocios-empresa-select">Empresa existente</label>
+              <select id="kanm-negocios-empresa-select">
+                <option value="">Selecciona un grupo...</option>
+              </select>
+              <span class="kanm-input-help">
+                Al elegir un grupo se copiará el tema visual y el logo de esa empresa.
+              </span>
+            </div>
+            <div class="kanm-input-group">
+              <label class="kanm-checkbox" for="kanm-negocios-tiene-sucursales">
+                <input type="checkbox" id="kanm-negocios-tiene-sucursales" />
+                <span>Este negocio tiene sucursales</span>
+              </label>
+              <span class="kanm-input-help">
+                Si activas, se crea o se reutiliza el usuario empresa. Si ya existe, puedes dejar el usuario vacio.
+              </span>
             </div>
             <div class="kanm-input-group">
               <label for="kanm-negocios-logo-url">Logo URL</label>
@@ -2235,16 +2260,18 @@
           </section>
 
           <section class="kanm-modal-section">
-            <h4>Admin principal</h4>
+            <h4 id="kanm-negocios-admin-titulo">Admin principal</h4>
           <div class="kanm-input-group">
-            <label for="kanm-negocios-admin-correo">Correo del admin principal</label>
+            <label for="kanm-negocios-admin-correo" id="kanm-negocios-admin-correo-label">Correo del admin principal</label>
             <input type="email" id="kanm-negocios-admin-correo" placeholder="admin@negocio.com" />
           </div>
           <div class="kanm-grid-2">
             <div class="kanm-input-group">
-              <label for="kanm-negocios-admin-usuario">Usuario admin (opcional)</label>
+              <label for="kanm-negocios-admin-usuario" id="kanm-negocios-admin-usuario-label">Usuario admin (opcional)</label>
               <input type="text" id="kanm-negocios-admin-usuario" placeholder="admin.negocio" />
-              <span class="kanm-input-help">Este usuario sera el admin principal del negocio.</span>
+              <span class="kanm-input-help" id="kanm-negocios-admin-usuario-help">
+                Este usuario sera el admin principal del negocio.
+              </span>
             </div>
             <div class="kanm-input-group kanm-input-group--inline kanm-input-toggle">
               <label class="kanm-checkbox" for="kanm-negocios-cambiar-password">
@@ -2254,7 +2281,9 @@
               <span class="kanm-input-help">Activa para definir una nueva contrase?a.</span>
             </div>
             <div class="kanm-input-group">
-              <label for="kanm-negocios-admin-password">Contrase?a admin (opcional)</label>
+              <label for="kanm-negocios-admin-password" id="kanm-negocios-admin-password-label">
+                Contrase?a admin (opcional)
+              </label>
               <div class="password-field">
                 <input
                   type="password"
@@ -2271,7 +2300,9 @@
                   Mostrar
                 </button>
               </div>
-              <span class="kanm-input-help">Solo se aplica si activas "Actualizar contrase?a".</span>
+              <span class="kanm-input-help" id="kanm-negocios-admin-password-help">
+                Solo se aplica si activas "Actualizar contrase?a".
+              </span>
             </div>
           </div>
         </section>
@@ -2684,6 +2715,35 @@
         <button type="button" class="kanm-button danger" id="admin-eliminar-confirmar">Eliminar</button>
       </div>
       <div id="admin-eliminar-mensaje" class="kanm-message"></div>
+    </div>
+  </div>
+
+  <div class="kanm-modal-overlay" id="empresa-usuario-modal" hidden>
+    <div class="kanm-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-usuario-titulo">
+      <h3 id="empresa-usuario-titulo">Crear usuario empresa</h3>
+      <p class="kanm-subtitle" id="empresa-usuario-subtitulo">Empresa: --</p>
+      <div class="kanm-input-group">
+        <label for="empresa-usuario-nombre">Nombre</label>
+        <input type="text" id="empresa-usuario-nombre" placeholder="Nombre del usuario empresa" />
+      </div>
+      <div class="kanm-input-group">
+        <label for="empresa-usuario-usuario">Usuario</label>
+        <input type="text" id="empresa-usuario-usuario" placeholder="usuario.empresa" />
+      </div>
+      <div class="kanm-input-group">
+        <label for="empresa-usuario-password">Contraseña</label>
+        <div class="password-field">
+          <input type="password" id="empresa-usuario-password" placeholder="Contraseña" autocomplete="new-password" />
+          <button type="button" class="password-toggle" data-password-toggle aria-pressed="false">
+            Mostrar
+          </button>
+        </div>
+      </div>
+      <div class="kanm-modal-actions">
+        <button type="button" class="kanm-button ghost" id="empresa-usuario-cancelar">Cancelar</button>
+        <button type="button" class="kanm-button primary" id="empresa-usuario-guardar">Crear usuario</button>
+      </div>
+      <div id="empresa-usuario-mensaje" class="kanm-message"></div>
     </div>
   </div>
 
