@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Factura cliente</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <link rel="stylesheet" href="/css/cliente-factura.css" />
+    <script src="/js/auth.js" defer></script>
+    <script src="/js/cliente-factura.js" defer></script>
+  </head>
+  <body class="cliente-factura-body" data-role="empresa,admin">
+    <div class="cliente-factura-page">
+      <div class="cliente-factura-sheet">
+        <header class="cliente-factura-header">
+          <div class="cliente-factura-emisor">
+            <h1 id="cliente-factura-emisor-nombre">Factura</h1>
+            <p id="cliente-factura-emisor-rnc"></p>
+            <p id="cliente-factura-emisor-direccion"></p>
+            <p id="cliente-factura-emisor-telefono"></p>
+          </div>
+          <div class="cliente-factura-meta">
+            <div>
+              <span>N. Doc.</span>
+              <strong id="cliente-factura-numero">-</strong>
+            </div>
+            <div>
+              <span>Fecha</span>
+              <strong id="cliente-factura-fecha">-</strong>
+            </div>
+            <div>
+              <span>Condicion</span>
+              <strong id="cliente-factura-condicion">CREDITO</strong>
+            </div>
+          </div>
+        </header>
+
+        <section class="cliente-factura-cliente">
+          <div><span>Cliente:</span> <strong id="cliente-factura-cliente-nombre">--</strong></div>
+          <div><span>RNC/Cedula:</span> <strong id="cliente-factura-cliente-documento">--</strong></div>
+          <div><span>Direccion:</span> <strong id="cliente-factura-cliente-direccion">--</strong></div>
+          <div><span>Telefono:</span> <strong id="cliente-factura-cliente-telefono">--</strong></div>
+        </section>
+
+        <table class="cliente-factura-tabla">
+          <thead>
+            <tr>
+              <th>Codigo</th>
+              <th>Descripcion</th>
+              <th class="text-right">Cant</th>
+              <th class="text-right">Precio unitario</th>
+              <th class="text-right">Precio total</th>
+            </tr>
+          </thead>
+          <tbody id="cliente-factura-items-body">
+            <tr>
+              <td colspan="5">Cargando...</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <section class="cliente-factura-totales">
+          <div class="cliente-factura-notas" id="cliente-factura-notas"></div>
+          <div class="cliente-factura-totales-box">
+            <div>
+              <span>Sub-total (gravable):</span>
+              <strong id="cliente-factura-subtotal">RD$0.00</strong>
+            </div>
+            <div>
+              <span id="cliente-factura-itbis-label">ITBIS 0%:</span>
+              <strong id="cliente-factura-itbis">RD$0.00</strong>
+            </div>
+            <div class="cliente-factura-total">
+              <span>Total general:</span>
+              <strong id="cliente-factura-total">RD$0.00</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="cliente-factura-firmas">
+          <div>
+            <span>Despacho Conforme Almacen</span>
+            <div class="cliente-factura-linea"></div>
+          </div>
+          <div>
+            <span>Recibe Conforme Chofer</span>
+            <div class="cliente-factura-linea"></div>
+          </div>
+          <div>
+            <span>Recibe Conforme Cliente</span>
+            <div class="cliente-factura-linea"></div>
+          </div>
+        </section>
+      </div>
+      <div class="cliente-factura-actions">
+        <button type="button" class="kanm-button" id="cliente-factura-imprimir">Imprimir</button>
+      </div>
+    </div>
+  </body>
+</html>

@@ -810,6 +810,8 @@ img {
   border-radius: 24px;
   box-shadow: 0 24px 60px var(--tone-25);
   padding: 32px;
+  max-height: calc(100vh - 96px);
+  overflow: auto;
 }
 
 .kanm-modal h3 {
@@ -1302,6 +1304,7 @@ img {
   background: rgba(45, 42, 50, 0.12);
   color: var(--kanm-gray-600);
 }
+
 
 .negocio-motivo {
   margin-top: 6px;
@@ -3174,6 +3177,255 @@ img {
   padding-top: 10px;
 }
 
+/* ==========================
+   Clientes empresa
+   ========================== */
+.empresa-clientes-header {
+  margin-bottom: 18px;
+}
+
+.empresa-clientes-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.empresa-clientes-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.empresa-clientes-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.empresa-clientes-filtros-scroll {
+  display: grid;
+  gap: 12px;
+  max-height: 600px;
+  overflow: auto;
+}
+
+.empresa-clientes-filtros-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.empresa-clientes-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.empresa-clientes-lista-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.empresa-clientes-view-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.empresa-clientes-resumen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.empresa-clientes-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.empresa-cliente-card {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 14px 30px rgba(40, 60, 90, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.empresa-cliente-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.empresa-cliente-sub {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--kanm-gray-600);
+}
+
+.empresa-cliente-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.empresa-cliente-card-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.empresa-cliente-metric span {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--kanm-gray-500);
+}
+
+.empresa-cliente-metric strong {
+  font-size: 1rem;
+  color: var(--kanm-gray-900);
+}
+
+.empresa-cliente-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.empresa-clientes-table-scroll {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.empresa-clientes-bulk {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+}
+
+.empresa-cliente-view-modal .empresa-cliente-view-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.empresa-cliente-view-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.empresa-cliente-view-body {
+  margin-top: 14px;
+}
+
+.empresa-cliente-view-panel {
+  display: none;
+}
+
+.empresa-cliente-view-panel.active {
+  display: block;
+}
+
+.empresa-cliente-view-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.empresa-cliente-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.empresa-cliente-info-grid span {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--kanm-gray-500);
+}
+
+.empresa-cliente-info-grid strong {
+  font-size: 0.95rem;
+}
+
+.empresa-cliente-cxc-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.empresa-cliente-nota-form {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.empresa-cliente-notas-list {
+  display: grid;
+  gap: 10px;
+}
+
+.empresa-cliente-nota {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f6f7fb;
+}
+
+.empresa-cliente-nota small {
+  color: var(--kanm-gray-500);
+  font-size: 0.75rem;
+}
+
+.empresa-cliente-factura-items {
+  margin-top: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.empresa-clientes-estado-resumen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.pill-danger {
+  background: #ffe6e6;
+  color: #c42d2d;
+}
+
+.empresa-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--kanm-gray-600);
+}
+
+@media (max-width: 1100px) {
+  .empresa-clientes-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .product-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4850,9 +5102,14 @@ img {
 
 /* Empresa */
 .empresa-container {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 32px auto;
   padding: 0 20px 40px;
+}
+
+.empresa-panel {
+  display: grid;
+  gap: 18px;
 }
 
 .empresa-resumen-grid {
@@ -4861,13 +5118,49 @@ img {
   gap: 12px;
 }
 
+.empresa-resumen {
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  border: 1px solid var(--tone-12);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
+  position: relative;
+  overflow: hidden;
+}
+
+.empresa-resumen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top right, rgba(22, 163, 74, 0.12), transparent 55%);
+  pointer-events: none;
+}
+
+.empresa-resumen > * {
+  position: relative;
+  z-index: 1;
+}
+
 .empresa-kpi {
-  background: #f7f7f7;
-  border-radius: 12px;
-  padding: 12px 14px;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  border: 1px solid var(--tone-12);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+  position: relative;
+  z-index: 1;
+}
+
+.empresa-kpi::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-boton-primario), var(--color-secundario));
 }
 
 .empresa-kpi-label {
@@ -4877,9 +5170,1109 @@ img {
   letter-spacing: 0.4px;
 }
 
+.empresa-kpi strong {
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
 .empresa-kpi-sub {
   font-size: 11px;
   color: #6b6b6b;
+}
+
+.empresa-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.empresa-panel.hidden {
+  display: none;
+}
+
+.empresa-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.empresa-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.empresa-nomina-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  align-items: start;
+}
+
+.empresa-nomina-kpis,
+.empresa-conta-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.empresa-conta-kpis {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  align-items: stretch;
+}
+
+.empresa-gastos-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.empresa-facturas-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.empresa-gastos-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.empresa-facturas-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.empresa-gastos-view-toggle {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.empresa-gastos-view-toggle .kanm-button.is-active {
+  background: var(--color-boton-primario);
+  color: #fff;
+  border-color: transparent;
+}
+
+.empresa-gastos-resumen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.empresa-facturas-resumen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.empresa-gastos-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.empresa-facturas-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.empresa-inventario-header {
+  background: linear-gradient(180deg, #ffffff 0%, #f5fbff 100%);
+  border: 1px solid var(--tone-12);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
+}
+
+.empresa-inventario-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.empresa-inventario-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.empresa-inventario-metodo {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--tone-12);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.04);
+  gap: 8px;
+}
+
+.empresa-inventario-scope {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--tone-12);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.04);
+  gap: 8px;
+}
+
+.empresa-inventario-scope label {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--kanm-gray-600);
+}
+
+.empresa-inventario-scope select {
+  min-width: 190px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--kanm-gray-100);
+}
+
+.empresa-inventario-metodo label {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--kanm-gray-600);
+}
+
+.empresa-inventario-metodo select {
+  min-width: 140px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--kanm-gray-100);
+}
+
+.empresa-inventario-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.empresa-inventario-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.empresa-inventario-filtros-scroll {
+  display: grid;
+  gap: 12px;
+  max-height: 72vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.empresa-inventario-filtros-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.empresa-inventario-lista {
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.empresa-inventario-movimientos .empresa-filtros {
+  margin-top: 8px;
+}
+
+.empresa-inventario-lista-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.empresa-inventario-bulk {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.empresa-inventario-bulk .kanm-button,
+.empresa-inventario-table-scroll .acciones-inline .kanm-button {
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  line-height: 1.1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--kanm-gray-800);
+  border: 1px solid var(--tone-25);
+  box-shadow: none;
+  font-weight: 500;
+  transform: none;
+}
+
+.empresa-inventario-bulk .kanm-button:hover,
+.empresa-inventario-table-scroll .acciones-inline .kanm-button:hover {
+  background: var(--kanm-gray-100);
+  box-shadow: none;
+  transform: none;
+}
+
+.empresa-inventario-table-scroll {
+  max-height: 560px;
+  overflow: auto;
+}
+
+.empresa-conta-asientos-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.empresa-conta-asientos-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.empresa-conta-asientos-actions .kanm-input-group {
+  margin: 0;
+  min-width: 180px;
+}
+
+.empresa-conta-group {
+  background: #f3f7fb;
+  color: var(--kanm-gray-800);
+  font-weight: 600;
+}
+
+.inventario-producto-nombre {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inventario-producto-nombre span {
+  font-size: 0.82rem;
+  color: var(--kanm-gray-600);
+}
+
+.inventario-stock-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.inventario-stock-badge.stock-critico {
+  background: #ffe3e3;
+  color: #b42318;
+}
+
+.inventario-stock-badge.stock-bajo {
+  background: #fff3cd;
+  color: #8a5d00;
+}
+
+.inventario-stock-badge.stock-ok {
+  background: #def7e5;
+  color: #0f5132;
+}
+
+.inventario-stock-badge.stock-indef {
+  background: #eef2ff;
+  color: #364fc7;
+}
+
+.empresa-inventario-modal {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.empresa-gastos-filtros {
+  position: relative;
+}
+
+.empresa-facturas-filtros {
+  position: relative;
+}
+
+.empresa-gastos-filtros-scroll {
+  display: grid;
+  gap: 12px;
+  max-height: 72vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.empresa-facturas-filtros-scroll {
+  display: grid;
+  gap: 12px;
+  max-height: 72vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.empresa-gastos-range-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.empresa-gastos-montos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.empresa-gastos-filtros-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.empresa-facturas-filtros-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.empresa-gastos-lista {
+  min-height: 520px;
+}
+
+.empresa-facturas-lista {
+  min-height: 520px;
+}
+
+.empresa-gastos-lista-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.empresa-facturas-lista-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.empresa-gastos-bulk {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.empresa-gastos-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.empresa-gastos-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.empresa-gastos-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 4px 2px;
+}
+
+.empresa-gastos-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.empresa-gasto-card {
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid var(--tone-12);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.04);
+}
+
+.empresa-gasto-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.empresa-gasto-card-title {
+  font-weight: 600;
+  color: var(--kanm-gray-900);
+}
+
+.empresa-gasto-card-meta {
+  font-size: 12px;
+  color: var(--kanm-gray-600);
+}
+
+.empresa-gasto-card-monto {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--kanm-gray-900);
+}
+
+.empresa-gasto-card-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.empresa-gasto-card-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.empresa-gasto-card-actions .kanm-button {
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  line-height: 1.1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--kanm-gray-800);
+  border: 1px solid var(--tone-25);
+  box-shadow: none;
+  font-weight: 500;
+  transform: none;
+}
+
+.empresa-gasto-card-actions .kanm-button:hover {
+  background: var(--kanm-gray-100);
+  box-shadow: none;
+  transform: none;
+}
+
+.empresa-gasto-card-actions .kanm-button.ghost-danger {
+  background: #fff5f5;
+  border-color: #f0bcbc;
+  color: #b02a37;
+}
+
+.empresa-gasto-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.empresa-gasto-badge--pagado {
+  background: #def7e5;
+  color: #0f5132;
+}
+
+.empresa-gasto-badge--pendiente {
+  background: #fff4ce;
+  color: #8a5d00;
+}
+
+.empresa-gasto-badge--aprobado {
+  background: #e0f2ff;
+  color: #0b4b7a;
+}
+
+.empresa-gasto-badge--borrador {
+  background: #f2f2f2;
+  color: #6b6b6b;
+}
+
+.empresa-gasto-badge--anulado {
+  background: #f8d7da;
+  color: #842029;
+}
+
+.empresa-gastos-table-scroll {
+  max-height: 540px;
+  overflow: auto;
+}
+
+.empresa-facturas-table-scroll {
+  max-height: 540px;
+  overflow: auto;
+}
+
+.empresa-gastos-table-scroll .acciones-inline {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.empresa-facturas-table-scroll .acciones-inline {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.empresa-gastos-table-scroll .acciones-inline .kanm-button {
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  line-height: 1.1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--kanm-gray-800);
+  border: 1px solid var(--tone-25);
+  box-shadow: none;
+  font-weight: 500;
+  transform: none;
+}
+
+.empresa-facturas-table-scroll .acciones-inline .kanm-button {
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  line-height: 1.1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--kanm-gray-800);
+  border: 1px solid var(--tone-25);
+  box-shadow: none;
+  font-weight: 500;
+  transform: none;
+}
+
+.empresa-gastos-table-scroll .acciones-inline .kanm-button:hover {
+  background: var(--kanm-gray-100);
+  box-shadow: none;
+  transform: none;
+}
+
+.empresa-facturas-table-scroll .acciones-inline .kanm-button:hover {
+  background: var(--kanm-gray-100);
+  box-shadow: none;
+  transform: none;
+}
+
+.empresa-gastos-table-scroll .acciones-inline .kanm-button.ghost-danger {
+  background: #fff5f5;
+  border-color: #f0bcbc;
+  color: #b02a37;
+}
+
+.empresa-gasto-group-row td {
+  background: #f3f7fb;
+  color: var(--kanm-gray-800);
+  font-weight: 600;
+}
+
+.empresa-gasto-modal {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.empresa-gasto-view-modal {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.empresa-gasto-view-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.empresa-gasto-view-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.empresa-gasto-view-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin-bottom: 12px;
+}
+
+.empresa-gasto-view-card {
+  background: var(--surface-soft);
+  border-radius: 12px;
+  padding: 12px;
+  border: 1px solid var(--tone-12);
+}
+
+.empresa-gasto-view-list {
+  display: grid;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.empresa-gasto-timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.empresa-module-grid {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+.empresa-module-grid--two {
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+}
+
+.empresa-empleado-estado {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.empresa-empleado-actions {
+  display: inline-flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.empresa-empleados-table tbody tr:hover .empresa-empleado-actions {
+  opacity: 1;
+}
+
+.empresa-empleado-actions .kanm-button {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.empresa-empleados-table th:nth-child(2),
+.empresa-empleados-table td:nth-child(2),
+.empresa-empleados-table th:nth-child(3),
+.empresa-empleados-table td:nth-child(3) {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.conta-group-row td {
+  background: #f7f9fb;
+  font-weight: 600;
+}
+
+.conta-total-row td {
+  background: #eef6ff;
+  font-weight: 600;
+}
+
+@media (max-width: 1100px) {
+  .empresa-module-grid--two {
+    grid-template-columns: 1fr;
+  }
+  .empresa-nomina-grid {
+    grid-template-columns: repeat(2, minmax(240px, 1fr));
+  }
+  .empresa-gastos-layout {
+    grid-template-columns: 1fr;
+  }
+  .empresa-facturas-layout {
+    grid-template-columns: 1fr;
+  }
+  .empresa-inventario-layout {
+    grid-template-columns: 1fr;
+  }
+  .empresa-gastos-filtros-scroll {
+    max-height: none;
+  }
+  .empresa-facturas-filtros-scroll {
+    max-height: none;
+  }
+  .empresa-inventario-filtros-scroll {
+    max-height: none;
+  }
+}
+
+@media (max-width: 740px) {
+  .empresa-nomina-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.empresa-hub {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #ffffff 0%, #f7fbff 45%, #f2faf4 100%);
+  border: 1px solid var(--tone-12);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.06);
+}
+
+.empresa-hub::before,
+.empresa-hub::after {
+  content: '';
+  position: absolute;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at center,
+    color-mix(in srgb, var(--color-boton-primario) 20%, transparent),
+    transparent 70%
+  );
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.empresa-hub::before {
+  top: -120px;
+  right: -100px;
+}
+
+.empresa-hub::after {
+  bottom: -140px;
+  left: -100px;
+  background: radial-gradient(
+    circle at center,
+    color-mix(in srgb, var(--color-secundario) 22%, transparent),
+    transparent 70%
+  );
+}
+
+.empresa-hub-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+
+.empresa-hub-copy {
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.empresa-hub-copy h2 {
+  margin: 0;
+  font-size: clamp(1.7rem, 2.8vw, 2.2rem);
+  color: var(--kanm-gray-900);
+}
+
+.empresa-hub-eyebrow {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  background: var(--surface-soft-strong);
+  color: var(--kanm-gray-900);
+}
+
+.empresa-hub-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.empresa-hub-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  min-width: 260px;
+  flex: 1;
+}
+
+.empresa-mini-stat {
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--tone-12);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.empresa-mini-stat span {
+  font-size: 11px;
+  color: var(--kanm-gray-600);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.empresa-mini-stat strong {
+  font-size: 1.4rem;
+  color: var(--kanm-gray-900);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.empresa-conta-scroll {
+  max-height: 380px;
+  overflow: auto;
+}
+
+.empresa-hub-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  gap: 20px;
+  align-items: start;
+  position: relative;
+  z-index: 1;
+}
+
+.empresa-modulos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.empresa-modulo-card {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 16px;
+  border: 1px solid var(--tone-12);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 210px;
+  animation: empresa-fade-up 0.6s ease both;
+  animation-delay: var(--delay, 0s);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.empresa-modulo-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.08);
+}
+
+.empresa-modulo-top {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.empresa-modulo-top h3 {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+}
+
+.empresa-modulo-top p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--kanm-gray-600);
+}
+
+.empresa-modulo-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--color-texto);
+  background: linear-gradient(135deg, var(--color-boton-primario), var(--color-secundario));
+  box-shadow: 0 8px 14px color-mix(in srgb, var(--color-boton-primario) 18%, transparent);
+  flex-shrink: 0;
+}
+
+.empresa-modulo-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  color: var(--kanm-gray-600);
+  font-size: 0.9rem;
+}
+
+.empresa-modulo-list li {
+  position: relative;
+  padding-left: 16px;
+}
+
+.empresa-modulo-list li::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-boton-primario);
+  position: absolute;
+  left: 0;
+  top: 8px;
+}
+
+.empresa-hub-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.empresa-flow-card,
+.empresa-quick-card {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 18px;
+  border: 1px solid var(--tone-12);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.empresa-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.empresa-flow-node {
+  background: var(--surface-soft);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--tone-12);
+}
+
+.empresa-flow-title {
+  font-weight: 600;
+}
+
+.empresa-flow-sub {
+  font-size: 0.85rem;
+  color: var(--kanm-gray-600);
+}
+
+.empresa-flow-connector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--kanm-gray-600);
+  font-size: 0.85rem;
+}
+
+.empresa-flow-line {
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-boton-primario), var(--color-secundario));
+  border-radius: 999px;
+  position: relative;
+}
+
+.empresa-flow-line::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--color-secundario);
+  border-bottom: 2px solid var(--color-secundario);
+  position: absolute;
+  right: -2px;
+  top: -4px;
+  transform: rotate(-45deg);
+}
+
+.empresa-flow-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.empresa-sucursales .empresa-filtros {
+  background: #f8fafc;
+  border: 1px solid var(--tone-12);
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+.empresa-sucursales .kanm-table-wrapper {
+  border: 1px solid var(--tone-12);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.empresa-quick-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empresa-quick-control {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.empresa-quick-control select {
+  flex: 1;
+  min-width: 0;
+}
+
+.empresa-quick-help {
+  font-size: 0.8rem;
+  color: var(--kanm-gray-600);
+}
+
+.empresa-quick-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+@keyframes empresa-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .empresa-sucursal-nombre {
@@ -4913,4 +6306,26 @@ img {
 
 #empresa-mensaje {
   margin-left: auto;
+}
+
+@media (max-width: 960px) {
+  .empresa-hub-header {
+    flex-direction: column;
+  }
+
+  .empresa-hub-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .empresa-hub-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .empresa-quick-control {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }

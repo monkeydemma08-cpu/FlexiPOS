@@ -5,7 +5,7 @@ const roleRoutes = {
   caja: '/caja.html',
   vendedor: '/mostrador.html',
   admin: '/admin.html',
-  supervisor: '/admin.html',
+  supervisor: '/supervisor.html',
   empresa: '/empresa.html',
 };
 

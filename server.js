@@ -11,15 +11,19 @@ const db = require('./db');
 const usuariosRepo = require('./repos/usuarios-mysql');
 const runMultiNegocioMigrations = require('./migrations/mysql-multi-negocio');
 const runChatMigrations = require('./migrations/mysql-chat');
+const dgiiRoutes = require('./dgii.routes');
 console.log('server.js cargó correctamente');
 
 const app = express();
 let io = null;
 
+app.set('trust proxy', 1);
+
 // Allow larger payloads for long logo URLs or data URIs in configuration.
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(dgiiRoutes);
 
 const NEGOCIO_ID_DEFAULT = 1;
 const DEFAULT_CONFIG_MODULOS = {
@@ -42,6 +46,8 @@ const IMPERSONATION_TOKEN_TTL_SECONDS = 60 * 60;
 const IMPERSONATION_JWT_SECRET =
   process.env.IMPERSONATION_JWT_SECRET || process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
+const INVENTARIO_VALORACION_DEFAULT = 'PROMEDIO';
+const INVENTARIO_VALORACION_METODOS = new Set(['PROMEDIO', 'PEPS']);
 
 const seedUsuariosIniciales = async () => {
   const iniciales = [
@@ -105,6 +111,11 @@ const analyticsCache = new Map();
 const analyticsAdvancedCache = new Map();
 
 const limpiarCacheAnalitica = (negocioId) => {
+  if (!negocioId) {
+    analyticsCache.clear();
+    analyticsAdvancedCache.clear();
+    return;
+  }
   for (const key of analyticsCache.keys()) {
     if (key.startsWith(`${negocioId}:`)) {
       analyticsCache.delete(key);
@@ -235,6 +246,14 @@ function normalizarMonto(valor) {
   }
   const numero = Number(texto);
   return Number.isFinite(numero) ? numero : null;
+}
+
+function getLocalDateISO(value = new Date()) {
+  const base = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(base.getTime())) return '';
+  const offset = base.getTimezoneOffset();
+  const local = new Date(base.getTime() - offset * 60000);
+  return local.toISOString().slice(0, 10);
 }
 
 function normalizarAreaPreparacion(area) {
@@ -715,6 +734,152 @@ const validarEstadoNegocio = async (negocioId) => {
   }
 
   return { ok: true, negocio };
+};
+
+const obtenerNegocioIdReutilizable = async () => {
+  try {
+    const row = await db.get(
+      `
+        SELECT next_id
+          FROM (
+            SELECT 1 AS next_id
+            WHERE NOT EXISTS (SELECT 1 FROM negocios WHERE id = 1)
+            UNION ALL
+            SELECT MIN(t1.id + 1) AS next_id
+              FROM negocios t1
+              LEFT JOIN negocios t2 ON t2.id = t1.id + 1
+             WHERE t2.id IS NULL
+          ) t
+         ORDER BY next_id ASC
+         LIMIT 1
+      `
+    );
+    const nextId = Number(row?.next_id);
+    if (!Number.isFinite(nextId) || nextId <= 0) {
+      return null;
+    }
+    return nextId;
+  } catch (error) {
+    console.warn('No se pudo obtener ID reutilizable de negocio:', error?.message || error);
+    return null;
+  }
+};
+
+const NEGOCIO_DELETE_TABLES = [
+  'admin_actions',
+  'admin_impersonations',
+  'analisis_capital_inicial',
+  'categorias',
+  'chat_messages',
+  'chat_rooms',
+  'cierres_caja',
+  'clientes',
+  'clientes_abonos',
+  'clientes_deudas',
+  'clientes_deudas_detalle',
+  'compras',
+  'compras_inventario',
+  'compras_inventario_detalle',
+  'configuracion',
+  'consumo_insumos',
+  'cotizacion_items',
+  'cotizaciones',
+  'detalle_compra',
+  'detalle_pedido',
+  'gastos',
+  'historial_bar',
+  'historial_cocina',
+  'notas_credito_compras',
+  'notas_credito_ventas',
+  'pedidos',
+  'posium_facturacion_config',
+  'posium_facturas',
+  'productos',
+  'recetas',
+  'salidas_caja',
+  'secuencias_ncf',
+  'sesiones_usuarios',
+  'usuarios',
+];
+
+const eliminarNegocioCompleto = async ({ negocioId, empresaId }) => {
+  const negocioIdNum = Number(negocioId);
+  if (!Number.isFinite(negocioIdNum) || negocioIdNum <= 0) {
+    throw new Error('ID de negocio invalido');
+  }
+
+  let negocioEmpresaId = empresaId ? Number(empresaId) : null;
+  if (!Number.isFinite(negocioEmpresaId)) {
+    const rowEmpresa = await db.get('SELECT empresa_id FROM negocios WHERE id = ? LIMIT 1', [negocioIdNum]);
+    negocioEmpresaId = Number(rowEmpresa?.empresa_id) || null;
+  }
+
+  await db.run('BEGIN');
+  try {
+    if (Number.isFinite(negocioEmpresaId)) {
+      const fallback = await db.get(
+        `
+          SELECT id
+            FROM negocios
+           WHERE empresa_id = ?
+             AND id <> ?
+             AND deleted_at IS NULL
+             AND activo = 1
+           ORDER BY id ASC
+           LIMIT 1
+        `,
+        [negocioEmpresaId, negocioIdNum]
+      );
+      if (fallback?.id) {
+        await db.run(
+          `UPDATE usuarios
+              SET negocio_id = ?
+            WHERE rol = 'empresa'
+              AND empresa_id = ?
+              AND negocio_id = ?`,
+          [fallback.id, negocioEmpresaId, negocioIdNum]
+        );
+      }
+    }
+
+    await db.run('SET FOREIGN_KEY_CHECKS = 0');
+
+    await db.run(
+      `DELETE FROM chat_message_reads
+        WHERE message_id IN (SELECT id FROM chat_messages WHERE negocio_id = ?)`,
+      [negocioIdNum]
+    );
+    await db.run(
+      `DELETE FROM chat_mentions
+        WHERE message_id IN (SELECT id FROM chat_messages WHERE negocio_id = ?)`,
+      [negocioIdNum]
+    );
+    await db.run(
+      `DELETE FROM chat_room_users
+        WHERE room_id IN (SELECT id FROM chat_rooms WHERE negocio_id = ?)`,
+      [negocioIdNum]
+    );
+
+    for (const table of NEGOCIO_DELETE_TABLES) {
+      await db.run(`DELETE FROM ${table} WHERE negocio_id = ?`, [negocioIdNum]);
+    }
+
+    await db.run('DELETE FROM negocios WHERE id = ?', [negocioIdNum]);
+    await db.run('SET FOREIGN_KEY_CHECKS = 1');
+    await db.run('COMMIT');
+  } catch (error) {
+    try {
+      await db.run('SET FOREIGN_KEY_CHECKS = 1');
+    } catch (resetErr) {
+      console.warn('No se pudo restaurar FOREIGN_KEY_CHECKS:', resetErr?.message || resetErr);
+    }
+    try {
+      await db.run('ROLLBACK');
+    } catch (rollbackErr) {
+      console.warn('No se pudo hacer rollback al eliminar negocio:', rollbackErr?.message || rollbackErr);
+    }
+    throw error;
+  }
 };
 
 const obtenerNegocioAdmin = async (negocioId) =>
@@ -1707,6 +1872,8 @@ const registrarHistorialBar = (pedidoId, negocioId, callback = () => {}) => {
   );
 };
 
+const IMPUESTO_POR_DEFECTO = 18;
+
 const obtenerImpuestoConfigurado = (negocioId, callback) => {
   if (typeof negocioId === 'function') {
     callback = negocioId;
@@ -1720,8 +1887,9 @@ const obtenerImpuestoConfigurado = (negocioId, callback) => {
       if (err) {
         return callback(err);
       }
-      const porcentaje = row ? parseFloat(row.valor) : 0;
-      callback(null, Number.isNaN(porcentaje) ? 0 : porcentaje);
+      const porcentaje = row ? parseFloat(row.valor) : IMPUESTO_POR_DEFECTO;
+      const valor = Number.isNaN(porcentaje) ? IMPUESTO_POR_DEFECTO : porcentaje;
+      callback(null, valor);
     }
   );
 };
@@ -2209,6 +2377,76 @@ const normalizarModoInventarioCostos = (valor, predeterminado = 'PREPARACION') =
   return predeterminado;
 };
 
+const normalizarMetodoValoracionInventario = (valor, predeterminado = INVENTARIO_VALORACION_DEFAULT) => {
+  const limpio = String(valor || '').trim().toUpperCase();
+  if (INVENTARIO_VALORACION_METODOS.has(limpio)) {
+    return limpio;
+  }
+  return predeterminado;
+};
+
+const obtenerMetodoValoracionEmpresa = async (empresaId) => {
+  if (!empresaId) return INVENTARIO_VALORACION_DEFAULT;
+  try {
+    const row = await db.get(
+      'SELECT inventario_valoracion_metodo FROM empresas WHERE id = ? LIMIT 1',
+      [empresaId]
+    );
+    return normalizarMetodoValoracionInventario(row?.inventario_valoracion_metodo, INVENTARIO_VALORACION_DEFAULT);
+  } catch (error) {
+    console.warn('No se pudo obtener metodo de valoracion de inventario:', error?.message || error);
+    return INVENTARIO_VALORACION_DEFAULT;
+  }
+};
+
+const guardarMetodoValoracionEmpresa = async (empresaId, metodo) => {
+  if (!empresaId) return;
+  const normalizado = normalizarMetodoValoracionInventario(metodo, INVENTARIO_VALORACION_DEFAULT);
+  await db.run('UPDATE empresas SET inventario_valoracion_metodo = ? WHERE id = ?', [normalizado, empresaId]);
+  return normalizado;
+};
+
+const registrarCapaInventarioEmpresa = async ({ empresaId, productoId, cantidad, costoUnitario, fecha }) => {
+  if (!empresaId || !productoId || !cantidad || cantidad <= 0) return;
+  await db.run(
+    `INSERT INTO empresa_inventario_capas (empresa_id, producto_id, cantidad_restante, costo_unitario, fecha)
+     VALUES (?, ?, ?, ?, ?)`,
+    [empresaId, productoId, cantidad, costoUnitario, fecha || new Date()]
+  );
+};
+
+const consumirCapasInventarioEmpresa = async ({ empresaId, productoId, cantidad }) => {
+  const resultado = { cantidadConsumida: 0, costoTotal: 0 };
+  if (!empresaId || !productoId || !cantidad || cantidad <= 0) return resultado;
+  const capas = await db.all(
+    `SELECT id, cantidad_restante, costo_unitario
+       FROM empresa_inventario_capas
+      WHERE empresa_id = ? AND producto_id = ? AND cantidad_restante > 0
+      ORDER BY fecha ASC, id ASC`,
+    [empresaId, productoId]
+  );
+  let restante = cantidad;
+  for (const capa of capas || []) {
+    if (restante <= 0) break;
+    const disponible = Number(capa.cantidad_restante) || 0;
+    if (disponible <= 0) continue;
+    const tomar = Math.min(disponible, restante);
+    restante -= tomar;
+    resultado.cantidadConsumida += tomar;
+    resultado.costoTotal += tomar * (Number(capa.costo_unitario) || 0);
+    const nuevaCantidad = Number((disponible - tomar).toFixed(4));
+    if (nuevaCantidad <= 0) {
+      await db.run('DELETE FROM empresa_inventario_capas WHERE id = ?', [capa.id]);
+    } else {
+      await db.run('UPDATE empresa_inventario_capas SET cantidad_restante = ? WHERE id = ?', [
+        nuevaCantidad,
+        capa.id,
+      ]);
+    }
+  }
+  return resultado;
+};
+
 const normalizarContenidoPorUnidad = (valor, predeterminado = 1) => {
   const numero = normalizarNumero(valor, predeterminado);
   if (!Number.isFinite(numero) || numero <= 0) {
@@ -2217,9 +2455,13 @@ const normalizarContenidoPorUnidad = (valor, predeterminado = 1) => {
   return Number(numero);
 };
 
-const TIPOS_GASTO = ['OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA'];
+const TIPOS_GASTO = ['OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA', 'ACTIVO_FIJO'];
 const ORIGENES_GASTO = ['manual', 'compra', 'nomina', 'caja'];
+const ESTADOS_GASTO = ['BORRADOR', 'PENDIENTE', 'APROBADO', 'PAGADO', 'ANULADO'];
 const ORIGENES_FONDOS_COMPRA = ['negocio', 'caja', 'aporte_externo'];
+const ESTADOS_CLIENTE = ['ACTIVO', 'INACTIVO', 'MORA', 'BLOQUEADO'];
+const SEGMENTOS_CLIENTE = ['CONSUMIDOR', 'FRECUENTE', 'EMPRESA', 'MAYORISTA'];
+const TIPOS_CLIENTE = ['PERSONA', 'EMPRESA'];
 
 const normalizarTipoGasto = (valor, predeterminado = 'OPERATIVO') => {
   if (!valor) {
@@ -2243,6 +2485,33 @@ const normalizarOrigenGasto = (valor, predeterminado = 'manual') => {
   return predeterminado;
 };
 
+const normalizarEstadoGasto = (valor, predeterminado = 'PENDIENTE') => {
+  if (!valor) {
+    return ESTADOS_GASTO.includes(predeterminado) ? predeterminado : 'PENDIENTE';
+  }
+  const limpio = String(valor).trim().toUpperCase();
+  if (ESTADOS_GASTO.includes(limpio)) {
+    return limpio;
+  }
+  if (['DRAFT', 'BORRADOR'].includes(limpio)) return 'BORRADOR';
+  if (['PENDIENTE_APROBACION', 'PENDIENTE APROBACION'].includes(limpio)) return 'PENDIENTE';
+  if (['APROBADO', 'APROBADA'].includes(limpio)) return 'APROBADO';
+  if (['PAGADO', 'PAGADA'].includes(limpio)) return 'PAGADO';
+  if (['ANULADO', 'CANCELADO'].includes(limpio)) return 'ANULADO';
+  return ESTADOS_GASTO.includes(predeterminado) ? predeterminado : 'PENDIENTE';
+};
+
+const normalizarOrigenFondosGasto = (valor, predeterminado = null) => {
+  if (!valor) {
+    return predeterminado;
+  }
+  const limpio = String(valor).trim().toLowerCase();
+  if (['caja', 'efectivo', 'cash'].includes(limpio)) return 'caja';
+  if (['banco', 'transferencia', 'tarjeta', 'pos', 'debito', 'credito'].includes(limpio)) return 'banco';
+  if (['externo', 'aporte', 'aporte_externo', 'aporte externo'].includes(limpio)) return 'externo';
+  return limpio.slice(0, 20);
+};
+
 const normalizarOrigenFondosCompra = (valor, predeterminado = 'negocio') => {
   if (!valor) {
     return ORIGENES_FONDOS_COMPRA.includes(predeterminado) ? predeterminado : 'negocio';
@@ -2254,6 +2523,47 @@ const normalizarOrigenFondosCompra = (valor, predeterminado = 'negocio') => {
     return 'aporte_externo';
   }
   return ORIGENES_FONDOS_COMPRA.includes(predeterminado) ? predeterminado : 'negocio';
+};
+
+const normalizarEstadoCliente = (valor, predeterminado = 'ACTIVO') => {
+  if (!valor) {
+    return ESTADOS_CLIENTE.includes(predeterminado) ? predeterminado : 'ACTIVO';
+  }
+  const limpio = String(valor).trim().toUpperCase();
+  if (ESTADOS_CLIENTE.includes(limpio)) {
+    return limpio;
+  }
+  if (['SUSPENDIDO', 'INACTIVO', 'BLOQUEADO'].includes(limpio)) return limpio === 'INACTIVO' ? 'INACTIVO' : 'BLOQUEADO';
+  if (['MORA', 'VENCIDO'].includes(limpio)) return 'MORA';
+  return ESTADOS_CLIENTE.includes(predeterminado) ? predeterminado : 'ACTIVO';
+};
+
+const normalizarSegmentoCliente = (valor, predeterminado = 'CONSUMIDOR') => {
+  if (!valor) {
+    return SEGMENTOS_CLIENTE.includes(predeterminado) ? predeterminado : 'CONSUMIDOR';
+  }
+  const limpio = String(valor).trim().toUpperCase();
+  if (SEGMENTOS_CLIENTE.includes(limpio)) {
+    return limpio;
+  }
+  if (['CONSUMIDOR FINAL', 'FINAL'].includes(limpio)) return 'CONSUMIDOR';
+  if (['FRECUENTE', 'VIP'].includes(limpio)) return 'FRECUENTE';
+  if (['B2B', 'EMPRESA'].includes(limpio)) return 'EMPRESA';
+  if (['MAYORISTA', 'WHOLESALE'].includes(limpio)) return 'MAYORISTA';
+  return SEGMENTOS_CLIENTE.includes(predeterminado) ? predeterminado : 'CONSUMIDOR';
+};
+
+const normalizarTipoCliente = (valor, predeterminado = 'PERSONA') => {
+  if (!valor) {
+    return TIPOS_CLIENTE.includes(predeterminado) ? predeterminado : 'PERSONA';
+  }
+  const limpio = String(valor).trim().toUpperCase();
+  if (TIPOS_CLIENTE.includes(limpio)) {
+    return limpio;
+  }
+  if (['EMPRESA', 'B2B'].includes(limpio)) return 'EMPRESA';
+  if (['PERSONA', 'INDIVIDUAL'].includes(limpio)) return 'PERSONA';
+  return TIPOS_CLIENTE.includes(predeterminado) ? predeterminado : 'PERSONA';
 };
 
 const obtenerConfiguracionSecuenciasNegocio = async (negocioId) => {
@@ -4789,6 +5099,10 @@ app.get('/admin/cotizaciones', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
+app.get('/supervisor/cotizaciones', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'supervisor.html'));
+});
+
 app.get('/admin/cotizaciones/:id/imprimir', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'cotizacion-imprimir.html'));
 });
@@ -6895,14 +7209,13 @@ app.post('/api/negocios', (req, res) => {
           return res.status(400).json({ ok: false, error: 'Ya existe un negocio con ese slug' });
         }
         if (existente && existente.deleted_at) {
-          const slugArchivado = `${slug}-eliminado-${existente.id}-${Date.now()}`;
           try {
-            await db.run('UPDATE negocios SET slug = ? WHERE id = ?', [slugArchivado, existente.id]);
+            await eliminarNegocioCompleto({ negocioId: existente.id });
           } catch (error) {
-            console.warn('No se pudo liberar slug de negocio eliminado:', error?.message || error);
+            console.warn('No se pudo eliminar definitivamente el negocio con slug repetido:', error?.message || error);
             return res.status(400).json({
               ok: false,
-              error: 'Existe un negocio eliminado con ese slug. Cambia el slug o elimina definitivamente.',
+              error: 'Existe un negocio eliminado con ese slug. No se pudo eliminar definitivamente.',
             });
           }
         }
@@ -6924,13 +7237,37 @@ app.post('/api/negocios', (req, res) => {
         }
       }
       const insertSql = `
-        INSERT INTO negocios (nombre, slug, rnc, telefono, direccion, color_primario, color_secundario, color_texto, color_header,
-                              color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos, admin_principal_correo,
-                              admin_principal_usuario_id, logo_url, titulo_sistema, activo, empresa_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO negocios ({{columns}})
+        VALUES ({{placeholders}})
       `;
 
-      const params = [
+      const reusableId = await obtenerNegocioIdReutilizable();
+      const usarIdReutilizable = Number.isFinite(reusableId) && reusableId > 0;
+      const columns = [
+        ...(usarIdReutilizable ? ['id'] : []),
+        'nombre',
+        'slug',
+        'rnc',
+        'telefono',
+        'direccion',
+        'color_primario',
+        'color_secundario',
+        'color_texto',
+        'color_header',
+        'color_boton_primario',
+        'color_boton_secundario',
+        'color_boton_peligro',
+        'config_modulos',
+        'admin_principal_correo',
+        'admin_principal_usuario_id',
+        'logo_url',
+        'titulo_sistema',
+        'activo',
+        'empresa_id',
+      ];
+
+      const paramsBase = [
+        ...(usarIdReutilizable ? [reusableId] : []),
         nombre,
         slug,
         rnc,
@@ -6952,14 +7289,44 @@ app.post('/api/negocios', (req, res) => {
         empresaIdFinal,
       ];
 
-      db.run(insertSql, params, async function (err) {
-        if (err) {
-          console.error('Error al crear negocio:', err.message);
+      const sqlConId = insertSql
+        .replace('{{columns}}', columns.join(', '))
+        .replace('{{placeholders}}', columns.map(() => '?').join(', '));
+
+      const sqlSinId = insertSql
+        .replace('{{columns}}', columns.filter((col) => col !== 'id').join(', '))
+        .replace('{{placeholders}}', columns.filter((col) => col !== 'id').map(() => '?').join(', '));
+
+      const paramsSinId = paramsBase.slice(usarIdReutilizable ? 1 : 0);
+
+      const ejecutarInsert = (sql, params) =>
+        new Promise((resolve, reject) => {
+          db.run(sql, params, function (err) {
+            if (err) return reject(err);
+            resolve(this);
+          });
+        });
+
+      let insertContext = null;
+      try {
+        insertContext = await ejecutarInsert(sqlConId, paramsBase);
+      } catch (err) {
+        if (usarIdReutilizable && err?.code === 'ER_DUP_ENTRY') {
+          try {
+            insertContext = await ejecutarInsert(sqlSinId, paramsSinId);
+          } catch (fallbackErr) {
+            console.error('Error al crear negocio:', fallbackErr.message || fallbackErr);
+            return res.status(500).json({ ok: false, error: 'No se pudo crear el negocio' });
+          }
+        } else {
+          console.error('Error al crear negocio:', err.message || err);
           return res.status(500).json({ ok: false, error: 'No se pudo crear el negocio' });
         }
+      }
 
-        const negocioCreado = mapNegocioWithDefaults({
-          id: this.lastID,
+      const nuevoId = insertContext?.lastID || reusableId;
+      const negocioCreado = mapNegocioWithDefaults({
+          id: nuevoId,
           nombre,
           slug,
           rnc,
@@ -7026,7 +7393,6 @@ app.post('/api/negocios', (req, res) => {
         }
 
         res.status(201).json(responsePayload);
-      });
     });
   });
 });
@@ -7819,19 +8185,12 @@ app.delete('/api/admin/negocios/:id', (req, res) => {
       if (!negocio) {
         return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
       }
-      if (negocio.deleted_at) {
-        return res.status(400).json({ ok: false, error: 'El negocio ya esta eliminado' });
-      }
 
-      await db.run(
-        'UPDATE negocios SET deleted_at = CURRENT_TIMESTAMP, activo = 0, suspendido = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [id]
-      );
-      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'eliminar' });
-      res.json({ ok: true });
+      await eliminarNegocioCompleto({ negocioId: id, empresaId: negocio.empresa_id });
+      res.json({ ok: true, eliminado: 'definitivo' });
     } catch (error) {
       console.error('Error eliminando negocio:', error?.message || error);
-      res.status(500).json({ ok: false, error: 'No se pudo eliminar el negocio' });
+      res.status(500).json({ ok: false, error: 'No se pudo eliminar definitivamente el negocio' });
     }
   });
 });
@@ -8565,6 +8924,13 @@ app.get('/api/empresa/analytics/overview', (req, res) => {
             ganancia_neta: 0,
             ticket_promedio: 0,
           },
+          kpis: {
+            nomina_total: 0,
+            deudas_total: 0,
+            deudas_abonos: 0,
+            deudas_saldo: 0,
+            usuarios_activos: 0,
+          },
           sucursales: [],
         });
       }
@@ -8602,9 +8968,57 @@ app.get('/api/empresa/analytics/overview', (req, res) => {
             FROM gastos
            WHERE negocio_id IN (${placeholders})
              AND DATE(fecha) BETWEEN ? AND ?
+             AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
            GROUP BY negocio_id
         `,
         paramsBase
+      );
+
+      const nominaRow = await db.get(
+        `
+          SELECT SUM(monto) AS total
+            FROM gastos
+           WHERE negocio_id IN (${placeholders})
+             AND DATE(fecha) BETWEEN ? AND ?
+             AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
+             AND (
+               origen = 'nomina'
+               OR LOWER(COALESCE(categoria, '')) LIKE 'nomina%'
+               OR LOWER(COALESCE(descripcion, '')) LIKE 'nomina%'
+             )
+        `,
+        paramsBase
+      );
+
+      const deudasRow = await db.get(
+        `
+          SELECT SUM(monto_total) AS total
+            FROM clientes_deudas
+           WHERE negocio_id IN (${placeholders})
+             AND DATE(fecha) BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+
+      const abonosRow = await db.get(
+        `
+          SELECT SUM(monto) AS total
+            FROM clientes_abonos
+           WHERE negocio_id IN (${placeholders})
+             AND DATE(fecha) BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+
+      const usuariosRow = await db.get(
+        `
+          SELECT COUNT(1) AS total
+            FROM usuarios
+           WHERE empresa_id = ?
+             AND activo = 1
+             AND (rol IS NULL OR rol <> 'empresa')
+        `,
+        [empresaId]
       );
 
       const ventasMap = new Map((ventasRows || []).map((row) => [Number(row.negocio_id), row]));
@@ -8668,10 +9082,5059 @@ app.get('/api/empresa/analytics/overview', (req, res) => {
         ticket_promedio: totalVentasCount > 0 ? Number((totalVentas / totalVentasCount).toFixed(2)) : 0,
       };
 
-      res.json({ ok: true, rango, resumen, sucursales });
+      const nominaTotal = Number(nominaRow?.total || 0);
+      const deudasTotal = Number(deudasRow?.total || 0);
+      const abonosTotal = Number(abonosRow?.total || 0);
+      const deudasSaldo = Math.max(deudasTotal - abonosTotal, 0);
+      const usuariosActivos = Number(usuariosRow?.total || 0);
+
+      const kpis = {
+        nomina_total: Number(nominaTotal.toFixed(2)),
+        deudas_total: Number(deudasTotal.toFixed(2)),
+        deudas_abonos: Number(abonosTotal.toFixed(2)),
+        deudas_saldo: Number(deudasSaldo.toFixed(2)),
+        usuarios_activos: usuariosActivos,
+      };
+
+      res.json({ ok: true, rango, resumen, kpis, sucursales });
     } catch (error) {
       console.error('Error al generar analisis empresa:', error?.message || error);
       res.status(500).json({ ok: false, error: 'No se pudo generar el analisis de la empresa' });
+    }
+  });
+});
+
+// Empresa: productos maestro
+app.get('/api/empresa/productos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    try {
+      const metodoValoracion = await obtenerMetodoValoracionEmpresa(empresaId);
+      const rows = await db.all(
+        `SELECT id, nombre, categoria, tipo_producto, costo_base, costo_promedio_actual, precio_sugerido, activo,
+                sku, codigo_barras, familia, tags, atributos_json, stock, stock_minimo, stock_indefinido,
+                ubicacion, bodega, serializable
+           FROM empresa_productos
+          WHERE empresa_id = ?
+          ORDER BY nombre ASC`,
+        [empresaId]
+      );
+      let valoresMap = new Map();
+      if (metodoValoracion === 'PEPS') {
+        const valores = await db.all(
+          `SELECT producto_id, SUM(cantidad_restante * costo_unitario) AS valor
+             FROM empresa_inventario_capas
+            WHERE empresa_id = ?
+            GROUP BY producto_id`,
+          [empresaId]
+        );
+        valoresMap = new Map((valores || []).map((row) => [Number(row.producto_id), Number(row.valor) || 0]));
+      }
+      const productos = (rows || []).map((row) => {
+        const stock = Number(row.stock || 0);
+        const stockIndefinido = Number(row.stock_indefinido || 0) === 1;
+        let valorInventario = 0;
+        if (!stockIndefinido) {
+          if (metodoValoracion === 'PEPS') {
+            valorInventario = valoresMap.get(Number(row.id)) || 0;
+            if (!valorInventario && stock > 0) {
+              const costoBase = Number(row.costo_promedio_actual || row.costo_base || 0);
+              valorInventario = stock * costoBase;
+            }
+          } else {
+            const costoBase = Number(row.costo_promedio_actual || row.costo_base || 0);
+            valorInventario = stock * costoBase;
+          }
+        }
+        const costoValoracion = stock > 0 ? Number((valorInventario / stock).toFixed(4)) : 0;
+        return {
+          ...row,
+          valor_inventario: Number(valorInventario.toFixed(4)),
+          costo_valoracion: costoValoracion,
+        };
+      });
+      res.json({ ok: true, metodo_valoracion: metodoValoracion, productos });
+    } catch (error) {
+      console.error('Error al listar productos empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener los productos' });
+    }
+  });
+});
+
+app.post('/api/empresa/productos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const nombre = normalizarCampoTexto(req.body?.nombre, null);
+    if (!nombre) {
+      return res.status(400).json({ ok: false, error: 'El nombre es obligatorio' });
+    }
+    const categoria = normalizarCampoTexto(req.body?.categoria, null);
+    const sku = normalizarCampoTexto(req.body?.sku, null);
+    const codigoBarras = normalizarCampoTexto(req.body?.codigo_barras ?? req.body?.codigoBarras, null);
+    const familia = normalizarCampoTexto(req.body?.familia, null);
+    const tags = normalizarCampoTexto(req.body?.tags, null);
+    const ubicacion = normalizarCampoTexto(req.body?.ubicacion, null);
+    const bodega = normalizarCampoTexto(req.body?.bodega, null);
+    const serializable = normalizarFlag(req.body?.serializable, 0) ? 1 : 0;
+    const stockIndefinido = normalizarFlag(req.body?.stock_indefinido ?? req.body?.stockIndefinido, 0) ? 1 : 0;
+    const stockMinimo = normalizarNumero(req.body?.stock_minimo ?? req.body?.stockMinimo, 0);
+    let stock = normalizarNumero(req.body?.stock, 0);
+    if (stockIndefinido) {
+      stock = null;
+    }
+    let atributosJson = null;
+    if (req.body?.atributos_json !== undefined || req.body?.atributosJson !== undefined) {
+      const raw = req.body?.atributos_json ?? req.body?.atributosJson;
+      if (raw === null || raw === '') {
+        atributosJson = null;
+      } else if (typeof raw === 'object') {
+        atributosJson = JSON.stringify(raw);
+      } else {
+        try {
+          atributosJson = JSON.stringify(JSON.parse(raw));
+        } catch (error) {
+          return res.status(400).json({ ok: false, error: 'Atributos invalidos. Debe ser JSON.' });
+        }
+      }
+    }
+    const tipoProducto = (req.body?.tipo_producto || req.body?.tipo || 'FINAL').toString().toUpperCase();
+    if (!['FINAL', 'INSUMO'].includes(tipoProducto)) {
+      return res.status(400).json({ ok: false, error: 'Tipo de producto invalido' });
+    }
+    const costoBase = Number(req.body?.costo_base || 0) || 0;
+    const precioSugerido = Number(req.body?.precio_sugerido || 0) || 0;
+    const activo = req.body?.activo === 0 || req.body?.activo === false ? 0 : 1;
+
+    try {
+      const insert = await db.run(
+        `INSERT INTO empresa_productos (
+            empresa_id, nombre, categoria, tipo_producto, costo_base, precio_sugerido, activo,
+            sku, codigo_barras, familia, tags, atributos_json, stock, stock_minimo, stock_indefinido,
+            ubicacion, bodega, serializable
+          )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          empresaId,
+          nombre,
+          categoria,
+          tipoProducto,
+          costoBase,
+          precioSugerido,
+          activo,
+          sku,
+          codigoBarras,
+          familia,
+          tags,
+          atributosJson,
+          stock,
+          stockMinimo,
+          stockIndefinido,
+          ubicacion,
+          bodega,
+          serializable,
+        ]
+      );
+      res.status(201).json({
+        ok: true,
+        producto: {
+          id: insert.lastID,
+          nombre,
+          categoria,
+          tipo_producto: tipoProducto,
+          costo_base: costoBase,
+          precio_sugerido: precioSugerido,
+          activo,
+          sku,
+          codigo_barras: codigoBarras,
+          familia,
+          tags,
+          atributos_json: atributosJson,
+          stock,
+          stock_minimo: stockMinimo,
+          stock_indefinido: stockIndefinido,
+          ubicacion,
+          bodega,
+          serializable,
+        },
+      });
+    } catch (error) {
+      console.error('Error al crear producto empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo crear el producto' });
+    }
+  });
+});
+
+app.put('/api/empresa/productos/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID invalido' });
+    }
+
+    const nombre = normalizarCampoTexto(req.body?.nombre, null);
+    if (!nombre) {
+      return res.status(400).json({ ok: false, error: 'El nombre es obligatorio' });
+    }
+    const categoria = normalizarCampoTexto(req.body?.categoria, null);
+    const sku = normalizarCampoTexto(req.body?.sku, null);
+    const codigoBarras = normalizarCampoTexto(req.body?.codigo_barras ?? req.body?.codigoBarras, null);
+    const familia = normalizarCampoTexto(req.body?.familia, null);
+    const tags = normalizarCampoTexto(req.body?.tags, null);
+    const ubicacion = normalizarCampoTexto(req.body?.ubicacion, null);
+    const bodega = normalizarCampoTexto(req.body?.bodega, null);
+    const serializable = normalizarFlag(req.body?.serializable, 0) ? 1 : 0;
+    const stockIndefinido = normalizarFlag(req.body?.stock_indefinido ?? req.body?.stockIndefinido, 0) ? 1 : 0;
+    const stockMinimo = normalizarNumero(req.body?.stock_minimo ?? req.body?.stockMinimo, 0);
+    let stock = normalizarNumero(req.body?.stock, 0);
+    if (stockIndefinido) {
+      stock = null;
+    }
+    let atributosJson = null;
+    if (req.body?.atributos_json !== undefined || req.body?.atributosJson !== undefined) {
+      const raw = req.body?.atributos_json ?? req.body?.atributosJson;
+      if (raw === null || raw === '') {
+        atributosJson = null;
+      } else if (typeof raw === 'object') {
+        atributosJson = JSON.stringify(raw);
+      } else {
+        try {
+          atributosJson = JSON.stringify(JSON.parse(raw));
+        } catch (error) {
+          return res.status(400).json({ ok: false, error: 'Atributos invalidos. Debe ser JSON.' });
+        }
+      }
+    }
+    const tipoProducto = (req.body?.tipo_producto || req.body?.tipo || 'FINAL').toString().toUpperCase();
+    if (!['FINAL', 'INSUMO'].includes(tipoProducto)) {
+      return res.status(400).json({ ok: false, error: 'Tipo de producto invalido' });
+    }
+    const costoBase = Number(req.body?.costo_base || 0) || 0;
+    const precioSugerido = Number(req.body?.precio_sugerido || 0) || 0;
+    const activo = req.body?.activo === 0 || req.body?.activo === false ? 0 : 1;
+
+    try {
+      const result = await db.run(
+        `UPDATE empresa_productos
+            SET nombre = ?, categoria = ?, tipo_producto = ?, costo_base = ?, precio_sugerido = ?, activo = ?,
+                sku = ?, codigo_barras = ?, familia = ?, tags = ?, atributos_json = ?, stock = ?, stock_minimo = ?,
+                stock_indefinido = ?, ubicacion = ?, bodega = ?, serializable = ?,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND empresa_id = ?`,
+        [
+          nombre,
+          categoria,
+          tipoProducto,
+          costoBase,
+          precioSugerido,
+          activo,
+          sku,
+          codigoBarras,
+          familia,
+          tags,
+          atributosJson,
+          stock,
+          stockMinimo,
+          stockIndefinido,
+          ubicacion,
+          bodega,
+          serializable,
+          id,
+          empresaId,
+        ]
+      );
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Producto no encontrado' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al actualizar producto empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar el producto' });
+    }
+  });
+});
+
+app.delete('/api/empresa/productos/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID invalido' });
+    }
+    try {
+      const result = await db.run('DELETE FROM empresa_productos WHERE id = ? AND empresa_id = ?', [id, empresaId]);
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Producto no encontrado' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al eliminar producto empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo eliminar el producto' });
+    }
+  });
+});
+
+app.get('/api/empresa/inventario/config', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    try {
+      const metodo = await obtenerMetodoValoracionEmpresa(empresaId);
+      res.json({ ok: true, metodo_valoracion: metodo });
+    } catch (error) {
+      console.error('Error al obtener configuracion de inventario empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo consultar la configuracion.' });
+    }
+  });
+});
+
+app.put('/api/empresa/inventario/config', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const rawMetodo = req.body?.metodo_valoracion ?? req.body?.metodoValoracion;
+    const metodo = normalizarMetodoValoracionInventario(rawMetodo, INVENTARIO_VALORACION_DEFAULT);
+    try {
+      const guardado = await guardarMetodoValoracionEmpresa(empresaId, metodo);
+      res.json({ ok: true, metodo_valoracion: guardado });
+    } catch (error) {
+      console.error('Error al guardar configuracion de inventario empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar la configuracion.' });
+    }
+  });
+});
+
+app.get('/api/empresa/inventario/movimientos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const hoy = new Date();
+    const desdeRaw = req.query?.from || req.query?.desde;
+    const hastaRaw = req.query?.to || req.query?.hasta;
+    const desde = desdeRaw ? new Date(desdeRaw) : new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 29);
+    const hasta = hastaRaw ? new Date(hastaRaw) : hoy;
+    const fechaDesde = getLocalDateISO(desde);
+    const fechaHasta = getLocalDateISO(hasta);
+    const productoId = Number(req.query?.producto_id || req.query?.productoId || 0);
+    const tipo = req.query?.tipo ? String(req.query.tipo).trim().toUpperCase() : '';
+    const params = [empresaId, fechaDesde, fechaHasta];
+    let filtro = '';
+    if (Number.isFinite(productoId) && productoId > 0) {
+      filtro += ' AND m.producto_id = ?';
+      params.push(productoId);
+    }
+    if (tipo && ['ENTRADA', 'SALIDA', 'AJUSTE'].includes(tipo)) {
+      filtro += ' AND m.tipo = ?';
+      params.push(tipo);
+    }
+    try {
+      const rows = await db.all(
+        `SELECT m.id, m.fecha, m.tipo, m.cantidad, m.costo_unitario, m.motivo, m.referencia,
+                m.stock_antes, m.stock_despues,
+                p.nombre AS producto_nombre,
+                u.nombre AS usuario_nombre
+           FROM empresa_inventario_movimientos m
+           JOIN empresa_productos p ON p.id = m.producto_id
+           LEFT JOIN usuarios u ON u.id = m.usuario_id
+          WHERE m.empresa_id = ?
+            AND DATE(m.fecha) BETWEEN ? AND ?
+            ${filtro}
+          ORDER BY m.fecha DESC, m.id DESC`,
+        params
+      );
+      res.json({ ok: true, movimientos: rows || [] });
+    } catch (error) {
+      console.error('Error al listar movimientos de inventario empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener los movimientos' });
+    }
+  });
+});
+
+app.post('/api/empresa/inventario/movimientos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const productoId = Number(req.body?.producto_id || req.body?.productoId);
+    if (!Number.isFinite(productoId) || productoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Producto invalido' });
+    }
+    const tipo = String(req.body?.tipo || '').trim().toUpperCase();
+    if (!['ENTRADA', 'SALIDA', 'AJUSTE'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: 'Tipo de movimiento invalido' });
+    }
+    const cantidadRaw = normalizarNumero(req.body?.cantidad, null);
+    if (!Number.isFinite(cantidadRaw) || cantidadRaw === 0) {
+      return res.status(400).json({ ok: false, error: 'Cantidad invalida' });
+    }
+    const fecha = req.body?.fecha ? new Date(req.body.fecha) : new Date();
+    const motivo = normalizarCampoTexto(req.body?.motivo ?? req.body?.descripcion, null);
+    const referencia = normalizarCampoTexto(req.body?.referencia, null);
+
+    try {
+      const producto = await db.get(
+        `SELECT id, nombre, stock, stock_indefinido, costo_base, costo_promedio_actual
+           FROM empresa_productos
+          WHERE id = ? AND empresa_id = ?
+          LIMIT 1`,
+        [productoId, empresaId]
+      );
+      if (!producto) {
+        return res.status(404).json({ ok: false, error: 'Producto no encontrado' });
+      }
+
+      const metodoValoracion = await obtenerMetodoValoracionEmpresa(empresaId);
+      const stockIndefinido = Number(producto.stock_indefinido || 0) === 1;
+      const stockAntes = stockIndefinido ? null : Number(producto.stock || 0);
+      let cantidad = Number(cantidadRaw);
+      if (tipo === 'ENTRADA' || tipo === 'SALIDA') {
+        cantidad = Math.abs(cantidad);
+      }
+      const esSalida = tipo === 'SALIDA' || (tipo === 'AJUSTE' && cantidad < 0);
+      const cantidadAbs = Math.abs(cantidad);
+
+      let costoUnitario = normalizarNumero(req.body?.costo_unitario ?? req.body?.costoUnitario, 0);
+      if (!Number.isFinite(costoUnitario) || costoUnitario <= 0) {
+        costoUnitario = Number(producto.costo_promedio_actual || producto.costo_base || 0);
+      }
+      let costoTotalMovimiento = cantidadAbs * costoUnitario;
+
+      if (metodoValoracion === 'PEPS' && esSalida && cantidadAbs > 0) {
+        const consumo = await consumirCapasInventarioEmpresa({ empresaId, productoId, cantidad: cantidadAbs });
+        if (consumo.cantidadConsumida > 0) {
+          const restante = Math.max(cantidadAbs - consumo.cantidadConsumida, 0);
+          costoTotalMovimiento = consumo.costoTotal + restante * costoUnitario;
+          costoUnitario =
+            consumo.cantidadConsumida > 0
+              ? (consumo.costoTotal + restante * costoUnitario) / cantidadAbs
+              : costoUnitario;
+        }
+      }
+
+      let stockDespues = stockAntes;
+      if (!stockIndefinido && Number.isFinite(stockAntes)) {
+        if (tipo === 'ENTRADA') {
+          stockDespues = stockAntes + cantidadAbs;
+        } else if (tipo === 'SALIDA') {
+          stockDespues = stockAntes - cantidadAbs;
+        } else if (tipo === 'AJUSTE') {
+          stockDespues = stockAntes + cantidad;
+        }
+        stockDespues = Number(stockDespues.toFixed(4));
+      }
+
+      if (!stockIndefinido && Number.isFinite(stockDespues)) {
+        await db.run('UPDATE empresa_productos SET stock = ? WHERE id = ? AND empresa_id = ?', [
+          stockDespues,
+          productoId,
+          empresaId,
+        ]);
+      }
+
+      if (metodoValoracion === 'PROMEDIO' && !esSalida && cantidadAbs > 0 && !stockIndefinido) {
+        const stockBase = Number(stockAntes || 0);
+        const costoActual = Number(producto.costo_promedio_actual || producto.costo_base || 0);
+        const nuevoTotal = stockBase + cantidadAbs;
+        const nuevoCosto =
+          nuevoTotal > 0 ? (stockBase * costoActual + cantidadAbs * costoUnitario) / nuevoTotal : costoUnitario;
+        await db.run(
+          'UPDATE empresa_productos SET costo_promedio_actual = ? WHERE id = ? AND empresa_id = ?',
+          [Number(nuevoCosto.toFixed(4)), productoId, empresaId]
+        );
+      }
+
+      if (metodoValoracion === 'PEPS' && !esSalida && cantidadAbs > 0) {
+        await registrarCapaInventarioEmpresa({
+          empresaId,
+          productoId,
+          cantidad: cantidadAbs,
+          costoUnitario,
+          fecha,
+        });
+      }
+
+      await db.run(
+        `INSERT INTO empresa_inventario_movimientos
+          (empresa_id, producto_id, tipo, cantidad, costo_unitario, motivo, referencia, usuario_id, fecha, stock_antes, stock_despues)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          empresaId,
+          productoId,
+          tipo,
+          cantidad,
+          Number(costoUnitario.toFixed(4)),
+          motivo,
+          referencia,
+          usuarioSesion?.id ?? null,
+          fecha,
+          stockAntes,
+          stockDespues,
+        ]
+      );
+
+      res.status(201).json({
+        ok: true,
+        movimiento: {
+          producto_id: productoId,
+          tipo,
+          cantidad,
+          costo_unitario: Number(costoUnitario.toFixed(4)),
+          costo_total: Number(costoTotalMovimiento.toFixed(4)),
+          stock_antes: stockAntes,
+          stock_despues: stockDespues,
+        },
+      });
+    } catch (error) {
+      console.error('Error al registrar movimiento de inventario empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo registrar el movimiento' });
+    }
+  });
+});
+
+// Empresa: nomina
+app.get('/api/empresa/nomina/empleados', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    try {
+      const rows = await db.all(
+        `SELECT id, nombre, documento, telefono, cargo, tipo_pago, sueldo_base, tarifa_hora,
+                ars_porcentaje, afp_porcentaje, isr_porcentaje, activo, negocio_id
+           FROM empresa_empleados
+          WHERE empresa_id = ?
+          ORDER BY nombre ASC`,
+        [empresaId]
+      );
+      res.json({ ok: true, empleados: rows || [] });
+    } catch (error) {
+      console.error('Error al listar empleados empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener los empleados' });
+    }
+  });
+});
+
+app.post('/api/empresa/nomina/empleados', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const nombre = normalizarCampoTexto(req.body?.nombre, null);
+    if (!nombre) {
+      return res.status(400).json({ ok: false, error: 'El nombre es obligatorio' });
+    }
+    const documento = normalizarCampoTexto(req.body?.documento, null);
+    const telefono = normalizarCampoTexto(req.body?.telefono, null);
+    const cargo = normalizarCampoTexto(req.body?.cargo, null);
+    const tipoPago = (req.body?.tipo_pago || 'MENSUAL').toString().toUpperCase();
+    if (!['MENSUAL', 'QUINCENAL', 'HORA'].includes(tipoPago)) {
+      return res.status(400).json({ ok: false, error: 'Tipo de pago invalido' });
+    }
+    const sueldoBase = Number(req.body?.sueldo_base || 0) || 0;
+    const tarifaHora = Number(req.body?.tarifa_hora || 0) || 0;
+    const arsPorcentaje = Number(req.body?.ars_porcentaje ?? req.body?.ars ?? 0) || 0;
+    const afpPorcentaje = Number(req.body?.afp_porcentaje ?? req.body?.afp ?? 0) || 0;
+    const isrPorcentaje = Number(req.body?.isr_porcentaje ?? req.body?.isr ?? 0) || 0;
+    if ([arsPorcentaje, afpPorcentaje, isrPorcentaje].some((valor) => valor < 0 || valor > 100)) {
+      return res.status(400).json({ ok: false, error: 'Los descuentos deben estar entre 0% y 100%' });
+    }
+    const activo = req.body?.activo === 0 || req.body?.activo === false ? 0 : 1;
+    const negocioId = Number(req.body?.negocio_id || 0) || null;
+
+    try {
+      const insert = await db.run(
+        `INSERT INTO empresa_empleados (empresa_id, negocio_id, nombre, documento, telefono, cargo, tipo_pago, sueldo_base, tarifa_hora,
+                                        ars_porcentaje, afp_porcentaje, isr_porcentaje, activo)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          empresaId,
+          negocioId,
+          nombre,
+          documento,
+          telefono,
+          cargo,
+          tipoPago,
+          sueldoBase,
+          tarifaHora,
+          arsPorcentaje,
+          afpPorcentaje,
+          isrPorcentaje,
+          activo,
+        ]
+      );
+      res.status(201).json({ ok: true, empleado: { id: insert.lastID } });
+    } catch (error) {
+      console.error('Error al crear empleado empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo crear el empleado' });
+    }
+  });
+});
+
+app.put('/api/empresa/nomina/empleados/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID invalido' });
+    }
+    const nombre = normalizarCampoTexto(req.body?.nombre, null);
+    if (!nombre) {
+      return res.status(400).json({ ok: false, error: 'El nombre es obligatorio' });
+    }
+    const documento = normalizarCampoTexto(req.body?.documento, null);
+    const telefono = normalizarCampoTexto(req.body?.telefono, null);
+    const cargo = normalizarCampoTexto(req.body?.cargo, null);
+    const tipoPago = (req.body?.tipo_pago || 'MENSUAL').toString().toUpperCase();
+    if (!['MENSUAL', 'QUINCENAL', 'HORA'].includes(tipoPago)) {
+      return res.status(400).json({ ok: false, error: 'Tipo de pago invalido' });
+    }
+    const sueldoBase = Number(req.body?.sueldo_base || 0) || 0;
+    const tarifaHora = Number(req.body?.tarifa_hora || 0) || 0;
+    const arsPorcentaje = Number(req.body?.ars_porcentaje ?? req.body?.ars ?? 0) || 0;
+    const afpPorcentaje = Number(req.body?.afp_porcentaje ?? req.body?.afp ?? 0) || 0;
+    const isrPorcentaje = Number(req.body?.isr_porcentaje ?? req.body?.isr ?? 0) || 0;
+    if ([arsPorcentaje, afpPorcentaje, isrPorcentaje].some((valor) => valor < 0 || valor > 100)) {
+      return res.status(400).json({ ok: false, error: 'Los descuentos deben estar entre 0% y 100%' });
+    }
+    const activo = req.body?.activo === 0 || req.body?.activo === false ? 0 : 1;
+    const negocioId = Number(req.body?.negocio_id || 0) || null;
+
+    try {
+      const result = await db.run(
+        `UPDATE empresa_empleados
+            SET nombre = ?, documento = ?, telefono = ?, cargo = ?, tipo_pago = ?, sueldo_base = ?, tarifa_hora = ?,
+                ars_porcentaje = ?, afp_porcentaje = ?, isr_porcentaje = ?, activo = ?, negocio_id = ?,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND empresa_id = ?`,
+        [
+          nombre,
+          documento,
+          telefono,
+          cargo,
+          tipoPago,
+          sueldoBase,
+          tarifaHora,
+          arsPorcentaje,
+          afpPorcentaje,
+          isrPorcentaje,
+          activo,
+          negocioId,
+          id,
+          empresaId,
+        ]
+      );
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Empleado no encontrado' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al actualizar empleado empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar el empleado' });
+    }
+  });
+});
+
+app.delete('/api/empresa/nomina/empleados/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID invalido' });
+    }
+    try {
+      const result = await db.run('DELETE FROM empresa_empleados WHERE id = ? AND empresa_id = ?', [id, empresaId]);
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Empleado no encontrado' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al eliminar empleado empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo eliminar el empleado' });
+    }
+  });
+});
+
+app.post('/api/empresa/nomina/asistencias', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const empleadoId = Number(req.body?.empleado_id);
+    const fecha = normalizarCampoTexto(req.body?.fecha, null);
+    const horaEntrada = normalizarCampoTexto(req.body?.hora_entrada, null);
+    const horaSalida = normalizarCampoTexto(req.body?.hora_salida, null);
+    if (!empleadoId || !fecha || !horaEntrada || !horaSalida) {
+      return res.status(400).json({ ok: false, error: 'Completa empleado, fecha y horas' });
+    }
+
+    const empleado = await db.get(
+      'SELECT id, empresa_id, negocio_id FROM empresa_empleados WHERE id = ? LIMIT 1',
+      [empleadoId]
+    );
+    if (!empleado || Number(empleado.empresa_id) !== Number(empresaId)) {
+      return res.status(404).json({ ok: false, error: 'Empleado no encontrado' });
+    }
+
+    const parseHora = (valor) => {
+      const [h, m] = String(valor).split(':').map((item) => Number(item));
+      if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+      return h * 60 + m;
+    };
+    const inicio = parseHora(horaEntrada);
+    const fin = parseHora(horaSalida);
+    if (inicio === null || fin === null) {
+      return res.status(400).json({ ok: false, error: 'Hora invalida' });
+    }
+    let minutos = fin - inicio;
+    if (minutos < 0) {
+      minutos += 24 * 60;
+    }
+    const horas = Number((minutos / 60).toFixed(2));
+
+    try {
+      await db.run(
+        `INSERT INTO empresa_asistencias (empleado_id, negocio_id, fecha, hora_entrada, hora_salida, horas)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [empleadoId, empleado.negocio_id ?? null, fecha, horaEntrada, horaSalida, horas]
+      );
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      console.error('Error al registrar asistencia:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo registrar la asistencia' });
+    }
+  });
+});
+
+app.post('/api/empresa/nomina/movimientos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const empleadoId = Number(req.body?.empleado_id);
+    const tipo = (req.body?.tipo || 'COMISION').toString().toUpperCase();
+    const fecha = normalizarCampoTexto(req.body?.fecha, null);
+    const notas = normalizarCampoTexto(req.body?.notas, null);
+    const monto = Number(req.body?.monto || 0) || 0;
+    if (!empleadoId || !fecha || !monto) {
+      return res.status(400).json({ ok: false, error: 'Empleado, fecha y monto son obligatorios' });
+    }
+    if (!['COMISION', 'BONO', 'DEDUCCION'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: 'Tipo invalido' });
+    }
+    const empleado = await db.get(
+      'SELECT id, empresa_id, negocio_id FROM empresa_empleados WHERE id = ? LIMIT 1',
+      [empleadoId]
+    );
+    if (!empleado || Number(empleado.empresa_id) !== Number(empresaId)) {
+      return res.status(404).json({ ok: false, error: 'Empleado no encontrado' });
+    }
+    try {
+      await db.run(
+        `INSERT INTO empresa_nomina_movimientos (empleado_id, negocio_id, tipo, monto, fecha, notas)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [empleadoId, empleado.negocio_id ?? null, tipo, monto, fecha, notas]
+      );
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      console.error('Error al registrar movimiento de nomina:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo registrar el movimiento' });
+    }
+  });
+});
+
+app.get('/api/empresa/nomina/resumen', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const rango = normalizarRangoAnalisis(req.query?.from ?? req.query?.desde, req.query?.to ?? req.query?.hasta);
+    try {
+      const empleados = await db.all(
+        `SELECT id, nombre, tipo_pago, sueldo_base, tarifa_hora, ars_porcentaje, afp_porcentaje, isr_porcentaje
+           FROM empresa_empleados
+          WHERE empresa_id = ?
+            AND activo = 1
+          ORDER BY nombre ASC`,
+        [empresaId]
+      );
+      const ids = (empleados || []).map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
+      if (!ids.length) {
+        return res.json({ ok: true, rango, resumen: {}, detalle: [] });
+      }
+      const placeholders = ids.map(() => '?').join(', ');
+
+      const asistencias = await db.all(
+        `SELECT empleado_id, SUM(horas) AS total_horas
+           FROM empresa_asistencias
+          WHERE empleado_id IN (${placeholders})
+            AND fecha BETWEEN ? AND ?
+          GROUP BY empleado_id`,
+        [...ids, rango.desde, rango.hasta]
+      );
+
+      const movimientos = await db.all(
+        `SELECT empleado_id, tipo, SUM(monto) AS total
+           FROM empresa_nomina_movimientos
+          WHERE empleado_id IN (${placeholders})
+            AND fecha BETWEEN ? AND ?
+          GROUP BY empleado_id, tipo`,
+        [...ids, rango.desde, rango.hasta]
+      );
+
+      const horasMap = new Map((asistencias || []).map((row) => [Number(row.empleado_id), Number(row.total_horas) || 0]));
+      const movimientosMap = new Map();
+      (movimientos || []).forEach((row) => {
+        const key = Number(row.empleado_id);
+        if (!movimientosMap.has(key)) {
+          movimientosMap.set(key, { COMISION: 0, BONO: 0, DEDUCCION: 0 });
+        }
+        const item = movimientosMap.get(key);
+        item[row.tipo] = Number(row.total) || 0;
+      });
+
+      const resumen = { sueldos_base: 0, comisiones: 0, bonos: 0, deducciones: 0, total_pagar: 0 };
+      const detalle = (empleados || []).map((emp) => {
+        const horas = horasMap.get(Number(emp.id)) || 0;
+        let base = 0;
+        if (emp.tipo_pago === 'HORA') {
+          base = Number((horas * (Number(emp.tarifa_hora) || 0)).toFixed(2));
+        } else if (emp.tipo_pago === 'QUINCENAL') {
+          base = Number(((Number(emp.sueldo_base) || 0) / 2).toFixed(2));
+        } else {
+          base = Number(emp.sueldo_base || 0);
+        }
+
+        const mov = movimientosMap.get(Number(emp.id)) || { COMISION: 0, BONO: 0, DEDUCCION: 0 };
+        const comisiones = Number(mov.COMISION || 0);
+        const bonos = Number(mov.BONO || 0);
+
+        const arsPct = Number(emp.ars_porcentaje || 0);
+        const afpPct = Number(emp.afp_porcentaje || 0);
+        const isrPct = Number(emp.isr_porcentaje || 0);
+        const arsMonto = Number(((base * arsPct) / 100).toFixed(2));
+        const afpMonto = Number(((base * afpPct) / 100).toFixed(2));
+        const isrMonto = Number(((base * isrPct) / 100).toFixed(2));
+        const deduccionesLegales = Number((arsMonto + afpMonto + isrMonto).toFixed(2));
+        const deduccionesMov = Number(mov.DEDUCCION || 0);
+        const deducciones = Number((deduccionesLegales + deduccionesMov).toFixed(2));
+        const total = Number((base + comisiones + bonos - deducciones).toFixed(2));
+
+        resumen.sueldos_base += base;
+        resumen.comisiones += comisiones;
+        resumen.bonos += bonos;
+        resumen.deducciones += deducciones;
+        resumen.total_pagar += total;
+
+        return {
+          empleado_id: emp.id,
+          nombre: emp.nombre,
+          base,
+          comisiones,
+          bonos,
+          deducciones,
+          deducciones_legales: deduccionesLegales,
+          deducciones_movimientos: deduccionesMov,
+          ars_monto: arsMonto,
+          afp_monto: afpMonto,
+          isr_monto: isrMonto,
+          total,
+        };
+      });
+
+      res.json({ ok: true, rango, resumen, detalle });
+    } catch (error) {
+      console.error('Error al generar resumen nomina:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo generar la nomina' });
+    }
+  });
+});
+
+// ==========================
+// Contabilidad (doble partida)
+// ==========================
+const CONTABILIDAD_CUENTAS_BASE = [
+  { codigo: '1.1.1', nombre: 'Caja', tipo: 'ACTIVO', alias: 'CAJA' },
+  { codigo: '1.1.2', nombre: 'Bancos', tipo: 'ACTIVO', alias: 'BANCO' },
+  { codigo: '1.1.3', nombre: 'Cuentas por cobrar', tipo: 'ACTIVO', alias: 'CXC' },
+  { codigo: '1.1.4', nombre: 'Inventario', tipo: 'ACTIVO', alias: 'INVENTARIO' },
+  { codigo: '1.1.5', nombre: 'ITBIS acreditable', tipo: 'ACTIVO', alias: 'ITBIS_ACREDITABLE' },
+  { codigo: '1.2.1', nombre: 'Activos fijos', tipo: 'ACTIVO', alias: 'ACTIVOS_FIJOS' },
+  { codigo: '2.1.1', nombre: 'Cuentas por pagar', tipo: 'PASIVO', alias: 'CXP' },
+  { codigo: '2.1.2', nombre: 'ITBIS por pagar', tipo: 'PASIVO', alias: 'ITBIS_POR_PAGAR' },
+  { codigo: '2.1.3', nombre: 'Sueldos por pagar', tipo: 'PASIVO', alias: 'SUELDOS_POR_PAGAR' },
+  { codigo: '2.1.4', nombre: 'Prestamos', tipo: 'PASIVO', alias: 'PRESTAMOS' },
+  { codigo: '3.1.1', nombre: 'Capital', tipo: 'PATRIMONIO', alias: 'CAPITAL' },
+  { codigo: '3.1.2', nombre: 'Resultados acumulados', tipo: 'PATRIMONIO', alias: 'RESULTADOS_ACUMULADOS' },
+  { codigo: '3.1.3', nombre: 'Utilidad del periodo', tipo: 'PATRIMONIO', alias: 'UTILIDAD_PERIODO' },
+  { codigo: '4.1.1', nombre: 'Ventas', tipo: 'INGRESO', alias: 'VENTAS' },
+  { codigo: '4.1.2', nombre: 'Otros ingresos', tipo: 'INGRESO', alias: 'OTROS_INGRESOS' },
+  { codigo: '4.1.3', nombre: 'Propinas', tipo: 'INGRESO', alias: 'PROPINA' },
+  { codigo: '5.1.1', nombre: 'Costo de ventas', tipo: 'COSTO', alias: 'COGS' },
+  { codigo: '6.1.1', nombre: 'Nomina', tipo: 'GASTO', alias: 'GASTO_NOMINA' },
+  { codigo: '6.1.2', nombre: 'Alquiler', tipo: 'GASTO', alias: 'GASTO_ALQUILER' },
+  { codigo: '6.1.3', nombre: 'Luz y agua', tipo: 'GASTO', alias: 'GASTO_SERVICIOS' },
+  { codigo: '6.1.4', nombre: 'Marketing', tipo: 'GASTO', alias: 'GASTO_MARKETING' },
+  { codigo: '6.1.5', nombre: 'Mantenimiento', tipo: 'GASTO', alias: 'GASTO_MANTENIMIENTO' },
+  { codigo: '6.1.6', nombre: 'Comisiones', tipo: 'GASTO', alias: 'GASTO_COMISIONES' },
+  { codigo: '6.1.7', nombre: 'Gastos generales', tipo: 'GASTO', alias: 'GASTOS_GENERALES' },
+];
+
+const asegurarPlanContableEmpresa = async (empresaId) => {
+  const existe = await db.get(
+    'SELECT id FROM contabilidad_cuentas WHERE empresa_id = ? LIMIT 1',
+    [empresaId]
+  );
+  if (existe) return;
+  for (const cuenta of CONTABILIDAD_CUENTAS_BASE) {
+    await db.run(
+      'INSERT INTO contabilidad_cuentas (empresa_id, codigo, nombre, tipo, alias) VALUES (?, ?, ?, ?, ?)',
+      [empresaId, cuenta.codigo, cuenta.nombre, cuenta.tipo, cuenta.alias]
+    );
+  }
+};
+
+const obtenerMapaCuentasContables = async (empresaId) => {
+  const rows = await db.all(
+    'SELECT id, codigo, nombre, tipo, alias FROM contabilidad_cuentas WHERE empresa_id = ? AND activo = 1',
+    [empresaId]
+  );
+  const map = new Map();
+  (rows || []).forEach((row) => {
+    if (row.alias) {
+      map.set(row.alias, row);
+    }
+  });
+  return { cuentas: rows || [], map };
+};
+
+const obtenerCuentaAlias = (cuentasMap, alias) => {
+  const cuenta = cuentasMap.get(alias);
+  if (!cuenta) {
+    throw new Error(`Cuenta contable faltante: ${alias}`);
+  }
+  return cuenta;
+};
+
+const parseFechaContable = (fecha) => {
+  const base = fecha instanceof Date ? fecha : new Date(fecha);
+  if (Number.isNaN(base.getTime())) return null;
+  const anio = base.getFullYear();
+  const mes = base.getMonth() + 1;
+  return { anio, mes };
+};
+
+const periodoEstaCerrado = async (empresaId, fecha) => {
+  const periodo = parseFechaContable(fecha);
+  if (!periodo) return false;
+  const row = await db.get(
+    'SELECT estado FROM contabilidad_periodos WHERE empresa_id = ? AND anio = ? AND mes = ? LIMIT 1',
+    [empresaId, periodo.anio, periodo.mes]
+  );
+  return row?.estado === 'CERRADO';
+};
+
+const asegurarPeriodo = async (empresaId, fecha) => {
+  const periodo = parseFechaContable(fecha);
+  if (!periodo) return;
+  const row = await db.get(
+    'SELECT id FROM contabilidad_periodos WHERE empresa_id = ? AND anio = ? AND mes = ? LIMIT 1',
+    [empresaId, periodo.anio, periodo.mes]
+  );
+  if (row) return;
+  await db.run(
+    'INSERT INTO contabilidad_periodos (empresa_id, anio, mes, estado) VALUES (?, ?, ?, ?)',
+    [empresaId, periodo.anio, periodo.mes, 'ABIERTO']
+  );
+};
+
+const crearAsientoContable = async ({
+  empresaId,
+  negocioId,
+  fecha,
+  descripcion,
+  referenciaTipo,
+  referenciaId,
+  lineas,
+  usuarioId,
+}) => {
+  const lineasValidas = (lineas || []).filter((linea) => (Number(linea.debe) || 0) > 0 || (Number(linea.haber) || 0) > 0);
+  if (!lineasValidas.length) return null;
+
+  const totalDebe = lineasValidas.reduce((acc, linea) => acc + (Number(linea.debe) || 0), 0);
+  const totalHaber = lineasValidas.reduce((acc, linea) => acc + (Number(linea.haber) || 0), 0);
+  if (Math.abs(totalDebe - totalHaber) > 0.02) {
+    throw new Error('Asiento descuadrado');
+  }
+
+  await asegurarPeriodo(empresaId, fecha);
+  if (await periodoEstaCerrado(empresaId, fecha)) {
+    return null;
+  }
+
+  await db.run('BEGIN');
+  try {
+    const asiento = await db.run(
+      `INSERT INTO contabilidad_asientos (empresa_id, negocio_id, fecha, descripcion, referencia_tipo, referencia_id, estado, creado_por)
+       VALUES (?, ?, ?, ?, ?, ?, 'CONTABILIZADO', ?)`,
+      [empresaId, negocioId || null, fecha, descripcion || null, referenciaTipo || null, referenciaId || null, usuarioId || null]
+    );
+    const asientoId = asiento?.lastID;
+    if (!asientoId) {
+      throw new Error('No se pudo crear el asiento');
+    }
+    for (const linea of lineasValidas) {
+      await db.run(
+        `INSERT INTO contabilidad_asiento_lineas (asiento_id, cuenta_id, descripcion, debe, haber)
+         VALUES (?, ?, ?, ?, ?)`,
+        [asientoId, linea.cuenta_id, linea.descripcion || null, Number(linea.debe || 0), Number(linea.haber || 0)]
+      );
+    }
+    await db.run('COMMIT');
+    return asientoId;
+  } catch (error) {
+    await db.run('ROLLBACK');
+    throw error;
+  }
+};
+
+const registrarEventoContable = async (empresaId, tipo, origenId, asientoId) => {
+  if (!asientoId) return;
+  await db.run(
+    'INSERT INTO contabilidad_eventos (empresa_id, tipo, origen_id, asiento_id) VALUES (?, ?, ?, ?)',
+    [empresaId, tipo, origenId, asientoId]
+  );
+};
+
+const obtenerCuentaGasto = (categoria, cuentasMap) => {
+  const valor = (categoria || '').toString().toLowerCase();
+  if (valor.includes('nomina')) return obtenerCuentaAlias(cuentasMap, 'GASTO_NOMINA');
+  if (valor.includes('alquiler') || valor.includes('renta')) return obtenerCuentaAlias(cuentasMap, 'GASTO_ALQUILER');
+  if (valor.includes('luz') || valor.includes('agua') || valor.includes('energia')) return obtenerCuentaAlias(cuentasMap, 'GASTO_SERVICIOS');
+  if (valor.includes('marketing') || valor.includes('publicidad')) return obtenerCuentaAlias(cuentasMap, 'GASTO_MARKETING');
+  if (valor.includes('mantenimiento')) return obtenerCuentaAlias(cuentasMap, 'GASTO_MANTENIMIENTO');
+  if (valor.includes('comision')) return obtenerCuentaAlias(cuentasMap, 'GASTO_COMISIONES');
+  return obtenerCuentaAlias(cuentasMap, 'GASTOS_GENERALES');
+};
+
+const resolverCuentaPago = (metodoPago, origenFondos, cuentasMap) => {
+  const metodo = (metodoPago || '').toString().toLowerCase();
+  const origen = (origenFondos || '').toString().toLowerCase();
+  if (!metodo || metodo.includes('credito')) {
+    return obtenerCuentaAlias(cuentasMap, 'CXP');
+  }
+  if (origen === 'caja' || metodo.includes('efectivo')) {
+    return obtenerCuentaAlias(cuentasMap, 'CAJA');
+  }
+  return obtenerCuentaAlias(cuentasMap, 'BANCO');
+};
+
+const contabilizarVentas = async (empresaId, desde, hasta, cuentasMap) => {
+  const fechaBase = 'DATE(COALESCE(p.fecha_factura, p.fecha_cierre, p.fecha_creacion))';
+  const rows = await db.all(
+    `
+      SELECT p.id, p.negocio_id, ${fechaBase} AS fecha, p.subtotal, p.impuesto, p.total, p.propina_monto, p.descuento_monto,
+             p.pago_efectivo, p.pago_efectivo_entregado, p.pago_tarjeta, p.pago_transferencia, p.pago_cambio, p.cogs_total
+        FROM pedidos p
+        JOIN negocios n ON n.id = p.negocio_id
+        LEFT JOIN contabilidad_eventos ce
+               ON ce.empresa_id = n.empresa_id AND ce.tipo = 'VENTA' AND ce.origen_id = p.id
+       WHERE n.empresa_id = ?
+         AND n.deleted_at IS NULL
+         AND p.estado = 'pagado'
+         AND ${fechaBase} BETWEEN ? AND ?
+         AND ce.id IS NULL
+    `,
+    [empresaId, desde, hasta]
+  );
+
+  const cuentaCaja = obtenerCuentaAlias(cuentasMap, 'CAJA');
+  const cuentaBanco = obtenerCuentaAlias(cuentasMap, 'BANCO');
+  const cuentaVentas = obtenerCuentaAlias(cuentasMap, 'VENTAS');
+  const cuentaItbis = obtenerCuentaAlias(cuentasMap, 'ITBIS_POR_PAGAR');
+  const cuentaPropina = obtenerCuentaAlias(cuentasMap, 'PROPINA');
+  const cuentaCogs = obtenerCuentaAlias(cuentasMap, 'COGS');
+  const cuentaInventario = obtenerCuentaAlias(cuentasMap, 'INVENTARIO');
+
+  for (const row of rows || []) {
+    const fecha = row.fecha;
+    const total = Number(row.total || 0);
+    const itbis = Number(row.impuesto || 0);
+    const propina = Number(row.propina_monto || 0);
+    const pagoTarjeta = Number(row.pago_tarjeta || 0);
+    const pagoTransferencia = Number(row.pago_transferencia || 0);
+    const baseEfectivo = Number(row.pago_efectivo_entregado || 0) || Number(row.pago_efectivo || 0);
+    const cambio = Number(row.pago_cambio || 0);
+    let efectivo = Math.max(baseEfectivo - cambio, 0);
+    let totalCobrado = Number((efectivo + pagoTarjeta + pagoTransferencia).toFixed(2));
+    if (totalCobrado <= 0 && total > 0) {
+      efectivo = total;
+      totalCobrado = total;
+    }
+
+    const baseVenta = Math.max(0, Number((totalCobrado - itbis - propina).toFixed(2)));
+    const lineas = [];
+    if (efectivo > 0) {
+      lineas.push({ cuenta_id: cuentaCaja.id, debe: efectivo, haber: 0, descripcion: 'Venta efectivo' });
+    }
+    const noEfectivo = Number((pagoTarjeta + pagoTransferencia).toFixed(2));
+    if (noEfectivo > 0) {
+      lineas.push({ cuenta_id: cuentaBanco.id, debe: noEfectivo, haber: 0, descripcion: 'Venta no efectivo' });
+    }
+    if (baseVenta > 0) {
+      lineas.push({ cuenta_id: cuentaVentas.id, debe: 0, haber: baseVenta, descripcion: 'Ventas' });
+    }
+    if (itbis > 0) {
+      lineas.push({ cuenta_id: cuentaItbis.id, debe: 0, haber: itbis, descripcion: 'ITBIS por pagar' });
+    }
+    if (propina > 0) {
+      lineas.push({ cuenta_id: cuentaPropina.id, debe: 0, haber: propina, descripcion: 'Propinas' });
+    }
+    const cogs = Number(row.cogs_total || 0);
+    if (cogs > 0) {
+      lineas.push({ cuenta_id: cuentaCogs.id, debe: cogs, haber: 0, descripcion: 'Costo de ventas' });
+      lineas.push({ cuenta_id: cuentaInventario.id, debe: 0, haber: cogs, descripcion: 'Salida de inventario' });
+    }
+
+    const asientoId = await crearAsientoContable({
+      empresaId,
+      negocioId: row.negocio_id,
+      fecha,
+      descripcion: 'Venta POS',
+      referenciaTipo: 'VENTA',
+      referenciaId: row.id,
+      lineas,
+    });
+    if (asientoId) {
+      await registrarEventoContable(empresaId, 'VENTA', row.id, asientoId);
+    }
+  }
+};
+
+const contabilizarCompras = async (empresaId, desde, hasta, cuentasMap) => {
+  const rows = await db.all(
+    `
+      SELECT ci.id, ci.negocio_id, DATE(ci.fecha) AS fecha, ci.subtotal, ci.itbis, ci.total, ci.metodo_pago, ci.origen_fondos,
+             ci.aplica_itbis, ci.itbis_capitalizable
+        FROM compras_inventario ci
+        JOIN negocios n ON n.id = ci.negocio_id
+        LEFT JOIN contabilidad_eventos ce
+               ON ce.empresa_id = n.empresa_id AND ce.tipo = 'COMPRA_INVENTARIO' AND ce.origen_id = ci.id
+       WHERE n.empresa_id = ?
+         AND n.deleted_at IS NULL
+         AND DATE(ci.fecha) BETWEEN ? AND ?
+         AND ce.id IS NULL
+    `,
+    [empresaId, desde, hasta]
+  );
+
+  const cuentaInventario = obtenerCuentaAlias(cuentasMap, 'INVENTARIO');
+  const cuentaItbisAcreditable = obtenerCuentaAlias(cuentasMap, 'ITBIS_ACREDITABLE');
+
+  for (const row of rows || []) {
+    const fecha = row.fecha;
+    const subtotal = Number(row.subtotal || 0);
+    const itbis = Number(row.itbis || 0);
+    const total = Number(row.total || subtotal + itbis);
+    const aplicaItbis = Number(row.aplica_itbis || 0) === 1;
+    const itbisCapitalizable = Number(row.itbis_capitalizable || 0) === 1;
+    const cuentaPago = resolverCuentaPago(row.metodo_pago, row.origen_fondos, cuentasMap);
+
+    const lineas = [];
+    const inventarioDebe = Number((subtotal + (aplicaItbis && itbisCapitalizable ? itbis : 0)).toFixed(2));
+    if (inventarioDebe > 0) {
+      lineas.push({ cuenta_id: cuentaInventario.id, debe: inventarioDebe, haber: 0, descripcion: 'Compra inventario' });
+    }
+    if (aplicaItbis && !itbisCapitalizable && itbis > 0) {
+      lineas.push({ cuenta_id: cuentaItbisAcreditable.id, debe: itbis, haber: 0, descripcion: 'ITBIS acreditable' });
+    }
+    lineas.push({ cuenta_id: cuentaPago.id, debe: 0, haber: total, descripcion: 'Pago compra inventario' });
+
+    const asientoId = await crearAsientoContable({
+      empresaId,
+      negocioId: row.negocio_id,
+      fecha,
+      descripcion: 'Compra de inventario',
+      referenciaTipo: 'COMPRA_INVENTARIO',
+      referenciaId: row.id,
+      lineas,
+    });
+    if (asientoId) {
+      await registrarEventoContable(empresaId, 'COMPRA_INVENTARIO', row.id, asientoId);
+    }
+  }
+};
+
+const contabilizarGastos = async (empresaId, desde, hasta, cuentasMap) => {
+  const rows = await db.all(
+    `
+      SELECT g.id, g.negocio_id, g.fecha, g.monto, g.categoria, g.metodo_pago,
+             COALESCE(g.origen_fondos, g.origen, 'manual') AS origen_fondos
+        FROM gastos g
+        LEFT JOIN negocios n ON n.id = g.negocio_id
+        LEFT JOIN contabilidad_eventos ce
+               ON ce.empresa_id = COALESCE(g.empresa_id, n.empresa_id) AND ce.tipo = 'GASTO' AND ce.origen_id = g.id
+       WHERE COALESCE(g.empresa_id, n.empresa_id) = ?
+         AND (g.negocio_id IS NULL OR n.deleted_at IS NULL)
+         AND g.fecha BETWEEN ? AND ?
+         AND (g.estado IS NULL OR g.estado IN ('APROBADO', 'PAGADO'))
+         AND ce.id IS NULL
+    `,
+    [empresaId, desde, hasta]
+  );
+
+  for (const row of rows || []) {
+    const fecha = row.fecha;
+    const monto = Number(row.monto || 0);
+    if (monto <= 0) continue;
+    const cuentaGasto = obtenerCuentaGasto(row.categoria, cuentasMap);
+    const cuentaPago = resolverCuentaPago(row.metodo_pago || 'efectivo', row.origen_fondos, cuentasMap);
+
+    const lineas = [
+      { cuenta_id: cuentaGasto.id, debe: monto, haber: 0, descripcion: 'Gasto operativo' },
+      { cuenta_id: cuentaPago.id, debe: 0, haber: monto, descripcion: 'Pago gasto' },
+    ];
+
+    const asientoId = await crearAsientoContable({
+      empresaId,
+      negocioId: row.negocio_id,
+      fecha,
+      descripcion: 'Gasto',
+      referenciaTipo: 'GASTO',
+      referenciaId: row.id,
+      lineas,
+    });
+    if (asientoId) {
+      await registrarEventoContable(empresaId, 'GASTO', row.id, asientoId);
+    }
+  }
+};
+
+const contabilizarPagosGastos = async (empresaId, desde, hasta, cuentasMap) => {
+  const rows = await db.all(
+    `
+      SELECT gp.id, gp.gasto_id, COALESCE(gp.negocio_id, g.negocio_id) AS negocio_id, gp.fecha, gp.monto, gp.metodo_pago,
+             COALESCE(gp.origen_fondos, g.origen_fondos, g.origen, 'manual') AS origen_fondos
+        FROM gastos_pagos gp
+        JOIN gastos g ON g.id = gp.gasto_id
+        LEFT JOIN negocios n ON n.id = COALESCE(gp.negocio_id, g.negocio_id)
+        LEFT JOIN contabilidad_eventos ce
+               ON ce.empresa_id = COALESCE(g.empresa_id, n.empresa_id) AND ce.tipo = 'PAGO_GASTO' AND ce.origen_id = gp.id
+       WHERE COALESCE(g.empresa_id, n.empresa_id) = ?
+         AND (g.negocio_id IS NULL OR n.deleted_at IS NULL)
+         AND gp.fecha BETWEEN ? AND ?
+         AND ce.id IS NULL
+    `,
+    [empresaId, desde, hasta]
+  );
+
+  const cuentaCxp = obtenerCuentaAlias(cuentasMap, 'CXP');
+
+  for (const row of rows || []) {
+    const fecha = row.fecha;
+    const monto = Number(row.monto || 0);
+    if (monto <= 0) continue;
+    const cuentaPago = resolverCuentaPago(row.metodo_pago || 'efectivo', row.origen_fondos, cuentasMap);
+
+    const lineas = [
+      { cuenta_id: cuentaCxp.id, debe: monto, haber: 0, descripcion: 'Pago gasto a credito' },
+      { cuenta_id: cuentaPago.id, debe: 0, haber: monto, descripcion: 'Salida por pago gasto' },
+    ];
+
+    const asientoId = await crearAsientoContable({
+      empresaId,
+      negocioId: row.negocio_id,
+      fecha,
+      descripcion: 'Pago gasto',
+      referenciaTipo: 'PAGO_GASTO',
+      referenciaId: row.id,
+      lineas,
+    });
+    if (asientoId) {
+      await registrarEventoContable(empresaId, 'PAGO_GASTO', row.id, asientoId);
+    }
+  }
+};
+
+const contabilizarCxC = async (empresaId, desde, hasta, cuentasMap) => {
+  const rows = await db.all(
+    `
+      SELECT d.id, d.negocio_id, d.fecha, d.monto_total,
+             (SELECT COALESCE(SUM(total_linea), 0)
+                FROM clientes_deudas_detalle dd
+               WHERE dd.deuda_id = d.id) AS subtotal_lineas
+        FROM clientes_deudas d
+        JOIN negocios n ON n.id = d.negocio_id
+        LEFT JOIN contabilidad_eventos ce
+               ON ce.empresa_id = n.empresa_id AND ce.tipo = 'CXC' AND ce.origen_id = d.id
+       WHERE n.empresa_id = ?
+         AND n.deleted_at IS NULL
+         AND d.fecha BETWEEN ? AND ?
+         AND ce.id IS NULL
+    `,
+    [empresaId, desde, hasta]
+  );
+
+  const cuentaCxc = obtenerCuentaAlias(cuentasMap, 'CXC');
+  const cuentaVentas = obtenerCuentaAlias(cuentasMap, 'VENTAS');
+  const cuentaItbis = obtenerCuentaAlias(cuentasMap, 'ITBIS_POR_PAGAR');
+  const cuentaCogs = obtenerCuentaAlias(cuentasMap, 'COGS');
+  const cuentaInventario = obtenerCuentaAlias(cuentasMap, 'INVENTARIO');
+
+  for (const row of rows || []) {
+    const fecha = row.fecha;
+    const montoTotal = Number(row.monto_total || 0);
+    if (montoTotal <= 0) continue;
+    const subtotalLineas = Number(row.subtotal_lineas || 0);
+    let baseVentas = montoTotal;
+    let itbis = 0;
+    if (subtotalLineas > 0 && montoTotal >= subtotalLineas) {
+      baseVentas = subtotalLineas;
+      itbis = Number((montoTotal - subtotalLineas).toFixed(2));
+    }
+
+    const lineas = [
+      { cuenta_id: cuentaCxc.id, debe: montoTotal, haber: 0, descripcion: 'Venta a credito' },
+      { cuenta_id: cuentaVentas.id, debe: 0, haber: baseVentas, descripcion: 'Ventas credito' },
+    ];
+    if (itbis > 0) {
+      lineas.push({ cuenta_id: cuentaItbis.id, debe: 0, haber: itbis, descripcion: 'ITBIS por pagar' });
+    }
+
+    const referenciaFactura = `FACTURA #${row.id}`;
+    const costoRow = await db.get(
+      `SELECT COALESCE(SUM(cantidad * costo_unitario), 0) AS costo
+         FROM empresa_inventario_movimientos
+        WHERE empresa_id = ?
+          AND referencia = ?`,
+      [empresaId, referenciaFactura]
+    );
+    const costoTotal = Number(costoRow?.costo || 0);
+    if (costoTotal > 0) {
+      lineas.push({ cuenta_id: cuentaCogs.id, debe: costoTotal, haber: 0, descripcion: 'Costo de ventas' });
+      lineas.push({
+        cuenta_id: cuentaInventario.id,
+        debe: 0,
+        haber: costoTotal,
+        descripcion: 'Salida de inventario',
+      });
+    }
+
+    const asientoId = await crearAsientoContable({
+      empresaId,
+      negocioId: row.negocio_id,
+      fecha,
+      descripcion: 'Cuenta por cobrar',
+      referenciaTipo: 'CXC',
+      referenciaId: row.id,
+      lineas,
+    });
+    if (asientoId) {
+      await registrarEventoContable(empresaId, 'CXC', row.id, asientoId);
+    }
+  }
+};
+
+const contabilizarAbonos = async (empresaId, desde, hasta, cuentasMap) => {
+  const rows = await db.all(
+    `
+      SELECT a.id, a.negocio_id, a.fecha, a.monto, a.metodo_pago
+        FROM clientes_abonos a
+        JOIN negocios n ON n.id = a.negocio_id
+        LEFT JOIN contabilidad_eventos ce
+               ON ce.empresa_id = n.empresa_id AND ce.tipo = 'ABONO_CXC' AND ce.origen_id = a.id
+       WHERE n.empresa_id = ?
+         AND n.deleted_at IS NULL
+         AND a.fecha BETWEEN ? AND ?
+         AND ce.id IS NULL
+    `,
+    [empresaId, desde, hasta]
+  );
+
+  const cuentaCxc = obtenerCuentaAlias(cuentasMap, 'CXC');
+
+  for (const row of rows || []) {
+    const fecha = row.fecha;
+    const monto = Number(row.monto || 0);
+    if (monto <= 0) continue;
+    const cuentaPago = resolverCuentaPago(row.metodo_pago || 'efectivo', 'caja', cuentasMap);
+    const lineas = [
+      { cuenta_id: cuentaPago.id, debe: monto, haber: 0, descripcion: 'Cobro cliente' },
+      { cuenta_id: cuentaCxc.id, debe: 0, haber: monto, descripcion: 'Abono CxC' },
+    ];
+    const asientoId = await crearAsientoContable({
+      empresaId,
+      negocioId: row.negocio_id,
+      fecha,
+      descripcion: 'Abono a cuentas por cobrar',
+      referenciaTipo: 'ABONO_CXC',
+      referenciaId: row.id,
+      lineas,
+    });
+    if (asientoId) {
+      await registrarEventoContable(empresaId, 'ABONO_CXC', row.id, asientoId);
+    }
+  }
+};
+
+const contabilizarRango = async (empresaId, desde, hasta, cuentasMap) => {
+  await contabilizarVentas(empresaId, desde, hasta, cuentasMap);
+  await contabilizarCompras(empresaId, desde, hasta, cuentasMap);
+  await contabilizarGastos(empresaId, desde, hasta, cuentasMap);
+  await contabilizarPagosGastos(empresaId, desde, hasta, cuentasMap);
+  await contabilizarCxC(empresaId, desde, hasta, cuentasMap);
+  await contabilizarAbonos(empresaId, desde, hasta, cuentasMap);
+};
+
+const cerrarPeriodoAnteriorAutomatico = async (empresaId, cuentasMap) => {
+  const ahora = new Date();
+  const previo = new Date(ahora.getFullYear(), ahora.getMonth(), 0);
+  const anio = previo.getFullYear();
+  const mes = previo.getMonth() + 1;
+  const row = await db.get(
+    'SELECT estado FROM contabilidad_periodos WHERE empresa_id = ? AND anio = ? AND mes = ? LIMIT 1',
+    [empresaId, anio, mes]
+  );
+  if (row?.estado === 'CERRADO') return;
+  const desde = `${anio}-${String(mes).padStart(2, '0')}-01`;
+  const ultimoDia = new Date(anio, mes, 0).getDate();
+  const hasta = `${anio}-${String(mes).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
+  await contabilizarRango(empresaId, desde, hasta, cuentasMap);
+  await db.run(
+    `INSERT INTO contabilidad_periodos (empresa_id, anio, mes, estado, cerrado_at)
+     VALUES (?, ?, ?, 'CERRADO', NOW())
+     ON DUPLICATE KEY UPDATE estado = 'CERRADO', cerrado_at = NOW()`,
+    [empresaId, anio, mes]
+  );
+};
+
+const sincronizarContabilidad = async (empresaId, desde, hasta) => {
+  await asegurarPlanContableEmpresa(empresaId);
+  const { cuentas, map } = await obtenerMapaCuentasContables(empresaId);
+  await contabilizarRango(empresaId, desde, hasta, map);
+  await cerrarPeriodoAnteriorAutomatico(empresaId, map);
+  return { cuentas, map };
+};
+
+const obtenerBalanzaContable = async (empresaId, desde, hasta) => {
+  const rows = await db.all(
+    `
+      SELECT c.id, c.codigo, c.nombre, c.tipo,
+             SUM(l.debe) AS debe, SUM(l.haber) AS haber
+        FROM contabilidad_asiento_lineas l
+        JOIN contabilidad_asientos a ON a.id = l.asiento_id
+        JOIN contabilidad_cuentas c ON c.id = l.cuenta_id
+       WHERE a.empresa_id = ?
+         AND a.estado = 'CONTABILIZADO'
+         AND a.fecha BETWEEN ? AND ?
+       GROUP BY c.id
+       ORDER BY c.codigo ASC
+    `,
+    [empresaId, desde, hasta]
+  );
+
+  const cuentas = (rows || []).map((row) => {
+    const debe = Number(row.debe || 0);
+    const haber = Number(row.haber || 0);
+    const saldo =
+      row.tipo === 'ACTIVO' || row.tipo === 'COSTO' || row.tipo === 'GASTO'
+        ? Number((debe - haber).toFixed(2))
+        : Number((haber - debe).toFixed(2));
+    return {
+      id: row.id,
+      codigo: row.codigo,
+      nombre: row.nombre,
+      tipo: row.tipo,
+      debe,
+      haber,
+      saldo,
+    };
+  });
+
+  const resumen = {
+    activos: 0,
+    pasivos: 0,
+    patrimonio: 0,
+    ingresos: 0,
+    costos: 0,
+    gastos: 0,
+    resultado: 0,
+  };
+
+  const grupos = {
+    activos: [],
+    pasivos: [],
+    patrimonio: [],
+    ingresos: [],
+    costos: [],
+    gastos: [],
+  };
+
+  for (const cuenta of cuentas) {
+    if (cuenta.tipo === 'ACTIVO') {
+      resumen.activos += cuenta.saldo;
+      grupos.activos.push(cuenta);
+    }
+    if (cuenta.tipo === 'PASIVO') {
+      resumen.pasivos += cuenta.saldo;
+      grupos.pasivos.push(cuenta);
+    }
+    if (cuenta.tipo === 'PATRIMONIO') {
+      resumen.patrimonio += cuenta.saldo;
+      grupos.patrimonio.push(cuenta);
+    }
+    if (cuenta.tipo === 'INGRESO') {
+      resumen.ingresos += cuenta.saldo;
+      grupos.ingresos.push(cuenta);
+    }
+    if (cuenta.tipo === 'COSTO') {
+      resumen.costos += cuenta.saldo;
+      grupos.costos.push(cuenta);
+    }
+    if (cuenta.tipo === 'GASTO') {
+      resumen.gastos += cuenta.saldo;
+      grupos.gastos.push(cuenta);
+    }
+  }
+  resumen.resultado = Number((resumen.ingresos - resumen.costos - resumen.gastos).toFixed(2));
+
+  const balance = {
+    activos: grupos.activos,
+    pasivos: grupos.pasivos,
+    patrimonio: grupos.patrimonio,
+    total_activos: Number(resumen.activos.toFixed(2)),
+    total_pasivos: Number(resumen.pasivos.toFixed(2)),
+    total_patrimonio: Number(resumen.patrimonio.toFixed(2)),
+    total_pasivo_patrimonio: Number((resumen.pasivos + resumen.patrimonio).toFixed(2)),
+  };
+
+  const resultados = {
+    ingresos: grupos.ingresos,
+    costos: grupos.costos,
+    gastos: grupos.gastos,
+    total_ingresos: Number(resumen.ingresos.toFixed(2)),
+    total_costos: Number(resumen.costos.toFixed(2)),
+    total_gastos: Number(resumen.gastos.toFixed(2)),
+    utilidad: resumen.resultado,
+  };
+
+  return { cuentas, resumen, balance, resultados };
+};
+
+// Empresa: contabilidad
+app.get('/api/empresa/contabilidad', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const rango = normalizarRangoAnalisis(req.query?.from ?? req.query?.desde, req.query?.to ?? req.query?.hasta);
+    try {
+      const rows = await db.all(
+        `SELECT m.id, m.tipo, m.cuenta, m.descripcion, m.monto, m.fecha, m.negocio_id, n.nombre AS sucursal_nombre
+           FROM empresa_contabilidad_movimientos m
+           LEFT JOIN negocios n ON n.id = m.negocio_id
+          WHERE m.empresa_id = ?
+            AND m.fecha BETWEEN ? AND ?
+          ORDER BY m.fecha DESC, m.id DESC`,
+        [empresaId, rango.desde, rango.hasta]
+      );
+      const resumen = { activos: 0, pasivos: 0, capital: 0, capital_neto: 0, ingresos: 0, gastos: 0, resultado: 0 };
+      (rows || []).forEach((row) => {
+        const monto = Number(row.monto) || 0;
+        if (row.tipo === 'ACTIVO') resumen.activos += monto;
+        if (row.tipo === 'PASIVO') resumen.pasivos += monto;
+        if (row.tipo === 'CAPITAL') resumen.capital += monto;
+        if (row.tipo === 'INGRESO') resumen.ingresos += monto;
+        if (row.tipo === 'GASTO') resumen.gastos += monto;
+      });
+      resumen.capital_neto = Number((resumen.activos + resumen.capital - resumen.pasivos).toFixed(2));
+      resumen.resultado = Number(
+        (resumen.activos + resumen.ingresos + resumen.capital - resumen.pasivos - resumen.gastos).toFixed(2)
+      );
+      res.json({ ok: true, rango, resumen, movimientos: rows || [] });
+    } catch (error) {
+      console.error('Error al cargar contabilidad:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo cargar la contabilidad' });
+    }
+  });
+});
+
+app.post('/api/empresa/contabilidad', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const tipo = (req.body?.tipo || 'ACTIVO').toString().toUpperCase();
+    if (!['ACTIVO', 'PASIVO', 'CAPITAL', 'INGRESO', 'GASTO'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: 'Tipo invalido' });
+    }
+    const cuenta = normalizarCampoTexto(req.body?.cuenta, null);
+    if (!cuenta) {
+      return res.status(400).json({ ok: false, error: 'La cuenta es obligatoria' });
+    }
+    const descripcion = normalizarCampoTexto(req.body?.descripcion, null);
+    const monto = Number(req.body?.monto || 0) || 0;
+    const fecha = normalizarCampoTexto(req.body?.fecha, null);
+    if (!fecha || !monto) {
+      return res.status(400).json({ ok: false, error: 'Monto y fecha son obligatorios' });
+    }
+    const negocioId = Number(req.body?.negocio_id || 0) || null;
+
+    try {
+      await db.run(
+        `INSERT INTO empresa_contabilidad_movimientos (empresa_id, negocio_id, tipo, cuenta, descripcion, monto, fecha)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [empresaId, negocioId, tipo, cuenta, descripcion, monto, fecha]
+      );
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      console.error('Error al registrar contabilidad:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo registrar el movimiento' });
+    }
+  });
+});
+
+app.put('/api/empresa/contabilidad/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID invalido' });
+    }
+
+    const tipo = (req.body?.tipo || 'ACTIVO').toString().toUpperCase();
+    if (!['ACTIVO', 'PASIVO', 'CAPITAL', 'INGRESO', 'GASTO'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: 'Tipo invalido' });
+    }
+    const cuenta = normalizarCampoTexto(req.body?.cuenta, null);
+    if (!cuenta) {
+      return res.status(400).json({ ok: false, error: 'La cuenta es obligatoria' });
+    }
+    const descripcion = normalizarCampoTexto(req.body?.descripcion, null);
+    const monto = Number(req.body?.monto || 0) || 0;
+    const fecha = normalizarCampoTexto(req.body?.fecha, null);
+    if (!fecha || !monto) {
+      return res.status(400).json({ ok: false, error: 'Monto y fecha son obligatorios' });
+    }
+    const negocioId = Number(req.body?.negocio_id || 0) || null;
+
+    try {
+      const result = await db.run(
+        `UPDATE empresa_contabilidad_movimientos
+            SET tipo = ?, cuenta = ?, descripcion = ?, monto = ?, fecha = ?, negocio_id = ?,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND empresa_id = ?`,
+        [tipo, cuenta, descripcion, monto, fecha, negocioId, id, empresaId]
+      );
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Movimiento no encontrado' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al actualizar contabilidad:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar el movimiento' });
+    }
+  });
+});
+
+app.delete('/api/empresa/contabilidad/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID invalido' });
+    }
+    try {
+      const result = await db.run(
+        'DELETE FROM empresa_contabilidad_movimientos WHERE id = ? AND empresa_id = ?',
+        [id, empresaId]
+      );
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Movimiento no encontrado' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al eliminar movimiento contable:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo eliminar el movimiento' });
+    }
+  });
+});
+
+// Nuevo motor contable
+app.get('/api/empresa/contabilidad/cuentas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    try {
+      await asegurarPlanContableEmpresa(empresaId);
+      const { cuentas } = await obtenerMapaCuentasContables(empresaId);
+      res.json({ ok: true, cuentas: cuentas || [] });
+    } catch (error) {
+      console.error('Error al cargar plan de cuentas:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo cargar el plan de cuentas' });
+    }
+  });
+});
+
+app.get('/api/empresa/contabilidad/reportes', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const rango = normalizarRangoAnalisis(req.query?.from ?? req.query?.desde, req.query?.to ?? req.query?.hasta);
+    try {
+      await sincronizarContabilidad(empresaId, rango.desde, rango.hasta);
+      const { resumen, balance, resultados } = await obtenerBalanzaContable(empresaId, rango.desde, rango.hasta);
+      res.json({ ok: true, rango, resumen, balance, resultados });
+    } catch (error) {
+      console.error('Error al generar reportes contables:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron generar los reportes' });
+    }
+  });
+});
+
+app.get('/api/empresa/contabilidad/asientos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const rango = normalizarRangoAnalisis(req.query?.from ?? req.query?.desde, req.query?.to ?? req.query?.hasta);
+    try {
+      const lineas = await db.all(
+        `
+          SELECT a.id AS asiento_id, a.fecha, a.referencia_tipo, a.referencia_id, a.negocio_id,
+                 n.nombre AS sucursal_nombre, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre,
+                 l.debe, l.haber
+            FROM contabilidad_asiento_lineas l
+            JOIN contabilidad_asientos a ON a.id = l.asiento_id
+            JOIN contabilidad_cuentas c ON c.id = l.cuenta_id
+            LEFT JOIN negocios n ON n.id = a.negocio_id
+           WHERE a.empresa_id = ?
+             AND a.estado = 'CONTABILIZADO'
+             AND a.fecha BETWEEN ? AND ?
+           ORDER BY a.fecha DESC, a.id DESC, l.id ASC
+        `,
+        [empresaId, rango.desde, rango.hasta]
+      );
+      res.json({ ok: true, rango, lineas: lineas || [] });
+    } catch (error) {
+      console.error('Error al cargar asientos contables:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron cargar los asientos' });
+    }
+  });
+});
+
+app.get('/api/empresa/contabilidad/mayor', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const cuentaId = Number(req.query?.cuenta_id ?? req.query?.cuentaId);
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida' });
+    }
+    const rango = normalizarRangoAnalisis(req.query?.from ?? req.query?.desde, req.query?.to ?? req.query?.hasta);
+    try {
+      const cuenta = await db.get(
+        'SELECT id, codigo, nombre, tipo FROM contabilidad_cuentas WHERE id = ? AND empresa_id = ? LIMIT 1',
+        [cuentaId, empresaId]
+      );
+      if (!cuenta) {
+        return res.status(404).json({ ok: false, error: 'Cuenta no encontrada' });
+      }
+
+      const rows = await db.all(
+        `
+          SELECT a.id AS asiento_id, a.fecha, a.referencia_tipo, a.referencia_id, a.negocio_id,
+                 n.nombre AS sucursal_nombre, l.debe, l.haber
+            FROM contabilidad_asiento_lineas l
+            JOIN contabilidad_asientos a ON a.id = l.asiento_id
+            LEFT JOIN negocios n ON n.id = a.negocio_id
+           WHERE a.empresa_id = ?
+             AND a.estado = 'CONTABILIZADO'
+             AND a.fecha BETWEEN ? AND ?
+             AND l.cuenta_id = ?
+           ORDER BY a.fecha ASC, a.id ASC, l.id ASC
+        `,
+        [empresaId, rango.desde, rango.hasta, cuentaId]
+      );
+
+      let saldo = 0;
+      const lineas = (rows || []).map((row) => {
+        const debe = Number(row.debe || 0);
+        const haber = Number(row.haber || 0);
+        if (['ACTIVO', 'COSTO', 'GASTO'].includes(cuenta.tipo)) {
+          saldo = Number((saldo + debe - haber).toFixed(2));
+        } else {
+          saldo = Number((saldo + haber - debe).toFixed(2));
+        }
+        return { ...row, saldo };
+      });
+
+      res.json({ ok: true, rango, cuenta, lineas });
+    } catch (error) {
+      console.error('Error al cargar mayor contable:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo cargar el mayor' });
+    }
+  });
+});
+
+// ==========================
+// Empresa: gastos
+// ==========================
+const MAX_GASTO_ADJUNTO_BYTES = 1024 * 1024 * 1.5;
+
+const obtenerNegocioEmpresa = async (empresaId, negocioId) => {
+  if (!empresaId || !negocioId) return null;
+  return db.get(
+    `SELECT id, nombre
+       FROM negocios
+      WHERE id = ?
+        AND empresa_id = ?
+        AND deleted_at IS NULL
+      LIMIT 1`,
+    [negocioId, empresaId]
+  );
+};
+
+const obtenerClienteEmpresa = async (empresaId, clienteId) => {
+  if (!empresaId || !clienteId) return null;
+  return db.get(
+    `SELECT *
+       FROM clientes
+      WHERE id = ?
+        AND empresa_id = ?
+      LIMIT 1`,
+    [clienteId, empresaId]
+  );
+};
+
+const calcularDiasTranscurridos = (fechaISO) => {
+  const fecha = parseFechaISO(fechaISO);
+  if (!fecha) return 0;
+  const ahora = new Date();
+  const ms = ahora.getTime() - fecha.getTime();
+  if (!Number.isFinite(ms)) return 0;
+  return Math.max(0, Math.floor(ms / 86400000));
+};
+
+const construirResumenClienteEmpresa = (row = {}) => {
+  const total = Number(row.total_deuda ?? row.total ?? 0) || 0;
+  const pagado = Number(row.total_abonos ?? row.pagado ?? 0) || 0;
+  const saldo = Number((total - pagado).toFixed(2));
+  const creditoActivo = Number(row.credito_activo ?? 0) === 1;
+  const creditoLimite = Number(row.credito_limite ?? 0) || 0;
+  const creditoDias = Number(row.credito_dias ?? 0) || 0;
+  const diasMora = calcularDiasTranscurridos(row.fecha_antigua ?? row.primera_compra ?? row.ultima_compra);
+  const enMora = creditoActivo && creditoDias > 0 && saldo > 0 && diasMora > creditoDias;
+  const excedeLimite = creditoActivo && creditoLimite > 0 && saldo > creditoLimite;
+  const estadoCredito = enMora ? 'MORA' : saldo > 0 ? 'PENDIENTE' : 'AL_DIA';
+  return {
+    total,
+    pagado,
+    saldo,
+    dias_mora: diasMora,
+    en_mora: enMora,
+    excede_limite: excedeLimite,
+    estado_credito: estadoCredito,
+  };
+};
+
+const guardarAdjuntosGasto = async (gastoId, adjuntos = [], limpiarPrevios = false) => {
+  if (!gastoId) return;
+  if (limpiarPrevios) {
+    await db.run('DELETE FROM gastos_adjuntos WHERE gasto_id = ?', [gastoId]);
+  }
+  if (!Array.isArray(adjuntos) || !adjuntos.length) return;
+  for (const item of adjuntos) {
+    if (!item) continue;
+    const nombre = normalizarCampoTexto(item.nombre ?? item.file_name ?? item.filename, null);
+    const mime = normalizarCampoTexto(item.mime ?? item.mimetype, null);
+    const contenido = normalizarCampoTexto(item.contenido_base64 ?? item.base64 ?? item.contenido, null);
+    if (!nombre || !contenido) continue;
+    if (contenido.length > MAX_GASTO_ADJUNTO_BYTES * 1.4) {
+      throw new Error('El adjunto supera el tamaño permitido.');
+    }
+    await db.run(
+      `INSERT INTO gastos_adjuntos (gasto_id, nombre, mime, contenido_base64) VALUES (?, ?, ?, ?)`,
+      [gastoId, nombre.slice(0, 255), mime ? mime.slice(0, 80) : null, contenido]
+    );
+  }
+};
+
+const obtenerAdjuntosGasto = async (gastoId, incluirContenido = false) => {
+  if (!gastoId) return [];
+  if (incluirContenido) {
+    return db.all(
+      `SELECT id, nombre, mime, contenido_base64
+         FROM gastos_adjuntos
+        WHERE gasto_id = ?
+        ORDER BY id ASC`,
+      [gastoId]
+    );
+  }
+  return db.all(
+    `SELECT id, nombre, mime
+       FROM gastos_adjuntos
+      WHERE gasto_id = ?
+      ORDER BY id ASC`,
+    [gastoId]
+  );
+};
+
+app.get('/api/empresa/gastos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const page = Math.max(parseInt(req.query?.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query?.limit, 10) || 40, 1), 200);
+    const offset = (page - 1) * limit;
+    const desde = esFechaISOValida(req.query?.from ?? req.query?.desde) ? req.query?.from ?? req.query?.desde : null;
+    const hasta = esFechaISOValida(req.query?.to ?? req.query?.hasta) ? req.query?.to ?? req.query?.hasta : null;
+    const negocioId = normalizarNumero(req.query?.negocio_id ?? req.query?.negocioId, null);
+    const categoria = normalizarCampoTexto(req.query?.categoria, null);
+    const tipoGastoRaw = normalizarCampoTexto(req.query?.tipo_gasto ?? req.query?.tipoGasto, null);
+    const metodoPago = normalizarCampoTexto(req.query?.metodo_pago ?? req.query?.metodoPago, null);
+    const estadoRaw = normalizarCampoTexto(req.query?.estado, null);
+    const origenFondosRaw = normalizarCampoTexto(req.query?.origen_fondos ?? req.query?.origenFondos, null);
+    const proveedor = normalizarCampoTexto(req.query?.proveedor, null);
+    const origenDetalle = normalizarCampoTexto(req.query?.origen_detalle ?? req.query?.origenDetalle, null);
+    const q = normalizarCampoTexto(req.query?.q ?? req.query?.buscar, null);
+    const montoMin = normalizarNumero(req.query?.monto_min ?? req.query?.montoMin, null);
+    const montoMax = normalizarNumero(req.query?.monto_max ?? req.query?.montoMax, null);
+    const orden = normalizarCampoTexto(req.query?.orden ?? req.query?.order_by ?? req.query?.orderBy, null);
+    const direccion = (req.query?.dir ?? req.query?.order_dir ?? 'desc').toString().toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    const empresaRef = 'COALESCE(g.empresa_id, n.empresa_id)';
+    const filtros = [`${empresaRef} = ?`, '(g.negocio_id IS NULL OR n.deleted_at IS NULL)'];
+    const params = [empresaId];
+
+    if (Number.isFinite(negocioId) && negocioId > 0) {
+      filtros.push('g.negocio_id = ?');
+      params.push(negocioId);
+    }
+    if (desde) {
+      filtros.push('DATE(g.fecha) >= ?');
+      params.push(desde);
+    }
+    if (hasta) {
+      filtros.push('DATE(g.fecha) <= ?');
+      params.push(hasta);
+    }
+    if (categoria) {
+      filtros.push('g.categoria = ?');
+      params.push(categoria);
+    }
+    if (tipoGastoRaw) {
+      const tipoGasto = normalizarTipoGasto(tipoGastoRaw, null);
+      if (tipoGasto) {
+        filtros.push("COALESCE(g.tipo_gasto, 'OPERATIVO') = ?");
+        params.push(tipoGasto);
+      }
+    }
+    if (metodoPago) {
+      filtros.push('g.metodo_pago = ?');
+      params.push(metodoPago);
+    }
+    if (estadoRaw) {
+      const estado = normalizarEstadoGasto(estadoRaw, null);
+      if (estado) {
+        filtros.push("COALESCE(g.estado, 'PAGADO') = ?");
+        params.push(estado);
+      }
+    }
+    if (origenFondosRaw) {
+      const origenFondos = normalizarOrigenFondosGasto(origenFondosRaw, null);
+      if (origenFondos) {
+        filtros.push("COALESCE(g.origen_fondos, g.origen, 'manual') = ?");
+        params.push(origenFondos);
+      }
+    }
+    if (origenDetalle) {
+      filtros.push('LOWER(g.origen_detalle) LIKE ?');
+      params.push(`%${origenDetalle.toLowerCase()}%`);
+    }
+    if (proveedor) {
+      filtros.push('LOWER(g.proveedor) LIKE ?');
+      params.push(`%${proveedor.toLowerCase()}%`);
+    }
+    if (Number.isFinite(montoMin)) {
+      filtros.push('g.monto >= ?');
+      params.push(montoMin);
+    }
+    if (Number.isFinite(montoMax)) {
+      filtros.push('g.monto <= ?');
+      params.push(montoMax);
+    }
+    if (q) {
+      const termino = `%${q.toLowerCase()}%`;
+      filtros.push(
+        '(LOWER(g.proveedor) LIKE ? OR LOWER(g.descripcion) LIKE ? OR LOWER(g.comprobante_ncf) LIKE ? OR LOWER(g.referencia) LIKE ? OR LOWER(g.categoria) LIKE ?)'
+      );
+      params.push(termino, termino, termino, termino, termino);
+    }
+
+    const orderMap = {
+      fecha: 'g.fecha',
+      monto: 'g.monto',
+      proveedor: 'g.proveedor',
+      categoria: 'g.categoria',
+    };
+    const orderBy = orderMap[orden] || 'g.fecha';
+
+    const whereClause = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
+
+    try {
+      const listadoSql = `
+        SELECT g.id, g.fecha, g.monto, g.moneda, g.categoria,
+               COALESCE(g.tipo_gasto, 'OPERATIVO') AS tipo_gasto,
+               COALESCE(g.origen_fondos, g.origen, 'manual') AS origen_fondos,
+               g.origen_detalle, g.metodo_pago, g.proveedor, g.descripcion,
+               g.comprobante_ncf, g.tipo_comprobante, g.referencia,
+               g.es_recurrente, g.frecuencia, g.tags,
+               COALESCE(g.estado, 'PAGADO') AS estado,
+               g.fecha_vencimiento, g.fecha_pago, g.monto_pagado, g.itbis, g.centro_costo,
+               g.aprobado_por, g.aprobado_at, g.anulado_por, g.anulado_at, g.motivo_anulacion,
+               g.created_at, g.updated_at, g.negocio_id,
+               n.nombre AS sucursal_nombre
+          FROM gastos g
+          LEFT JOIN negocios n ON n.id = g.negocio_id
+          ${whereClause}
+          ORDER BY ${orderBy} ${direccion}, g.id DESC
+          LIMIT ${limit} OFFSET ${offset}
+      `;
+      const gastos = await db.all(listadoSql, params);
+
+      const conteoSql = `SELECT COUNT(1) AS total FROM gastos g LEFT JOIN negocios n ON n.id = g.negocio_id ${whereClause}`;
+      const countRow = await db.get(conteoSql, params);
+      const total = Number(countRow?.total) || 0;
+
+      const resumenSql = `
+        SELECT SUM(g.monto) AS total,
+               SUM(CASE WHEN COALESCE(g.estado, 'PAGADO') = 'PAGADO' THEN g.monto ELSE 0 END) AS total_pagado,
+               SUM(CASE WHEN COALESCE(g.estado, 'PAGADO') IN ('PENDIENTE','APROBADO','BORRADOR') THEN g.monto ELSE 0 END) AS total_pendiente,
+               COUNT(DISTINCT DATE(g.fecha)) AS dias
+        FROM gastos g
+        LEFT JOIN negocios n ON n.id = g.negocio_id
+        ${whereClause}
+      `;
+      const resumenRow = await db.get(resumenSql, params);
+      const totalGastos = Number(resumenRow?.total) || 0;
+
+      let diasPromedio = Number(resumenRow?.dias) || 0;
+      if (desde && hasta) {
+        const inicio = parseFechaISO(desde);
+        const fin = parseFechaISO(hasta);
+        if (inicio && fin) {
+          diasPromedio = calcularDiasIncluidos(inicio, fin);
+        }
+      }
+      const promedioDiario = diasPromedio > 0 ? Number((totalGastos / diasPromedio).toFixed(2)) : 0;
+
+      const filtrosCategorias = [...filtros, "g.categoria IS NOT NULL", "g.categoria <> ''"];
+      const whereCategorias = `WHERE ${filtrosCategorias.join(' AND ')}`;
+      const topCategorias = await db.all(
+        `
+          SELECT g.categoria, SUM(g.monto) AS total
+          FROM gastos g
+          LEFT JOIN negocios n ON n.id = g.negocio_id
+          ${whereCategorias}
+          GROUP BY g.categoria
+          ORDER BY total DESC
+          LIMIT 3
+        `,
+        params
+      );
+
+      res.json({
+        ok: true,
+        gastos: gastos || [],
+        total,
+        page,
+        limit,
+        resumen: {
+          total: totalGastos,
+          total_pagado: Number(resumenRow?.total_pagado) || 0,
+          total_pendiente: Number(resumenRow?.total_pendiente) || 0,
+          promedio_diario: promedioDiario,
+          top_categorias: topCategorias || [],
+        },
+      });
+    } catch (error) {
+      console.error('Error al obtener gastos empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener los gastos' });
+    }
+  });
+});
+
+app.get('/api/empresa/gastos/export', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const desde = esFechaISOValida(req.query?.from ?? req.query?.desde) ? req.query?.from ?? req.query?.desde : null;
+    const hasta = esFechaISOValida(req.query?.to ?? req.query?.hasta) ? req.query?.to ?? req.query?.hasta : null;
+    const negocioId = normalizarNumero(req.query?.negocio_id ?? req.query?.negocioId, null);
+
+    const empresaRef = 'COALESCE(g.empresa_id, n.empresa_id)';
+    const filtros = [`${empresaRef} = ?`, '(g.negocio_id IS NULL OR n.deleted_at IS NULL)'];
+    const params = [empresaId];
+    if (Number.isFinite(negocioId) && negocioId > 0) {
+      filtros.push('g.negocio_id = ?');
+      params.push(negocioId);
+    }
+    if (desde) {
+      filtros.push('DATE(g.fecha) >= ?');
+      params.push(desde);
+    }
+    if (hasta) {
+      filtros.push('DATE(g.fecha) <= ?');
+      params.push(hasta);
+    }
+
+    const whereClause = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
+
+    try {
+      const rows = await db.all(
+        `SELECT g.fecha, g.descripcion, g.proveedor, g.categoria, g.monto, g.metodo_pago,
+                COALESCE(g.origen_fondos, g.origen, 'manual') AS origen_fondos,
+                COALESCE(g.estado, 'PAGADO') AS estado,
+                n.nombre AS sucursal
+           FROM gastos g
+           LEFT JOIN negocios n ON n.id = g.negocio_id
+           ${whereClause}
+           ORDER BY g.fecha DESC, g.id DESC`,
+        params
+      );
+
+      const headers = ['Fecha', 'Concepto', 'Proveedor', 'Categoria', 'Monto', 'Metodo', 'Origen', 'Estado', 'Sucursal'];
+      const csvRows = [headers.join(',')];
+      (rows || []).forEach((row) => {
+        const values = [
+          row.fecha,
+          row.descripcion || '',
+          row.proveedor || '',
+          row.categoria || '',
+          row.monto || 0,
+          row.metodo_pago || '',
+          row.origen_fondos || '',
+          row.estado || '',
+          row.sucursal || '',
+        ].map((val) => `"${String(val).replace(/\"/g, '\"\"')}"`);
+        csvRows.push(values.join(','));
+      });
+      const csv = csvRows.join('\n');
+      const nombre = `gastos_empresa_${desde || 'inicio'}_a_${hasta || 'hoy'}.csv`;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${nombre}"`);
+      res.send(csv);
+    } catch (error) {
+      console.error('Error al exportar gastos empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo exportar.' });
+    }
+  });
+});
+
+app.get('/api/empresa/gastos/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID invalido.' });
+    }
+
+    try {
+      const gasto = await db.get(
+        `
+          SELECT g.*, n.nombre AS sucursal_nombre
+          FROM gastos g
+          LEFT JOIN negocios n ON n.id = g.negocio_id
+          WHERE g.id = ?
+            AND COALESCE(g.empresa_id, n.empresa_id) = ?
+            AND (g.negocio_id IS NULL OR n.deleted_at IS NULL)
+          LIMIT 1
+        `,
+        [id, empresaId]
+      );
+      if (!gasto) {
+        return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+      }
+      const pagos = await db.all(
+        `SELECT id, fecha, monto, metodo_pago, origen_fondos, origen_detalle, referencia, notas, created_at
+           FROM gastos_pagos
+          WHERE gasto_id = ?
+          ORDER BY fecha ASC, id ASC`,
+        [id]
+      );
+      const adjuntos = await obtenerAdjuntosGasto(id, true);
+      res.json({ ok: true, gasto, pagos: pagos || [], adjuntos: adjuntos || [] });
+    } catch (error) {
+      console.error('Error al obtener detalle de gasto:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el gasto' });
+    }
+  });
+});
+
+app.post('/api/empresa/gastos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const payload = req.body || {};
+    const negocioIdRaw = normalizarNumero(payload.negocio_id ?? payload.negocioId, null);
+    const negocioId = Number.isFinite(negocioIdRaw) && negocioIdRaw > 0 ? negocioIdRaw : null;
+    if (negocioId) {
+      const negocio = await obtenerNegocioEmpresa(empresaId, negocioId);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Sucursal no encontrada.' });
+      }
+    }
+
+    const fecha = normalizarCampoTexto(payload.fecha, null);
+    if (!fecha || !esFechaISOValida(fecha)) {
+      return res.status(400).json({ ok: false, error: 'La fecha del gasto es obligatoria y debe ser valida.' });
+    }
+
+    const montoValor = normalizarNumero(payload.monto, null);
+    if (montoValor === null || montoValor <= 0) {
+      return res.status(400).json({ ok: false, error: 'El monto debe ser mayor a 0.' });
+    }
+
+    const moneda = (normalizarCampoTexto(payload.moneda, null) || 'DOP').toUpperCase();
+    if (moneda.length > 3) {
+      return res.status(400).json({ ok: false, error: 'La moneda debe tener maximo 3 caracteres.' });
+    }
+
+    const categoria = normalizarCampoTexto(payload.categoria, null);
+    if (categoria && categoria.length > 80) {
+      return res.status(400).json({ ok: false, error: 'La categoria no puede superar 80 caracteres.' });
+    }
+
+    const tipoGasto = normalizarTipoGasto(payload.tipo_gasto ?? payload.tipoGasto, 'OPERATIVO');
+    const origen = normalizarOrigenGasto(payload.origen ?? payload.origen_gasto ?? payload.origenGasto, 'manual');
+    const origenFondos = normalizarOrigenFondosGasto(
+      payload.origen_fondos ?? payload.origenFondos ?? payload.origen_fondo,
+      null
+    );
+    const origenDetalle = normalizarCampoTexto(payload.origen_detalle ?? payload.origenDetalle, null);
+
+    const metodoPago = normalizarCampoTexto(payload.metodo_pago ?? payload.metodoPago, null);
+    if (metodoPago && metodoPago.length > 40) {
+      return res.status(400).json({ ok: false, error: 'El metodo de pago no puede superar 40 caracteres.' });
+    }
+
+    const proveedor = normalizarCampoTexto(payload.proveedor, null);
+    if (proveedor && proveedor.length > 120) {
+      return res.status(400).json({ ok: false, error: 'El proveedor no puede superar 120 caracteres.' });
+    }
+
+    const descripcion = normalizarCampoTexto(payload.descripcion ?? payload.concepto, null);
+    const comprobanteNCF = normalizarCampoTexto(payload.comprobante_ncf ?? payload.comprobanteNCF, null);
+    if (comprobanteNCF && comprobanteNCF.length > 30) {
+      return res.status(400).json({ ok: false, error: 'El comprobante NCF no puede superar 30 caracteres.' });
+    }
+
+    const tipoComprobante = normalizarCampoTexto(payload.tipo_comprobante ?? payload.tipoComprobante, null);
+    if (tipoComprobante && tipoComprobante.length > 30) {
+      return res.status(400).json({ ok: false, error: 'El tipo de comprobante no puede superar 30 caracteres.' });
+    }
+
+    const referencia = normalizarCampoTexto(payload.referencia, null);
+    if (referencia && referencia.length > 60) {
+      return res.status(400).json({ ok: false, error: 'La referencia no puede superar 60 caracteres.' });
+    }
+
+    const esRecurrente = normalizarFlag(payload.es_recurrente ?? payload.esRecurrente, 0);
+    const frecuencia = normalizarCampoTexto(payload.frecuencia, null);
+    if (frecuencia && frecuencia.length > 20) {
+      return res.status(400).json({ ok: false, error: 'La frecuencia no puede superar 20 caracteres.' });
+    }
+    if (esRecurrente && !frecuencia) {
+      return res.status(400).json({ ok: false, error: 'La frecuencia es obligatoria para gastos recurrentes.' });
+    }
+
+    const fechaVencimiento = normalizarCampoTexto(payload.fecha_vencimiento ?? payload.fechaVencimiento, null);
+    if (fechaVencimiento && !esFechaISOValida(fechaVencimiento)) {
+      return res.status(400).json({ ok: false, error: 'La fecha de vencimiento no es valida.' });
+    }
+    const fechaPago = normalizarCampoTexto(payload.fecha_pago ?? payload.fechaPago, null);
+    if (fechaPago && !esFechaISOValida(fechaPago)) {
+      return res.status(400).json({ ok: false, error: 'La fecha de pago no es valida.' });
+    }
+
+    const itbisMonto = normalizarNumero(payload.itbis, 0) || 0;
+    const centroCosto = normalizarCampoTexto(payload.centro_costo ?? payload.centroCosto ?? payload.area, null);
+
+    let tagsEntrada = payload.tags;
+    if (Array.isArray(tagsEntrada)) {
+      tagsEntrada = tagsEntrada.map((tag) => String(tag).trim()).filter(Boolean).join(',');
+    } else if (tagsEntrada && typeof tagsEntrada === 'object') {
+      tagsEntrada = JSON.stringify(tagsEntrada);
+    }
+    const tags = normalizarCampoTexto(tagsEntrada, null);
+
+    const esCredito = metodoPago ? metodoPago.toString().toLowerCase().includes('credito') : false;
+    let estado = normalizarEstadoGasto(payload.estado, esCredito ? 'PENDIENTE' : 'PAGADO');
+    if (esCredito && estado === 'PAGADO') {
+      estado = 'PENDIENTE';
+    }
+
+    let montoPagado = normalizarNumero(payload.monto_pagado ?? payload.montoPagado, null);
+    if (!Number.isFinite(montoPagado)) {
+      montoPagado = estado === 'PAGADO' && !esCredito ? montoValor : 0;
+    }
+
+    const usuarioId = usuarioSesion?.id || null;
+    const aprobadoPor = estado === 'APROBADO' || estado === 'PAGADO' ? usuarioId : null;
+    const aprobadoAt = aprobadoPor ? new Date() : null;
+    const aprobadoAtValue = aprobadoAt ? aprobadoAt.toISOString().slice(0, 19).replace('T', ' ') : null;
+    const fechaPagoFinal = estado === 'PAGADO' && !fechaPago ? fecha : fechaPago;
+
+    const adjuntos = Array.isArray(payload.adjuntos) ? payload.adjuntos : [];
+
+    try {
+      const sql = `
+        INSERT INTO gastos (
+          fecha, monto, moneda, categoria, tipo_gasto, origen, origen_fondos, origen_detalle, metodo_pago,
+          proveedor, descripcion, comprobante_ncf, tipo_comprobante, referencia, es_recurrente, frecuencia,
+          tags, estado, fecha_vencimiento, fecha_pago, monto_pagado, itbis, centro_costo,
+          aprobado_por, aprobado_at, negocio_id, usuario_id, empresa_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      const params = [
+        fecha,
+        montoValor,
+        moneda,
+        categoria,
+        tipoGasto,
+        origen,
+        origenFondos,
+        origenDetalle,
+        metodoPago,
+        proveedor,
+        descripcion,
+        comprobanteNCF,
+        tipoComprobante,
+        referencia,
+        esRecurrente ? 1 : 0,
+        frecuencia,
+        tags,
+        estado,
+        fechaVencimiento,
+        fechaPagoFinal,
+        montoPagado || 0,
+        itbisMonto || 0,
+        centroCosto,
+        aprobadoPor,
+        aprobadoAtValue,
+        negocioId,
+        usuarioId,
+        empresaId,
+      ];
+
+      const result = await db.run(sql, params);
+      const gastoId = result?.lastID;
+      if (gastoId && adjuntos.length) {
+        await guardarAdjuntosGasto(gastoId, adjuntos);
+      }
+
+      limpiarCacheAnalitica(negocioId);
+      res.status(201).json({ ok: true, id: gastoId });
+    } catch (error) {
+      console.error('Error al registrar gasto empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: error?.message || 'No se pudo registrar el gasto.' });
+    }
+  });
+});
+
+app.put('/api/empresa/gastos/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID invalido.' });
+    }
+
+    let existente;
+    try {
+      existente = await db.get(
+        `SELECT g.*
+           FROM gastos g
+           LEFT JOIN negocios n ON n.id = g.negocio_id
+          WHERE g.id = ?
+            AND COALESCE(g.empresa_id, n.empresa_id) = ?
+            AND (g.negocio_id IS NULL OR n.deleted_at IS NULL)`,
+        [id, empresaId]
+      );
+    } catch (error) {
+      console.error('Error al obtener gasto:', error?.message || error);
+      return res.status(500).json({ ok: false, error: 'No se pudo obtener el gasto.' });
+    }
+
+    if (!existente) {
+      return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+    }
+
+    if (String(existente.estado || '').toUpperCase() === 'ANULADO') {
+      return res.status(400).json({ ok: false, error: 'No se puede editar un gasto anulado.' });
+    }
+
+    const payload = req.body || {};
+    const updates = [];
+    const params = [];
+
+    const estadoActual = String(existente.estado || 'PAGADO').toUpperCase();
+    const bloqueado = estadoActual === 'PAGADO';
+
+    if (payload.negocio_id !== undefined || payload.negocioId !== undefined) {
+      const nuevoNegocioRaw = normalizarNumero(payload.negocio_id ?? payload.negocioId, null);
+      const nuevoNegocioId = Number.isFinite(nuevoNegocioRaw) && nuevoNegocioRaw > 0 ? nuevoNegocioRaw : null;
+      const actualNegocioId = existente?.negocio_id ? Number(existente.negocio_id) : null;
+      const cambia = String(actualNegocioId || '') !== String(nuevoNegocioId || '');
+      if (cambia) {
+        if (bloqueado) {
+          return res.status(400).json({ ok: false, error: 'No se puede cambiar la sucursal de un gasto pagado.' });
+        }
+        if (nuevoNegocioId) {
+          const negocio = await obtenerNegocioEmpresa(empresaId, nuevoNegocioId);
+          if (!negocio) {
+            return res.status(404).json({ ok: false, error: 'Sucursal no encontrada.' });
+          }
+        }
+        updates.push('negocio_id = ?');
+        params.push(nuevoNegocioId);
+        if (!existente.empresa_id || !nuevoNegocioId) {
+          updates.push('empresa_id = ?');
+          params.push(empresaId);
+        }
+      }
+    }
+
+    if (payload.fecha !== undefined) {
+      if (bloqueado) {
+        return res.status(400).json({ ok: false, error: 'No se puede cambiar la fecha de un gasto pagado.' });
+      }
+      const fecha = normalizarCampoTexto(payload.fecha, null);
+      if (!fecha || !esFechaISOValida(fecha)) {
+        return res.status(400).json({ ok: false, error: 'La fecha del gasto es obligatoria y debe ser valida.' });
+      }
+      updates.push('fecha = ?');
+      params.push(fecha);
+    }
+
+    if (payload.monto !== undefined) {
+      if (bloqueado) {
+        return res.status(400).json({ ok: false, error: 'No se puede cambiar el monto de un gasto pagado.' });
+      }
+      const montoValor = normalizarNumero(payload.monto, null);
+      if (montoValor === null || montoValor <= 0) {
+        return res.status(400).json({ ok: false, error: 'El monto debe ser mayor a 0.' });
+      }
+      updates.push('monto = ?');
+      params.push(montoValor);
+    }
+
+    if (payload.moneda !== undefined) {
+      const moneda = (normalizarCampoTexto(payload.moneda, null) || 'DOP').toUpperCase();
+      if (moneda.length > 3) {
+        return res.status(400).json({ ok: false, error: 'La moneda debe tener maximo 3 caracteres.' });
+      }
+      updates.push('moneda = ?');
+      params.push(moneda);
+    }
+
+    if (payload.categoria !== undefined) {
+      const categoria = normalizarCampoTexto(payload.categoria, null);
+      if (categoria && categoria.length > 80) {
+        return res.status(400).json({ ok: false, error: 'La categoria no puede superar 80 caracteres.' });
+      }
+      updates.push('categoria = ?');
+      params.push(categoria);
+    }
+
+    if (payload.tipo_gasto !== undefined || payload.tipoGasto !== undefined) {
+      if (bloqueado) {
+        return res.status(400).json({ ok: false, error: 'No se puede cambiar el tipo en un gasto pagado.' });
+      }
+      const tipoGasto = normalizarTipoGasto(payload.tipo_gasto ?? payload.tipoGasto, 'OPERATIVO');
+      updates.push('tipo_gasto = ?');
+      params.push(tipoGasto);
+    }
+
+    if (payload.metodo_pago !== undefined || payload.metodoPago !== undefined) {
+      if (bloqueado) {
+        return res.status(400).json({ ok: false, error: 'No se puede cambiar el metodo de pago en un gasto pagado.' });
+      }
+      const metodoPago = normalizarCampoTexto(payload.metodo_pago ?? payload.metodoPago, null);
+      if (metodoPago && metodoPago.length > 40) {
+        return res.status(400).json({ ok: false, error: 'El metodo de pago no puede superar 40 caracteres.' });
+      }
+      updates.push('metodo_pago = ?');
+      params.push(metodoPago);
+    }
+
+    if (payload.origen_fondos !== undefined || payload.origenFondos !== undefined) {
+      const origenFondos = normalizarOrigenFondosGasto(
+        payload.origen_fondos ?? payload.origenFondos ?? payload.origen_fondo,
+        null
+      );
+      updates.push('origen_fondos = ?');
+      params.push(origenFondos);
+    }
+
+    if (payload.origen_detalle !== undefined || payload.origenDetalle !== undefined) {
+      updates.push('origen_detalle = ?');
+      params.push(normalizarCampoTexto(payload.origen_detalle ?? payload.origenDetalle, null));
+    }
+
+    if (payload.proveedor !== undefined) {
+      const proveedor = normalizarCampoTexto(payload.proveedor, null);
+      if (proveedor && proveedor.length > 120) {
+        return res.status(400).json({ ok: false, error: 'El proveedor no puede superar 120 caracteres.' });
+      }
+      updates.push('proveedor = ?');
+      params.push(proveedor);
+    }
+
+    if (payload.descripcion !== undefined || payload.concepto !== undefined) {
+      updates.push('descripcion = ?');
+      params.push(normalizarCampoTexto(payload.descripcion ?? payload.concepto, null));
+    }
+
+    if (payload.comprobante_ncf !== undefined || payload.comprobanteNCF !== undefined) {
+      const comprobante = normalizarCampoTexto(payload.comprobante_ncf ?? payload.comprobanteNCF, null);
+      if (comprobante && comprobante.length > 30) {
+        return res.status(400).json({ ok: false, error: 'El comprobante NCF no puede superar 30 caracteres.' });
+      }
+      updates.push('comprobante_ncf = ?');
+      params.push(comprobante);
+    }
+
+    if (payload.tipo_comprobante !== undefined || payload.tipoComprobante !== undefined) {
+      const tipoComprobante = normalizarCampoTexto(payload.tipo_comprobante ?? payload.tipoComprobante, null);
+      if (tipoComprobante && tipoComprobante.length > 30) {
+        return res.status(400).json({ ok: false, error: 'El tipo de comprobante no puede superar 30 caracteres.' });
+      }
+      updates.push('tipo_comprobante = ?');
+      params.push(tipoComprobante);
+    }
+
+    if (payload.referencia !== undefined) {
+      const referencia = normalizarCampoTexto(payload.referencia, null);
+      if (referencia && referencia.length > 60) {
+        return res.status(400).json({ ok: false, error: 'La referencia no puede superar 60 caracteres.' });
+      }
+      updates.push('referencia = ?');
+      params.push(referencia);
+    }
+
+    if (payload.fecha_vencimiento !== undefined || payload.fechaVencimiento !== undefined) {
+      const fechaVencimiento = normalizarCampoTexto(
+        payload.fecha_vencimiento ?? payload.fechaVencimiento,
+        null
+      );
+      if (fechaVencimiento && !esFechaISOValida(fechaVencimiento)) {
+        return res.status(400).json({ ok: false, error: 'La fecha de vencimiento no es valida.' });
+      }
+      updates.push('fecha_vencimiento = ?');
+      params.push(fechaVencimiento);
+    }
+
+    if (payload.itbis !== undefined) {
+      const itbisMonto = normalizarNumero(payload.itbis, 0) || 0;
+      updates.push('itbis = ?');
+      params.push(itbisMonto);
+    }
+
+    if (payload.centro_costo !== undefined || payload.centroCosto !== undefined || payload.area !== undefined) {
+      updates.push('centro_costo = ?');
+      params.push(normalizarCampoTexto(payload.centro_costo ?? payload.centroCosto ?? payload.area, null));
+    }
+
+    if (payload.tags !== undefined) {
+      let tagsEntrada = payload.tags;
+      if (Array.isArray(tagsEntrada)) {
+        tagsEntrada = tagsEntrada.map((tag) => String(tag).trim()).filter(Boolean).join(',');
+      } else if (tagsEntrada && typeof tagsEntrada === 'object') {
+        tagsEntrada = JSON.stringify(tagsEntrada);
+      }
+      updates.push('tags = ?');
+      params.push(normalizarCampoTexto(tagsEntrada, null));
+    }
+
+    const adjuntos = Array.isArray(payload.adjuntos) ? payload.adjuntos : null;
+
+    if (!updates.length && !adjuntos) {
+      return res.json({ ok: true });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(id);
+
+    try {
+      if (updates.length) {
+        const sql = `UPDATE gastos SET ${updates.join(', ')} WHERE id = ?`;
+        await db.run(sql, params);
+      }
+      if (adjuntos) {
+        await guardarAdjuntosGasto(id, adjuntos, true);
+      }
+      limpiarCacheAnalitica(existente.negocio_id);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al actualizar gasto empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: error?.message || 'No se pudo actualizar el gasto.' });
+    }
+  });
+});
+
+app.post('/api/empresa/gastos/:id/aprobar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID invalido.' });
+    }
+
+    try {
+      const gasto = await db.get(
+        `SELECT g.id, g.estado, g.negocio_id
+           FROM gastos g
+           LEFT JOIN negocios n ON n.id = g.negocio_id
+          WHERE g.id = ?
+            AND COALESCE(g.empresa_id, n.empresa_id) = ?
+            AND (g.negocio_id IS NULL OR n.deleted_at IS NULL)`,
+        [id, empresaId]
+      );
+      if (!gasto) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+      const estado = String(gasto.estado || 'PAGADO').toUpperCase();
+      if (estado === 'ANULADO') {
+        return res.status(400).json({ ok: false, error: 'El gasto esta anulado.' });
+      }
+      if (estado === 'APROBADO' || estado === 'PAGADO') {
+        return res.json({ ok: true });
+      }
+      const usuarioId = usuarioSesion?.id || null;
+      await db.run(
+        `UPDATE gastos
+            SET estado = 'APROBADO',
+                aprobado_por = ?,
+                aprobado_at = NOW(),
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+        [usuarioId, id]
+      );
+      limpiarCacheAnalitica(gasto.negocio_id);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al aprobar gasto:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo aprobar el gasto.' });
+    }
+  });
+});
+
+app.post('/api/empresa/gastos/:id/anular', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID invalido.' });
+    }
+    const motivo = normalizarCampoTexto(req.body?.motivo ?? req.body?.motivo_anulacion, null);
+    if (!motivo) {
+      return res.status(400).json({ ok: false, error: 'El motivo es obligatorio.' });
+    }
+
+    try {
+      const gasto = await db.get(
+        `SELECT g.id, g.estado, g.negocio_id, g.fecha
+           FROM gastos g
+           LEFT JOIN negocios n ON n.id = g.negocio_id
+          WHERE g.id = ?
+            AND COALESCE(g.empresa_id, n.empresa_id) = ?
+            AND (g.negocio_id IS NULL OR n.deleted_at IS NULL)`,
+        [id, empresaId]
+      );
+      if (!gasto) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+      const estado = String(gasto.estado || 'PAGADO').toUpperCase();
+      if (estado === 'ANULADO') {
+        return res.json({ ok: true, reverso: false });
+      }
+
+      const usuarioId = usuarioSesion?.id || null;
+      await db.run(
+        `UPDATE gastos
+            SET estado = 'ANULADO',
+                anulado_por = ?,
+                anulado_at = NOW(),
+                motivo_anulacion = ?,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+        [usuarioId, motivo, id]
+      );
+
+      let reverso = false;
+      try {
+        const evento = await db.get(
+          `SELECT asiento_id
+             FROM contabilidad_eventos
+            WHERE empresa_id = ?
+              AND tipo = 'GASTO'
+              AND origen_id = ?
+            LIMIT 1`,
+          [empresaId, id]
+        );
+        if (evento?.asiento_id) {
+          const lineas = await db.all(
+            `SELECT cuenta_id, debe, haber
+               FROM contabilidad_asiento_lineas
+              WHERE asiento_id = ?`,
+            [evento.asiento_id]
+          );
+          const lineasReverso = (lineas || []).map((linea) => ({
+            cuenta_id: linea.cuenta_id,
+            debe: Number(linea.haber || 0),
+            haber: Number(linea.debe || 0),
+            descripcion: 'Reverso gasto',
+          }));
+          const asientoId = await crearAsientoContable({
+            empresaId,
+            negocioId: gasto.negocio_id,
+            fecha: obtenerFechaLocalISO(new Date()),
+            descripcion: `Reverso gasto #${id}`,
+            referenciaTipo: 'GASTO_ANULADO',
+            referenciaId: id,
+            lineas: lineasReverso,
+            usuarioId,
+          });
+          if (asientoId) {
+            await registrarEventoContable(empresaId, 'GASTO_ANULADO', id, asientoId);
+            reverso = true;
+          }
+        }
+      } catch (error) {
+        console.warn('No se pudo generar reverso contable del gasto:', error?.message || error);
+      }
+
+      limpiarCacheAnalitica(gasto.negocio_id);
+      res.json({ ok: true, reverso });
+    } catch (error) {
+      console.error('Error al anular gasto:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo anular el gasto.' });
+    }
+  });
+});
+
+app.post('/api/empresa/gastos/:id/pagar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID invalido.' });
+    }
+
+    const payload = req.body || {};
+    const fechaPago = normalizarCampoTexto(payload.fecha_pago ?? payload.fechaPago ?? payload.fecha, null);
+    if (!fechaPago || !esFechaISOValida(fechaPago)) {
+      return res.status(400).json({ ok: false, error: 'La fecha de pago es obligatoria.' });
+    }
+    const montoPago = normalizarNumero(payload.monto ?? payload.monto_pagado ?? payload.montoPagado, null);
+    if (montoPago === null || montoPago <= 0) {
+      return res.status(400).json({ ok: false, error: 'El monto pagado debe ser mayor a 0.' });
+    }
+    const metodoPago = normalizarCampoTexto(payload.metodo_pago ?? payload.metodoPago, null);
+    if (!metodoPago) {
+      return res.status(400).json({ ok: false, error: 'El metodo de pago es obligatorio.' });
+    }
+    const origenFondos = normalizarOrigenFondosGasto(
+      payload.origen_fondos ?? payload.origenFondos ?? payload.origen_fondo,
+      null
+    );
+    const origenDetalle = normalizarCampoTexto(payload.origen_detalle ?? payload.origenDetalle, null);
+    const referencia = normalizarCampoTexto(payload.referencia, null);
+    const notas = normalizarCampoTexto(payload.notas, null);
+
+    try {
+      const gasto = await db.get(
+        `SELECT g.id, g.monto, g.monto_pagado, g.estado, g.negocio_id
+           FROM gastos g
+           LEFT JOIN negocios n ON n.id = g.negocio_id
+          WHERE g.id = ?
+            AND COALESCE(g.empresa_id, n.empresa_id) = ?
+            AND (g.negocio_id IS NULL OR n.deleted_at IS NULL)`,
+        [id, empresaId]
+      );
+      if (!gasto) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+      const estadoActual = String(gasto.estado || 'PAGADO').toUpperCase();
+      if (estadoActual === 'ANULADO') {
+        return res.status(400).json({ ok: false, error: 'No se puede pagar un gasto anulado.' });
+      }
+
+      const montoAnterior = Number(gasto.monto_pagado || 0);
+      const nuevoMontoPagado = Number((montoAnterior + montoPago).toFixed(2));
+      const montoTotal = Number(gasto.monto || 0);
+      const estadoFinal = nuevoMontoPagado >= montoTotal ? 'PAGADO' : estadoActual === 'BORRADOR' ? 'PENDIENTE' : estadoActual;
+
+      await db.run(
+        `INSERT INTO gastos_pagos
+           (gasto_id, negocio_id, fecha, monto, metodo_pago, origen_fondos, origen_detalle, referencia, notas, usuario_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          gasto.negocio_id,
+          fechaPago,
+          montoPago,
+          metodoPago,
+          origenFondos,
+          origenDetalle,
+          referencia,
+          notas,
+          usuarioSesion?.id || null,
+        ]
+      );
+
+      await db.run(
+        `UPDATE gastos
+            SET monto_pagado = ?,
+                fecha_pago = ?,
+                estado = ?,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+        [nuevoMontoPagado, fechaPago, estadoFinal, id]
+      );
+
+      limpiarCacheAnalitica(gasto.negocio_id);
+      res.json({ ok: true, estado: estadoFinal, monto_pagado: nuevoMontoPagado });
+    } catch (error) {
+      console.error('Error al registrar pago de gasto:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo registrar el pago.' });
+    }
+  });
+});
+
+app.post('/api/empresa/gastos/batch', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const accion = normalizarCampoTexto(req.body?.accion, null);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((id) => Number(id)).filter((id) => id > 0) : [];
+    if (!accion || !ids.length) {
+      return res.status(400).json({ ok: false, error: 'Accion e ids son obligatorios.' });
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
+    try {
+      if (accion === 'aprobar') {
+        await db.run(
+          `UPDATE gastos g
+              LEFT JOIN negocios n ON n.id = g.negocio_id
+             SET g.estado = 'APROBADO',
+                 g.aprobado_por = ?,
+                 g.aprobado_at = NOW(),
+                 g.updated_at = CURRENT_TIMESTAMP
+           WHERE g.id IN (${placeholders})
+             AND COALESCE(g.empresa_id, n.empresa_id) = ?
+             AND (g.negocio_id IS NULL OR n.deleted_at IS NULL)
+             AND (g.estado IS NULL OR g.estado NOT IN ('ANULADO', 'PAGADO'))`,
+          [usuarioSesion?.id || null, ...ids, empresaId]
+        );
+      } else if (accion === 'anular') {
+        const motivo = normalizarCampoTexto(req.body?.motivo, 'Anulacion masiva');
+        await db.run(
+          `UPDATE gastos g
+              LEFT JOIN negocios n ON n.id = g.negocio_id
+             SET g.estado = 'ANULADO',
+                 g.anulado_por = ?,
+                 g.anulado_at = NOW(),
+                 g.motivo_anulacion = ?,
+                 g.updated_at = CURRENT_TIMESTAMP
+           WHERE g.id IN (${placeholders})
+             AND COALESCE(g.empresa_id, n.empresa_id) = ?
+             AND (g.negocio_id IS NULL OR n.deleted_at IS NULL)`,
+          [usuarioSesion?.id || null, motivo, ...ids, empresaId]
+        );
+      } else {
+        return res.status(400).json({ ok: false, error: 'Accion no soportada.' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error en accion masiva de gastos:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo ejecutar la accion masiva.' });
+    }
+  });
+});
+
+// ==========================
+// Clientes empresa
+// ==========================
+app.get('/api/empresa/negocios/:id/productos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const negocioId = Number(req.params.id);
+    if (!Number.isFinite(negocioId) || negocioId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Sucursal invalida.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioEmpresa(empresaId, negocioId);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Sucursal no encontrada.' });
+      }
+      const productosEmpresa = await db.all(
+        `SELECT id, nombre, precio_sugerido AS precio, tipo_producto, activo, stock, stock_indefinido
+           FROM empresa_productos
+          WHERE empresa_id = ?
+            AND activo = 1
+            AND tipo_producto <> 'INSUMO'
+          ORDER BY nombre ASC`,
+        [empresaId]
+      );
+      const productosMaster = (productosEmpresa || []).map((item) => ({
+        ...item,
+        origen: 'empresa',
+        empresa_producto_id: item.id,
+        selector_id: `e-${item.id}`,
+      }));
+      const productosFinal = [...productosMaster];
+      const impuestoPorcentaje = Number(await obtenerImpuestoConfiguradoAsync(negocioId)) || 0;
+      res.json({ ok: true, productos: productosFinal, impuesto_porcentaje: impuestoPorcentaje });
+    } catch (error) {
+      console.error('Error al listar productos de sucursal:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron cargar los productos.' });
+    }
+  });
+});
+
+const resolverCategoriaSucursal = async (negocioId, nombreCategoria) => {
+  const nombre = normalizarCampoTexto(nombreCategoria, null);
+  if (!nombre) return null;
+  const existente = await db.get(
+    'SELECT id FROM categorias WHERE negocio_id = ? AND LOWER(nombre) = ? LIMIT 1',
+    [negocioId, nombre.toLowerCase()]
+  );
+  if (existente?.id) return existente.id;
+  try {
+    const insert = await db.run(
+      `INSERT INTO categorias (nombre, activo, area_preparacion, negocio_id)
+       VALUES (?, 1, 'ninguna', ?)`,
+      [nombre, negocioId]
+    );
+    return insert?.id || null;
+  } catch (error) {
+    console.warn('No se pudo crear la categoria:', error?.message || error);
+    return null;
+  }
+};
+
+app.get('/api/empresa/negocios/:id/inventario', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const negocioId = Number(req.params.id);
+    if (!Number.isFinite(negocioId) || negocioId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Sucursal invalida.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioEmpresa(empresaId, negocioId);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Sucursal no encontrada.' });
+      }
+      const tieneNegocioId = await verificarCategoriaNegocioId();
+      const joinCond = tieneNegocioId
+        ? 'LEFT JOIN categorias c ON p.categoria_id = c.id AND c.negocio_id = ?'
+        : 'LEFT JOIN categorias c ON p.categoria_id = c.id';
+      const params = [];
+      if (tieneNegocioId) {
+        params.push(negocioId);
+      }
+      params.push(negocioId);
+
+      const rows = await db.all(
+        `
+        SELECT p.id, p.nombre, p.precio, p.stock, p.stock_indefinido, p.activo, p.tipo_producto,
+               p.costo_base_sin_itbis, p.costo_promedio_actual, p.ultimo_costo_sin_itbis,
+               p.costo_unitario_real, p.costo_unitario_real_incluye_itbis,
+               p.categoria_id, p.unidad_base, p.contenido_por_unidad,
+               c.nombre AS categoria_nombre
+          FROM productos p
+          ${joinCond}
+         WHERE p.negocio_id = ?
+         ORDER BY p.nombre ASC
+        `,
+        params
+      );
+
+      const productos = (rows || []).map((row) => {
+        const stock = Number(row.stock || 0);
+        const stockIndef = Number(row.stock_indefinido || 0) === 1;
+        const costoBase =
+          Number(row.costo_promedio_actual) ||
+          Number(row.costo_base_sin_itbis) ||
+          Number(row.ultimo_costo_sin_itbis) ||
+          Number(row.costo_unitario_real) ||
+          0;
+        const valorInventario = stockIndef ? 0 : Number((stock * costoBase).toFixed(4));
+        return {
+          id: row.id,
+          nombre: row.nombre,
+          categoria: row.categoria_nombre || '',
+          tipo_producto: row.tipo_producto || 'FINAL',
+          costo_base: Number(row.costo_base_sin_itbis || 0),
+          costo_promedio_actual: Number(row.costo_promedio_actual || 0),
+          precio_sugerido: Number(row.precio || 0),
+          activo: row.activo,
+          stock: row.stock,
+          stock_minimo: 0,
+          stock_indefinido: row.stock_indefinido,
+          valor_inventario: valorInventario,
+          costo_valoracion: Number(costoBase.toFixed(4)),
+        };
+      });
+
+      res.json({ ok: true, sucursal: { id: negocioId, nombre: negocio.nombre }, productos });
+    } catch (error) {
+      console.error('Error al listar inventario de sucursal:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron cargar los productos.' });
+    }
+  });
+});
+
+app.post('/api/empresa/negocios/:id/inventario', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = Number(req.params.id);
+    if (!Number.isFinite(negocioId) || negocioId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Sucursal invalida.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const nombre = normalizarCampoTexto(req.body?.nombre, null);
+    if (!nombre) {
+      return res.status(400).json({ ok: false, error: 'El nombre es obligatorio.' });
+    }
+    const tipoProducto = normalizarTipoProducto(req.body?.tipo_producto ?? req.body?.tipo, 'FINAL');
+    const precio = normalizarNumero(req.body?.precio_sugerido ?? req.body?.precio, 0);
+    const costoBase = normalizarNumero(req.body?.costo_base ?? req.body?.costo, 0);
+    const activo = req.body?.activo === 0 || req.body?.activo === false ? 0 : 1;
+    const stockIndefinido = normalizarFlag(req.body?.stock_indefinido ?? req.body?.stockIndefinido, 0) ? 1 : 0;
+    let stock = normalizarNumero(req.body?.stock, 0);
+    if (stockIndefinido) {
+      stock = null;
+    }
+
+    try {
+      const negocio = await obtenerNegocioEmpresa(empresaId, negocioId);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Sucursal no encontrada.' });
+      }
+
+      const categoriaId = await resolverCategoriaSucursal(negocioId, req.body?.categoria);
+
+      const insert = await db.run(
+        `INSERT INTO productos (
+            nombre, categoria_id, precio, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
+            actualiza_costo_con_compras, costo_unitario_real, costo_unitario_real_incluye_itbis,
+            tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad,
+            stock, stock_indefinido, activo, negocio_id
+          )
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?, 0, ?, 0, 'UND', 1, ?, ?, ?, ?)`,
+        [
+          nombre,
+          categoriaId,
+          precio,
+          costoBase,
+          costoBase,
+          costoBase,
+          costoBase,
+          tipoProducto,
+          stock,
+          stockIndefinido,
+          activo,
+          negocioId,
+        ]
+      );
+
+      res.status(201).json({
+        ok: true,
+        producto: {
+          id: insert?.lastID,
+          nombre,
+          categoria: req.body?.categoria || '',
+          tipo_producto: tipoProducto,
+          costo_base: Number(costoBase || 0),
+          costo_promedio_actual: Number(costoBase || 0),
+          precio_sugerido: Number(precio || 0),
+          activo,
+          stock,
+          stock_indefinido: stockIndefinido,
+        },
+      });
+    } catch (error) {
+      console.error('Error al crear producto en sucursal:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo crear el producto.' });
+    }
+  });
+});
+
+app.put('/api/empresa/negocios/:id/inventario/:productoId', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = Number(req.params.id);
+    const productoId = Number(req.params.productoId);
+    if (!Number.isFinite(negocioId) || negocioId <= 0 || !Number.isFinite(productoId) || productoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Parametros invalidos.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const nombre = normalizarCampoTexto(req.body?.nombre, null);
+    if (!nombre) {
+      return res.status(400).json({ ok: false, error: 'El nombre es obligatorio.' });
+    }
+    const tipoProducto = normalizarTipoProducto(req.body?.tipo_producto ?? req.body?.tipo, 'FINAL');
+    const precio = normalizarNumero(req.body?.precio_sugerido ?? req.body?.precio, 0);
+    const costoBase = normalizarNumero(req.body?.costo_base ?? req.body?.costo, 0);
+    const activo = req.body?.activo === 0 || req.body?.activo === false ? 0 : 1;
+    const stockIndefinido = normalizarFlag(req.body?.stock_indefinido ?? req.body?.stockIndefinido, 0) ? 1 : 0;
+    let stock = normalizarNumero(req.body?.stock, 0);
+    if (stockIndefinido) {
+      stock = null;
+    }
+
+    try {
+      const negocio = await obtenerNegocioEmpresa(empresaId, negocioId);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Sucursal no encontrada.' });
+      }
+
+      const categoriaId = await resolverCategoriaSucursal(negocioId, req.body?.categoria);
+
+      const result = await db.run(
+        `UPDATE productos
+            SET nombre = ?, categoria_id = ?, precio = ?,
+                costo_base_sin_itbis = ?, costo_promedio_actual = ?, ultimo_costo_sin_itbis = ?,
+                costo_unitario_real = ?, tipo_producto = ?, stock = ?, stock_indefinido = ?, activo = ?
+          WHERE id = ? AND negocio_id = ?`,
+        [
+          nombre,
+          categoriaId,
+          precio,
+          costoBase,
+          costoBase,
+          costoBase,
+          costoBase,
+          tipoProducto,
+          stock,
+          stockIndefinido,
+          activo,
+          productoId,
+          negocioId,
+        ]
+      );
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Producto no encontrado.' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al actualizar producto de sucursal:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar el producto.' });
+    }
+  });
+});
+
+app.delete('/api/empresa/negocios/:id/inventario/:productoId', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = Number(req.params.id);
+    const productoId = Number(req.params.productoId);
+    if (!Number.isFinite(negocioId) || negocioId <= 0 || !Number.isFinite(productoId) || productoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Parametros invalidos.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    try {
+      const negocio = await obtenerNegocioEmpresa(empresaId, negocioId);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Sucursal no encontrada.' });
+      }
+      const result = await db.run('DELETE FROM productos WHERE id = ? AND negocio_id = ?', [productoId, negocioId]);
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Producto no encontrado.' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al eliminar producto de sucursal:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo eliminar el producto.' });
+    }
+  });
+});
+
+app.post('/api/empresa/clientes/desde-sucursal', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const negocioId = Number(req.body?.negocio_id ?? req.body?.negocioId);
+    if (!Number.isFinite(negocioId) || negocioId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Sucursal invalida.' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioEmpresa(empresaId, negocioId);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Sucursal no encontrada.' });
+      }
+
+      const existente = await db.get(
+        `SELECT * FROM clientes
+          WHERE empresa_id = ?
+            AND negocio_id = ?
+            AND (tags LIKE '%SUCURSAL%' OR tipo_cliente = 'EMPRESA')
+          ORDER BY id ASC
+          LIMIT 1`,
+        [empresaId, negocioId]
+      );
+      if (existente) {
+        return res.json({ ok: true, cliente: existente });
+      }
+
+      const nombre = negocio.nombre || `Sucursal ${negocioId}`;
+      const documento = negocio.rnc || null;
+      const telefono = negocio.telefono || null;
+      const direccion = negocio.direccion || null;
+      const codigo = `SUC-${negocioId}`;
+
+      const insert = await db.run(
+        `INSERT INTO clientes (
+            empresa_id, negocio_id, nombre, documento, telefono, direccion, codigo,
+            tipo_cliente, segmento, estado, vip, credito_activo, credito_limite, credito_dias,
+            credito_bloqueo_exceso, tags, activo, creado_en, actualizado_en
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'EMPRESA', 'EMPRESA', 'ACTIVO', 0, 0, 0, 0, 0, 'SUCURSAL', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [empresaId, negocioId, nombre, documento, telefono, direccion, codigo]
+      );
+
+      const cliente = await obtenerClienteEmpresa(empresaId, insert?.lastID);
+      res.json({ ok: true, cliente });
+    } catch (error) {
+      console.error('Error al crear cliente desde sucursal:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo preparar la sucursal.' });
+    }
+  });
+});
+
+app.get('/api/empresa/clientes', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const q = normalizarCampoTexto(req.query?.q ?? req.query?.buscar, null);
+    const segmentoRaw = normalizarCampoTexto(req.query?.segmento, null);
+    const estadoRaw = normalizarCampoTexto(req.query?.estado, null);
+    const vipRaw = req.query?.vip ?? req.query?.vip_only;
+    const creditoRaw = normalizarCampoTexto(req.query?.credito ?? req.query?.credito_activo, null);
+    const balanceRaw = normalizarCampoTexto(req.query?.balance ?? req.query?.saldo, null);
+    const scopeRaw = normalizarCampoTexto(req.query?.scope ?? req.query?.alcance, null);
+    const negocioId = normalizarNumero(req.query?.negocio_id ?? req.query?.negocioId, null);
+    const orden = normalizarCampoTexto(req.query?.orden ?? req.query?.order_by ?? req.query?.orderBy, 'nombre');
+    const direccion = (req.query?.dir ?? req.query?.order_dir ?? 'asc').toString().toLowerCase() === 'desc' ? 'desc' : 'asc';
+    const page = Math.max(parseInt(req.query?.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query?.limit, 10) || 60, 1), 200);
+
+    const segmento = segmentoRaw ? normalizarSegmentoCliente(segmentoRaw, null) : null;
+    const estado = estadoRaw ? normalizarEstadoCliente(estadoRaw, null) : null;
+
+    let vip = null;
+    if (vipRaw !== undefined && vipRaw !== null && vipRaw !== '') {
+      vip = normalizarFlag(vipRaw, 0) ? 1 : 0;
+    }
+
+    let creditoActivo = null;
+    if (creditoRaw) {
+      const credito = creditoRaw.toLowerCase();
+      if (['si', 'con', 'true', '1', 'activo', 'credito'].includes(credito)) {
+        creditoActivo = 1;
+      } else if (['no', 'sin', 'false', '0', 'inactivo'].includes(credito)) {
+        creditoActivo = 0;
+      }
+    } else if (req.query?.credito_activo !== undefined || req.query?.creditoActivo !== undefined) {
+      creditoActivo = normalizarFlag(req.query?.credito_activo ?? req.query?.creditoActivo, 0) ? 1 : 0;
+    }
+
+    const filtros = ['c.empresa_id = ?'];
+    const paramsWhere = [empresaId];
+
+    if (q) {
+      const termino = `%${q.toLowerCase()}%`;
+      filtros.push(
+        '(LOWER(c.nombre) LIKE ? OR LOWER(c.documento) LIKE ? OR LOWER(c.telefono) LIKE ? OR LOWER(c.email) LIKE ? OR LOWER(c.codigo) LIKE ? OR LOWER(c.notas) LIKE ? OR LOWER(c.notas_internas) LIKE ? OR LOWER(c.tags) LIKE ?)'
+      );
+      paramsWhere.push(termino, termino, termino, termino, termino, termino, termino, termino);
+    }
+    if (segmento) {
+      filtros.push('c.segmento = ?');
+      paramsWhere.push(segmento);
+    }
+    if (estado) {
+      filtros.push('c.estado = ?');
+      paramsWhere.push(estado);
+    }
+    if (vip !== null) {
+      filtros.push('c.vip = ?');
+      paramsWhere.push(vip);
+    }
+    if (creditoActivo !== null) {
+      filtros.push('c.credito_activo = ?');
+      paramsWhere.push(creditoActivo);
+    }
+    if (scopeRaw) {
+      const scope = scopeRaw.toLowerCase();
+      if (scope === 'global') {
+        filtros.push('c.negocio_id IS NULL');
+      } else if (scope === 'local') {
+        filtros.push('c.negocio_id IS NOT NULL');
+      }
+    }
+    if (Number.isFinite(negocioId) && negocioId > 0) {
+      filtros.push('c.negocio_id = ?');
+      paramsWhere.push(negocioId);
+    }
+
+    const negocioFiltroSql =
+      Number.isFinite(negocioId) && negocioId > 0 ? 'AND d.negocio_id = ?' : '';
+
+    const subTotalDeuda = `
+      SELECT COALESCE(SUM(d.monto_total), 0)
+        FROM clientes_deudas d
+        JOIN negocios n ON n.id = d.negocio_id
+       WHERE d.cliente_id = c.id
+         AND n.empresa_id = ?
+         ${negocioFiltroSql}
+    `;
+    const subTotalAbonos = `
+      SELECT COALESCE(SUM(a.monto), 0)
+        FROM clientes_abonos a
+        JOIN negocios n ON n.id = a.negocio_id
+       WHERE a.cliente_id = c.id
+         AND n.empresa_id = ?
+         ${negocioFiltroSql}
+    `;
+    const subUltimaCompra = `
+      SELECT MAX(d.fecha)
+        FROM clientes_deudas d
+        JOIN negocios n ON n.id = d.negocio_id
+       WHERE d.cliente_id = c.id
+         AND n.empresa_id = ?
+         ${negocioFiltroSql}
+    `;
+    const subPrimeraCompra = `
+      SELECT MIN(d.fecha)
+        FROM clientes_deudas d
+        JOIN negocios n ON n.id = d.negocio_id
+       WHERE d.cliente_id = c.id
+         AND n.empresa_id = ?
+         ${negocioFiltroSql}
+    `;
+    const subCompras = `
+      SELECT COUNT(1)
+        FROM clientes_deudas d
+        JOIN negocios n ON n.id = d.negocio_id
+       WHERE d.cliente_id = c.id
+         AND n.empresa_id = ?
+         ${negocioFiltroSql}
+    `;
+
+    const whereClause = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
+
+    const subParams = [];
+    const pushSub = () => {
+      subParams.push(empresaId);
+      if (Number.isFinite(negocioId) && negocioId > 0) {
+        subParams.push(negocioId);
+      }
+    };
+    for (let i = 0; i < 5; i += 1) {
+      pushSub();
+    }
+
+    try {
+      const rows = await db.all(
+        `
+        SELECT c.*,
+               (${subTotalDeuda}) AS total_deuda,
+               (${subTotalAbonos}) AS total_abonos,
+               (${subUltimaCompra}) AS ultima_compra,
+               (${subPrimeraCompra}) AS primera_compra,
+               (${subCompras}) AS compras_count,
+               n.nombre AS sucursal_nombre
+          FROM clientes c
+          LEFT JOIN negocios n ON n.id = c.negocio_id
+          ${whereClause}
+        `,
+        [...subParams, ...paramsWhere]
+      );
+
+      let clientes = (rows || []).map((row) => {
+        const resumen = construirResumenClienteEmpresa({
+          total_deuda: row.total_deuda,
+          total_abonos: row.total_abonos,
+          credito_activo: row.credito_activo,
+          credito_limite: row.credito_limite,
+          credito_dias: row.credito_dias,
+          primera_compra: row.primera_compra,
+          ultima_compra: row.ultima_compra,
+        });
+
+        const estadoCliente = row.estado || (Number(row.activo || 0) === 1 ? 'ACTIVO' : 'INACTIVO');
+        return {
+          ...row,
+          estado: estadoCliente,
+          total_deuda: resumen.total,
+          total_abonos: resumen.pagado,
+          saldo: resumen.saldo,
+          en_mora: resumen.en_mora,
+          excede_limite: resumen.excede_limite,
+          estado_credito: resumen.estado_credito,
+        };
+      });
+
+      if (balanceRaw) {
+        const balance = balanceRaw.toLowerCase();
+        if (['debe', 'pendiente', 'saldo', 'con'].includes(balance)) {
+          clientes = clientes.filter((c) => Number(c.saldo || 0) > 0);
+        } else if (['cero', 'al_dia'].includes(balance)) {
+          clientes = clientes.filter((c) => Number(c.saldo || 0) <= 0);
+        } else if (['favor', 'a_favor'].includes(balance)) {
+          clientes = clientes.filter((c) => Number(c.saldo || 0) < 0);
+        }
+      }
+
+      const ordenar = (a, b) => {
+        const dir = direccion === 'desc' ? -1 : 1;
+        const campo = (orden || 'nombre').toLowerCase();
+        if (campo === 'ultima_compra') {
+          const aVal = a.ultima_compra ? new Date(a.ultima_compra).getTime() : 0;
+          const bVal = b.ultima_compra ? new Date(b.ultima_compra).getTime() : 0;
+          return (aVal - bVal) * dir;
+        }
+        if (campo === 'saldo') {
+          return (Number(a.saldo || 0) - Number(b.saldo || 0)) * dir;
+        }
+        if (campo === 'total') {
+          return (Number(a.total_deuda || 0) - Number(b.total_deuda || 0)) * dir;
+        }
+        if (campo === 'compras') {
+          return (Number(a.compras_count || 0) - Number(b.compras_count || 0)) * dir;
+        }
+        const aNombre = (a.nombre || '').toString().toLowerCase();
+        const bNombre = (b.nombre || '').toString().toLowerCase();
+        if (aNombre < bNombre) return -1 * dir;
+        if (aNombre > bNombre) return 1 * dir;
+        return 0;
+      };
+
+      clientes.sort(ordenar);
+
+      const total = clientes.length;
+      const start = (page - 1) * limit;
+      const end = start + limit;
+      const paginated = clientes.slice(start, end);
+
+      const resumen = clientes.reduce(
+        (acc, item) => {
+          acc.total += 1;
+          acc.vip += Number(item.vip || 0) === 1 ? 1 : 0;
+          acc.activos += item.estado === 'ACTIVO' ? 1 : 0;
+          acc.en_mora += item.en_mora ? 1 : 0;
+          acc.saldo_total += Number(item.saldo || 0);
+          return acc;
+        },
+        { total: 0, vip: 0, activos: 0, en_mora: 0, saldo_total: 0 }
+      );
+
+      res.json({
+        ok: true,
+        clientes: paginated,
+        total,
+        page,
+        limit,
+        resumen,
+      });
+    } catch (error) {
+      console.error('Error al listar clientes empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo cargar la lista de clientes.' });
+    }
+  });
+});
+
+app.get('/api/empresa/clientes/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    if (!Number.isFinite(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cliente invalido.' });
+    }
+
+    try {
+      const cliente = await obtenerClienteEmpresa(empresaId, clienteId);
+      if (!cliente) {
+        return res.status(404).json({ ok: false, error: 'Cliente no encontrado.' });
+      }
+      const tagsCliente = String(cliente.tags || '').toUpperCase();
+      const tipoCliente = String(cliente.tipo_cliente || '').toUpperCase();
+      const esSucursalInterna =
+        Number(cliente.negocio_id) > 0 && (tagsCliente.includes('SUCURSAL') || tipoCliente === 'EMPRESA');
+      const autoPagoSolicitado = normalizarFlag(req.body?.auto_pago ?? req.body?.autoPago, 0) ? 1 : 0;
+      const autoPago = autoPagoSolicitado || esSucursalInterna;
+
+      const totalDeudaRow = await db.get(
+        `SELECT COALESCE(SUM(d.monto_total), 0) AS total
+           FROM clientes_deudas d
+           JOIN negocios n ON n.id = d.negocio_id
+          WHERE d.cliente_id = ?
+            AND n.empresa_id = ?`,
+        [clienteId, empresaId]
+      );
+      const totalAbonosRow = await db.get(
+        `SELECT COALESCE(SUM(a.monto), 0) AS total
+           FROM clientes_abonos a
+           JOIN negocios n ON n.id = a.negocio_id
+          WHERE a.cliente_id = ?
+            AND n.empresa_id = ?`,
+        [clienteId, empresaId]
+      );
+      const fechasRow = await db.get(
+        `SELECT MAX(d.fecha) AS ultima_compra,
+                MIN(d.fecha) AS primera_compra,
+                COUNT(1) AS compras_count
+           FROM clientes_deudas d
+           JOIN negocios n ON n.id = d.negocio_id
+          WHERE d.cliente_id = ?
+            AND n.empresa_id = ?`,
+        [clienteId, empresaId]
+      );
+
+      const resumen = construirResumenClienteEmpresa({
+        total_deuda: totalDeudaRow?.total,
+        total_abonos: totalAbonosRow?.total,
+        credito_activo: cliente.credito_activo,
+        credito_limite: cliente.credito_limite,
+        credito_dias: cliente.credito_dias,
+        primera_compra: fechasRow?.primera_compra,
+        ultima_compra: fechasRow?.ultima_compra,
+      });
+
+      res.json({
+        ok: true,
+        cliente,
+        resumen: {
+          ...resumen,
+          compras_count: Number(fechasRow?.compras_count || 0),
+          ultima_compra: fechasRow?.ultima_compra || null,
+          primera_compra: fechasRow?.primera_compra || null,
+        },
+      });
+    } catch (error) {
+      console.error('Error al obtener cliente empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo cargar el cliente.' });
+    }
+  });
+});
+
+app.post('/api/empresa/clientes', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const payload = req.body || {};
+    const nombre = normalizarCampoTexto(payload.nombre, null);
+    if (!nombre) {
+      return res.status(400).json({ ok: false, error: 'El nombre del cliente es obligatorio.' });
+    }
+    const negocioId = normalizarNumero(payload.negocio_id ?? payload.negocioId, null);
+    if (Number.isFinite(negocioId) && negocioId > 0) {
+      const negocio = await obtenerNegocioEmpresa(empresaId, negocioId);
+      if (!negocio) {
+        return res.status(400).json({ ok: false, error: 'La sucursal seleccionada no es valida.' });
+      }
+    }
+
+    const documento = normalizarCampoTexto(payload.documento, null);
+    const tipoDocumento = normalizarCampoTexto(payload.tipo_documento ?? payload.tipoDocumento, null);
+    const telefono = normalizarCampoTexto(payload.telefono, null);
+    const whatsapp = normalizarCampoTexto(payload.whatsapp, null);
+    const email = normalizarCampoTexto(payload.email, null);
+    const direccion = normalizarCampoTexto(payload.direccion, null);
+    const notas = normalizarCampoTexto(payload.notas, null);
+    const codigo = normalizarCampoTexto(payload.codigo, null);
+    const tipoCliente = payload.tipo_cliente ? normalizarTipoCliente(payload.tipo_cliente, 'PERSONA') : 'PERSONA';
+    const segmento = payload.segmento ? normalizarSegmentoCliente(payload.segmento, 'CONSUMIDOR') : 'CONSUMIDOR';
+    const estado = payload.estado ? normalizarEstadoCliente(payload.estado, 'ACTIVO') : 'ACTIVO';
+    const vip = normalizarFlag(payload.vip, 0) ? 1 : 0;
+    const creditoActivo = normalizarFlag(payload.credito_activo ?? payload.creditoActivo, 0) ? 1 : 0;
+    const creditoLimite = normalizarNumero(payload.credito_limite ?? payload.creditoLimite, 0) || 0;
+    const creditoDias = normalizarNumero(payload.credito_dias ?? payload.creditoDias, 0) || 0;
+    const creditoBloqueo = normalizarFlag(payload.credito_bloqueo_exceso ?? payload.creditoBloqueoExceso, 0) ? 1 : 0;
+    const tags = normalizarCampoTexto(payload.tags, null);
+    const notasInternas = normalizarCampoTexto(payload.notas_internas ?? payload.notasInternas, null);
+    const fechaCumple = esFechaISOValida(payload.fecha_cumple ?? payload.fechaCumple)
+      ? payload.fecha_cumple ?? payload.fechaCumple
+      : null;
+    const metodoPagoPreferido = normalizarCampoTexto(
+      payload.metodo_pago_preferido ?? payload.metodoPagoPreferido,
+      null
+    );
+
+    const forzarDuplicado = normalizarFlag(payload.forceDuplicate ?? payload.forzar_duplicado, 0) === 1;
+    if (!forzarDuplicado && (documento || telefono || email)) {
+      const condiciones = [];
+      const paramsDup = [empresaId];
+      if (documento) {
+        condiciones.push('documento = ?');
+        paramsDup.push(documento);
+      }
+      if (telefono) {
+        condiciones.push('telefono = ?');
+        paramsDup.push(telefono);
+      }
+      if (email) {
+        condiciones.push('email = ?');
+        paramsDup.push(email);
+      }
+      if (condiciones.length) {
+        const dup = await db.get(
+          `SELECT id, nombre, documento, telefono, email
+             FROM clientes
+            WHERE empresa_id = ?
+              AND (${condiciones.join(' OR ')})
+            LIMIT 1`,
+          paramsDup
+        );
+        if (dup) {
+          return res.status(409).json({ ok: false, error: 'Cliente duplicado.', duplicado: dup });
+        }
+      }
+    }
+
+    try {
+      const result = await db.run(
+        `INSERT INTO clientes
+          (nombre, documento, tipo_documento, telefono, whatsapp, email, direccion, notas, activo, negocio_id, empresa_id,
+           codigo, tipo_cliente, segmento, estado, vip, credito_activo, credito_limite, credito_dias, credito_bloqueo_exceso,
+           tags, notas_internas, fecha_cumple, metodo_pago_preferido, actualizado_en)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [
+          nombre,
+          documento,
+          tipoDocumento,
+          telefono,
+          whatsapp,
+          email,
+          direccion,
+          notas,
+          ['ACTIVO', 'MORA'].includes(estado) ? 1 : 0,
+          Number.isFinite(negocioId) && negocioId > 0 ? negocioId : null,
+          empresaId,
+          codigo,
+          tipoCliente,
+          segmento,
+          estado,
+          vip,
+          creditoActivo,
+          creditoLimite,
+          creditoDias,
+          creditoBloqueo,
+          tags,
+          notasInternas,
+          fechaCumple,
+          metodoPagoPreferido,
+        ]
+      );
+
+      const cliente = await obtenerClienteEmpresa(empresaId, result?.id);
+      res.status(201).json({ ok: true, cliente });
+    } catch (error) {
+      console.error('Error al crear cliente empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo crear el cliente.' });
+    }
+  });
+});
+
+app.put('/api/empresa/clientes/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    if (!Number.isFinite(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cliente invalido.' });
+    }
+
+    const existente = await obtenerClienteEmpresa(empresaId, clienteId);
+    if (!existente) {
+      return res.status(404).json({ ok: false, error: 'Cliente no encontrado.' });
+    }
+
+    const payload = req.body || {};
+    const negocioId = normalizarNumero(payload.negocio_id ?? payload.negocioId, null);
+    if (Number.isFinite(negocioId) && negocioId > 0) {
+      const negocio = await obtenerNegocioEmpresa(empresaId, negocioId);
+      if (!negocio) {
+        return res.status(400).json({ ok: false, error: 'La sucursal seleccionada no es valida.' });
+      }
+    }
+
+    const nombre = normalizarCampoTexto(payload.nombre ?? existente.nombre, null);
+    const documento = normalizarCampoTexto(payload.documento ?? existente.documento, null);
+    const tipoDocumento = normalizarCampoTexto(payload.tipo_documento ?? payload.tipoDocumento ?? existente.tipo_documento, null);
+    const telefono = normalizarCampoTexto(payload.telefono ?? existente.telefono, null);
+    const whatsapp = normalizarCampoTexto(payload.whatsapp ?? existente.whatsapp, null);
+    const email = normalizarCampoTexto(payload.email ?? existente.email, null);
+    const direccion = normalizarCampoTexto(payload.direccion ?? existente.direccion, null);
+    const notas = normalizarCampoTexto(payload.notas ?? existente.notas, null);
+    const codigo = normalizarCampoTexto(payload.codigo ?? existente.codigo, null);
+    const tipoCliente = payload.tipo_cliente ? normalizarTipoCliente(payload.tipo_cliente, existente.tipo_cliente) : existente.tipo_cliente;
+    const segmento = payload.segmento ? normalizarSegmentoCliente(payload.segmento, existente.segmento) : existente.segmento;
+    const estado = payload.estado ? normalizarEstadoCliente(payload.estado, existente.estado) : existente.estado;
+    const vip = payload.vip !== undefined ? (normalizarFlag(payload.vip, existente.vip) ? 1 : 0) : existente.vip;
+    const creditoActivo =
+      payload.credito_activo !== undefined || payload.creditoActivo !== undefined
+        ? normalizarFlag(payload.credito_activo ?? payload.creditoActivo, existente.credito_activo) ? 1 : 0
+        : existente.credito_activo;
+    const creditoLimite = payload.credito_limite !== undefined || payload.creditoLimite !== undefined
+      ? normalizarNumero(payload.credito_limite ?? payload.creditoLimite, existente.credito_limite)
+      : existente.credito_limite;
+    const creditoDias = payload.credito_dias !== undefined || payload.creditoDias !== undefined
+      ? normalizarNumero(payload.credito_dias ?? payload.creditoDias, existente.credito_dias)
+      : existente.credito_dias;
+    const creditoBloqueo = payload.credito_bloqueo_exceso !== undefined || payload.creditoBloqueoExceso !== undefined
+      ? normalizarFlag(payload.credito_bloqueo_exceso ?? payload.creditoBloqueoExceso, existente.credito_bloqueo_exceso) ? 1 : 0
+      : existente.credito_bloqueo_exceso;
+    const tags = normalizarCampoTexto(payload.tags ?? existente.tags, null);
+    const notasInternas = normalizarCampoTexto(payload.notas_internas ?? payload.notasInternas ?? existente.notas_internas, null);
+    const fechaCumple = esFechaISOValida(payload.fecha_cumple ?? payload.fechaCumple)
+      ? payload.fecha_cumple ?? payload.fechaCumple
+      : existente.fecha_cumple;
+    const metodoPagoPreferido = normalizarCampoTexto(
+      payload.metodo_pago_preferido ?? payload.metodoPagoPreferido ?? existente.metodo_pago_preferido,
+      null
+    );
+
+    const forzarDuplicado = normalizarFlag(payload.forceDuplicate ?? payload.forzar_duplicado, 0) === 1;
+    if (!forzarDuplicado && (documento || telefono || email)) {
+      const condiciones = [];
+      const paramsDup = [empresaId, clienteId];
+      if (documento) {
+        condiciones.push('documento = ?');
+        paramsDup.push(documento);
+      }
+      if (telefono) {
+        condiciones.push('telefono = ?');
+        paramsDup.push(telefono);
+      }
+      if (email) {
+        condiciones.push('email = ?');
+        paramsDup.push(email);
+      }
+      if (condiciones.length) {
+        const dup = await db.get(
+          `SELECT id, nombre, documento, telefono, email
+             FROM clientes
+            WHERE empresa_id = ?
+              AND id <> ?
+              AND (${condiciones.join(' OR ')})
+            LIMIT 1`,
+          paramsDup
+        );
+        if (dup) {
+          return res.status(409).json({ ok: false, error: 'Cliente duplicado.', duplicado: dup });
+        }
+      }
+    }
+
+    try {
+      await db.run(
+        `UPDATE clientes
+            SET nombre = ?,
+                documento = ?,
+                tipo_documento = ?,
+                telefono = ?,
+                whatsapp = ?,
+                email = ?,
+                direccion = ?,
+                notas = ?,
+                activo = ?,
+                negocio_id = ?,
+                codigo = ?,
+                tipo_cliente = ?,
+                segmento = ?,
+                estado = ?,
+                vip = ?,
+                credito_activo = ?,
+                credito_limite = ?,
+                credito_dias = ?,
+                credito_bloqueo_exceso = ?,
+                tags = ?,
+                notas_internas = ?,
+                fecha_cumple = ?,
+                metodo_pago_preferido = ?,
+                actualizado_en = CURRENT_TIMESTAMP
+          WHERE id = ?
+            AND empresa_id = ?`,
+        [
+          nombre,
+          documento,
+          tipoDocumento,
+          telefono,
+          whatsapp,
+          email,
+          direccion,
+          notas,
+          ['ACTIVO', 'MORA'].includes(estado) ? 1 : 0,
+          Number.isFinite(negocioId) && negocioId > 0 ? negocioId : null,
+          codigo,
+          tipoCliente,
+          segmento,
+          estado,
+          vip,
+          creditoActivo,
+          creditoLimite,
+          creditoDias,
+          creditoBloqueo,
+          tags,
+          notasInternas,
+          fechaCumple,
+          metodoPagoPreferido,
+          clienteId,
+          empresaId,
+        ]
+      );
+
+      const cliente = await obtenerClienteEmpresa(empresaId, clienteId);
+      res.json({ ok: true, cliente });
+    } catch (error) {
+      console.error('Error al actualizar cliente empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar el cliente.' });
+    }
+  });
+});
+
+app.put('/api/empresa/clientes/:id/estado', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    if (!Number.isFinite(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cliente invalido.' });
+    }
+    const estado = normalizarEstadoCliente(req.body?.estado ?? req.body?.status, 'ACTIVO');
+    const activo = ['ACTIVO', 'MORA'].includes(estado) ? 1 : 0;
+    try {
+      const result = await db.run(
+        `UPDATE clientes
+            SET estado = ?,
+                activo = ?,
+                actualizado_en = CURRENT_TIMESTAMP
+          WHERE id = ?
+            AND empresa_id = ?`,
+        [estado, activo, clienteId, empresaId]
+      );
+      if (!result?.changes) {
+        return res.status(404).json({ ok: false, error: 'Cliente no encontrado.' });
+      }
+      res.json({ ok: true, estado });
+    } catch (error) {
+      console.error('Error al cambiar estado de cliente:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar el estado.' });
+    }
+  });
+});
+
+app.get('/api/empresa/clientes/:id/notas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    if (!Number.isFinite(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cliente invalido.' });
+    }
+    try {
+      const cliente = await obtenerClienteEmpresa(empresaId, clienteId);
+      if (!cliente) return res.status(404).json({ ok: false, error: 'Cliente no encontrado.' });
+      const notas = await db.all(
+        `SELECT id, nota, usuario_id, created_at
+           FROM clientes_notas
+          WHERE cliente_id = ?
+            AND empresa_id = ?
+          ORDER BY id DESC`,
+        [clienteId, empresaId]
+      );
+      res.json({ ok: true, notas: notas || [] });
+    } catch (error) {
+      console.error('Error al obtener notas de cliente:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron cargar las notas.' });
+    }
+  });
+});
+
+app.post('/api/empresa/clientes/:id/notas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    if (!Number.isFinite(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cliente invalido.' });
+    }
+    const nota = normalizarCampoTexto(req.body?.nota ?? req.body?.texto, null);
+    if (!nota) {
+      return res.status(400).json({ ok: false, error: 'La nota es obligatoria.' });
+    }
+    try {
+      const cliente = await obtenerClienteEmpresa(empresaId, clienteId);
+      if (!cliente) return res.status(404).json({ ok: false, error: 'Cliente no encontrado.' });
+      const result = await db.run(
+        `INSERT INTO clientes_notas (cliente_id, empresa_id, negocio_id, nota, usuario_id)
+         VALUES (?, ?, ?, ?, ?)`,
+        [clienteId, empresaId, cliente.negocio_id ?? null, nota, usuarioSesion?.id || null]
+      );
+      const nuevo = await db.get(
+        `SELECT id, nota, usuario_id, created_at
+           FROM clientes_notas
+          WHERE id = ?`,
+        [result?.id]
+      );
+      res.status(201).json({ ok: true, nota: nuevo });
+    } catch (error) {
+      console.error('Error al guardar nota de cliente:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo guardar la nota.' });
+    }
+  });
+});
+
+app.get('/api/empresa/facturas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+
+    const q = normalizarCampoTexto(req.query?.q, null);
+    const estadoFiltro = normalizarCampoTexto(req.query?.estado, null);
+    const desde = esFechaISOValida(req.query?.desde ?? req.query?.from) ? req.query?.desde ?? req.query?.from : null;
+    const hasta = esFechaISOValida(req.query?.hasta ?? req.query?.to) ? req.query?.hasta ?? req.query?.to : null;
+    const negocioId = Number(req.query?.negocio_id ?? req.query?.negocioId ?? 0);
+    const orden = normalizarCampoTexto(req.query?.orden, 'fecha_desc') || 'fecha_desc';
+
+    const filtros = ['n.empresa_id = ?'];
+    const params = [empresaId];
+    if (q) {
+      const termino = `%${q.toLowerCase()}%`;
+      filtros.push('(LOWER(c.nombre) LIKE ? OR LOWER(c.documento) LIKE ? OR LOWER(d.descripcion) LIKE ?)');
+      params.push(termino, termino, termino);
+    }
+    if (desde) {
+      filtros.push('d.fecha >= ?');
+      params.push(desde);
+    }
+    if (hasta) {
+      filtros.push('d.fecha <= ?');
+      params.push(hasta);
+    }
+    if (Number.isFinite(negocioId) && negocioId > 0) {
+      filtros.push('d.negocio_id = ?');
+      params.push(negocioId);
+    }
+
+    const whereClause = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
+    const subTotalAbonos = `
+      SELECT COALESCE(SUM(a.monto), 0)
+        FROM clientes_abonos a
+       WHERE a.deuda_id = d.id
+         AND a.negocio_id = d.negocio_id
+    `;
+
+    try {
+      const rows = await db.all(
+        `
+        SELECT d.id,
+               d.fecha,
+               d.descripcion,
+               d.monto_total,
+               d.notas,
+               d.cliente_id,
+               d.negocio_id,
+               c.nombre AS cliente_nombre,
+               c.documento AS cliente_documento,
+               c.tags AS cliente_tags,
+               c.tipo_cliente AS cliente_tipo,
+               c.negocio_id AS cliente_negocio_id,
+               n.nombre AS sucursal_nombre,
+               (${subTotalAbonos}) AS total_abonos
+          FROM clientes_deudas d
+          JOIN clientes c ON c.id = d.cliente_id
+          JOIN negocios n ON n.id = d.negocio_id
+          ${whereClause}
+        `,
+        params
+      );
+
+      let facturas = (rows || []).map((row) => {
+        const total = Number(row.monto_total || 0);
+        const tags = String(row.cliente_tags || '').toUpperCase();
+        const tipoCliente = String(row.cliente_tipo || '').toUpperCase();
+        const esSucursal =
+          Number(row.cliente_negocio_id) > 0 && (tags.includes('SUCURSAL') || tipoCliente === 'EMPRESA');
+        let abonos = Number(row.total_abonos || 0);
+        if (esSucursal && abonos < total) {
+          abonos = total;
+        }
+        const saldo = Math.max(total - abonos, 0);
+        const estado = saldo <= 0 ? 'PAGADO' : 'PENDIENTE';
+        return {
+          ...row,
+          total_abonos: Number(abonos.toFixed(2)),
+          saldo: Number(saldo.toFixed(2)),
+          estado,
+          es_interna: esSucursal,
+        };
+      });
+
+      if (estadoFiltro) {
+        const estado = estadoFiltro.toUpperCase();
+        facturas = facturas.filter((factura) => factura.estado === estado);
+      }
+
+      const ordenar = (a, b) => {
+        const campo = (orden || 'fecha_desc').toLowerCase();
+        if (campo === 'fecha_asc') {
+          return new Date(a.fecha).getTime() - new Date(b.fecha).getTime();
+        }
+        if (campo === 'monto_desc') {
+          return Number(b.monto_total || 0) - Number(a.monto_total || 0);
+        }
+        if (campo === 'monto_asc') {
+          return Number(a.monto_total || 0) - Number(b.monto_total || 0);
+        }
+        if (campo === 'cliente') {
+          return String(a.cliente_nombre || '').localeCompare(String(b.cliente_nombre || ''));
+        }
+        return new Date(b.fecha).getTime() - new Date(a.fecha).getTime();
+      };
+
+      facturas.sort(ordenar);
+
+      const resumen = facturas.reduce(
+        (acc, row) => {
+          acc.total += Number(row.monto_total || 0);
+          acc.pagado += Number(row.total_abonos || 0);
+          acc.saldo += Number(row.saldo || 0);
+          acc.count += 1;
+          return acc;
+        },
+        { total: 0, pagado: 0, saldo: 0, count: 0 }
+      );
+
+      res.json({
+        ok: true,
+        facturas,
+        resumen: {
+          total: Number(resumen.total.toFixed(2)),
+          pagado: Number(resumen.pagado.toFixed(2)),
+          saldo: Number(resumen.saldo.toFixed(2)),
+          count: resumen.count,
+        },
+      });
+    } catch (error) {
+      console.error('Error al listar facturas empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron cargar las facturas.' });
+    }
+  });
+});
+
+app.get('/api/empresa/clientes/:id/deudas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    if (!Number.isFinite(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cliente invalido.' });
+    }
+    const negocioId = normalizarNumero(req.query?.negocio_id ?? req.query?.negocioId, null);
+
+    try {
+      const cliente = await obtenerClienteEmpresa(empresaId, clienteId);
+      if (!cliente) return res.status(404).json({ ok: false, error: 'Cliente no encontrado.' });
+
+      const filtros = ['d.cliente_id = ?', 'n.empresa_id = ?'];
+      const params = [clienteId, empresaId];
+      if (Number.isFinite(negocioId) && negocioId > 0) {
+        filtros.push('d.negocio_id = ?');
+        params.push(negocioId);
+      }
+
+      const whereClause = `WHERE ${filtros.join(' AND ')}`;
+      const rows = await db.all(
+        `SELECT d.id, d.fecha, d.descripcion, d.monto_total, d.notas, d.negocio_id, n.nombre AS sucursal_nombre,
+                COALESCE(SUM(a.monto), 0) AS total_abonos
+           FROM clientes_deudas d
+           JOIN negocios n ON n.id = d.negocio_id
+           LEFT JOIN clientes_abonos a
+             ON a.deuda_id = d.id
+            AND a.negocio_id = d.negocio_id
+          ${whereClause}
+          GROUP BY d.id
+          ORDER BY d.fecha DESC, d.id DESC`,
+        params
+      );
+
+      const deudas = (rows || []).map((row) => {
+        const monto = Number(row.monto_total) || 0;
+        const pagado = Number(row.total_abonos) || 0;
+        const saldo = Math.max(monto - pagado, 0);
+        const estado = saldo <= 0 ? 'saldada' : pagado > 0 ? 'parcial' : 'pendiente';
+        return {
+          ...row,
+          monto_total: monto,
+          total_abonos: pagado,
+          pagado,
+          saldo,
+          estado,
+        };
+      });
+
+      const resumen = deudas.reduce(
+        (acc, deuda) => {
+          acc.total_deuda += deuda.monto_total || 0;
+          acc.total_abonos += deuda.total_abonos || 0;
+          return acc;
+        },
+        { total_deuda: 0, total_abonos: 0 }
+      );
+      resumen.saldo_pendiente = Math.max(resumen.total_deuda - resumen.total_abonos, 0);
+
+      res.json({ ok: true, cliente, resumen, deudas });
+    } catch (error) {
+      console.error('Error al obtener deudas empresa:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron cargar las deudas.' });
+    }
+  });
+});
+
+app.get('/api/empresa/clientes/:id/deudas/:deudaId/detalle', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    const deudaId = Number(req.params.deudaId);
+    if (!Number.isFinite(clienteId) || clienteId <= 0 || !Number.isFinite(deudaId) || deudaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'IDs invalidos.' });
+    }
+    try {
+      const deuda = await db.get(
+        `SELECT d.id
+           FROM clientes_deudas d
+           JOIN negocios n ON n.id = d.negocio_id
+          WHERE d.id = ?
+            AND d.cliente_id = ?
+            AND n.empresa_id = ?
+          LIMIT 1`,
+        [deudaId, clienteId, empresaId]
+      );
+      if (!deuda) {
+        return res.status(404).json({ ok: false, error: 'Deuda no encontrada.' });
+      }
+
+      const items = await db.all(
+        `SELECT id, producto_id, nombre_producto, cantidad, precio_unitario, total_linea
+           FROM clientes_deudas_detalle
+          WHERE deuda_id = ?
+          ORDER BY id ASC`,
+        [deudaId]
+      );
+      res.json({ ok: true, items: items || [] });
+    } catch (error) {
+      console.error('Error al obtener detalle de deuda:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el detalle.' });
+    }
+  });
+});
+
+app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    if (!Number.isFinite(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cliente invalido.' });
+    }
+
+    const negocioId = normalizarNumero(req.body?.negocio_id ?? req.body?.negocioId, null);
+    if (!Number.isFinite(negocioId) || negocioId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Selecciona una sucursal para la factura.' });
+    }
+
+    const descripcion = normalizarCampoTexto(req.body?.descripcion, null);
+    const notas = normalizarCampoTexto(req.body?.notas, null);
+    const fechaEntrada = normalizarCampoTexto(req.body?.fecha, null);
+    const fecha = esFechaISOValida(fechaEntrada) ? fechaEntrada : obtenerFechaLocalISO(new Date());
+    const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
+    const montoEntrada = normalizarNumero(req.body?.monto_total ?? req.body?.montoTotal, null);
+
+    try {
+      const cliente = await obtenerClienteEmpresa(empresaId, clienteId);
+      if (!cliente) {
+        return res.status(404).json({ ok: false, error: 'Cliente no encontrado.' });
+      }
+
+      const negocio = await obtenerNegocioEmpresa(empresaId, negocioId);
+      if (!negocio) {
+        return res.status(400).json({ ok: false, error: 'Sucursal no valida.' });
+      }
+
+      let itemsProcesados = [];
+      const requeridosInventario = new Map();
+      if (!itemsEntrada.length) {
+        return res.status(400).json({ ok: false, error: 'Agrega al menos un producto.' });
+      }
+
+      const productos = await db.all(
+        `SELECT id, nombre, precio
+           FROM productos
+          WHERE negocio_id = ?
+            AND activo = 1`,
+        [negocioId]
+      );
+      const productosMap = new Map((productos || []).map((p) => [Number(p.id), p]));
+
+      const itemsNormalizados = [];
+      for (const item of itemsEntrada) {
+        const origenRaw = (item?.origen || '').toString().toLowerCase();
+        const empresaProductoId = Number(
+          item?.producto_empresa_id ??
+            item?.productoEmpresaId ??
+            (origenRaw === 'empresa' ? item?.id : null)
+        );
+        const cantidad = normalizarNumero(item?.cantidad, 0);
+        if (!Number.isFinite(cantidad) || cantidad <= 0) {
+          return res.status(400).json({ ok: false, error: 'Cantidad invalida en la factura.' });
+        }
+        if (!Number.isFinite(empresaProductoId) || empresaProductoId <= 0) {
+          return res.status(400).json({
+            ok: false,
+            error: 'Producto invalido. Solo se permiten productos del inventario de la empresa.',
+          });
+        }
+        const precioUnitario = normalizarNumero(item?.precio_unitario ?? item?.precioUnitario, null);
+        itemsNormalizados.push({
+          empresa_producto_id: empresaProductoId,
+          cantidad,
+          precio_unitario: precioUnitario,
+        });
+        requeridosInventario.set(empresaProductoId, (requeridosInventario.get(empresaProductoId) || 0) + cantidad);
+      }
+
+      const idsEmpresa = Array.from(requeridosInventario.keys());
+      const placeholdersEmpresa = idsEmpresa.map(() => '?').join(',');
+      const productosEmpresaRows = await db.all(
+        `SELECT id, nombre, precio_sugerido, costo_base, costo_promedio_actual, tipo_producto, activo, stock, stock_indefinido
+           FROM empresa_productos
+          WHERE empresa_id = ?
+            AND id IN (${placeholdersEmpresa})`,
+        [empresaId, ...idsEmpresa]
+      );
+      const productosEmpresaMap = new Map((productosEmpresaRows || []).map((p) => [Number(p.id), p]));
+      if (productosEmpresaMap.size !== idsEmpresa.length) {
+        return res.status(404).json({ ok: false, error: 'Producto empresa no encontrado.' });
+      }
+
+      for (const item of itemsNormalizados) {
+        const productoEmpresa = productosEmpresaMap.get(Number(item.empresa_producto_id));
+        if (!productoEmpresa || Number(productoEmpresa.activo || 0) !== 1) {
+          return res.status(404).json({ ok: false, error: 'Producto empresa no encontrado.' });
+        }
+        const tipoEmpresa = normalizarTipoProducto(productoEmpresa.tipo_producto, 'FINAL');
+        if (tipoEmpresa === 'INSUMO') {
+          return res.status(400).json({ ok: false, error: 'No se puede facturar un insumo.' });
+        }
+
+        const nombreEmpresa = (productoEmpresa.nombre || '').trim();
+        const nombreLower = nombreEmpresa.toLowerCase();
+        let productoSucursal = null;
+        if (nombreLower) {
+          productoSucursal = await db.get(
+            `SELECT id, nombre, precio
+               FROM productos
+              WHERE negocio_id = ?
+                AND LOWER(nombre) = ?
+              LIMIT 1`,
+            [negocioId, nombreLower]
+          );
+        }
+        if (!productoSucursal) {
+          const precioBase = Number(productoEmpresa.precio_sugerido || 0) || 0;
+          const costoBase = Number(productoEmpresa.costo_base || 0) || 0;
+          const sql = `
+            INSERT INTO productos (
+              nombre, precio, precios, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
+              actualiza_costo_con_compras, costo_unitario_real, costo_unitario_real_incluye_itbis,
+              tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad,
+              stock, stock_indefinido, categoria_id, activo, negocio_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+          `;
+          const params = [
+            nombreEmpresa || `Producto ${productoEmpresa.id}`,
+            precioBase,
+            null,
+            costoBase,
+            costoBase,
+            costoBase,
+            1,
+            costoBase,
+            0,
+            tipoEmpresa,
+            0,
+            'UND',
+            1,
+            null,
+            1,
+            null,
+            negocioId,
+          ];
+          const insert = await db.run(sql, params);
+          productoSucursal = {
+            id: insert?.lastID,
+            nombre: nombreEmpresa,
+            precio: precioBase,
+          };
+        }
+
+        const precioUnitarioEmpresa = Number.isFinite(item.precio_unitario)
+          ? Number(item.precio_unitario)
+          : Number(productoEmpresa.precio_sugerido || productoSucursal?.precio || 0);
+        itemsProcesados.push({
+          producto_id: Number(productoSucursal.id),
+          empresa_producto_id: Number(productoEmpresa.id),
+          nombre: productoSucursal.nombre || nombreEmpresa,
+          cantidad: Number(item.cantidad),
+          precio_unitario: Number(precioUnitarioEmpresa) || 0,
+        });
+      }
+
+      for (const [productoId, requerido] of requeridosInventario.entries()) {
+        const productoEmpresa = productosEmpresaMap.get(Number(productoId));
+        if (!productoEmpresa) continue;
+        const stockIndefinido = Number(productoEmpresa.stock_indefinido || 0) === 1;
+        const stockActual = Number(productoEmpresa.stock || 0);
+        if (!stockIndefinido && stockActual < requerido) {
+          return res.status(400).json({
+            ok: false,
+            error: `Stock insuficiente para ${productoEmpresa.nombre || 'producto'}. Disponible: ${stockActual}`,
+          });
+        }
+      }
+
+      let subtotalBase = Number(montoEntrada) || 0;
+      if (itemsProcesados.length) {
+        subtotalBase = Number(
+          itemsProcesados.reduce(
+            (acc, item) => acc + item.cantidad * (Number(item.precio_unitario) || 0),
+            0
+          ).toFixed(2)
+        );
+      }
+      if (subtotalBase <= 0) {
+        return res.status(400).json({ ok: false, error: 'El monto total debe ser mayor a 0.' });
+      }
+
+      const impuestoPorcentaje = Number(await obtenerImpuestoConfiguradoAsync(negocioId)) || 0;
+      const itbis = impuestoPorcentaje > 0
+        ? Number((subtotalBase * (impuestoPorcentaje / 100)).toFixed(2))
+        : 0;
+      const montoTotal = Number((subtotalBase + itbis).toFixed(2));
+
+      let deudaId = null;
+      try {
+        await db.run('BEGIN');
+        const result = await db.run(
+          `INSERT INTO clientes_deudas (cliente_id, negocio_id, fecha, descripcion, monto_total, notas)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [clienteId, negocioId, fecha, descripcion, montoTotal, notas]
+        );
+
+        deudaId = result?.id;
+        if (deudaId && itemsProcesados.length) {
+          for (const item of itemsProcesados) {
+            const totalLinea = Number((item.cantidad * item.precio_unitario).toFixed(2));
+            await db.run(
+              `INSERT INTO clientes_deudas_detalle
+                (deuda_id, producto_id, nombre_producto, cantidad, precio_unitario, total_linea, negocio_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [
+                deudaId,
+                item.producto_id,
+                item.nombre,
+                item.cantidad,
+                item.precio_unitario,
+                totalLinea,
+                negocioId,
+              ]
+            );
+          }
+        }
+
+        const metodoValoracion = await obtenerMetodoValoracionEmpresa(empresaId);
+        for (const [productoId, requerido] of requeridosInventario.entries()) {
+          const productoActual = await db.get(
+            `SELECT id, nombre, stock, stock_indefinido, costo_base, costo_promedio_actual
+               FROM empresa_productos
+              WHERE id = ? AND empresa_id = ?
+              LIMIT 1`,
+            [productoId, empresaId]
+          );
+          if (!productoActual) {
+            const err = new Error('Producto empresa no encontrado.');
+            err.status = 404;
+            throw err;
+          }
+          const stockIndefinido = Number(productoActual.stock_indefinido || 0) === 1;
+          const stockAntes = stockIndefinido ? null : Number(productoActual.stock || 0);
+          if (!stockIndefinido && stockAntes < requerido) {
+            const err = new Error(
+              `Stock insuficiente para ${productoActual.nombre || 'producto'}. Disponible: ${stockAntes}`
+            );
+            err.status = 400;
+            throw err;
+          }
+
+          let costoUnitario = Number(productoActual.costo_promedio_actual || productoActual.costo_base || 0);
+          if (metodoValoracion === 'PEPS' && requerido > 0) {
+            const consumo = await consumirCapasInventarioEmpresa({
+              empresaId,
+              productoId,
+              cantidad: requerido,
+            });
+            if (consumo.cantidadConsumida > 0) {
+              const restante = Math.max(requerido - consumo.cantidadConsumida, 0);
+              const costoTotal = consumo.costoTotal + restante * costoUnitario;
+              costoUnitario = requerido > 0 ? costoTotal / requerido : costoUnitario;
+            }
+          }
+
+          let stockDespues = stockAntes;
+          if (!stockIndefinido && Number.isFinite(stockAntes)) {
+            stockDespues = Number((stockAntes - requerido).toFixed(4));
+            await db.run('UPDATE empresa_productos SET stock = ? WHERE id = ? AND empresa_id = ?', [
+              stockDespues,
+              productoId,
+              empresaId,
+            ]);
+          }
+
+          await db.run(
+            `INSERT INTO empresa_inventario_movimientos
+              (empresa_id, producto_id, tipo, cantidad, costo_unitario, motivo, referencia, usuario_id, fecha, stock_antes, stock_despues)
+             VALUES (?, ?, 'SALIDA', ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              empresaId,
+              productoId,
+              requerido,
+              Number(costoUnitario.toFixed(4)),
+              'Factura',
+              deudaId ? `FACTURA #${deudaId}` : 'FACTURA',
+              usuarioSesion?.id ?? null,
+              fecha,
+              stockAntes,
+              stockDespues,
+            ]
+          );
+        }
+
+        if (autoPago && deudaId) {
+          await db.run(
+            `INSERT INTO clientes_abonos (deuda_id, cliente_id, negocio_id, fecha, monto, metodo_pago, notas)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              deudaId,
+              clienteId,
+              negocioId,
+              fecha,
+              montoTotal,
+              'INTERNO',
+              'Registro interno de envio a sucursal',
+            ]
+          );
+          await db.run('UPDATE clientes_deudas SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [deudaId]);
+        }
+
+        await db.run('COMMIT');
+      } catch (error) {
+        await db.run('ROLLBACK').catch(() => {});
+        throw error;
+      }
+
+      res.status(201).json({ ok: true, deuda_id: deudaId });
+    } catch (error) {
+      console.error('Error al crear deuda empresa:', error?.message || error);
+      if (error?.status) {
+        res.status(error.status).json({ ok: false, error: error.message || 'No se pudo crear la deuda.' });
+        return;
+      }
+      res.status(500).json({ ok: false, error: 'No se pudo crear la deuda.' });
+    }
+  });
+});
+
+app.get('/api/empresa/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    const deudaId = Number(req.params.deudaId);
+    if (!Number.isFinite(clienteId) || clienteId <= 0 || !Number.isFinite(deudaId) || deudaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'IDs invalidos.' });
+    }
+    try {
+      const deuda = await db.get(
+        `SELECT d.id, d.negocio_id
+           FROM clientes_deudas d
+           JOIN negocios n ON n.id = d.negocio_id
+          WHERE d.id = ?
+            AND d.cliente_id = ?
+            AND n.empresa_id = ?
+          LIMIT 1`,
+        [deudaId, clienteId, empresaId]
+      );
+      if (!deuda) {
+        return res.status(404).json({ ok: false, error: 'Deuda no encontrada.' });
+      }
+
+      const abonos = await db.all(
+        `SELECT id, fecha, monto, metodo_pago, notas, created_at
+           FROM clientes_abonos
+          WHERE deuda_id = ?
+            AND negocio_id = ?
+          ORDER BY fecha DESC, id DESC`,
+        [deudaId, deuda.negocio_id]
+      );
+      res.json({ ok: true, abonos: abonos || [] });
+    } catch (error) {
+      console.error('Error al obtener abonos de deuda:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron cargar los abonos.' });
+    }
+  });
+});
+
+app.post('/api/empresa/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    const deudaId = Number(req.params.deudaId);
+    if (!Number.isFinite(clienteId) || clienteId <= 0 || !Number.isFinite(deudaId) || deudaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'IDs invalidos.' });
+    }
+
+    const fechaEntrada = normalizarCampoTexto(req.body?.fecha, null);
+    const fecha = esFechaISOValida(fechaEntrada) ? fechaEntrada : obtenerFechaLocalISO(new Date());
+    const monto = normalizarNumero(req.body?.monto, null);
+    const metodo = normalizarCampoTexto(req.body?.metodo_pago ?? req.body?.metodoPago, null);
+    const notas = normalizarCampoTexto(req.body?.notas, null);
+    if (!Number.isFinite(monto) || monto <= 0) {
+      return res.status(400).json({ ok: false, error: 'El monto debe ser mayor a 0.' });
+    }
+    if (!metodo) {
+      return res.status(400).json({ ok: false, error: 'El metodo de pago es obligatorio.' });
+    }
+
+    try {
+      const deuda = await db.get(
+        `SELECT d.id, d.negocio_id
+           FROM clientes_deudas d
+           JOIN negocios n ON n.id = d.negocio_id
+          WHERE d.id = ?
+            AND d.cliente_id = ?
+            AND n.empresa_id = ?
+          LIMIT 1`,
+        [deudaId, clienteId, empresaId]
+      );
+      if (!deuda) {
+        return res.status(404).json({ ok: false, error: 'Deuda no encontrada.' });
+      }
+
+      await db.run(
+        `INSERT INTO clientes_abonos (deuda_id, cliente_id, negocio_id, fecha, monto, metodo_pago, notas)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [deudaId, clienteId, deuda.negocio_id, fecha, monto, metodo, notas]
+      );
+      await db.run('UPDATE clientes_deudas SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [deudaId]);
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      console.error('Error al registrar abono de cliente:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo registrar el abono.' });
+    }
+  });
+});
+
+app.get('/api/empresa/clientes/:id/abonos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    if (!Number.isFinite(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cliente invalido.' });
+    }
+
+    try {
+      const cliente = await obtenerClienteEmpresa(empresaId, clienteId);
+      if (!cliente) return res.status(404).json({ ok: false, error: 'Cliente no encontrado.' });
+      const abonos = await db.all(
+        `SELECT a.id, a.fecha, a.monto, a.metodo_pago, a.notas, a.created_at,
+                a.deuda_id, d.descripcion, d.negocio_id, n.nombre AS sucursal_nombre
+           FROM clientes_abonos a
+           JOIN clientes_deudas d ON d.id = a.deuda_id
+           JOIN negocios n ON n.id = a.negocio_id
+          WHERE a.cliente_id = ?
+            AND n.empresa_id = ?
+          ORDER BY a.fecha DESC, a.id DESC`,
+        [clienteId, empresaId]
+      );
+      res.json({ ok: true, abonos: abonos || [] });
+    } catch (error) {
+      console.error('Error al listar abonos cliente:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron cargar los abonos.' });
+    }
+  });
+});
+
+app.get('/api/empresa/clientes/:id/estado-cuenta', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const clienteId = Number(req.params.id);
+    if (!Number.isFinite(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cliente invalido.' });
+    }
+    const desde = esFechaISOValida(req.query?.from ?? req.query?.desde) ? req.query?.from ?? req.query?.desde : null;
+    const hasta = esFechaISOValida(req.query?.to ?? req.query?.hasta) ? req.query?.to ?? req.query?.hasta : null;
+
+    try {
+      const cliente = await obtenerClienteEmpresa(empresaId, clienteId);
+      if (!cliente) return res.status(404).json({ ok: false, error: 'Cliente no encontrado.' });
+
+      const filtros = ['d.cliente_id = ?', 'n.empresa_id = ?'];
+      const params = [clienteId, empresaId];
+      if (desde) {
+        filtros.push('DATE(d.fecha) >= ?');
+        params.push(desde);
+      }
+      if (hasta) {
+        filtros.push('DATE(d.fecha) <= ?');
+        params.push(hasta);
+      }
+
+      const whereClause = `WHERE ${filtros.join(' AND ')}`;
+      const deudas = await db.all(
+        `SELECT d.id, d.fecha, d.descripcion, d.monto_total, d.negocio_id, n.nombre AS sucursal_nombre,
+                COALESCE(SUM(a.monto), 0) AS total_abonos
+           FROM clientes_deudas d
+           JOIN negocios n ON n.id = d.negocio_id
+           LEFT JOIN clientes_abonos a
+             ON a.deuda_id = d.id
+            AND a.negocio_id = d.negocio_id
+          ${whereClause}
+          GROUP BY d.id
+          ORDER BY d.fecha ASC`,
+        params
+      );
+
+      const resumen = deudas.reduce(
+        (acc, row) => {
+          const monto = Number(row.monto_total) || 0;
+          const pagado = Number(row.total_abonos) || 0;
+          acc.total += monto;
+          acc.pagado += pagado;
+          return acc;
+        },
+        { total: 0, pagado: 0 }
+      );
+      resumen.saldo = Math.max(resumen.total - resumen.pagado, 0);
+
+      res.json({ ok: true, cliente, desde, hasta, deudas: deudas || [], resumen });
+    } catch (error) {
+      console.error('Error al generar estado de cuenta:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo generar el estado de cuenta.' });
+    }
+  });
+});
+
+app.get('/api/empresa/clientes/deudas/:deudaId/factura', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
+    if (!empresaId) {
+      return res.status(400).json({ ok: false, error: 'Empresa no asignada.' });
+    }
+    const deudaId = Number(req.params.deudaId);
+    if (!Number.isFinite(deudaId) || deudaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Factura invalida.' });
+    }
+
+    try {
+      const deuda = await db.get(
+        `SELECT d.id, d.fecha, d.descripcion, d.monto_total, d.notas, d.negocio_id,
+                c.nombre AS cliente_nombre, c.documento AS cliente_documento, c.telefono AS cliente_telefono,
+                c.direccion AS cliente_direccion, c.email AS cliente_email,
+                n.nombre AS sucursal_nombre, n.rnc AS sucursal_rnc, n.direccion AS sucursal_direccion, n.telefono AS sucursal_telefono
+           FROM clientes_deudas d
+           JOIN clientes c ON c.id = d.cliente_id
+           JOIN negocios n ON n.id = d.negocio_id
+          WHERE d.id = ?
+            AND n.empresa_id = ?
+          LIMIT 1`,
+        [deudaId, empresaId]
+      );
+      if (!deuda) {
+        return res.status(404).json({ ok: false, error: 'Factura no encontrada.' });
+      }
+
+      const config = await obtenerConfiguracionFacturacion(deuda.negocio_id);
+      const impuestoPorcentaje = Number(await obtenerImpuestoConfiguradoAsync(deuda.negocio_id)) || 0;
+      const items = await db.all(
+        `SELECT producto_id, nombre_producto, cantidad, precio_unitario, total_linea
+           FROM clientes_deudas_detalle
+          WHERE deuda_id = ?
+          ORDER BY id ASC`,
+        [deudaId]
+      );
+
+      let itemsFinal = items || [];
+      if (!itemsFinal.length) {
+        itemsFinal = [
+          {
+            producto_id: 0,
+            nombre_producto: deuda.descripcion || 'Servicio',
+            cantidad: 1,
+            precio_unitario: Number(deuda.monto_total) || 0,
+            total_linea: Number(deuda.monto_total) || 0,
+          },
+        ];
+      }
+
+      const subtotalItems = Number(
+        itemsFinal.reduce((acc, item) => acc + (Number(item.total_linea) || 0), 0).toFixed(2)
+      );
+      let total = Number(deuda.monto_total) || subtotalItems;
+      let itbis = 0;
+      if (impuestoPorcentaje > 0) {
+        itbis = Number((total - subtotalItems).toFixed(2));
+        if (itbis <= 0) {
+          itbis = Number((subtotalItems * (impuestoPorcentaje / 100)).toFixed(2));
+          total = Number((subtotalItems + itbis).toFixed(2));
+        }
+      }
+
+      res.json({
+        ok: true,
+        factura: {
+          numero: deuda.id,
+          fecha: deuda.fecha,
+          condicion: 'CREDITO',
+          emisor: {
+            nombre: deuda.sucursal_nombre,
+            rnc: config?.rnc || deuda.sucursal_rnc || '',
+            direccion: config?.direccion || deuda.sucursal_direccion || '',
+            telefonos: config?.telefonos || (deuda.sucursal_telefono ? [deuda.sucursal_telefono] : []),
+          },
+          cliente: {
+            nombre: deuda.cliente_nombre,
+            documento: deuda.cliente_documento || '',
+            direccion: deuda.cliente_direccion || '',
+            telefono: deuda.cliente_telefono || '',
+            email: deuda.cliente_email || '',
+          },
+          items: itemsFinal,
+          subtotal: subtotalItems,
+          itbis,
+          itbis_porcentaje: impuestoPorcentaje,
+          total,
+          notas: deuda.notas || '',
+        },
+      });
+    } catch (error) {
+      console.error('Error al generar factura de cliente:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo generar la factura.' });
     }
   });
 });
@@ -12005,7 +17468,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
 
       const tipoGastoNormalizadoSql = `
         CASE
-          WHEN UPPER(TRIM(COALESCE(tipo_gasto, ''))) IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA') THEN UPPER(TRIM(tipo_gasto))
+          WHEN UPPER(TRIM(COALESCE(tipo_gasto, ''))) IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA', 'ACTIVO_FIJO') THEN UPPER(TRIM(tipo_gasto))
           WHEN UPPER(TRIM(COALESCE(categoria, ''))) = 'COMPRAS INVENTARIO'
             OR COALESCE(referencia, '') LIKE 'INV-%' THEN 'INVENTARIO'
           WHEN UPPER(TRIM(COALESCE(categoria, ''))) = 'SALIDA_CAJA'
@@ -12021,6 +17484,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
+            AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
         `,
         paramsBase
       );
@@ -12033,6 +17497,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
+            AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
           GROUP BY fecha
           ORDER BY fecha ASC
         `,
@@ -12045,6 +17510,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
+            AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
             AND categoria IS NOT NULL
             AND categoria <> ''
           GROUP BY categoria
@@ -12060,6 +17526,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
+            AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
           GROUP BY es_recurrente
         `,
         paramsBase
@@ -12405,7 +17872,7 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
 
       const tipoGastoNormalizadoSql = `
         CASE
-          WHEN UPPER(TRIM(COALESCE(tipo_gasto, ''))) IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA') THEN UPPER(TRIM(tipo_gasto))
+          WHEN UPPER(TRIM(COALESCE(tipo_gasto, ''))) IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA', 'ACTIVO_FIJO') THEN UPPER(TRIM(tipo_gasto))
           WHEN UPPER(TRIM(COALESCE(categoria, ''))) = 'COMPRAS INVENTARIO'
             OR COALESCE(referencia, '') LIKE 'INV-%' THEN 'INVENTARIO'
           WHEN UPPER(TRIM(COALESCE(categoria, ''))) = 'SALIDA_CAJA'
@@ -12427,7 +17894,7 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
               CASE
                 WHEN tipo_gasto IS NOT NULL
                   AND TRIM(tipo_gasto) <> ''
-                  AND UPPER(TRIM(tipo_gasto)) NOT IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA')
+                  AND UPPER(TRIM(tipo_gasto)) NOT IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA', 'ACTIVO_FIJO')
                 THEN 1
                 ELSE 0
               END
@@ -12436,7 +17903,7 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
               CASE
                 WHEN tipo_gasto IS NOT NULL
                   AND TRIM(tipo_gasto) <> ''
-                  AND UPPER(TRIM(tipo_gasto)) NOT IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA')
+                  AND UPPER(TRIM(tipo_gasto)) NOT IN ('OPERATIVO', 'INVENTARIO', 'RETIRO_CAJA', 'ACTIVO_FIJO')
                 THEN monto
                 ELSE 0
               END
@@ -12444,6 +17911,7 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
+            AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
         `,
         paramsBase
       );

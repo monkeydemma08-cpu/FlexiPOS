@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>KANM - Panel de administración</title>
+  <title>KANM - Panel de supervisión</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -74,7 +74,7 @@
     }
   </style>
 </head>
-<body data-role="admin,caja">
+<body data-role="supervisor">
   <header class="kanm-header">
     <div class="kanm-header-left">
       <div class="kanm-header-logo-container">
@@ -87,7 +87,7 @@
           class="kanm-header-title"
           data-negocio-titulo
         ></div>
-        <div id="kanm-header-negocio-subtitulo" class="kanm-header-subtitle">Panel de administración</div>
+        <div id="kanm-header-negocio-subtitulo" class="kanm-header-subtitle">Panel de supervisión</div>
       </div>
     </div>
 
@@ -111,7 +111,7 @@
       <button type="button" class="kanm-tab" data-admin-tab="usuarios" data-modulo="admin">Usuarios</button>
       <button type="button" class="kanm-tab" data-admin-tab="categorias" data-modulo="admin">Categorías</button>
       <button type="button" class="kanm-tab" data-admin-tab="clientes" data-modulo="admin">Clientes</button>
-      <button type="button" class="kanm-tab" data-admin-tab="cotizaciones" data-modulo="admin" data-tab-url="/admin/cotizaciones">
+      <button type="button" class="kanm-tab" data-admin-tab="cotizaciones" data-modulo="admin" data-tab-url="/supervisor/cotizaciones">
         Cotizaciones
       </button>
       <button type="button" class="kanm-tab" data-admin-tab="compras" data-modulo="admin">Compras &amp; 606</button>
@@ -124,136 +124,331 @@
       <button type="button" class="kanm-tab super-admin-only" data-admin-tab="negocios" data-modulo="admin">Negocios</button>
     </div>
 
-    <!-- Inventario -->
+    <!-- Productos -->
     <section class="admin-panel" data-admin-section="productos" id="admin-section-productos">
-      <section class="kanm-card empresa-inventario-header">
-        <div class="empresa-inventario-header-row">
-          <div>
-            <h2>Inventario</h2>
-            <p class="kanm-subtitle">Stock y costos en tiempo real para tu negocio.</p>
-          </div>
-          <div class="empresa-inventario-actions">
-            <div class="kanm-input-group kanm-input-group--inline empresa-inventario-metodo">
-              <label for="admin-inventario-metodo">Valoracion</label>
-              <select id="admin-inventario-metodo">
-                <option value="PROMEDIO">Promedio</option>
-              </select>
+      <div class="kanm-card-header">
+        <h2>Inventario</h2>
+        <p class="kanm-subtitle">Consulta el inventario disponible para la venta.</p>
+      </div>
+      <div id="supervisor-inventario" class="supervisor-inventario-wrapper">
+        <section class="kanm-card empresa-inventario-header">
+          <div class="empresa-inventario-header-row">
+            <div>
+              <h2>Inventario</h2>
+              <p class="kanm-subtitle">Vista de solo lectura para supervisión.</p>
             </div>
-            <button type="button" class="kanm-button ghost" id="admin-inventario-movimiento-nuevo">
-              Registrar movimiento
-            </button>
-            <button type="button" class="kanm-button primary" id="admin-inventario-nuevo">Nuevo item</button>
           </div>
-        </div>
-        <div class="empresa-inventario-kpis">
-          <div class="empresa-mini-stat">
-            <span>Total items</span>
-            <strong id="admin-inventario-total">0</strong>
+          <div class="empresa-inventario-kpis">
+            <div class="empresa-kpi">
+              <span>Items en inventario</span>
+              <strong id="supervisor-inventario-total">0</strong>
+            </div>
+            <div class="empresa-kpi">
+              <span>Stock critico</span>
+              <strong id="supervisor-inventario-critico">0</strong>
+            </div>
+            <div class="empresa-kpi">
+              <span>Stock bajo</span>
+              <strong id="supervisor-inventario-bajo">0</strong>
+            </div>
+            <div class="empresa-kpi">
+              <span>Valor inventario</span>
+              <strong id="supervisor-inventario-valor">RD$0.00</strong>
+            </div>
           </div>
-          <div class="empresa-mini-stat">
-            <span>Stock critico</span>
-            <strong id="admin-inventario-critico">0</strong>
-          </div>
-          <div class="empresa-mini-stat">
-            <span>Stock bajo</span>
-            <strong id="admin-inventario-bajo">0</strong>
-          </div>
-          <div class="empresa-mini-stat">
-            <span>Valor inventario</span>
-            <strong id="admin-inventario-valor">RD$0.00</strong>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <section class="kanm-card empresa-inventario-layout">
-        <div class="empresa-inventario-filtros">
-          <div class="empresa-inventario-filtros-scroll">
+        <section class="kanm-card empresa-inventario-layout">
+          <div class="empresa-inventario-filtros">
+            <div class="empresa-inventario-filtros-scroll">
+              <div class="kanm-input-group">
+                <label for="supervisor-inventario-buscar">Buscar</label>
+                <input type="search" id="supervisor-inventario-buscar" placeholder="Nombre o categoria" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="supervisor-inventario-categoria">Categoria</label>
+                <input type="text" id="supervisor-inventario-categoria" placeholder="Familia, linea, categoria" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="supervisor-inventario-tipo">Tipo</label>
+                <select id="supervisor-inventario-tipo">
+                  <option value="">Todos</option>
+                  <option value="vendible">Vendible</option>
+                  <option value="insumo">Insumo</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="supervisor-inventario-estado">Estado</label>
+                <select id="supervisor-inventario-estado">
+                  <option value="">Todos</option>
+                  <option value="activo">Activo</option>
+                  <option value="inactivo">Inactivo</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="supervisor-inventario-stock">Stock</label>
+                <select id="supervisor-inventario-stock">
+                  <option value="">Todos</option>
+                  <option value="indefinido">Indefinido</option>
+                  <option value="critico">Critico</option>
+                  <option value="bajo">Bajo</option>
+                  <option value="disponible">Disponible</option>
+                </select>
+              </div>
+            </div>
+            <div class="empresa-inventario-filtros-actions">
+              <button type="button" class="kanm-button" id="supervisor-inventario-filtrar">Filtrar</button>
+              <button type="button" class="kanm-button ghost" id="supervisor-inventario-limpiar">Limpiar</button>
+            </div>
+          </div>
+          <div class="empresa-inventario-lista">
+            <div class="empresa-inventario-lista-header">
+              <div>
+                <h3>Inventario</h3>
+                <p class="kanm-subtitle">Stock, costos y precios en tiempo real.</p>
+              </div>
+            </div>
+            <div class="kanm-table-wrapper empresa-inventario-table-scroll">
+              <table class="kanm-table">
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Categoria</th>
+                    <th>Stock</th>
+                    <th>Minimo</th>
+                    <th>Costo</th>
+                    <th>Precio</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody id="supervisor-inventario-body">
+                  <tr>
+                    <td colspan="7">Cargando...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="supervisor-inventario-mensaje" class="kanm-message"></div>
+          </div>
+        </section>
+      </div>
+      <div class="admin-products-layout hidden">
+        <section class="kanm-card admin-card productos-card">
+          <header class="kanm-card-header productos-card-header">
+            <div class="kanm-card-header-row">
+              <div class="kanm-card-header-title">
+                <h3>Productos</h3>
+                <p class="kanm-subtitle">Listado con precios, estado y stock.</p>
+              </div>
+              <button type="button" class="kanm-button ghost" id="productos-vista-completa">Vista completa</button>
+            </div>
+          </header>
+          <div class="productos-controls">
             <div class="kanm-input-group">
-              <label for="admin-inventario-buscar">Buscar</label>
-              <input type="search" id="admin-inventario-buscar" placeholder="Nombre o categoria" />
+              <input type="text" id="productos-buscar" class="admin-product-search" placeholder="Buscar producto..." />
             </div>
             <div class="kanm-input-group">
-              <label for="productos-filtro-categoria">Categoria</label>
               <select id="productos-filtro-categoria" class="admin-product-filter">
                 <option value="">Todas las categorías</option>
               </select>
             </div>
-            <div class="kanm-input-group">
-              <label for="admin-inventario-tipo">Tipo</label>
-              <select id="admin-inventario-tipo">
-                <option value="">Todos</option>
-                <option value="FINAL">Producto final</option>
-                <option value="INSUMO">Insumo</option>
-              </select>
-            </div>
-            <div class="kanm-input-group">
-              <label for="admin-inventario-estado">Estado</label>
-              <select id="admin-inventario-estado">
-                <option value="">Todos</option>
-                <option value="ACTIVO">Activo</option>
-                <option value="INACTIVO">Inactivo</option>
-              </select>
-            </div>
-            <div class="kanm-input-group">
-              <label for="admin-inventario-stock">Stock</label>
-              <select id="admin-inventario-stock">
-                <option value="">Todos</option>
-                <option value="critico">Critico</option>
-                <option value="bajo">Bajo</option>
-                <option value="ok">Saludable</option>
-                <option value="sin_stock">Sin stock</option>
-              </select>
-            </div>
           </div>
-          <div class="empresa-inventario-filtros-actions">
-            <button type="button" class="kanm-button" id="admin-inventario-filtrar">Filtrar</button>
-            <button type="button" class="kanm-button ghost" id="admin-inventario-limpiar">Limpiar</button>
-          </div>
-        </div>
-        <div class="empresa-inventario-lista">
-          <div class="empresa-inventario-lista-header">
-            <div>
-              <h3>Catalogo del negocio</h3>
-              <p class="kanm-subtitle">Gestiona precios y estado en lote.</p>
+          <div id="productos-lista" class="productos-lista admin-product-list"></div>
+        </section>
+
+        <section class="kanm-card admin-card producto-form-card">
+          <header class="kanm-card-header">
+            <h3>Formulario de producto</h3>
+            <p class="kanm-subtitle">Crea nuevos productos o actualiza los existentes.</p>
+          </header>
+          <form id="prod-form" class="kanm-form" novalidate>
+            <input type="hidden" id="prod-id" />
+
+            <div class="product-form-sections">
+              <section class="product-form-section">
+                <div class="product-form-section-header">
+                  <h4>Datos basicos</h4>
+                  <p class="kanm-subtitle">Identifica el producto y su categoria.</p>
+                </div>
+                <div class="product-form-grid">
+                  <div class="kanm-input-group">
+                    <label for="prod-nombre">Nombre</label>
+                    <input type="text" id="prod-nombre" placeholder="Ej. Cheesecake de fresa" />
+                  </div>
+                  <div class="kanm-input-group">
+                    <label for="prod-categoria">Categor&iacute;a</label>
+                    <select id="prod-categoria">
+                      <option value="">Selecciona</option>
+                    </select>
+                  </div>
+                  <div class="kanm-input-group producto-activo-group product-form-span">
+                    <label for="prod-activo">Activo</label>
+                    <input type="checkbox" id="prod-activo" checked />
+                  </div>
+                </div>
+              </section>
+
+              <section class="product-form-section">
+                <div class="product-form-section-header">
+                  <h4>Precios</h4>
+                  <p class="kanm-subtitle">Define el precio principal y precios alternativos.</p>
+                </div>
+                <div class="product-form-grid">
+                  <div class="kanm-input-group">
+                    <label for="prod-precio">Precio</label>
+                    <input type="text" id="prod-precio" inputmode="decimal" data-money placeholder="0.00" />
+                  </div>
+                  <div class="kanm-input-group producto-precios-group">
+                    <label>Precios adicionales</label>
+                    <div id="prod-precios-lista" class="producto-precios-lista"></div>
+                    <button
+                      type="button"
+                      id="prod-precio-agregar"
+                      class="kanm-button ghost kanm-button--sm"
+                    >
+                      Agregar precio
+                    </button>
+                    <span class="kanm-input-help">Agrega etiquetas opcionales para cada precio.</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="product-form-section">
+                <div class="product-form-section-header">
+                  <h4>Costos</h4>
+                  <p class="kanm-subtitle">Controla el costo real y los costos de compra.</p>
+                </div>
+                <div class="product-form-grid">
+                  <div class="kanm-input-group modo-reventa-only">
+                    <label for="prod-costo-real">Costo unitario real</label>
+                    <input type="text" id="prod-costo-real" inputmode="decimal" data-money placeholder="0.00" />
+                    <span class="kanm-input-help">
+                      Costo unitario real = lo que cuesta comprar 1 unidad del producto.
+                    </span>
+                  </div>
+                  <div class="kanm-input-group modo-preparacion-only">
+                    <label for="prod-costo-base">Costo base (sin ITBIS)</label>
+                    <input type="text" id="prod-costo-base" inputmode="decimal" data-money placeholder="0.00" />
+                  </div>
+                  <div class="kanm-input-group modo-preparacion-only">
+                    <label for="prod-costo-promedio">Costo promedio actual</label>
+                    <input
+                      type="text"
+                      id="prod-costo-promedio"
+                      inputmode="decimal"
+                      data-money
+                      placeholder="0.00"
+                      readonly
+                    />
+                  </div>
+                  <div class="kanm-input-group modo-preparacion-only">
+                    <label for="prod-ultimo-costo">Ultimo costo (sin ITBIS)</label>
+                    <input
+                      type="text"
+                      id="prod-ultimo-costo"
+                      inputmode="decimal"
+                      data-money
+                      placeholder="0.00"
+                      readonly
+                    />
+                  </div>
+                  <div class="kanm-input-group modo-preparacion-only product-form-span">
+                    <label class="kanm-input-toggle" for="prod-actualiza-costo">
+                      <span>Actualizar costo con compras</span>
+                      <input type="checkbox" id="prod-actualiza-costo" checked />
+                    </label>
+                    <p class="kanm-input-help">Si esta activo, las compras ajustan el costo promedio.</p>
+                  </div>
+                </div>
+              </section>
+
+              <section class="product-form-section">
+                <div class="product-form-section-header">
+                  <h4>Inventario y unidades</h4>
+                  <p class="kanm-subtitle">Stock y medidas para controlar el inventario.</p>
+                </div>
+                <div class="product-form-grid">
+                  <div class="kanm-input-group">
+                    <label for="prod-stock">Stock</label>
+                    <input type="number" id="prod-stock" min="0" placeholder="Cantidad en inventario" />
+                  </div>
+                  <div class="kanm-input-group">
+                    <label class="kanm-input-toggle" for="prod-stock-indefinido">
+                      <span>Stock indefinido</span>
+                      <input type="checkbox" id="prod-stock-indefinido" />
+                    </label>
+                    <p class="kanm-input-help">Si esta activo, el sistema no controla cantidad.</p>
+                  </div>
+                  <div class="kanm-input-group modo-preparacion-only">
+                    <label for="prod-unidad-base">Unidad base</label>
+                    <select id="prod-unidad-base">
+                      <option value="UND">Unidades</option>
+                      <option value="ML">Mililitros (ML)</option>
+                      <option value="LT">Litros (LT)</option>
+                      <option value="GR">Gramos (GR)</option>
+                      <option value="KG">Kilogramos (KG)</option>
+                      <option value="OZ">Onzas (OZ)</option>
+                      <option value="LB">Libras (LB)</option>
+                    </select>
+                  </div>
+                  <div class="kanm-input-group modo-preparacion-only">
+                    <label for="prod-contenido-unidad">Contenido por unidad</label>
+                    <input
+                      type="number"
+                      id="prod-contenido-unidad"
+                      step="0.0001"
+                      min="0"
+                      placeholder="1.0000"
+                    />
+                    <span class="kanm-input-help">Ej: 750 ML por botella.</span>
+                  </div>
+                  <div class="kanm-input-group modo-preparacion-only product-form-span">
+                    <label class="kanm-input-toggle" for="prod-es-insumo">
+                      <span>Es insumo</span>
+                      <input type="checkbox" id="prod-es-insumo" />
+                    </label>
+                    <p class="kanm-input-help">Activalo si este producto se consume en recetas.</p>
+                  </div>
+                  <div class="kanm-input-group modo-preparacion-only insumo-vendible-group product-form-span">
+                    <label class="kanm-input-toggle" for="prod-insumo-vendible">
+                      <span>Insumo vendible</span>
+                      <input type="checkbox" id="prod-insumo-vendible" />
+                    </label>
+                    <p class="kanm-input-help">Permite vender este insumo como producto final.</p>
+                  </div>
+                </div>
+              </section>
             </div>
-            <div class="empresa-inventario-bulk">
-              <label class="kanm-checkbox" for="admin-inventario-select-all">
-                <input type="checkbox" id="admin-inventario-select-all" />
-                Seleccionar todo
-              </label>
-              <button type="button" class="kanm-button ghost sm" id="admin-inventario-bulk-activar">Activar</button>
-              <button type="button" class="kanm-button ghost sm" id="admin-inventario-bulk-desactivar">
-                Desactivar
+
+            <div class="producto-receta-section modo-preparacion-only" id="prod-receta-section">
+              <div class="kanm-card-header">
+                <h4>Receta del producto</h4>
+                <p class="kanm-subtitle">Define insumos y cantidades en unidad base.</p>
+              </div>
+              <div class="receta-detalles" id="prod-receta-detalles"></div>
+              <div class="receta-actions">
+                <button type="button" class="kanm-button ghost kanm-button--sm" id="prod-receta-agregar">
+                  Agregar insumo
+                </button>
+              </div>
+              <div class="admin-form-actions">
+                <button type="button" class="kanm-button secondary" id="prod-receta-guardar">
+                  Guardar receta
+                </button>
+              </div>
+              <div id="prod-receta-mensaje" class="kanm-message"></div>
+            </div>
+
+            <div class="admin-form-actions producto-form-actions">
+              <button type="button" class="kanm-button secondary" id="prod-cancelar" hidden>
+                Cancelar edicion
               </button>
-              <button type="button" class="kanm-button ghost sm" id="admin-inventario-bulk-precio">
-                Actualizar precio
-              </button>
+              <button type="submit" class="kanm-button" id="prod-guardar">Guardar producto</button>
             </div>
-          </div>
-          <div class="kanm-table-wrapper empresa-inventario-table-scroll">
-            <table class="kanm-table">
-              <thead>
-                <tr>
-                  <th></th>
-                  <th>Producto</th>
-                  <th>Categoria</th>
-                  <th>Stock</th>
-                  <th>Costo</th>
-                  <th>Precio</th>
-                  <th>Estado</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody id="admin-inventario-body">
-                <tr>
-                  <td colspan="8">Cargando...</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div id="admin-inventario-mensaje" class="kanm-message"></div>
-        </div>
-      </section>
+            <div id="admin-mensaje" class="kanm-message"></div>
+          </form>
+        </section>
+      </div>
     </section>
 
     <!-- Insumos -->
@@ -2223,211 +2418,6 @@
     </div>
   </div>
 
-  <div class="kanm-modal-overlay" id="admin-inventario-modal" hidden>
-    <div
-      class="kanm-modal kanm-modal--wide empresa-inventario-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="admin-inventario-modal-titulo"
-    >
-      <h3 id="admin-inventario-modal-titulo">Nuevo item de inventario</h3>
-      <p class="kanm-subtitle">Gestiona productos, stock y costos del negocio.</p>
-      <section class="kanm-card admin-card producto-form-card">
-        <header class="kanm-card-header">
-          <h3>Formulario de producto</h3>
-          <p class="kanm-subtitle">Crea nuevos productos o actualiza los existentes.</p>
-        </header>
-        <form id="prod-form" class="kanm-form" novalidate>
-          <input type="hidden" id="prod-id" />
-
-          <div class="product-form-sections">
-            <section class="product-form-section">
-              <div class="product-form-section-header">
-                <h4>Datos basicos</h4>
-                <p class="kanm-subtitle">Identifica el producto y su categoria.</p>
-              </div>
-              <div class="product-form-grid">
-                <div class="kanm-input-group">
-                  <label for="prod-nombre">Nombre</label>
-                  <input type="text" id="prod-nombre" placeholder="Ej. Cheesecake de fresa" />
-                </div>
-                <div class="kanm-input-group">
-                  <label for="prod-categoria">Categor&iacute;a</label>
-                  <select id="prod-categoria">
-                    <option value="">Selecciona</option>
-                  </select>
-                </div>
-                <div class="kanm-input-group producto-activo-group product-form-span">
-                  <label for="prod-activo">Activo</label>
-                  <input type="checkbox" id="prod-activo" checked />
-                </div>
-              </div>
-            </section>
-
-            <section class="product-form-section">
-              <div class="product-form-section-header">
-                <h4>Precios</h4>
-                <p class="kanm-subtitle">Define el precio principal y precios alternativos.</p>
-              </div>
-              <div class="product-form-grid">
-                <div class="kanm-input-group">
-                  <label for="prod-precio">Precio</label>
-                  <input type="text" id="prod-precio" inputmode="decimal" data-money placeholder="0.00" />
-                </div>
-                <div class="kanm-input-group producto-precios-group">
-                  <label>Precios adicionales</label>
-                  <div id="prod-precios-lista" class="producto-precios-lista"></div>
-                  <button
-                    type="button"
-                    id="prod-precio-agregar"
-                    class="kanm-button ghost kanm-button--sm"
-                  >
-                    Agregar precio
-                  </button>
-                  <span class="kanm-input-help">Agrega etiquetas opcionales para cada precio.</span>
-                </div>
-              </div>
-            </section>
-
-            <section class="product-form-section">
-              <div class="product-form-section-header">
-                <h4>Costos</h4>
-                <p class="kanm-subtitle">Controla el costo real y los costos de compra.</p>
-              </div>
-              <div class="product-form-grid">
-                <div class="kanm-input-group modo-reventa-only">
-                  <label for="prod-costo-real">Costo unitario real</label>
-                  <input type="text" id="prod-costo-real" inputmode="decimal" data-money placeholder="0.00" />
-                  <span class="kanm-input-help">
-                    Costo unitario real = lo que cuesta comprar 1 unidad del producto.
-                  </span>
-                </div>
-                <div class="kanm-input-group modo-preparacion-only">
-                  <label for="prod-costo-base">Costo base (sin ITBIS)</label>
-                  <input type="text" id="prod-costo-base" inputmode="decimal" data-money placeholder="0.00" />
-                </div>
-                <div class="kanm-input-group modo-preparacion-only">
-                  <label for="prod-costo-promedio">Costo promedio actual</label>
-                  <input
-                    type="text"
-                    id="prod-costo-promedio"
-                    inputmode="decimal"
-                    data-money
-                    placeholder="0.00"
-                    readonly
-                  />
-                </div>
-                <div class="kanm-input-group modo-preparacion-only">
-                  <label for="prod-ultimo-costo">Ultimo costo (sin ITBIS)</label>
-                  <input
-                    type="text"
-                    id="prod-ultimo-costo"
-                    inputmode="decimal"
-                    data-money
-                    placeholder="0.00"
-                    readonly
-                  />
-                </div>
-                <div class="kanm-input-group modo-preparacion-only product-form-span">
-                  <label class="kanm-input-toggle" for="prod-actualiza-costo">
-                    <span>Actualizar costo con compras</span>
-                    <input type="checkbox" id="prod-actualiza-costo" checked />
-                  </label>
-                  <p class="kanm-input-help">Si esta activo, las compras ajustan el costo promedio.</p>
-                </div>
-              </div>
-            </section>
-
-            <section class="product-form-section">
-              <div class="product-form-section-header">
-                <h4>Inventario y unidades</h4>
-                <p class="kanm-subtitle">Stock y medidas para controlar el inventario.</p>
-              </div>
-              <div class="product-form-grid">
-                <div class="kanm-input-group">
-                  <label for="prod-stock">Stock</label>
-                  <input type="number" id="prod-stock" min="0" placeholder="Cantidad en inventario" />
-                </div>
-                <div class="kanm-input-group">
-                  <label class="kanm-input-toggle" for="prod-stock-indefinido">
-                    <span>Stock indefinido</span>
-                    <input type="checkbox" id="prod-stock-indefinido" />
-                  </label>
-                  <p class="kanm-input-help">Si esta activo, el sistema no controla cantidad.</p>
-                </div>
-                <div class="kanm-input-group modo-preparacion-only">
-                  <label for="prod-unidad-base">Unidad base</label>
-                  <select id="prod-unidad-base">
-                    <option value="UND">Unidades</option>
-                    <option value="ML">Mililitros (ML)</option>
-                    <option value="LT">Litros (LT)</option>
-                    <option value="GR">Gramos (GR)</option>
-                    <option value="KG">Kilogramos (KG)</option>
-                    <option value="OZ">Onzas (OZ)</option>
-                    <option value="LB">Libras (LB)</option>
-                  </select>
-                </div>
-                <div class="kanm-input-group modo-preparacion-only">
-                  <label for="prod-contenido-unidad">Contenido por unidad</label>
-                  <input
-                    type="number"
-                    id="prod-contenido-unidad"
-                    step="0.0001"
-                    min="0"
-                    placeholder="1.0000"
-                  />
-                  <span class="kanm-input-help">Ej: 750 ML por botella.</span>
-                </div>
-                <div class="kanm-input-group modo-preparacion-only product-form-span">
-                  <label class="kanm-input-toggle" for="prod-es-insumo">
-                    <span>Es insumo</span>
-                    <input type="checkbox" id="prod-es-insumo" />
-                  </label>
-                  <p class="kanm-input-help">Activalo si este producto se consume en recetas.</p>
-                </div>
-                <div class="kanm-input-group modo-preparacion-only insumo-vendible-group product-form-span">
-                  <label class="kanm-input-toggle" for="prod-insumo-vendible">
-                    <span>Insumo vendible</span>
-                    <input type="checkbox" id="prod-insumo-vendible" />
-                  </label>
-                  <p class="kanm-input-help">Permite vender este insumo como producto final.</p>
-                </div>
-              </div>
-            </section>
-          </div>
-
-          <div class="producto-receta-section modo-preparacion-only" id="prod-receta-section">
-            <div class="kanm-card-header">
-              <h4>Receta del producto</h4>
-              <p class="kanm-subtitle">Define insumos y cantidades en unidad base.</p>
-            </div>
-            <div class="receta-detalles" id="prod-receta-detalles"></div>
-            <div class="receta-actions">
-              <button type="button" class="kanm-button ghost kanm-button--sm" id="prod-receta-agregar">
-                Agregar insumo
-              </button>
-            </div>
-            <div class="admin-form-actions">
-              <button type="button" class="kanm-button secondary" id="prod-receta-guardar">
-                Guardar receta
-              </button>
-            </div>
-            <div id="prod-receta-mensaje" class="kanm-message"></div>
-          </div>
-
-          <div class="admin-form-actions producto-form-actions">
-            <button type="button" class="kanm-button ghost" id="admin-inventario-cancelar">Cerrar</button>
-            <button type="button" class="kanm-button secondary" id="prod-cancelar" hidden>
-              Cancelar edicion
-            </button>
-            <button type="submit" class="kanm-button" id="prod-guardar">Guardar producto</button>
-          </div>
-          <div id="admin-mensaje" class="kanm-message"></div>
-        </form>
-      </section>
-    </div>
-  </div>
-
 
   <!-- Modal Vista completa Productos -->
   <div class="kanm-modal oculto" id="kanm-productos-vista-modal">
@@ -2862,6 +2852,7 @@
   <script src="/js/password-toggle.js"></script>
   <script src="/js/auth.js"></script>
   <script src="/js/admin.js"></script>
+  <script src="/js/supervisor.js"></script>
   <script src="/js/admin-facturacion-posium.js"></script>
   <script src="/js/admin-cotizaciones.js"></script>
   <script src="/js/admin-clientes.js"></script>

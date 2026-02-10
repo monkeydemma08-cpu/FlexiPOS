@@ -171,6 +171,292 @@ async function ensureDefaultEmpresa() {
   }
 }
 
+async function ensureTableEmpresaProductos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS empresa_productos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      empresa_id INT NOT NULL,
+      nombre VARCHAR(255) NOT NULL,
+      categoria VARCHAR(120) NULL,
+      tipo_producto ENUM('FINAL', 'INSUMO') NOT NULL DEFAULT 'FINAL',
+      costo_base DECIMAL(12,2) NOT NULL DEFAULT 0,
+      precio_sugerido DECIMAL(12,2) NOT NULL DEFAULT 0,
+      activo TINYINT(1) NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_empresa_productos_empresa (empresa_id),
+      CONSTRAINT fk_empresa_productos_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableEmpresaInventarioMovimientos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS empresa_inventario_movimientos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      empresa_id INT NOT NULL,
+      producto_id INT NOT NULL,
+      tipo ENUM('ENTRADA', 'SALIDA', 'AJUSTE') NOT NULL,
+      cantidad DECIMAL(12,4) NOT NULL DEFAULT 0,
+      costo_unitario DECIMAL(12,4) NOT NULL DEFAULT 0,
+      motivo VARCHAR(255) NULL,
+      referencia VARCHAR(120) NULL,
+      usuario_id INT NULL,
+      fecha DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      stock_antes DECIMAL(12,4) NULL,
+      stock_despues DECIMAL(12,4) NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_emp_inv_mov_empresa_fecha (empresa_id, fecha),
+      KEY idx_emp_inv_mov_producto (producto_id),
+      CONSTRAINT fk_emp_inv_mov_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+      CONSTRAINT fk_emp_inv_mov_producto FOREIGN KEY (producto_id) REFERENCES empresa_productos(id),
+      CONSTRAINT fk_emp_inv_mov_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableEmpresaInventarioCapas() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS empresa_inventario_capas (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      empresa_id INT NOT NULL,
+      producto_id INT NOT NULL,
+      cantidad_restante DECIMAL(12,4) NOT NULL DEFAULT 0,
+      costo_unitario DECIMAL(12,4) NOT NULL DEFAULT 0,
+      fecha DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_emp_inv_capas_empresa (empresa_id),
+      KEY idx_emp_inv_capas_producto_fecha (producto_id, fecha),
+      CONSTRAINT fk_emp_inv_capas_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+      CONSTRAINT fk_emp_inv_capas_producto FOREIGN KEY (producto_id) REFERENCES empresa_productos(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableEmpresaEmpleados() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS empresa_empleados (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      empresa_id INT NOT NULL,
+      negocio_id INT NULL,
+      nombre VARCHAR(255) NOT NULL,
+      documento VARCHAR(80) NULL,
+      telefono VARCHAR(50) NULL,
+      cargo VARCHAR(120) NULL,
+      tipo_pago ENUM('MENSUAL', 'QUINCENAL', 'HORA') NOT NULL DEFAULT 'MENSUAL',
+      sueldo_base DECIMAL(12,2) NOT NULL DEFAULT 0,
+      tarifa_hora DECIMAL(12,2) NOT NULL DEFAULT 0,
+      ars_porcentaje DECIMAL(5,2) NOT NULL DEFAULT 0,
+      afp_porcentaje DECIMAL(5,2) NOT NULL DEFAULT 0,
+      isr_porcentaje DECIMAL(5,2) NOT NULL DEFAULT 0,
+      activo TINYINT(1) NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_empresa_empleados_empresa (empresa_id),
+      KEY idx_empresa_empleados_negocio (negocio_id),
+      CONSTRAINT fk_empresa_empleados_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+      CONSTRAINT fk_empresa_empleados_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableEmpresaAsistencias() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS empresa_asistencias (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      empleado_id INT NOT NULL,
+      negocio_id INT NULL,
+      fecha DATE NOT NULL,
+      hora_entrada TIME NOT NULL,
+      hora_salida TIME NOT NULL,
+      horas DECIMAL(6,2) NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_empresa_asistencias_empleado (empleado_id),
+      KEY idx_empresa_asistencias_negocio (negocio_id),
+      CONSTRAINT fk_empresa_asistencias_empleado FOREIGN KEY (empleado_id) REFERENCES empresa_empleados(id) ON DELETE CASCADE,
+      CONSTRAINT fk_empresa_asistencias_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableEmpresaNominaMovimientos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS empresa_nomina_movimientos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      empleado_id INT NOT NULL,
+      negocio_id INT NULL,
+      tipo ENUM('COMISION', 'BONO', 'DEDUCCION') NOT NULL DEFAULT 'COMISION',
+      monto DECIMAL(12,2) NOT NULL DEFAULT 0,
+      fecha DATE NOT NULL,
+      notas TEXT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_empresa_nomina_mov_empleado (empleado_id),
+      KEY idx_empresa_nomina_mov_negocio (negocio_id),
+      CONSTRAINT fk_empresa_nomina_mov_empleado FOREIGN KEY (empleado_id) REFERENCES empresa_empleados(id) ON DELETE CASCADE,
+      CONSTRAINT fk_empresa_nomina_mov_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableEmpresaContabilidad() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS empresa_contabilidad_movimientos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      empresa_id INT NOT NULL,
+      negocio_id INT NULL,
+      tipo ENUM('ACTIVO', 'PASIVO', 'CAPITAL', 'INGRESO', 'GASTO') NOT NULL DEFAULT 'ACTIVO',
+      cuenta VARCHAR(150) NOT NULL,
+      descripcion TEXT NULL,
+      monto DECIMAL(12,2) NOT NULL DEFAULT 0,
+      fecha DATE NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_empresa_conta_empresa (empresa_id),
+      KEY idx_empresa_conta_negocio (negocio_id),
+      KEY idx_empresa_conta_fecha (fecha),
+      CONSTRAINT fk_empresa_conta_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+      CONSTRAINT fk_empresa_conta_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableContabilidadCuentas() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS contabilidad_cuentas (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      empresa_id INT NOT NULL,
+      codigo VARCHAR(40) NOT NULL,
+      nombre VARCHAR(180) NOT NULL,
+      tipo ENUM('ACTIVO', 'PASIVO', 'PATRIMONIO', 'INGRESO', 'COSTO', 'GASTO') NOT NULL,
+      alias VARCHAR(60) NULL,
+      activo TINYINT(1) NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_conta_cuentas_empresa_codigo (empresa_id, codigo),
+      UNIQUE KEY idx_conta_cuentas_empresa_alias (empresa_id, alias)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableContabilidadAsientos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS contabilidad_asientos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      empresa_id INT NOT NULL,
+      negocio_id INT NULL,
+      fecha DATE NOT NULL,
+      descripcion VARCHAR(255) NULL,
+      referencia_tipo VARCHAR(60) NULL,
+      referencia_id BIGINT NULL,
+      estado ENUM('BORRADOR', 'CONTABILIZADO', 'ANULADO') NOT NULL DEFAULT 'CONTABILIZADO',
+      creado_por INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_conta_asientos_empresa_fecha (empresa_id, fecha),
+      KEY idx_conta_asientos_negocio (negocio_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableContabilidadAsientoLineas() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS contabilidad_asiento_lineas (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      asiento_id INT NOT NULL,
+      cuenta_id INT NOT NULL,
+      descripcion VARCHAR(255) NULL,
+      debe DECIMAL(12,2) NOT NULL DEFAULT 0,
+      haber DECIMAL(12,2) NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_conta_lineas_asiento (asiento_id),
+      KEY idx_conta_lineas_cuenta (cuenta_id),
+      CONSTRAINT fk_conta_lineas_asiento FOREIGN KEY (asiento_id) REFERENCES contabilidad_asientos(id) ON DELETE CASCADE,
+      CONSTRAINT fk_conta_lineas_cuenta FOREIGN KEY (cuenta_id) REFERENCES contabilidad_cuentas(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableContabilidadPeriodos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS contabilidad_periodos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      empresa_id INT NOT NULL,
+      anio INT NOT NULL,
+      mes INT NOT NULL,
+      estado ENUM('ABIERTO', 'CERRADO') NOT NULL DEFAULT 'ABIERTO',
+      cerrado_at DATETIME NULL,
+      cerrado_por INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_conta_periodos_empresa (empresa_id, anio, mes)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableContabilidadEventos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS contabilidad_eventos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      empresa_id INT NOT NULL,
+      tipo VARCHAR(60) NOT NULL,
+      origen_id BIGINT NOT NULL,
+      asiento_id INT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_conta_eventos_unique (empresa_id, tipo, origen_id),
+      KEY idx_conta_eventos_asiento (asiento_id),
+      CONSTRAINT fk_conta_eventos_asiento FOREIGN KEY (asiento_id) REFERENCES contabilidad_asientos(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureDefaultPlanCuentas() {
+  if (!(await tableExists('empresas')) || !(await tableExists('contabilidad_cuentas'))) return;
+  const empresas = await query('SELECT id FROM empresas');
+  if (!empresas || empresas.length === 0) return;
+
+  const cuentasBase = [
+    { codigo: '1.1.1', nombre: 'Caja', tipo: 'ACTIVO', alias: 'CAJA' },
+    { codigo: '1.1.2', nombre: 'Bancos', tipo: 'ACTIVO', alias: 'BANCO' },
+    { codigo: '1.1.3', nombre: 'Cuentas por cobrar', tipo: 'ACTIVO', alias: 'CXC' },
+    { codigo: '1.1.4', nombre: 'Inventario', tipo: 'ACTIVO', alias: 'INVENTARIO' },
+    { codigo: '1.1.5', nombre: 'ITBIS acreditable', tipo: 'ACTIVO', alias: 'ITBIS_ACREDITABLE' },
+    { codigo: '1.2.1', nombre: 'Activos fijos', tipo: 'ACTIVO', alias: 'ACTIVOS_FIJOS' },
+    { codigo: '2.1.1', nombre: 'Cuentas por pagar', tipo: 'PASIVO', alias: 'CXP' },
+    { codigo: '2.1.2', nombre: 'ITBIS por pagar', tipo: 'PASIVO', alias: 'ITBIS_POR_PAGAR' },
+    { codigo: '2.1.3', nombre: 'Sueldos por pagar', tipo: 'PASIVO', alias: 'SUELDOS_POR_PAGAR' },
+    { codigo: '2.1.4', nombre: 'Prestamos', tipo: 'PASIVO', alias: 'PRESTAMOS' },
+    { codigo: '3.1.1', nombre: 'Capital', tipo: 'PATRIMONIO', alias: 'CAPITAL' },
+    { codigo: '3.1.2', nombre: 'Resultados acumulados', tipo: 'PATRIMONIO', alias: 'RESULTADOS_ACUMULADOS' },
+    { codigo: '3.1.3', nombre: 'Utilidad del periodo', tipo: 'PATRIMONIO', alias: 'UTILIDAD_PERIODO' },
+    { codigo: '4.1.1', nombre: 'Ventas', tipo: 'INGRESO', alias: 'VENTAS' },
+    { codigo: '4.1.2', nombre: 'Otros ingresos', tipo: 'INGRESO', alias: 'OTROS_INGRESOS' },
+    { codigo: '4.1.3', nombre: 'Propinas', tipo: 'INGRESO', alias: 'PROPINA' },
+    { codigo: '5.1.1', nombre: 'Costo de ventas', tipo: 'COSTO', alias: 'COGS' },
+    { codigo: '6.1.1', nombre: 'Nomina', tipo: 'GASTO', alias: 'GASTO_NOMINA' },
+    { codigo: '6.1.2', nombre: 'Alquiler', tipo: 'GASTO', alias: 'GASTO_ALQUILER' },
+    { codigo: '6.1.3', nombre: 'Luz y agua', tipo: 'GASTO', alias: 'GASTO_SERVICIOS' },
+    { codigo: '6.1.4', nombre: 'Marketing', tipo: 'GASTO', alias: 'GASTO_MARKETING' },
+    { codigo: '6.1.5', nombre: 'Mantenimiento', tipo: 'GASTO', alias: 'GASTO_MANTENIMIENTO' },
+    { codigo: '6.1.6', nombre: 'Comisiones', tipo: 'GASTO', alias: 'GASTO_COMISIONES' },
+    { codigo: '6.1.7', nombre: 'Gastos generales', tipo: 'GASTO', alias: 'GASTOS_GENERALES' },
+  ];
+
+  for (const empresa of empresas) {
+    const empresaId = empresa.id;
+    const existente = await query(
+      'SELECT id FROM contabilidad_cuentas WHERE empresa_id = ? LIMIT 1',
+      [empresaId]
+    );
+    if (existente && existente.length) continue;
+    for (const cuenta of cuentasBase) {
+      await query(
+        `INSERT INTO contabilidad_cuentas (empresa_id, codigo, nombre, tipo, alias)
+         VALUES (?, ?, ?, ?, ?)`,
+        [empresaId, cuenta.codigo, cuenta.nombre, cuenta.tipo, cuenta.alias]
+      );
+    }
+  }
+}
+
 async function ensureTableHistorialBar() {
   await query(`
     CREATE TABLE IF NOT EXISTS historial_bar (
@@ -274,6 +560,20 @@ async function ensureTableGastos() {
       es_recurrente TINYINT(1) NOT NULL DEFAULT 0,
       frecuencia VARCHAR(20) NULL,
       tags TEXT,
+      estado VARCHAR(20) NOT NULL DEFAULT 'PAGADO',
+      fecha_vencimiento DATE NULL,
+      fecha_pago DATE NULL,
+      monto_pagado DECIMAL(12,2) NOT NULL DEFAULT 0,
+      origen_fondos VARCHAR(20) NULL,
+      origen_detalle VARCHAR(80) NULL,
+      tipo_comprobante VARCHAR(30) NULL,
+      itbis DECIMAL(12,2) NOT NULL DEFAULT 0,
+      centro_costo VARCHAR(80) NULL,
+      aprobado_por INT NULL,
+      aprobado_at DATETIME NULL,
+      anulado_por INT NULL,
+      anulado_at DATETIME NULL,
+      motivo_anulacion TEXT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       negocio_id INT NOT NULL,
@@ -286,6 +586,26 @@ async function ensureTableGastos() {
   await ensureColumn('gastos', 'usuario_id INT NULL');
   await ensureColumn('gastos', "tipo_gasto VARCHAR(20) NOT NULL DEFAULT 'OPERATIVO'");
   await ensureColumn('gastos', "origen VARCHAR(20) NOT NULL DEFAULT 'manual'");
+  await ensureColumn('gastos', "estado VARCHAR(20) NOT NULL DEFAULT 'PAGADO'");
+  await ensureColumn('gastos', 'fecha_vencimiento DATE NULL');
+  await ensureColumn('gastos', 'fecha_pago DATE NULL');
+  await ensureColumn('gastos', 'monto_pagado DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('gastos', 'origen_fondos VARCHAR(20) NULL');
+  await ensureColumn('gastos', 'origen_detalle VARCHAR(80) NULL');
+  await ensureColumn('gastos', 'tipo_comprobante VARCHAR(30) NULL');
+  await ensureColumn('gastos', 'itbis DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('gastos', 'centro_costo VARCHAR(80) NULL');
+  await ensureColumn('gastos', 'aprobado_por INT NULL');
+  await ensureColumn('gastos', 'aprobado_at DATETIME NULL');
+  await ensureColumn('gastos', 'anulado_por INT NULL');
+  await ensureColumn('gastos', 'anulado_at DATETIME NULL');
+  await ensureColumn('gastos', 'motivo_anulacion TEXT NULL');
+  await ensureColumn('gastos', 'empresa_id INT NULL');
+  try {
+    await query('ALTER TABLE gastos MODIFY COLUMN negocio_id INT NULL');
+  } catch (error) {
+    console.warn('No se pudo actualizar negocio_id en gastos:', error?.message || error);
+  }
   await query("UPDATE gastos SET tipo_gasto = 'OPERATIVO' WHERE tipo_gasto IS NULL OR tipo_gasto = ''");
   await query(
     "UPDATE gastos SET tipo_gasto = 'INVENTARIO' WHERE (categoria = 'Compras inventario' OR referencia LIKE 'INV-%') AND (tipo_gasto IS NULL OR tipo_gasto = '' OR tipo_gasto = 'OPERATIVO')"
@@ -303,11 +623,67 @@ async function ensureTableGastos() {
   await query(
     "UPDATE gastos SET origen = 'nomina' WHERE (LOWER(categoria) LIKE 'nomina%' OR LOWER(descripcion) LIKE 'nomina%') AND (origen IS NULL OR origen = '' OR origen = 'manual')"
   );
+  await query(
+    `UPDATE gastos g
+        JOIN negocios n ON n.id = g.negocio_id
+       SET g.empresa_id = n.empresa_id
+     WHERE g.empresa_id IS NULL`
+  );
 
   await ensureIndexByName('gastos', 'idx_gastos_negocio_fecha', '(negocio_id, fecha)');
   await ensureIndexByName('gastos', 'idx_gastos_negocio_categoria_fecha', '(negocio_id, categoria, fecha)');
   await ensureIndexByName('gastos', 'idx_gastos_referencia', '(negocio_id, referencia_tipo, referencia_id)');
+  await ensureIndexByName('gastos', 'idx_gastos_empresa_fecha', '(empresa_id, fecha)');
   await ensureForeignKey('gastos', 'negocio_id');
+}
+
+async function ensureTableGastosPagos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS gastos_pagos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      gasto_id INT NOT NULL,
+      negocio_id INT NOT NULL,
+      fecha DATE NOT NULL,
+      monto DECIMAL(12,2) NOT NULL DEFAULT 0,
+      metodo_pago VARCHAR(40) NULL,
+      origen_fondos VARCHAR(20) NULL,
+      origen_detalle VARCHAR(80) NULL,
+      referencia VARCHAR(60) NULL,
+      notas TEXT NULL,
+      usuario_id INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_gastos_pagos_gasto FOREIGN KEY (gasto_id) REFERENCES gastos(id),
+      CONSTRAINT fk_gastos_pagos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  try {
+    await query('ALTER TABLE gastos_pagos MODIFY COLUMN negocio_id INT NULL');
+  } catch (error) {
+    console.warn('No se pudo actualizar negocio_id en gastos_pagos:', error?.message || error);
+  }
+
+  await ensureIndexByName('gastos_pagos', 'idx_gastos_pagos_negocio_fecha', '(negocio_id, fecha)');
+  await ensureIndexByName('gastos_pagos', 'idx_gastos_pagos_gasto', '(gasto_id)');
+  await ensureForeignKey('gastos_pagos', 'negocio_id');
+  await ensureForeignKey('gastos_pagos', 'gasto_id', 'gastos');
+}
+
+async function ensureTableGastosAdjuntos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS gastos_adjuntos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      gasto_id INT NOT NULL,
+      nombre VARCHAR(255) NOT NULL,
+      mime VARCHAR(80) NULL,
+      contenido_base64 LONGTEXT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_gastos_adjuntos_gasto FOREIGN KEY (gasto_id) REFERENCES gastos(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('gastos_adjuntos', 'idx_gastos_adjuntos_gasto', '(gasto_id)');
+  await ensureForeignKey('gastos_adjuntos', 'gasto_id', 'gastos');
 }
 
 async function ensureTableComprasInventario() {
@@ -456,6 +832,116 @@ async function ensureTableAnalisisCapitalInicial() {
       CONSTRAINT fk_capital_inicial_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+}
+
+async function ensureTableClientes() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS clientes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      nombre VARCHAR(255) NOT NULL,
+      documento VARCHAR(100),
+      tipo_documento VARCHAR(50),
+      telefono VARCHAR(50),
+      email VARCHAR(255),
+      direccion TEXT,
+      notas TEXT,
+      activo TINYINT DEFAULT 1,
+      creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+      actualizado_en DATETIME,
+      negocio_id INT NULL,
+      empresa_id INT NULL,
+      codigo VARCHAR(40) NULL,
+      tipo_cliente VARCHAR(20) NULL,
+      segmento VARCHAR(30) NULL,
+      estado VARCHAR(20) NOT NULL DEFAULT 'ACTIVO',
+      vip TINYINT(1) NOT NULL DEFAULT 0,
+      credito_activo TINYINT(1) NOT NULL DEFAULT 0,
+      credito_limite DECIMAL(12,2) NOT NULL DEFAULT 0,
+      credito_dias INT NOT NULL DEFAULT 0,
+      credito_bloqueo_exceso TINYINT(1) NOT NULL DEFAULT 0,
+      tags TEXT NULL,
+      notas_internas TEXT NULL,
+      fecha_cumple DATE NULL,
+      metodo_pago_preferido VARCHAR(40) NULL,
+      whatsapp VARCHAR(50) NULL,
+      CONSTRAINT fk_clientes_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureColumn('clientes', 'empresa_id INT NULL');
+  await ensureColumn('clientes', 'codigo VARCHAR(40) NULL');
+  await ensureColumn('clientes', 'tipo_cliente VARCHAR(20) NULL');
+  await ensureColumn('clientes', 'segmento VARCHAR(30) NULL');
+  await ensureColumn('clientes', "estado VARCHAR(20) NOT NULL DEFAULT 'ACTIVO'");
+  await ensureColumn('clientes', 'vip TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('clientes', 'credito_activo TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('clientes', 'credito_limite DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('clientes', 'credito_dias INT NOT NULL DEFAULT 0');
+  await ensureColumn('clientes', 'credito_bloqueo_exceso TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('clientes', 'tags TEXT NULL');
+  await ensureColumn('clientes', 'notas_internas TEXT NULL');
+  await ensureColumn('clientes', 'fecha_cumple DATE NULL');
+  await ensureColumn('clientes', 'metodo_pago_preferido VARCHAR(40) NULL');
+  await ensureColumn('clientes', 'whatsapp VARCHAR(50) NULL');
+
+  try {
+    await query('ALTER TABLE clientes MODIFY COLUMN negocio_id INT NULL');
+  } catch (error) {
+    console.warn('No se pudo actualizar negocio_id en clientes:', error?.message || error);
+  }
+
+  try {
+    await query(
+      `UPDATE clientes c
+          JOIN negocios n ON n.id = c.negocio_id
+         SET c.empresa_id = n.empresa_id
+       WHERE c.empresa_id IS NULL`
+    );
+  } catch (error) {
+    console.warn('No se pudo actualizar empresa_id en clientes:', error?.message || error);
+  }
+
+  await query("UPDATE clientes SET estado = 'ACTIVO' WHERE estado IS NULL OR estado = ''");
+  await query("UPDATE clientes SET tipo_cliente = 'PERSONA' WHERE tipo_cliente IS NULL OR tipo_cliente = ''");
+  await query("UPDATE clientes SET segmento = 'CONSUMIDOR' WHERE segmento IS NULL OR segmento = ''");
+
+  await ensureIndexByName('clientes', 'idx_clientes_empresa', '(empresa_id)');
+  await ensureIndexByName('clientes', 'idx_clientes_negocio', '(negocio_id)');
+  await ensureIndexByName('clientes', 'idx_clientes_codigo', '(codigo)');
+}
+
+async function ensureTableClientesNotas() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS clientes_notas (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      cliente_id INT NOT NULL,
+      empresa_id INT NOT NULL,
+      negocio_id INT NULL,
+      nota TEXT NOT NULL,
+      usuario_id INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_clientes_notas_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('clientes_notas', 'idx_clientes_notas_cliente', '(cliente_id)');
+  await ensureIndexByName('clientes_notas', 'idx_clientes_notas_empresa', '(empresa_id)');
+}
+
+async function ensureTableClientesAdjuntos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS clientes_adjuntos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      cliente_id INT NOT NULL,
+      nombre VARCHAR(255) NOT NULL,
+      mime VARCHAR(80) NULL,
+      contenido_base64 LONGTEXT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_clientes_adjuntos_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('clientes_adjuntos', 'idx_clientes_adjuntos_cliente', '(cliente_id)');
 }
 
 async function ensureTableClientesDeudas() {
@@ -832,6 +1318,9 @@ async function addNegocioIdToTables() {
 
   for (const table of tables) {
     await ensureColumn(table, `negocio_id INT NOT NULL DEFAULT ${DEFAULT_NEGOCIO_ID}`);
+    if (table === 'clientes') {
+      continue;
+    }
     try {
       await query(`UPDATE ${table} SET negocio_id = ? WHERE negocio_id IS NULL`, [DEFAULT_NEGOCIO_ID]);
     } catch (error) {
@@ -1060,16 +1549,51 @@ async function normalizeSecuenciasPk() {
 async function runMigrations() {
   await ensureTableEmpresas();
   await ensureTableNegocios();
+  await ensureTableContabilidadCuentas();
+  await ensureTableContabilidadAsientos();
+  await ensureTableContabilidadAsientoLineas();
+  await ensureTableContabilidadPeriodos();
+  await ensureTableContabilidadEventos();
+  await ensureTableEmpresaProductos();
+  await ensureTableEmpresaInventarioMovimientos();
+  await ensureTableEmpresaInventarioCapas();
+  await ensureColumn('empresa_productos', 'sku VARCHAR(120) NULL');
+  await ensureColumn('empresa_productos', 'codigo_barras VARCHAR(120) NULL');
+  await ensureColumn('empresa_productos', 'familia VARCHAR(120) NULL');
+  await ensureColumn('empresa_productos', 'tags VARCHAR(255) NULL');
+  await ensureColumn('empresa_productos', 'atributos_json JSON NULL');
+  await ensureColumn('empresa_productos', 'stock DECIMAL(12,4) NULL DEFAULT 0');
+  await ensureColumn('empresa_productos', 'stock_minimo DECIMAL(12,4) NOT NULL DEFAULT 0');
+  await ensureColumn('empresa_productos', 'stock_indefinido TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('empresa_productos', 'ubicacion VARCHAR(120) NULL');
+  await ensureColumn('empresa_productos', 'bodega VARCHAR(120) NULL');
+  await ensureColumn('empresa_productos', 'serializable TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('empresa_productos', 'costo_promedio_actual DECIMAL(12,4) NOT NULL DEFAULT 0');
+  await ensureColumn('empresas', "inventario_valoracion_metodo VARCHAR(20) NOT NULL DEFAULT 'PROMEDIO'");
+  await ensureTableEmpresaEmpleados();
+  await ensureColumn('empresa_empleados', 'telefono VARCHAR(50) NULL');
+  await ensureColumn('empresa_empleados', 'ars_porcentaje DECIMAL(5,2) NOT NULL DEFAULT 0');
+  await ensureColumn('empresa_empleados', 'afp_porcentaje DECIMAL(5,2) NOT NULL DEFAULT 0');
+  await ensureColumn('empresa_empleados', 'isr_porcentaje DECIMAL(5,2) NOT NULL DEFAULT 0');
+  await modifyColumn('empresa_empleados', "tipo_pago ENUM('MENSUAL', 'QUINCENAL', 'HORA') NOT NULL DEFAULT 'MENSUAL'");
+  await ensureTableEmpresaAsistencias();
+  await ensureTableEmpresaNominaMovimientos();
+  await ensureTableEmpresaContabilidad();
   await ensureTableHistorialBar();
   await ensureTablePosiumFacturacionConfig();
   await ensureTablePosiumFacturas();
   await ensureTableGastos();
+  await ensureTableGastosPagos();
+  await ensureTableGastosAdjuntos();
   await ensureTableComprasInventario();
   await ensureTableComprasInventarioDetalle();
   await ensureTableRecetas();
   await ensureTableRecetaDetalle();
   await ensureTableConsumoInsumos();
   await ensureTableAnalisisCapitalInicial();
+  await ensureTableClientes();
+  await ensureTableClientesNotas();
+  await ensureTableClientesAdjuntos();
   await ensureTableClientesDeudas();
   await ensureTableClientesDeudasDetalle();
   await ensureTableClientesAbonos();
@@ -1107,6 +1631,7 @@ async function runMigrations() {
   await ensureColumn('detalle_pedido', 'cogs_linea DECIMAL(12,2) NOT NULL DEFAULT 0');
   await ensureNegocioThemeAndModulesColumns();
   await ensureDefaultEmpresa();
+  await ensureDefaultPlanCuentas();
   await ensureEmpresaColumns();
   await ensureLogoUrlCapacity();
   await ensureNegocioStatusColumns();

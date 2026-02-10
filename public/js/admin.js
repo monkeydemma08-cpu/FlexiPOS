@@ -1,5 +1,24 @@
-﻿const productosLista = document.getElementById('productos-lista');
-const productosBuscarInput = document.getElementById('productos-buscar');
+﻿const productosLista = document.getElementById('admin-inventario-body');
+const productosBuscarInput = document.getElementById('admin-inventario-buscar');
+const inventarioTipoSelect = document.getElementById('admin-inventario-tipo');
+const inventarioEstadoSelect = document.getElementById('admin-inventario-estado');
+const inventarioStockSelect = document.getElementById('admin-inventario-stock');
+const inventarioFiltrarBtn = document.getElementById('admin-inventario-filtrar');
+const inventarioLimpiarBtn = document.getElementById('admin-inventario-limpiar');
+const inventarioTotalEl = document.getElementById('admin-inventario-total');
+const inventarioCriticoEl = document.getElementById('admin-inventario-critico');
+const inventarioBajoEl = document.getElementById('admin-inventario-bajo');
+const inventarioValorEl = document.getElementById('admin-inventario-valor');
+const inventarioNuevoBtn = document.getElementById('admin-inventario-nuevo');
+const inventarioMovimientoBtn = document.getElementById('admin-inventario-movimiento-nuevo');
+const inventarioSelectAll = document.getElementById('admin-inventario-select-all');
+const inventarioBulkActivarBtn = document.getElementById('admin-inventario-bulk-activar');
+const inventarioBulkDesactivarBtn = document.getElementById('admin-inventario-bulk-desactivar');
+const inventarioBulkPrecioBtn = document.getElementById('admin-inventario-bulk-precio');
+const inventarioMensaje = document.getElementById('admin-inventario-mensaje');
+const inventarioModal = document.getElementById('admin-inventario-modal');
+const inventarioModalCerrarBtn = document.getElementById('admin-inventario-cancelar');
+const inventarioMetodoSelect = document.getElementById('admin-inventario-metodo');
 const formProducto = document.getElementById('prod-form');
 const inputProdId = document.getElementById('prod-id');
 const inputProdNombre = document.getElementById('prod-nombre');
@@ -258,6 +277,7 @@ let paginaHistorialCocina = 1;
 const HIST_COCINA_PAGE_SIZE = 50;
 
 let productos = [];
+const ADMIN_STOCK_BAJO = 5;
 let productoEdicionBase = null;
 let compras = [];
 let comprasInventario = [];
@@ -729,8 +749,15 @@ const ocultarTabsNoPermitidos = () => {
 };
 
 const obtenerTabInicialAdmin = () => {
-  if (typeof window !== 'undefined' && window.location?.pathname?.includes('/admin/cotizaciones')) {
-    return 'cotizaciones';
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search || '');
+    const tabQuery = params.get('tab');
+    if (tabQuery) {
+      return tabQuery;
+    }
+    if (window.location?.pathname?.includes('/admin/cotizaciones')) {
+      return 'cotizaciones';
+    }
   }
   if (usuarioActual?.rol && !esRolAdmin(usuarioActual.rol)) {
     return 'cotizaciones';
@@ -903,6 +930,25 @@ const limpiarFormularioProducto = () => {
   actualizarEstadoRecetaUI();
 };
 
+const abrirInventarioModal = ({ limpiar = false } = {}) => {
+  if (!inventarioModal) return;
+  if (limpiar) {
+    limpiarFormularioProducto();
+    setMessage(mensajeProductos, '', 'info');
+  }
+  inventarioModal.hidden = false;
+  requestAnimationFrame(() => {
+    inventarioModal.classList.add('is-visible');
+  });
+};
+
+const cerrarInventarioModal = () => {
+  if (!inventarioModal) return;
+  inventarioModal.classList.remove('is-visible');
+  inventarioModal.hidden = true;
+  limpiarFormularioProducto();
+};
+
 const esProductoStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
 const esProductoInsumo = (producto) =>
   String(producto?.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
@@ -924,6 +970,95 @@ const obtenerCostoProducto = (producto) => {
     if (Number.isFinite(numero)) return numero;
   }
   return 0;
+};
+
+const obtenerEstadoStockAdmin = (producto) => {
+  if (esProductoStockIndefinido(producto)) return 'indef';
+  const stock = Number(producto?.stock || 0);
+  if (stock <= 0) return 'critico';
+  if (stock <= ADMIN_STOCK_BAJO) return 'bajo';
+  return 'ok';
+};
+
+const actualizarResumenInventario = () => {
+  const lista = Array.isArray(productos) ? productos : [];
+  const resumen = lista.reduce(
+    (acc, item) => {
+      const estadoStock = obtenerEstadoStockAdmin(item);
+      if (estadoStock === 'critico') acc.critico += 1;
+      if (estadoStock === 'bajo') acc.bajo += 1;
+      if (estadoStock !== 'indef') {
+        const stock = Number(item?.stock || 0);
+        acc.valor += stock * obtenerCostoProducto(item);
+      }
+      return acc;
+    },
+    { critico: 0, bajo: 0, valor: 0 }
+  );
+
+  if (inventarioTotalEl) inventarioTotalEl.textContent = formatNumber(lista.length);
+  if (inventarioCriticoEl) inventarioCriticoEl.textContent = formatNumber(resumen.critico);
+  if (inventarioBajoEl) inventarioBajoEl.textContent = formatNumber(resumen.bajo);
+  if (inventarioValorEl) inventarioValorEl.textContent = formatCurrency(resumen.valor || 0);
+  if (inventarioSelectAll) inventarioSelectAll.checked = false;
+};
+
+const obtenerIdsInventarioSeleccionados = () => {
+  if (!productosLista) return [];
+  return Array.from(productosLista.querySelectorAll('.admin-inventario-select:checked'))
+    .map((input) => Number(input.dataset.id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+};
+
+const actualizarSelectAllInventario = () => {
+  if (!inventarioSelectAll || !productosLista) return;
+  const checks = Array.from(productosLista.querySelectorAll('.admin-inventario-select'));
+  if (!checks.length) {
+    inventarioSelectAll.checked = false;
+    return;
+  }
+  inventarioSelectAll.checked = checks.every((input) => input.checked);
+};
+
+const actualizarProductosSeleccionados = async (payload, mensajeExito) => {
+  const ids = obtenerIdsInventarioSeleccionados();
+  if (!ids.length) {
+    setMessage(inventarioMensaje, 'Selecciona al menos un producto.', 'warning');
+    return;
+  }
+  try {
+    for (const id of ids) {
+      const resp = await fetchJsonAutorizado(`/api/productos/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      let data = {};
+      try {
+        data = await resp.json();
+      } catch (error) {
+        data = {};
+      }
+      if (!resp.ok || data?.error) {
+        throw new Error(data?.error || 'No se pudo actualizar el producto.');
+      }
+    }
+    await cargarProductos();
+    setMessage(inventarioMensaje, mensajeExito, 'info');
+  } catch (error) {
+    console.error('Error al actualizar productos en lote:', error);
+    setMessage(inventarioMensaje, error.message || 'Error al actualizar productos.', 'error');
+  }
+};
+
+const actualizarPrecioProductosSeleccionados = async () => {
+  const entrada = window.prompt('Nuevo precio para los productos seleccionados:');
+  if (entrada === null) return;
+  const valor = Number(entrada);
+  if (!Number.isFinite(valor) || valor < 0) {
+    setMessage(inventarioMensaje, 'Precio invalido.', 'error');
+    return;
+  }
+  await actualizarProductosSeleccionados({ precio: valor }, 'Precio actualizado correctamente.');
 };
 
 const refrescarUiStockIndefinido = (limpiarValor = false) => {
@@ -1374,82 +1509,61 @@ const seleccionarProductoEdicion = (producto) => {
   inputProdNombre?.focus();
 };
 
-const renderProductos = (lista) => {
+const renderProductos = (lista = []) => {
   if (!productosLista) return;
-  productosLista.innerHTML = '';
+  actualizarResumenInventario();
 
   if (!Array.isArray(lista) || lista.length === 0) {
-    const vacio = document.createElement('div');
-    vacio.className = 'kanm-empty-message';
-    vacio.textContent = 'No hay productos registrados.';
-    productosLista.appendChild(vacio);
+    productosLista.innerHTML = '<tr><td colspan="8">No hay productos registrados.</td></tr>';
     return;
   }
 
-  lista.forEach((producto) => {
-    const activo = Number(producto.activo) === 1;
-    const stockEsIndefinido = esProductoStockIndefinido(producto);
-    const costoBase = Number(producto.costo_base_sin_itbis) || 0;
-    const costoPromedio = Number(producto.costo_promedio_actual) || 0;
-    const ultimoCosto = Number(producto.ultimo_costo_sin_itbis) || 0;
-    const preciosExtra = Array.isArray(producto.precios) ? producto.precios : [];
-    const preciosTexto = preciosExtra.length
-      ? preciosExtra.map((p) => `${p.label || 'Precio'}: ${formatCurrency(p.valor)}`).join(' | ')
-      : '';
-    const item = document.createElement('article');
-    item.className = 'producto-item';
-
-    const header = document.createElement('div');
-    header.className = 'producto-item-header';
-
-    const nombre = document.createElement('div');
-    nombre.className = 'producto-nombre';
-    nombre.textContent = producto.nombre;
-
-    const precio = document.createElement('div');
-    precio.className = 'producto-precio';
-    precio.textContent = formatCurrency(producto.precio);
-
-    header.appendChild(nombre);
-    header.appendChild(precio);
-
-    const detalle = document.createElement('div');
-    detalle.className = 'producto-detalle';
-    const stockValor = Number(producto.stock ?? 0);
-    const stockTexto = stockEsIndefinido
-      ? 'Indefinido'
-      : formatNumber(Number.isFinite(stockValor) ? stockValor : 0);
-    detalle.innerHTML = `
-      <span><strong>Stock:</strong> ${stockTexto}</span>
-      <span><strong>Categoría:</strong> ${producto.categoria_nombre ?? 'Sin asignar'}</span>
-      <span><strong>Costo base:</strong> ${formatCurrency(costoBase)}</span>
-      <span><strong>Costo promedio:</strong> ${formatCurrency(costoPromedio)}</span>
-      <span><strong>Ultimo costo:</strong> ${formatCurrency(ultimoCosto)}</span>
-      <span><strong>Estado:</strong> <span class="estado-pill ${
-        activo ? '' : 'estado-inactivo'
-      }">${activo ? 'Activo' : 'Inactivo'}</span></span>
-    `;
-    if (preciosTexto) {
-      detalle.innerHTML += `<span><strong>Precios:</strong> ${preciosTexto}</span>`;
-    }
-
-    const botonEditar = document.createElement('button');
-    botonEditar.type = 'button';
-    botonEditar.className = 'kanm-button';
-    botonEditar.textContent = 'Editar';
-    botonEditar.addEventListener('click', () => {
-      seleccionarProductoEdicion(producto);
-    });
-
-    const footer = document.createElement('div');
-    footer.className = 'producto-footer';
-    footer.appendChild(botonEditar);
-
-    item.appendChild(header);
-    item.appendChild(detalle);
-    item.appendChild(footer);
-    productosLista.appendChild(item);
-  });
+  productosLista.innerHTML = lista
+    .map((producto) => {
+      const estadoStock = obtenerEstadoStockAdmin(producto);
+      const tipo = String(producto?.tipo_producto || 'FINAL').toUpperCase();
+      const tipoLabel = tipo === 'INSUMO' ? 'Insumo' : 'Final';
+      const categoria = producto.categoria_nombre || 'Sin categoria';
+      const activo = Number(producto.activo) === 1;
+      const estadoLabel = activo ? 'Activo' : 'Inactivo';
+      const costo = formatCurrency(obtenerCostoProducto(producto));
+      const precio = formatCurrency(producto.precio || 0);
+      const stockTexto = esProductoStockIndefinido(producto)
+        ? 'SIN LIMITE'
+        : formatNumber(Number.isFinite(Number(producto.stock)) ? Number(producto.stock) : 0);
+      const badgeClass =
+        estadoStock === 'critico'
+          ? 'inventario-stock-badge stock-critico'
+          : estadoStock === 'bajo'
+          ? 'inventario-stock-badge stock-bajo'
+          : estadoStock === 'ok'
+          ? 'inventario-stock-badge stock-ok'
+          : 'inventario-stock-badge stock-indef';
+      return `
+        <tr>
+          <td><input type="checkbox" class="admin-inventario-select" data-id="${producto.id}" /></td>
+          <td>
+            <div class="inventario-producto-nombre">
+              <strong>${producto.nombre || ''}</strong>
+              <span>${tipoLabel}</span>
+            </div>
+          </td>
+          <td>${categoria}</td>
+          <td><span class="${badgeClass}">${stockTexto}</span></td>
+          <td>${costo}</td>
+          <td>${precio}</td>
+          <td>${estadoLabel}</td>
+          <td>
+            <div class="acciones-inline">
+              <button type="button" class="kanm-button ghost sm" data-admin-inventario-action="editar" data-id="${producto.id}">
+                Editar
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
 };
 
 const renderProductosVistaCompleta = (lista) => {
@@ -1639,6 +1753,9 @@ const cerrarVistaCompletaProductos = () => {
 const filtrarProductos = () => {
   const termino = (productosBuscarInput?.value || '').toLowerCase();
   const categoriaFiltro = filtroCategoriaProductos?.value || '';
+  const tipoFiltro = inventarioTipoSelect?.value || '';
+  const estadoFiltro = inventarioEstadoSelect?.value || '';
+  const stockFiltro = inventarioStockSelect?.value || '';
   let lista = Array.isArray(productos) ? [...productos] : [];
 
   if (termino) {
@@ -1655,7 +1772,34 @@ const filtrarProductos = () => {
     lista = lista.filter((p) => Number(p.categoria_id) === catId);
   }
 
+  if (tipoFiltro) {
+    lista = lista.filter((p) => String(p?.tipo_producto || 'FINAL').toUpperCase() === tipoFiltro);
+  }
+
+  if (estadoFiltro) {
+    const activo = estadoFiltro === 'ACTIVO' ? 1 : 0;
+    lista = lista.filter((p) => Number(p.activo) === activo);
+  }
+
+  if (stockFiltro) {
+    lista = lista.filter((p) => {
+      if (stockFiltro === 'sin_stock') {
+        return !esProductoStockIndefinido(p) && Number(p.stock || 0) <= 0;
+      }
+      return obtenerEstadoStockAdmin(p) === stockFiltro;
+    });
+  }
+
   renderProductos(lista);
+};
+
+const limpiarFiltrosInventario = () => {
+  if (productosBuscarInput) productosBuscarInput.value = '';
+  if (filtroCategoriaProductos) filtroCategoriaProductos.value = '';
+  if (inventarioTipoSelect) inventarioTipoSelect.value = '';
+  if (inventarioEstadoSelect) inventarioEstadoSelect.value = '';
+  if (inventarioStockSelect) inventarioStockSelect.value = '';
+  filtrarProductos();
 };
 
 const cargarProductos = async () => {
@@ -1674,12 +1818,63 @@ const cargarProductos = async () => {
     refrescarOpcionesReceta();
   } catch (error) {
     console.error('Error al cargar productos:', error);
-    setMessage(mensajeProductos, 'Error al cargar los productos.', 'error');
+    setMessage(inventarioMensaje || mensajeProductos, 'Error al cargar los productos.', 'error');
   }
 };
 
 productosBuscarInput?.addEventListener('input', () => filtrarProductos());
 filtroCategoriaProductos?.addEventListener('change', () => filtrarProductos());
+inventarioTipoSelect?.addEventListener('change', () => filtrarProductos());
+inventarioEstadoSelect?.addEventListener('change', () => filtrarProductos());
+inventarioStockSelect?.addEventListener('change', () => filtrarProductos());
+inventarioFiltrarBtn?.addEventListener('click', () => filtrarProductos());
+inventarioLimpiarBtn?.addEventListener('click', () => limpiarFiltrosInventario());
+inventarioNuevoBtn?.addEventListener('click', () => abrirInventarioModal({ limpiar: true }));
+inventarioModalCerrarBtn?.addEventListener('click', () => cerrarInventarioModal());
+inventarioModal?.addEventListener('click', (event) => {
+  if (event.target === inventarioModal) {
+    cerrarInventarioModal();
+  }
+});
+inventarioSelectAll?.addEventListener('change', (event) => {
+  const checked = event.target.checked;
+  if (!productosLista) return;
+  productosLista.querySelectorAll('.admin-inventario-select').forEach((input) => {
+    input.checked = checked;
+  });
+});
+inventarioBulkActivarBtn?.addEventListener('click', () =>
+  actualizarProductosSeleccionados({ activo: 1 }, 'Productos activados correctamente.')
+);
+inventarioBulkDesactivarBtn?.addEventListener('click', () =>
+  actualizarProductosSeleccionados({ activo: 0 }, 'Productos desactivados correctamente.')
+);
+inventarioBulkPrecioBtn?.addEventListener('click', () => actualizarPrecioProductosSeleccionados());
+inventarioMovimientoBtn?.addEventListener('click', () => {
+  if (typeof mostrarTabAdmin === 'function') {
+    mostrarTabAdmin('abastecimiento');
+  }
+  setMessage(inventarioMensaje, 'Usa Abastecimiento para registrar entradas de inventario.', 'info');
+});
+productosLista?.addEventListener('change', (event) => {
+  if (event.target?.matches('.admin-inventario-select')) {
+    actualizarSelectAllInventario();
+  }
+});
+productosLista?.addEventListener('click', (event) => {
+  const boton = event.target.closest('[data-admin-inventario-action="editar"]');
+  if (!boton) return;
+  const id = Number(boton.dataset.id || 0);
+  const producto = (Array.isArray(productos) ? productos : []).find((item) => Number(item.id) === id);
+  if (producto) {
+    seleccionarProductoEdicion(producto);
+    abrirInventarioModal({ limpiar: false });
+  }
+});
+if (inventarioMetodoSelect) {
+  inventarioMetodoSelect.value = 'PROMEDIO';
+  inventarioMetodoSelect.disabled = true;
+}
 productosVistaCompletaBtn?.addEventListener('click', () => abrirVistaCompletaProductos());
 productosVistaCerrarBtn?.addEventListener('click', () => cerrarVistaCompletaProductos());
 productosVistaBackdrop?.addEventListener('click', () => cerrarVistaCompletaProductos());
@@ -3242,7 +3437,7 @@ const renderComprasInventario = (lista) => {
     const origen = document.createElement('td');
     const origenFondos = String(compra.origen_fondos || '').toLowerCase();
     origen.textContent =
-      origenFondos === 'caja' ? 'Caja' : origenFondos === 'aporte_externo' ? 'Aporte externo' : 'Negocio';
+      origenFondos === 'caja' ? 'Caja' : origenFondos === 'aporte_externo' ? 'Empresa' : 'Negocio';
 
     const items = document.createElement('td');
     const itemsValor = Number(compra.items) || 0;
@@ -6592,3 +6787,8 @@ document.addEventListener('visibilitychange', () => {
     });
   }
 });
+
+
+
+
+

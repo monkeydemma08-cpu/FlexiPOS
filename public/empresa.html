@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
   <head>
@@ -38,73 +39,2317 @@
     </header>
 
     <main class="empresa-container">
-      <section class="kanm-card empresa-resumen">
-        <header class="kanm-card-header">
-          <h2>Resumen general</h2>
-          <p class="kanm-subtitle">Totales de todas las sucursales en el periodo seleccionado.</p>
-        </header>
-        <div class="empresa-resumen-grid">
-          <div class="empresa-kpi">
-            <span class="empresa-kpi-label">Ventas</span>
-            <strong id="empresa-kpi-ventas">RD$0.00</strong>
-            <span class="empresa-kpi-sub" id="empresa-kpi-ventas-count">0 ventas</span>
+      <div class="empresa-tabs">
+        <button type="button" class="kanm-tab active" data-empresa-tab="panel">Panel</button>
+        <button type="button" class="kanm-tab" data-empresa-tab="inventario">Inventario</button>
+        <button type="button" class="kanm-tab" data-empresa-tab="nomina">Nomina</button>
+        <button type="button" class="kanm-tab" data-empresa-tab="gastos">Gastos</button>
+        <button type="button" class="kanm-tab" data-empresa-tab="clientes">Clientes</button>
+        <button type="button" class="kanm-tab" data-empresa-tab="facturacion">Facturacion</button>
+        <button type="button" class="kanm-tab" data-empresa-tab="contabilidad">Contabilidad</button>
+      </div>
+
+      <section class="empresa-panel" data-empresa-section="panel">
+        <section class="kanm-card empresa-resumen">
+          <header class="kanm-card-header">
+            <h2>Resumen general</h2>
+            <p class="kanm-subtitle">Totales de todas las sucursales en el periodo seleccionado.</p>
+          </header>
+          <div class="empresa-resumen-grid">
+            <div class="empresa-kpi">
+              <span class="empresa-kpi-label">Ventas</span>
+              <strong id="empresa-kpi-ventas">RD$0.00</strong>
+              <span class="empresa-kpi-sub" id="empresa-kpi-ventas-count">0 ventas</span>
+            </div>
+            <div class="empresa-kpi">
+              <span class="empresa-kpi-label">Gastos</span>
+              <strong id="empresa-kpi-gastos">RD$0.00</strong>
+              <span class="empresa-kpi-sub">Total gastos</span>
+            </div>
+            <div class="empresa-kpi">
+              <span class="empresa-kpi-label">Ganancia neta</span>
+              <strong id="empresa-kpi-ganancia">RD$0.00</strong>
+              <span class="empresa-kpi-sub">Ventas - Gastos</span>
+            </div>
+            <div class="empresa-kpi">
+              <span class="empresa-kpi-label">Ticket promedio</span>
+              <strong id="empresa-kpi-ticket">RD$0.00</strong>
+              <span class="empresa-kpi-sub">Promedio por venta</span>
+            </div>
           </div>
-          <div class="empresa-kpi">
-            <span class="empresa-kpi-label">Gastos</span>
-            <strong id="empresa-kpi-gastos">RD$0.00</strong>
-            <span class="empresa-kpi-sub">Total gastos</span>
+        </section>
+
+        <section class="kanm-card empresa-hub">
+          <div class="empresa-hub-header">
+            <div class="empresa-hub-copy">
+              <span class="empresa-hub-eyebrow">Modulo central</span>
+              <h2>Matriz operativa y sucursales en un solo panel</h2>
+              <p class="kanm-subtitle">
+                Contabilidad, nomina, inventario, facturacion, deudas y usuarios en un mismo flujo.
+              </p>
+              <div class="empresa-hub-actions">
+                <button type="button" class="kanm-button primary" data-empresa-tab-target="contabilidad">
+                  Ir a contabilidad
+                </button>
+                <button type="button" class="kanm-button ghost" data-empresa-tab-target="nomina">
+                  Ir a nomina
+                </button>
+              </div>
+            </div>
+            <div class="empresa-hub-stats">
+              <div class="empresa-mini-stat">
+                <span>Sucursales activas</span>
+                <strong id="empresa-total-sucursales">0</strong>
+              </div>
+              <div class="empresa-mini-stat">
+                <span>Supervisores listos</span>
+                <strong id="empresa-supervisores-listos">0</strong>
+              </div>
+              <div class="empresa-mini-stat">
+                <span>Supervisores pendientes</span>
+                <strong id="empresa-supervisores-pendientes">0</strong>
+              </div>
+              <div class="empresa-mini-stat">
+                <span>Nomina del periodo</span>
+                <strong id="empresa-kpi-nomina">RD$0.00</strong>
+              </div>
+              <div class="empresa-mini-stat">
+                <span>Cuentas por cobrar</span>
+                <strong id="empresa-kpi-deudas">RD$0.00</strong>
+              </div>
+              <div class="empresa-mini-stat">
+                <span>Usuarios activos</span>
+                <strong id="empresa-kpi-usuarios">0</strong>
+              </div>
+            </div>
           </div>
-          <div class="empresa-kpi">
-            <span class="empresa-kpi-label">Ganancia neta</span>
-            <strong id="empresa-kpi-ganancia">RD$0.00</strong>
-            <span class="empresa-kpi-sub">Ventas - Gastos</span>
+
+          <div class="empresa-hub-layout">
+            <div class="empresa-modulos-grid">
+              <article class="empresa-modulo-card" style="--delay: 0s">
+                <div class="empresa-modulo-top">
+                  <div class="empresa-modulo-icon" aria-hidden="true">C</div>
+                  <div>
+                    <h3>Contabilidad</h3>
+                    <p>Libro mayor, gastos, activos y pasivos.</p>
+                  </div>
+                </div>
+                <ul class="empresa-modulo-list">
+                  <li>Capital y balance general.</li>
+                  <li>Ingresos vs. gastos.</li>
+                  <li>Reporte por sucursal.</li>
+                </ul>
+              </article>
+              <article class="empresa-modulo-card" style="--delay: 0.05s">
+                <div class="empresa-modulo-top">
+                  <div class="empresa-modulo-icon" aria-hidden="true">N</div>
+                  <div>
+                    <h3>Nomina</h3>
+                    <p>Sueldos, comisiones y asistencia centralizada.</p>
+                  </div>
+                </div>
+                <ul class="empresa-modulo-list">
+                  <li>Calculo por horarios.</li>
+                  <li>Bonos y deducciones.</li>
+                  <li>Historial del personal.</li>
+                </ul>
+              </article>
+              <article class="empresa-modulo-card" style="--delay: 0.1s">
+                <div class="empresa-modulo-top">
+                <div class="empresa-modulo-icon" aria-hidden="true">I</div>
+                <div>
+                    <h3>Inventario maestro</h3>
+                    <p>Ubicaciones, costos y alertas de stock.</p>
+                </div>
+                </div>
+                <ul class="empresa-modulo-list">
+                  <li>Stock por bodega y ubicacion.</li>
+                  <li>Alertas de minimo y rotacion.</li>
+                  <li>Historial de movimientos.</li>
+                </ul>
+              </article>
+            </div>
+
+            <div class="empresa-hub-side">
+              <article class="empresa-flow-card">
+                <h3>Flujo matriz &rarr; sucursales</h3>
+                <p class="kanm-subtitle">
+                  La matriz concentra compras, costos y stock maestro para alimentar cada sucursal.
+                </p>
+                <div class="empresa-flow">
+                  <div class="empresa-flow-node">
+                    <span class="empresa-flow-title">Matriz principal</span>
+                    <span class="empresa-flow-sub">Compras, produccion, stock central.</span>
+                  </div>
+                  <div class="empresa-flow-connector">
+                    <span class="empresa-flow-line" aria-hidden="true"></span>
+                    <span class="empresa-flow-text">Despachos programados</span>
+                  </div>
+                  <div class="empresa-flow-node">
+                    <span class="empresa-flow-title">Sucursales</span>
+                    <span class="empresa-flow-sub">Ventas, caja, inventario local.</span>
+                  </div>
+                </div>
+                <div class="empresa-flow-tags">
+                  <span class="pill">Productos</span>
+                  <span class="pill pill-muted">Insumos</span>
+                  <span class="pill">Costos</span>
+                </div>
+              </article>
+
+              <article class="empresa-quick-card">
+                <h3>Acciones rapidas</h3>
+                <p class="kanm-subtitle">Crea supervisores y registra movimientos clave.</p>
+                <div class="empresa-quick-row">
+                  <label for="empresa-quick-sucursal-select">Sucursal destino</label>
+                  <div class="empresa-quick-control">
+                    <select id="empresa-quick-sucursal-select">
+                      <option value="">Cargando sucursales...</option>
+                    </select>
+                  </div>
+                  <span class="empresa-quick-help">Define la sucursal donde se abrira el modulo.</span>
+                </div>
+                <div class="empresa-quick-row">
+                  <label for="empresa-quick-supervisor-select">Supervisor</label>
+                  <div class="empresa-quick-control">
+                    <select id="empresa-quick-supervisor-select">
+                      <option value="">Cargando sucursales...</option>
+                    </select>
+                    <button type="button" class="kanm-button primary" id="empresa-quick-supervisor-btn">
+                      Crear
+                    </button>
+                  </div>
+                  <span class="empresa-quick-help">Solo sucursales sin supervisor.</span>
+                </div>
+                <div class="empresa-quick-buttons">
+                  <button type="button" class="kanm-button ghost" data-empresa-tab-target="inventario">
+                    Nuevo item
+                  </button>
+                  <button type="button" class="kanm-button ghost" data-empresa-tab-target="nomina">
+                    Registrar nomina
+                  </button>
+                  <button type="button" class="kanm-button ghost" data-empresa-tab-target="contabilidad">
+                    Registrar movimiento
+                  </button>
+                </div>
+              </article>
+            </div>
           </div>
-          <div class="empresa-kpi">
-            <span class="empresa-kpi-label">Ticket promedio</span>
-            <strong id="empresa-kpi-ticket">RD$0.00</strong>
-            <span class="empresa-kpi-sub">Promedio por venta</span>
+        </section>
+
+        <section class="kanm-card empresa-sucursales">
+          <header class="kanm-card-header">
+            <h2>Analisis por sucursal</h2>
+            <p class="kanm-subtitle">Selecciona el rango de fechas para comparar sucursales.</p>
+          </header>
+          <div class="empresa-filtros">
+            <div class="kanm-input-group">
+              <label for="empresa-desde">Desde</label>
+              <input type="date" id="empresa-desde" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-hasta">Hasta</label>
+              <input type="date" id="empresa-hasta" />
+            </div>
+            <button type="button" class="kanm-button" id="empresa-actualizar">Actualizar</button>
+            <span id="empresa-mensaje" class="kanm-subtitle"></span>
           </div>
+          <div class="kanm-table-wrapper empresa-conta-scroll">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Sucursal</th>
+                  <th>Ventas</th>
+                  <th>Gastos</th>
+                  <th>Ganancia</th>
+                  <th>Ticket</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="empresa-sucursales-body">
+                <tr>
+                  <td colspan="6">Cargando...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+      <section class="empresa-panel hidden" data-empresa-section="inventario">
+        <section class="kanm-card empresa-inventario-header">
+          <div class="empresa-inventario-header-row">
+            <div>
+              <h2>Inventario maestro</h2>
+              <p class="kanm-subtitle">Stock y ubicaciones con alertas inteligentes.</p>
+            </div>
+            <div class="empresa-inventario-actions">
+              <div class="kanm-input-group kanm-input-group--inline empresa-inventario-scope">
+                <label for="empresa-inventario-scope">Inventario</label>
+                <select id="empresa-inventario-scope">
+                  <option value="empresa">Empresa principal</option>
+                </select>
+              </div>
+              <div class="kanm-input-group kanm-input-group--inline empresa-inventario-metodo">
+                <label for="empresa-inventario-metodo">Valoracion</label>
+                <select id="empresa-inventario-metodo">
+                  <option value="PROMEDIO">Promedio</option>
+                  <option value="PEPS">PEPS</option>
+                </select>
+              </div>
+              <button type="button" class="kanm-button ghost" id="empresa-inventario-movimiento-nuevo">
+                Registrar movimiento
+              </button>
+              <button type="button" class="kanm-button primary" id="empresa-inventario-nuevo">Nuevo item</button>
+            </div>
+          </div>
+          <div class="empresa-inventario-kpis">
+            <div class="empresa-mini-stat">
+              <span>Total items</span>
+              <strong id="empresa-inventario-total">0</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Stock critico</span>
+              <strong id="empresa-inventario-critico">0</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Stock bajo</span>
+              <strong id="empresa-inventario-bajo">0</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Valor inventario</span>
+              <strong id="empresa-inventario-valor">RD$0.00</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="kanm-card empresa-inventario-layout">
+          <div class="empresa-inventario-filtros">
+            <div class="empresa-inventario-filtros-scroll">
+              <div class="kanm-input-group">
+                <label for="empresa-inventario-buscar">Buscar</label>
+                <input type="search" id="empresa-inventario-buscar" placeholder="Nombre o etiqueta" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-inventario-categoria">Categoria</label>
+                <input type="text" id="empresa-inventario-categoria" placeholder="Familia, linea, categoria" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-inventario-tipo">Tipo</label>
+                <select id="empresa-inventario-tipo">
+                  <option value="">Todos</option>
+                  <option value="FINAL">Producto final</option>
+                  <option value="INSUMO">Insumo</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-inventario-estado">Estado</label>
+                <select id="empresa-inventario-estado">
+                  <option value="">Todos</option>
+                  <option value="ACTIVO">Activo</option>
+                  <option value="INACTIVO">Inactivo</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-inventario-stock">Stock</label>
+                <select id="empresa-inventario-stock">
+                  <option value="">Todos</option>
+                  <option value="critico">Critico</option>
+                  <option value="bajo">Bajo</option>
+                  <option value="ok">Saludable</option>
+                  <option value="sin_stock">Sin stock</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-inventario-tag">Tags</label>
+                <input type="text" id="empresa-inventario-tag" placeholder="Ej. fresco, importado" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-inventario-bodega">Bodega</label>
+                <input type="text" id="empresa-inventario-bodega" placeholder="Central, frio" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-inventario-ubicacion">Ubicacion</label>
+                <input type="text" id="empresa-inventario-ubicacion" placeholder="Pasillo 3, Estante B" />
+              </div>
+            </div>
+            <div class="empresa-inventario-filtros-actions">
+              <button type="button" class="kanm-button" id="empresa-inventario-filtrar">Filtrar</button>
+              <button type="button" class="kanm-button ghost" id="empresa-inventario-limpiar">Limpiar</button>
+            </div>
+          </div>
+          <div class="empresa-inventario-lista">
+            <div class="empresa-inventario-lista-header">
+              <div>
+                <h3>Catalogo maestro</h3>
+                <p class="kanm-subtitle">Gestiona costos y estado en lote.</p>
+              </div>
+              <div class="empresa-inventario-bulk">
+                <label class="kanm-checkbox" for="empresa-inventario-select-all">
+                  <input type="checkbox" id="empresa-inventario-select-all" />
+                  Seleccionar todo
+                </label>
+                <button type="button" class="kanm-button ghost sm" id="empresa-inventario-bulk-activar">Activar</button>
+                <button type="button" class="kanm-button ghost sm" id="empresa-inventario-bulk-desactivar">Desactivar</button>
+                <button type="button" class="kanm-button ghost sm" id="empresa-inventario-bulk-precio">
+                  Actualizar precio
+                </button>
+              </div>
+            </div>
+            <div class="kanm-table-wrapper empresa-inventario-table-scroll">
+              <table class="kanm-table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Producto</th>
+                    <th>Categoria</th>
+                    <th>Stock</th>
+                    <th>Minimo</th>
+                    <th>Ubicacion</th>
+                    <th>Costo</th>
+                    <th>Precio</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="empresa-inventario-body">
+                  <tr>
+                    <td colspan="10">Cargando...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="empresa-inventario-mensaje" class="kanm-message"></div>
+          </div>
+        </section>
+
+        <section class="kanm-card empresa-inventario-movimientos" id="empresa-inventario-movimientos">
+          <div class="empresa-inventario-lista-header">
+            <div>
+              <h3>Movimientos de inventario</h3>
+              <p class="kanm-subtitle">Registro por producto, usuario y fecha.</p>
+            </div>
+          </div>
+          <div class="empresa-filtros">
+            <div class="kanm-input-group">
+              <label for="empresa-inventario-mov-desde">Desde</label>
+              <input type="date" id="empresa-inventario-mov-desde" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-inventario-mov-hasta">Hasta</label>
+              <input type="date" id="empresa-inventario-mov-hasta" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-inventario-mov-producto">Producto</label>
+              <select id="empresa-inventario-mov-producto">
+                <option value="">Todos</option>
+              </select>
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-inventario-mov-tipo">Tipo</label>
+              <select id="empresa-inventario-mov-tipo">
+                <option value="">Todos</option>
+                <option value="ENTRADA">Entrada</option>
+                <option value="SALIDA">Salida</option>
+                <option value="AJUSTE">Ajuste</option>
+              </select>
+            </div>
+            <button type="button" class="kanm-button" id="empresa-inventario-mov-filtrar">Actualizar</button>
+            <span id="empresa-inventario-mov-mensaje" class="kanm-subtitle"></span>
+          </div>
+          <div class="kanm-table-wrapper empresa-inventario-table-scroll">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Producto</th>
+                  <th>Tipo</th>
+                  <th>Cantidad</th>
+                  <th>Costo</th>
+                  <th>Stock</th>
+                  <th>Motivo</th>
+                  <th>Usuario</th>
+                </tr>
+              </thead>
+              <tbody id="empresa-inventario-mov-body">
+                <tr>
+                  <td colspan="8">Cargando...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+      <section class="empresa-panel hidden" data-empresa-section="nomina">
+        <section class="kanm-card">
+          <header class="kanm-card-header">
+            <h2>Nomina centralizada</h2>
+            <p class="kanm-subtitle">Sueldos, comisiones, asistencia y calculo por horarios.</p>
+          </header>
+          <div class="empresa-filtros">
+            <div class="kanm-input-group">
+              <label for="empresa-nomina-desde">Desde</label>
+              <input type="date" id="empresa-nomina-desde" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-nomina-hasta">Hasta</label>
+              <input type="date" id="empresa-nomina-hasta" />
+            </div>
+            <button type="button" class="kanm-button" id="empresa-nomina-actualizar">Actualizar</button>
+            <span id="empresa-nomina-mensaje" class="kanm-subtitle"></span>
+          </div>
+          <div class="empresa-nomina-kpis">
+            <div class="empresa-mini-stat">
+              <span>Sueldos base</span>
+              <strong id="empresa-nomina-sueldos">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Comisiones</span>
+              <strong id="empresa-nomina-comisiones">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Bonos</span>
+              <strong id="empresa-nomina-bonos">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Deducciones (legales + gastos)</span>
+              <strong id="empresa-nomina-deducciones">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Total a pagar</span>
+              <strong id="empresa-nomina-total">RD$0.00</strong>
+            </div>
+          </div>
+        </section>
+
+        <div class="empresa-nomina-grid">
+          <section class="kanm-card">
+            <header class="kanm-card-header">
+              <h3>Personal</h3>
+              <p class="kanm-subtitle">Alta y configuracion de sueldos base.</p>
+            </header>
+            <form class="kanm-form empresa-form" id="empresa-empleado-form" novalidate>
+              <input type="hidden" id="empresa-empleado-id" />
+              <div class="kanm-form-grid empresa-form-grid">
+                <div class="kanm-input-group">
+                  <label for="empresa-empleado-nombre">Nombre</label>
+                  <input type="text" id="empresa-empleado-nombre" placeholder="Nombre completo" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-empleado-documento">Documento</label>
+                  <input type="text" id="empresa-empleado-documento" placeholder="Cedula/RNC" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-empleado-telefono">Telefono</label>
+                  <input type="text" id="empresa-empleado-telefono" placeholder="Telefono" inputmode="tel" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-empleado-cargo">Cargo</label>
+                  <input type="text" id="empresa-empleado-cargo" placeholder="Cargo" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-empleado-sucursal">Sucursal</label>
+                  <select id="empresa-empleado-sucursal">
+                    <option value="">Matriz / Todas</option>
+                  </select>
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-empleado-tipo">Tipo de pago</label>
+                  <select id="empresa-empleado-tipo">
+                    <option value="MENSUAL">Mensual</option>
+                    <option value="QUINCENAL">Quincenal</option>
+                    <option value="HORA">Por hora</option>
+                  </select>
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-empleado-sueldo">Sueldo base mensual</label>
+                  <input type="text" id="empresa-empleado-sueldo" inputmode="decimal" data-money placeholder="0.00" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-empleado-tarifa">Tarifa por hora</label>
+                  <input type="text" id="empresa-empleado-tarifa" inputmode="decimal" data-money placeholder="0.00" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-empleado-ars">Descuento ARS (%)</label>
+                  <input type="text" id="empresa-empleado-ars" inputmode="decimal" placeholder="0" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-empleado-afp">Descuento AFP (%)</label>
+                  <input type="text" id="empresa-empleado-afp" inputmode="decimal" placeholder="0" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-empleado-isr">Descuento ISR (%)</label>
+                  <input type="text" id="empresa-empleado-isr" inputmode="decimal" placeholder="0" />
+                </div>
+                <div class="kanm-input-group">
+                  <label class="kanm-input-toggle" for="empresa-empleado-activo">
+                    <span>Activo</span>
+                    <input type="checkbox" id="empresa-empleado-activo" checked />
+                  </label>
+                </div>
+              </div>
+              <div class="empresa-form-actions">
+                <button type="button" class="kanm-button ghost" id="empresa-empleado-limpiar">Limpiar</button>
+                <button type="submit" class="kanm-button primary">Guardar</button>
+              </div>
+              <div id="empresa-empleado-mensaje" class="kanm-message"></div>
+            </form>
+          </section>
+
+          <section class="kanm-card">
+            <header class="kanm-card-header">
+              <h3>Asistencia</h3>
+              <p class="kanm-subtitle">Registro de horas trabajadas por sucursal.</p>
+            </header>
+            <form class="kanm-form empresa-form" id="empresa-asistencia-form" novalidate>
+              <div class="kanm-form-grid empresa-form-grid">
+                <div class="kanm-input-group">
+                  <label for="empresa-asistencia-empleado">Empleado</label>
+                  <select id="empresa-asistencia-empleado">
+                    <option value="">Selecciona empleado</option>
+                  </select>
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-asistencia-fecha">Fecha</label>
+                  <input type="date" id="empresa-asistencia-fecha" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-asistencia-entrada">Hora entrada</label>
+                  <input type="time" id="empresa-asistencia-entrada" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-asistencia-salida">Hora salida</label>
+                  <input type="time" id="empresa-asistencia-salida" />
+                </div>
+              </div>
+              <div class="empresa-form-actions">
+                <button type="submit" class="kanm-button primary">Registrar asistencia</button>
+              </div>
+              <div id="empresa-asistencia-mensaje" class="kanm-message"></div>
+            </form>
+          </section>
+
+          <section class="kanm-card">
+            <header class="kanm-card-header">
+              <h3>Bonos, comisiones, deducciones y gastos</h3>
+              <p class="kanm-subtitle">Registra movimientos adicionales por empleado (gastos incluidos).</p>
+            </header>
+            <form class="kanm-form empresa-form" id="empresa-movimiento-form" novalidate>
+              <div class="kanm-form-grid empresa-form-grid">
+                <div class="kanm-input-group">
+                  <label for="empresa-movimiento-empleado">Empleado</label>
+                  <select id="empresa-movimiento-empleado">
+                    <option value="">Selecciona empleado</option>
+                  </select>
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-movimiento-tipo">Tipo</label>
+                  <select id="empresa-movimiento-tipo">
+                    <option value="COMISION">Comision</option>
+                    <option value="BONO">Bono</option>
+                    <option value="DEDUCCION">Deduccion / Gasto</option>
+                  </select>
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-movimiento-monto">Monto</label>
+                  <input type="text" id="empresa-movimiento-monto" inputmode="decimal" data-money placeholder="0.00" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-movimiento-fecha">Fecha</label>
+                  <input type="date" id="empresa-movimiento-fecha" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-movimiento-notas">Notas</label>
+                  <input type="text" id="empresa-movimiento-notas" placeholder="Detalle" />
+                </div>
+              </div>
+              <div class="empresa-form-actions">
+                <button type="submit" class="kanm-button primary">Registrar movimiento</button>
+              </div>
+              <div id="empresa-movimiento-mensaje" class="kanm-message"></div>
+            </form>
+          </section>
+        </div>
+
+        <section class="kanm-card">
+          <header class="kanm-card-header">
+            <h3>Personal registrado</h3>
+            <p class="kanm-subtitle">Listado y estado del personal activo/inactivo.</p>
+          </header>
+          <div class="kanm-table-wrapper">
+            <table class="kanm-table empresa-empleados-table">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Cedula</th>
+                  <th>Telefono</th>
+                  <th>Cargo</th>
+                  <th>Tipo</th>
+                  <th>Sueldo bruto</th>
+                  <th>AFP</th>
+                  <th>ARS</th>
+                  <th>ISR</th>
+                  <th>Descuentos</th>
+                  <th>Estado</th>
+                  <th>Sueldo neto</th>
+                </tr>
+              </thead>
+              <tbody id="empresa-empleados-body">
+                <tr>
+                  <td colspan="12">Cargando...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="kanm-card">
+          <header class="kanm-card-header">
+            <h3>Historial del personal</h3>
+            <p class="kanm-subtitle">Detalle de pagos por empleado en el periodo.</p>
+          </header>
+          <div class="kanm-table-wrapper">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Empleado</th>
+                  <th>Base</th>
+                  <th>Comisiones</th>
+                  <th>Bonos</th>
+                  <th>Deducciones</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody id="empresa-nomina-body">
+                <tr>
+                  <td colspan="6">Cargando...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+      <section class="empresa-panel hidden" data-empresa-section="gastos">
+        <section class="kanm-card empresa-gastos-header">
+          <header class="kanm-card-header empresa-gastos-header-row">
+            <div>
+              <h2>Gastos (vista completa)</h2>
+              <p class="kanm-subtitle">Controla egresos por sucursal, categoria y estado.</p>
+            </div>
+            <div class="empresa-gastos-actions">
+              <button type="button" class="kanm-button primary" id="empresa-gastos-nuevo">+ Nuevo gasto</button>
+              <div class="empresa-gastos-view-toggle" id="empresa-gastos-view-toggle">
+                <button type="button" class="kanm-button ghost is-active" data-gastos-view="cards">Cards</button>
+                <button type="button" class="kanm-button ghost" data-gastos-view="tabla">Tabla</button>
+              </div>
+            </div>
+          </header>
+          <div class="empresa-gastos-resumen">
+            <div class="empresa-mini-stat">
+              <span>Total gastos</span>
+              <strong id="empresa-gastos-total">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Pendientes</span>
+              <strong id="empresa-gastos-pendientes">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Pagados</span>
+              <strong id="empresa-gastos-pagados">RD$0.00</strong>
+            </div>
+          </div>
+        </section>
+
+        <div class="empresa-gastos-layout">
+          <aside class="kanm-card empresa-gastos-filtros">
+            <header class="kanm-card-header">
+              <h3>Filtros</h3>
+              <p class="kanm-subtitle">Refina por proveedor, fechas y estado.</p>
+            </header>
+            <div class="empresa-gastos-filtros-scroll">
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-buscar">Buscar</label>
+                <input type="text" id="empresa-gastos-buscar" placeholder="Proveedor, concepto, #comprobante" />
+              </div>
+              <div class="empresa-gastos-range">
+                <span class="kanm-subtitle">Rango rapido</span>
+                <div class="empresa-gastos-range-buttons">
+                  <button type="button" class="kanm-button ghost" data-gastos-range="hoy">Hoy</button>
+                  <button type="button" class="kanm-button ghost" data-gastos-range="ayer">Ayer</button>
+                  <button type="button" class="kanm-button ghost" data-gastos-range="semana">Semana</button>
+                  <button type="button" class="kanm-button ghost" data-gastos-range="mes">Mes</button>
+                </div>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-desde">Desde</label>
+                <input type="date" id="empresa-gastos-desde" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-hasta">Hasta</label>
+                <input type="date" id="empresa-gastos-hasta" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-estado">Estado</label>
+                <select id="empresa-gastos-estado">
+                  <option value="">Todos</option>
+                  <option value="BORRADOR">Borrador</option>
+                  <option value="PENDIENTE">Pendiente</option>
+                  <option value="APROBADO">Aprobado</option>
+                  <option value="PAGADO">Pagado</option>
+                  <option value="ANULADO">Anulado</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-categoria">Categoria</label>
+                <input type="text" id="empresa-gastos-categoria" list="empresa-gastos-categorias" placeholder="Alquiler, nomina..." />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-tipo">Tipo</label>
+                <select id="empresa-gastos-tipo">
+                  <option value="">Todos</option>
+                  <option value="OPERATIVO">Operativo</option>
+                  <option value="INVENTARIO">Compra inventario</option>
+                  <option value="ACTIVO_FIJO">Activo fijo</option>
+                  <option value="RETIRO_CAJA">Retiro caja</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-metodo">Metodo de pago</label>
+                <select id="empresa-gastos-metodo">
+                  <option value="">Todos</option>
+                  <option value="EFECTIVO">Caja / Efectivo</option>
+                  <option value="TARJETA">Tarjeta</option>
+                  <option value="TRANSFERENCIA">Transferencia</option>
+                  <option value="CREDITO">Credito</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-origen">Origen de fondos</label>
+                <select id="empresa-gastos-origen">
+                  <option value="">Todos</option>
+                  <option value="caja">Caja</option>
+                  <option value="banco">Banco</option>
+                  <option value="externo">Externo</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-origen-detalle">Origen detalle</label>
+                <input type="text" id="empresa-gastos-origen-detalle" list="empresa-gastos-origenes" placeholder="Caja principal, Banco Popular" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-proveedor">Proveedor</label>
+                <input type="text" id="empresa-gastos-proveedor" list="empresa-gastos-proveedores" placeholder="Proveedor" />
+              </div>
+              <div class="empresa-gastos-montos">
+                <div class="kanm-input-group">
+                  <label for="empresa-gastos-min">Monto min</label>
+                  <input type="text" id="empresa-gastos-min" inputmode="decimal" data-money placeholder="0.00" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="empresa-gastos-max">Monto max</label>
+                  <input type="text" id="empresa-gastos-max" inputmode="decimal" data-money placeholder="0.00" />
+                </div>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-sucursal">Sucursal</label>
+                <select id="empresa-gastos-sucursal">
+                  <option value="">Matriz / Todas</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gastos-orden">Orden</label>
+                <select id="empresa-gastos-orden">
+                  <option value="fecha">Fecha (desc)</option>
+                  <option value="monto">Monto</option>
+                  <option value="proveedor">Proveedor A-Z</option>
+                  <option value="categoria">Categoria A-Z</option>
+                </select>
+              </div>
+            </div>
+            <div class="empresa-gastos-filtros-actions">
+              <button type="button" class="kanm-button" id="empresa-gastos-filtrar">Buscar</button>
+              <button type="button" class="kanm-button ghost" id="empresa-gastos-limpiar">Limpiar</button>
+              <span id="empresa-gastos-mensaje" class="kanm-subtitle"></span>
+            </div>
+          </aside>
+
+          <section class="kanm-card empresa-gastos-lista">
+            <header class="kanm-card-header empresa-gastos-lista-header">
+              <h3>Listado de gastos</h3>
+              <div class="empresa-gastos-bulk" id="empresa-gastos-bulk">
+                <button type="button" class="kanm-button ghost" id="empresa-gastos-bulk-aprobar">Aprobar</button>
+                <button type="button" class="kanm-button ghost" id="empresa-gastos-bulk-anular">Anular</button>
+              </div>
+            </header>
+            <div class="empresa-gastos-view empresa-gastos-view-cards" data-gastos-view="cards">
+              <div id="empresa-gastos-cards" class="empresa-gastos-cards"></div>
+            </div>
+            <div class="empresa-gastos-view empresa-gastos-view-tabla hidden" data-gastos-view="tabla">
+              <div class="kanm-table-wrapper empresa-gastos-table-scroll">
+                <table class="kanm-table">
+                  <thead>
+                    <tr>
+                      <th><input type="checkbox" id="empresa-gastos-select-all" /></th>
+                      <th>Fecha</th>
+                      <th>Concepto</th>
+                      <th>Proveedor</th>
+                      <th>Categoria</th>
+                      <th>Monto</th>
+                      <th>Metodo</th>
+                      <th>Origen</th>
+                      <th>Estado</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="empresa-gastos-tabla-body">
+                    <tr>
+                      <td colspan="10">Cargando...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <datalist id="empresa-gastos-categorias"></datalist>
+        <datalist id="empresa-gastos-proveedores"></datalist>
+        <datalist id="empresa-gastos-origenes"></datalist>
+      </section>
+      <section class="empresa-panel hidden" data-empresa-section="clientes">
+        <section class="kanm-card empresa-clientes-header">
+          <header class="kanm-card-header empresa-clientes-header-row">
+            <div>
+              <h2>Clientes (vista completa)</h2>
+              <p class="kanm-subtitle">Gestiona, segmenta y da seguimiento a tus clientes.</p>
+            </div>
+            <div class="empresa-clientes-actions">
+              <button type="button" class="kanm-button primary" id="empresa-clientes-nuevo">+ Nuevo cliente</button>
+              <button type="button" class="kanm-button ghost" id="empresa-clientes-importar">Importar</button>
+              <button type="button" class="kanm-button ghost" id="empresa-clientes-exportar">Exportar</button>
+              <button type="button" class="kanm-button ghost" data-empresa-tab-target="panel">Cerrar</button>
+            </div>
+          </header>
+        </section>
+
+        <div class="empresa-clientes-layout">
+          <aside class="kanm-card empresa-clientes-filtros">
+            <header class="kanm-card-header">
+              <h3>Filtros</h3>
+              <p class="kanm-subtitle">Segmenta por estado, credito y sucursal.</p>
+            </header>
+            <div class="empresa-clientes-filtros-scroll">
+              <div class="kanm-input-group">
+                <label for="empresa-clientes-buscar">Buscar</label>
+                <input type="text" id="empresa-clientes-buscar" placeholder="Nombre, telefono, documento, email" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-clientes-segmento">Segmento</label>
+                <select id="empresa-clientes-segmento">
+                  <option value="">Todos</option>
+                  <option value="CONSUMIDOR">Consumidor final</option>
+                  <option value="FRECUENTE">Cliente frecuente</option>
+                  <option value="EMPRESA">Empresa (B2B)</option>
+                  <option value="MAYORISTA">Mayorista</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-clientes-estado">Estado</label>
+                <select id="empresa-clientes-estado">
+                  <option value="">Todos</option>
+                  <option value="ACTIVO">Activo</option>
+                  <option value="INACTIVO">Inactivo / bloqueado</option>
+                  <option value="MORA">En mora</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-clientes-credito">Credito</label>
+                <select id="empresa-clientes-credito">
+                  <option value="">Todos</option>
+                  <option value="con">Con credito</option>
+                  <option value="sin">Sin credito</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-clientes-balance">Balance</label>
+                <select id="empresa-clientes-balance">
+                  <option value="">Todos</option>
+                  <option value="debe">Debe saldo</option>
+                  <option value="cero">En cero</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-clientes-scope">Alcance</label>
+                <select id="empresa-clientes-scope">
+                  <option value="">Global + sucursal</option>
+                  <option value="global">Solo global</option>
+                  <option value="local">Solo sucursal</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-clientes-sucursal">Sucursal</label>
+                <select id="empresa-clientes-sucursal">
+                  <option value="">Matriz / Todas</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-clientes-orden">Orden</label>
+                <select id="empresa-clientes-orden">
+                  <option value="nombre">Nombre A-Z</option>
+                  <option value="ultima_compra">Ultima compra</option>
+                  <option value="saldo">Mayor saldo</option>
+                  <option value="total">Mayor facturacion</option>
+                  <option value="compras">Mas compras</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label class="kanm-input-toggle" for="empresa-clientes-vip">
+                  <span>Solo VIP</span>
+                  <input type="checkbox" id="empresa-clientes-vip" />
+                </label>
+              </div>
+              <div class="empresa-clientes-filtros-actions">
+                <button type="button" class="kanm-button" id="empresa-clientes-filtrar">Filtrar</button>
+                <button type="button" class="kanm-button ghost" id="empresa-clientes-limpiar">Limpiar</button>
+                <span id="empresa-clientes-mensaje" class="kanm-subtitle"></span>
+              </div>
+            </div>
+          </aside>
+
+          <section class="kanm-card empresa-clientes-lista">
+            <header class="kanm-card-header empresa-clientes-lista-header">
+              <div>
+                <h3>Listado de clientes</h3>
+                <p class="kanm-subtitle">Vista dual: tarjetas o tabla para administrar.</p>
+              </div>
+              <div class="empresa-clientes-actions">
+                <div class="empresa-clientes-view-toggle" id="empresa-clientes-view-toggle">
+                  <button type="button" class="kanm-button ghost is-active" data-clientes-view="cards">Cards</button>
+                  <button type="button" class="kanm-button ghost" data-clientes-view="tabla">Tabla</button>
+                </div>
+              </div>
+            </header>
+
+            <div class="empresa-clientes-resumen">
+              <div class="empresa-mini-stat">
+                <span>Total clientes</span>
+                <strong id="empresa-clientes-total">0</strong>
+              </div>
+              <div class="empresa-mini-stat">
+                <span>VIP</span>
+                <strong id="empresa-clientes-vip-total">0</strong>
+              </div>
+              <div class="empresa-mini-stat">
+                <span>En mora</span>
+                <strong id="empresa-clientes-mora-total">0</strong>
+              </div>
+              <div class="empresa-mini-stat">
+                <span>Saldo total</span>
+                <strong id="empresa-clientes-saldo-total">RD$0.00</strong>
+              </div>
+            </div>
+
+            <div class="empresa-clientes-view empresa-clientes-view-cards" data-clientes-view="cards">
+              <div id="empresa-clientes-cards" class="empresa-clientes-cards"></div>
+            </div>
+            <div class="empresa-clientes-view empresa-clientes-view-tabla hidden" data-clientes-view="tabla">
+              <div class="kanm-table-wrapper empresa-clientes-table-scroll">
+                <table class="kanm-table">
+                  <thead>
+                    <tr>
+                      <th><input type="checkbox" id="empresa-clientes-select-all" /></th>
+                      <th>Cliente</th>
+                      <th>Telefono</th>
+                      <th>Tipo</th>
+                      <th>Saldo</th>
+                      <th>Limite credito</th>
+                      <th>Ultima compra</th>
+                      <th>Total comprado</th>
+                      <th>Estado</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="empresa-clientes-tabla-body">
+                    <tr>
+                      <td colspan="10">Cargando...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="empresa-clientes-bulk" id="empresa-clientes-bulk">
+                <button type="button" class="kanm-button ghost" id="empresa-clientes-bulk-vip">Marcar VIP</button>
+                <button type="button" class="kanm-button ghost" id="empresa-clientes-bulk-activar">Activar</button>
+                <button type="button" class="kanm-button ghost" id="empresa-clientes-bulk-bloquear">Bloquear</button>
+              </div>
+            </div>
+          </section>
         </div>
       </section>
+      <section class="empresa-panel hidden" data-empresa-section="facturacion">
+        <section class="kanm-card empresa-facturas-header">
+          <header class="kanm-card-header empresa-facturas-header-row">
+            <div>
+              <h2>Facturacion (vista completa)</h2>
+              <p class="kanm-subtitle">Crea facturas a clientes y controla el balance por sucursal.</p>
+            </div>
+            <div class="empresa-facturas-actions">
+              <button type="button" class="kanm-button primary" id="empresa-facturas-nuevo">+ Nueva factura</button>
+            </div>
+          </header>
+          <div class="empresa-facturas-resumen">
+            <div class="empresa-mini-stat">
+              <span>Total facturado</span>
+              <strong id="empresa-facturas-total">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Pagado</span>
+              <strong id="empresa-facturas-pagado">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Saldo</span>
+              <strong id="empresa-facturas-saldo">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Facturas</span>
+              <strong id="empresa-facturas-count">0</strong>
+            </div>
+          </div>
+        </section>
 
-      <section class="kanm-card empresa-sucursales">
-        <header class="kanm-card-header">
-          <h2>Analisis por sucursal</h2>
-          <p class="kanm-subtitle">Selecciona el rango de fechas para comparar sucursales.</p>
-        </header>
-        <div class="empresa-filtros">
+        <div class="empresa-facturas-layout">
+          <aside class="kanm-card empresa-facturas-filtros">
+            <header class="kanm-card-header">
+              <h3>Filtros</h3>
+              <p class="kanm-subtitle">Busca por cliente, fechas y estado.</p>
+            </header>
+            <div class="empresa-facturas-filtros-scroll">
+              <div class="kanm-input-group">
+                <label for="empresa-facturas-buscar">Buscar</label>
+                <input type="text" id="empresa-facturas-buscar" placeholder="Cliente, documento, descripcion" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-facturas-desde">Desde</label>
+                <input type="date" id="empresa-facturas-desde" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-facturas-hasta">Hasta</label>
+                <input type="date" id="empresa-facturas-hasta" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-facturas-estado">Estado</label>
+                <select id="empresa-facturas-estado">
+                  <option value="">Todos</option>
+                  <option value="PENDIENTE">Pendiente</option>
+                  <option value="PAGADO">Pagado</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-facturas-sucursal">Sucursal</label>
+                <select id="empresa-facturas-sucursal">
+                  <option value="">Matriz / Todas</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-facturas-orden">Orden</label>
+                <select id="empresa-facturas-orden">
+                  <option value="fecha_desc">Fecha (desc)</option>
+                  <option value="fecha_asc">Fecha (asc)</option>
+                  <option value="monto_desc">Monto (desc)</option>
+                  <option value="monto_asc">Monto (asc)</option>
+                  <option value="cliente">Cliente A-Z</option>
+                </select>
+              </div>
+            </div>
+            <div class="empresa-facturas-filtros-actions">
+              <button type="button" class="kanm-button" id="empresa-facturas-filtrar">Buscar</button>
+              <button type="button" class="kanm-button ghost" id="empresa-facturas-limpiar">Limpiar</button>
+              <span id="empresa-facturas-mensaje" class="kanm-subtitle"></span>
+            </div>
+          </aside>
+
+          <section class="kanm-card empresa-facturas-lista">
+            <header class="kanm-card-header empresa-facturas-lista-header">
+              <h3>Listado de facturas</h3>
+            </header>
+            <div class="kanm-table-wrapper empresa-facturas-table-scroll">
+              <table class="kanm-table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Cliente</th>
+                    <th>Documento</th>
+                    <th>Monto</th>
+                    <th>Pagado</th>
+                    <th>Saldo</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="empresa-facturas-body">
+                  <tr>
+                    <td colspan="8">Cargando...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+      <section class="empresa-panel hidden" data-empresa-section="contabilidad">
+        <section class="kanm-card">
+          <header class="kanm-card-header">
+            <h2>Contabilidad central</h2>
+            <p class="kanm-subtitle">Registro de activos, pasivos, ingresos y gastos.</p>
+          </header>
+          <div class="empresa-filtros">
+            <div class="kanm-input-group">
+              <label for="empresa-conta-desde">Desde</label>
+              <input type="date" id="empresa-conta-desde" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-conta-hasta">Hasta</label>
+              <input type="date" id="empresa-conta-hasta" />
+            </div>
+            <button type="button" class="kanm-button" id="empresa-conta-actualizar">Actualizar</button>
+            <span id="empresa-conta-mensaje" class="kanm-subtitle"></span>
+          </div>
+          <div class="empresa-conta-kpis">
+            <div class="empresa-mini-stat">
+              <span>Activos</span>
+              <strong id="empresa-conta-activos">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Pasivos</span>
+              <strong id="empresa-conta-pasivos">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Patrimonio</span>
+              <strong id="empresa-conta-patrimonio">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Ingresos</span>
+              <strong id="empresa-conta-ingresos">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Costos</span>
+              <strong id="empresa-conta-costos">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Gastos</span>
+              <strong id="empresa-conta-gastos">RD$0.00</strong>
+            </div>
+            <div class="empresa-mini-stat">
+              <span>Resultado</span>
+              <strong id="empresa-conta-resultado">RD$0.00</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="kanm-card">
+          <header class="kanm-card-header">
+            <h3>Estado de resultados</h3>
+            <p class="kanm-subtitle">Ingresos, costos, gastos y utilidad del periodo.</p>
+          </header>
+          <div class="kanm-table-wrapper">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Grupo</th>
+                  <th>Cuenta</th>
+                  <th>Monto</th>
+                </tr>
+              </thead>
+              <tbody id="empresa-conta-resultados-body">
+                <tr>
+                  <td colspan="3">Cargando...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="kanm-card">
+          <header class="kanm-card-header">
+            <h3>Balance general</h3>
+            <p class="kanm-subtitle">Activos, pasivos y patrimonio al cierre del periodo.</p>
+          </header>
+          <div class="kanm-table-wrapper">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Grupo</th>
+                  <th>Cuenta</th>
+                  <th>Saldo</th>
+                </tr>
+              </thead>
+              <tbody id="empresa-conta-balance-body">
+                <tr>
+                  <td colspan="3">Cargando...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="kanm-card">
+          <header class="kanm-card-header">
+            <h3>Libro mayor</h3>
+            <p class="kanm-subtitle">Detalle por cuenta en el rango seleccionado.</p>
+          </header>
+          <div class="empresa-filtros">
+            <div class="kanm-input-group">
+              <label for="empresa-conta-mayor-cuenta">Cuenta</label>
+              <select id="empresa-conta-mayor-cuenta">
+                <option value="">Selecciona cuenta</option>
+              </select>
+            </div>
+            <button type="button" class="kanm-button" id="empresa-conta-mayor-actualizar">Ver mayor</button>
+            <span id="empresa-conta-mayor-mensaje" class="kanm-subtitle"></span>
+          </div>
+          <div class="kanm-table-wrapper empresa-conta-scroll">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Asiento</th>
+                  <th>Debe</th>
+                  <th>Haber</th>
+                  <th>Saldo</th>
+                  <th>Referencia</th>
+                  <th>Sucursal</th>
+                </tr>
+              </thead>
+              <tbody id="empresa-conta-mayor-body">
+                <tr>
+                  <td colspan="7">Selecciona una cuenta.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="kanm-card">
+          <header class="kanm-card-header">
+            <h3>Plan de cuentas</h3>
+            <p class="kanm-subtitle">Estructura contable base para la empresa.</p>
+          </header>
+          <div class="kanm-table-wrapper">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Codigo</th>
+                  <th>Cuenta</th>
+                  <th>Tipo</th>
+                  <th>Alias</th>
+                </tr>
+              </thead>
+              <tbody id="empresa-conta-cuentas-body">
+                <tr>
+                  <td colspan="4">Cargando...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="kanm-card">
+          <header class="kanm-card-header">
+            <div class="empresa-conta-asientos-header">
+              <div>
+                <h3>Asientos contables</h3>
+                <p class="kanm-subtitle">Detalle de movimientos por cuenta en el periodo.</p>
+              </div>
+              <div class="empresa-conta-asientos-actions">
+                <div class="kanm-input-group kanm-input-group--inline">
+                  <label for="empresa-conta-asientos-sucursal">Sucursal</label>
+                  <select id="empresa-conta-asientos-sucursal">
+                    <option value="">Todas</option>
+                    <option value="empresa">Empresa</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </header>
+          <div class="kanm-table-wrapper empresa-conta-scroll">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Asiento</th>
+                  <th>Cuenta</th>
+                  <th>Debe</th>
+                  <th>Haber</th>
+                  <th>Referencia</th>
+                  <th>Sucursal</th>
+                </tr>
+              </thead>
+              <tbody id="empresa-conta-asientos-body">
+                <tr>
+                  <td colspan="7">Cargando...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div class="kanm-modal-overlay" id="empresa-inventario-modal" hidden>
+      <div class="kanm-modal kanm-modal--wide empresa-inventario-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-inventario-modal-titulo">
+        <h3 id="empresa-inventario-modal-titulo">Nuevo item de inventario</h3>
+        <p class="kanm-subtitle">Gestiona costos, stock y ubicaciones desde la matriz.</p>
+        <form id="empresa-producto-form" class="kanm-form" novalidate>
+          <input type="hidden" id="empresa-producto-id" />
+
+          <div class="kanm-modal-section">
+            <h4>Identidad</h4>
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-producto-nombre">Nombre</label>
+                <input type="text" id="empresa-producto-nombre" placeholder="Producto o insumo" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-producto-categoria">Categoria</label>
+                <input type="text" id="empresa-producto-categoria" placeholder="Categoria" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-producto-familia">Familia</label>
+                <input type="text" id="empresa-producto-familia" placeholder="Familia o linea" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-producto-tags">Tags</label>
+                <input type="text" id="empresa-producto-tags" placeholder="Ej. fresco, importado" />
+              </div>
+            </div>
+          </div>
+
+          <div class="kanm-modal-section">
+            <h4>Inventario</h4>
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-producto-tipo">Tipo</label>
+                <select id="empresa-producto-tipo">
+                  <option value="FINAL">Producto final</option>
+                  <option value="INSUMO">Insumo</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-producto-bodega">Bodega</label>
+                <input type="text" id="empresa-producto-bodega" placeholder="Central, frio" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-producto-ubicacion">Ubicacion</label>
+                <input type="text" id="empresa-producto-ubicacion" placeholder="Pasillo 3, Estante B" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-producto-stock">Stock actual</label>
+                <input type="text" id="empresa-producto-stock" inputmode="decimal" data-money placeholder="0" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-producto-stock-minimo">Stock minimo</label>
+                <input type="text" id="empresa-producto-stock-minimo" inputmode="decimal" data-money placeholder="0" />
+              </div>
+              <div class="kanm-input-group">
+                <label class="kanm-input-toggle" for="empresa-producto-stock-indefinido">
+                  <span>Stock indefinido</span>
+                  <input type="checkbox" id="empresa-producto-stock-indefinido" />
+                </label>
+              </div>
+              <div class="kanm-input-group">
+                <label class="kanm-input-toggle" for="empresa-producto-serializable">
+                  <span>Serializable</span>
+                  <input type="checkbox" id="empresa-producto-serializable" />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="kanm-modal-section">
+            <h4>Costos y precio</h4>
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-producto-costo">Costo base</label>
+                <input type="text" id="empresa-producto-costo" inputmode="decimal" data-money placeholder="0.00" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-producto-precio">Precio sugerido</label>
+                <input type="text" id="empresa-producto-precio" inputmode="decimal" data-money placeholder="0.00" />
+              </div>
+              <div class="kanm-input-group">
+                <label class="kanm-input-toggle" for="empresa-producto-activo">
+                  <span>Activo</span>
+                  <input type="checkbox" id="empresa-producto-activo" checked />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="kanm-modal-section">
+            <h4>Atributos dinamicos</h4>
+            <div class="kanm-input-group">
+              <label for="empresa-producto-atributos">JSON atributos</label>
+              <textarea id="empresa-producto-atributos" rows="3" placeholder='{"talla": "M", "color": "rojo"}'></textarea>
+            </div>
+          </div>
+
+          <div class="kanm-modal-actions">
+            <button type="button" class="kanm-button ghost" id="empresa-inventario-cancelar">Cancelar</button>
+            <button type="button" class="kanm-button ghost" id="empresa-producto-limpiar">Limpiar</button>
+            <button type="submit" class="kanm-button primary" id="empresa-producto-guardar">Guardar</button>
+          </div>
+          <div id="empresa-producto-mensaje" class="kanm-message"></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="empresa-inventario-mov-modal" hidden>
+      <div class="kanm-modal kanm-modal--wide empresa-inventario-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-inventario-mov-titulo">
+        <h3 id="empresa-inventario-mov-titulo">Registrar movimiento</h3>
+        <p class="kanm-subtitle">Entrada, salida o ajuste de inventario con trazabilidad.</p>
+        <form id="empresa-inventario-mov-form" class="kanm-form" novalidate>
+          <div class="kanm-form-grid empresa-form-grid">
+            <div class="kanm-input-group">
+              <label for="empresa-inventario-mov-producto-form">Producto</label>
+              <select id="empresa-inventario-mov-producto-form">
+                <option value="">Selecciona producto</option>
+              </select>
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-inventario-mov-tipo-form">Tipo</label>
+              <select id="empresa-inventario-mov-tipo-form">
+                <option value="ENTRADA">Entrada</option>
+                <option value="SALIDA">Salida</option>
+                <option value="AJUSTE">Ajuste</option>
+              </select>
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-inventario-mov-cantidad">Cantidad</label>
+              <input type="text" id="empresa-inventario-mov-cantidad" inputmode="decimal" data-money placeholder="0" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-inventario-mov-costo">Costo unitario</label>
+              <input type="text" id="empresa-inventario-mov-costo" inputmode="decimal" data-money placeholder="0.00" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-inventario-mov-fecha">Fecha</label>
+              <input type="date" id="empresa-inventario-mov-fecha" />
+            </div>
+            <div class="kanm-input-group">
+              <label class="kanm-input-toggle" for="empresa-inventario-mov-ajuste-negativo">
+                <span>Ajuste negativo</span>
+                <input type="checkbox" id="empresa-inventario-mov-ajuste-negativo" />
+              </label>
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-inventario-mov-motivo">Motivo</label>
+              <input type="text" id="empresa-inventario-mov-motivo" placeholder="Conteo, merma, compra" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-inventario-mov-referencia">Referencia</label>
+              <input type="text" id="empresa-inventario-mov-referencia" placeholder="#documento" />
+            </div>
+          </div>
+          <div class="kanm-modal-actions">
+            <button type="button" class="kanm-button ghost" id="empresa-inventario-mov-cancelar">Cancelar</button>
+            <button type="submit" class="kanm-button primary">Guardar movimiento</button>
+          </div>
+          <div id="empresa-inventario-mov-estado" class="kanm-message"></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="empresa-gasto-modal" hidden>
+      <div class="kanm-modal kanm-modal--wide empresa-gasto-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-gasto-modal-titulo">
+        <h3 id="empresa-gasto-modal-titulo">Nuevo gasto</h3>
+        <p class="kanm-subtitle" id="empresa-gasto-modal-subtitulo">Registra un gasto con evidencia y estado.</p>
+        <form id="empresa-gasto-form" class="kanm-form" novalidate>
+          <input type="hidden" id="empresa-gasto-id" />
+          <div class="kanm-modal-section">
+            <h4>Basico</h4>
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-sucursal">Sucursal (opcional)</label>
+                <select id="empresa-gasto-sucursal">
+                  <option value="">Empresa (general)</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-fecha">Fecha</label>
+                <input type="date" id="empresa-gasto-fecha" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-concepto">Concepto / Descripcion</label>
+                <input type="text" id="empresa-gasto-concepto" placeholder="Pago luz, insumos, etc." />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-categoria">Categoria</label>
+                <input type="text" id="empresa-gasto-categoria" list="empresa-gastos-categorias" placeholder="Alquiler, nomina" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-monto">Monto</label>
+                <input type="text" id="empresa-gasto-monto" inputmode="decimal" data-money placeholder="0.00" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-moneda">Moneda</label>
+                <select id="empresa-gasto-moneda">
+                  <option value="DOP">DOP</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-tipo">Tipo</label>
+                <select id="empresa-gasto-tipo">
+                  <option value="OPERATIVO">Operativo</option>
+                  <option value="INVENTARIO">Compra inventario</option>
+                  <option value="ACTIVO_FIJO">Activo fijo</option>
+                  <option value="RETIRO_CAJA">Retiro caja</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-itbis">ITBIS</label>
+                <input type="text" id="empresa-gasto-itbis" inputmode="decimal" data-money placeholder="0.00" />
+              </div>
+            </div>
+          </div>
+
+          <div class="kanm-modal-section">
+            <h4>Proveedor</h4>
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-proveedor">Proveedor</label>
+                <input type="text" id="empresa-gasto-proveedor" list="empresa-gastos-proveedores" placeholder="Proveedor" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-referencia">Referencia</label>
+                <input type="text" id="empresa-gasto-referencia" placeholder="#factura / transferencia" />
+              </div>
+            </div>
+          </div>
+
+          <div class="kanm-modal-section">
+            <h4>Pago</h4>
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-metodo">Metodo de pago</label>
+                <select id="empresa-gasto-metodo">
+                  <option value="EFECTIVO">Caja / Efectivo</option>
+                  <option value="TARJETA">Tarjeta</option>
+                  <option value="TRANSFERENCIA">Transferencia</option>
+                  <option value="CREDITO">Credito</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-origen">Origen fondos</label>
+                <select id="empresa-gasto-origen">
+                  <option value="caja">Caja</option>
+                  <option value="banco">Banco</option>
+                  <option value="externo">Externo</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-origen-detalle">Origen detalle</label>
+                <input type="text" id="empresa-gasto-origen-detalle" list="empresa-gastos-origenes" placeholder="Caja principal, Banco Popular" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-fecha-venc">Fecha vencimiento</label>
+                <input type="date" id="empresa-gasto-fecha-venc" />
+              </div>
+            </div>
+          </div>
+
+          <div class="kanm-modal-section">
+            <h4>Comprobante</h4>
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-tipo-comprobante">Tipo</label>
+                <select id="empresa-gasto-tipo-comprobante">
+                  <option value="">Sin comprobante</option>
+                  <option value="FACTURA">Factura</option>
+                  <option value="RECIBO">Recibo</option>
+                  <option value="NOTA">Nota</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-ncf">NCF</label>
+                <input type="text" id="empresa-gasto-ncf" placeholder="B01XXXXXX" />
+              </div>
+            </div>
+          </div>
+
+          <div class="kanm-modal-section">
+            <h4>Centro de costo</h4>
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-centro">Area / Sucursal</label>
+                <input type="text" id="empresa-gasto-centro" placeholder="Cocina, Barra, Administracion" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-gasto-tags">Tags</label>
+                <input type="text" id="empresa-gasto-tags" placeholder="marketing, delivery" />
+              </div>
+            </div>
+          </div>
+
+          <div class="kanm-modal-actions">
+            <button type="button" class="kanm-button ghost" id="empresa-gasto-cancelar">Cancelar</button>
+            <button type="button" class="kanm-button ghost" data-gasto-save="borrador">Guardar borrador</button>
+            <button type="button" class="kanm-button" data-gasto-save="aprobar">Guardar y aprobar</button>
+            <button type="button" class="kanm-button primary" data-gasto-save="pagar">Guardar y pagar</button>
+          </div>
+          <div id="empresa-gasto-mensaje" class="kanm-message"></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="empresa-gasto-view-modal" hidden>
+      <div class="kanm-modal kanm-modal--wide empresa-gasto-view-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-gasto-view-titulo">
+        <div class="empresa-gasto-view-header">
+          <div>
+            <h3 id="empresa-gasto-view-titulo">Detalle de gasto</h3>
+            <p class="kanm-subtitle" id="empresa-gasto-view-subtitulo">--</p>
+          </div>
+          <div class="empresa-gasto-view-actions">
+            <button type="button" class="kanm-button ghost" id="empresa-gasto-view-editar">Editar</button>
+            <button type="button" class="kanm-button ghost" id="empresa-gasto-view-aprobar">Aprobar</button>
+            <button type="button" class="kanm-button ghost" id="empresa-gasto-view-pagar">Marcar pagado</button>
+            <button type="button" class="kanm-button ghost" id="empresa-gasto-view-anular">Anular</button>
+            <button type="button" class="kanm-button primary" id="empresa-gasto-view-cerrar">Cerrar</button>
+          </div>
+        </div>
+        <div class="empresa-gasto-view-body">
+          <div class="empresa-gasto-view-grid">
+            <div class="empresa-gasto-view-card" id="empresa-gasto-view-resumen"></div>
+            <div class="empresa-gasto-view-card">
+              <h4>Timeline</h4>
+              <ul id="empresa-gasto-view-timeline" class="empresa-gasto-timeline"></ul>
+            </div>
+          </div>
+          <div class="empresa-gasto-view-card">
+            <h4>Pagos</h4>
+            <div id="empresa-gasto-view-pagos" class="empresa-gasto-view-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="empresa-gasto-pago-modal" hidden>
+      <div class="kanm-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-gasto-pago-titulo">
+        <h3 id="empresa-gasto-pago-titulo">Marcar como pagado</h3>
+        <p class="kanm-subtitle" id="empresa-gasto-pago-subtitulo">Registra un pago total o parcial.</p>
+        <form id="empresa-gasto-pago-form" class="kanm-form" novalidate>
           <div class="kanm-input-group">
-            <label for="empresa-desde">Desde</label>
-            <input type="date" id="empresa-desde" />
+            <label for="empresa-gasto-pago-fecha">Fecha pago</label>
+            <input type="date" id="empresa-gasto-pago-fecha" />
           </div>
           <div class="kanm-input-group">
-            <label for="empresa-hasta">Hasta</label>
-            <input type="date" id="empresa-hasta" />
+            <label for="empresa-gasto-pago-monto">Monto pagado</label>
+            <input type="text" id="empresa-gasto-pago-monto" inputmode="decimal" data-money placeholder="0.00" />
           </div>
-          <button type="button" class="kanm-button" id="empresa-actualizar">Actualizar</button>
-          <span id="empresa-mensaje" class="kanm-subtitle"></span>
+          <div class="kanm-input-group">
+            <label for="empresa-gasto-pago-metodo">Metodo</label>
+            <select id="empresa-gasto-pago-metodo">
+              <option value="EFECTIVO">Caja / Efectivo</option>
+              <option value="TRANSFERENCIA">Transferencia</option>
+              <option value="TARJETA">Tarjeta</option>
+            </select>
+          </div>
+          <div class="kanm-input-group">
+            <label for="empresa-gasto-pago-origen">Origen fondos</label>
+            <select id="empresa-gasto-pago-origen">
+              <option value="caja">Caja</option>
+              <option value="banco">Banco</option>
+            </select>
+          </div>
+          <div class="kanm-input-group">
+            <label for="empresa-gasto-pago-origen-detalle">Origen detalle</label>
+            <input type="text" id="empresa-gasto-pago-origen-detalle" list="empresa-gastos-origenes" placeholder="Caja principal, Banco Popular" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="empresa-gasto-pago-referencia">Referencia</label>
+            <input type="text" id="empresa-gasto-pago-referencia" placeholder="Transferencia / cheque" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="empresa-gasto-pago-notas">Notas</label>
+            <textarea id="empresa-gasto-pago-notas" rows="2" placeholder="Detalle del pago"></textarea>
+          </div>
+          <div class="kanm-modal-actions">
+            <button type="button" class="kanm-button ghost" id="empresa-gasto-pago-cancelar">Cancelar</button>
+            <button type="submit" class="kanm-button primary">Registrar pago</button>
+          </div>
+          <div id="empresa-gasto-pago-mensaje" class="kanm-message"></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="empresa-gasto-anular-modal" hidden>
+      <div class="kanm-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-gasto-anular-titulo">
+        <h3 id="empresa-gasto-anular-titulo">Anular gasto</h3>
+        <p class="kanm-subtitle">Debes indicar el motivo. Esto no elimina el registro.</p>
+        <div class="kanm-input-group">
+          <label for="empresa-gasto-anular-motivo">Motivo</label>
+          <textarea id="empresa-gasto-anular-motivo" rows="3" placeholder="Ej. error de factura"></textarea>
+        </div>
+        <div class="kanm-input-group">
+          <label class="kanm-input-toggle" for="empresa-gasto-anular-confirm">
+            <span>Confirmo la anulacion</span>
+            <input type="checkbox" id="empresa-gasto-anular-confirm" />
+          </label>
+        </div>
+        <div class="kanm-modal-actions">
+          <button type="button" class="kanm-button ghost" id="empresa-gasto-anular-cancelar">Cancelar</button>
+          <button type="button" class="kanm-button danger" id="empresa-gasto-anular-confirmar">Anular</button>
+        </div>
+        <div id="empresa-gasto-anular-mensaje" class="kanm-message"></div>
+      </div>
+    </div>
+
+    <!-- Modales de clientes -->
+    <div class="kanm-modal-overlay" id="empresa-cliente-modal" hidden>
+      <div class="kanm-modal kanm-modal--wide empresa-cliente-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-cliente-modal-titulo">
+        <h3 id="empresa-cliente-modal-titulo">Nuevo cliente</h3>
+        <p class="kanm-subtitle" id="empresa-cliente-modal-subtitulo">Registra datos y reglas de credito.</p>
+        <form id="empresa-cliente-form" class="kanm-form" novalidate>
+          <input type="hidden" id="empresa-cliente-id" />
+          <div class="kanm-modal-section">
+            <h4>Identidad</h4>
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-nombre">Nombre / Razon social</label>
+                <input type="text" id="empresa-cliente-nombre" placeholder="Nombre del cliente" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-documento">Documento</label>
+                <input type="text" id="empresa-cliente-documento" placeholder="Cedula / RNC" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-tipo-documento">Tipo documento</label>
+                <select id="empresa-cliente-tipo-documento">
+                  <option value="">Selecciona</option>
+                  <option value="CEDULA">Cedula</option>
+                  <option value="RNC">RNC</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-tipo">Tipo</label>
+                <select id="empresa-cliente-tipo">
+                  <option value="PERSONA">Persona</option>
+                  <option value="EMPRESA">Empresa</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-codigo">Codigo interno</label>
+                <input type="text" id="empresa-cliente-codigo" placeholder="Auto o manual" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-segmento">Segmento</label>
+                <select id="empresa-cliente-segmento">
+                  <option value="CONSUMIDOR">Consumidor final</option>
+                  <option value="FRECUENTE">Cliente frecuente</option>
+                  <option value="EMPRESA">Empresa (B2B)</option>
+                  <option value="MAYORISTA">Mayorista</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-estado">Estado</label>
+                <select id="empresa-cliente-estado">
+                  <option value="ACTIVO">Activo</option>
+                  <option value="INACTIVO">Inactivo</option>
+                  <option value="MORA">En mora</option>
+                  <option value="BLOQUEADO">Bloqueado</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-sucursal">Sucursal</label>
+                <select id="empresa-cliente-sucursal">
+                  <option value="">Empresa (global)</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label class="kanm-input-toggle" for="empresa-cliente-vip">
+                  <span>VIP</span>
+                  <input type="checkbox" id="empresa-cliente-vip" />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="kanm-modal-section">
+            <h4>Contacto</h4>
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-telefono">Telefono</label>
+                <input type="text" id="empresa-cliente-telefono" placeholder="809-000-0000" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-whatsapp">WhatsApp</label>
+                <input type="text" id="empresa-cliente-whatsapp" placeholder="809-000-0000" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-email">Email</label>
+                <input type="email" id="empresa-cliente-email" placeholder="correo@cliente.com" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-direccion">Direccion</label>
+                <input type="text" id="empresa-cliente-direccion" placeholder="Direccion del cliente" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-cumple">Cumpleanos</label>
+                <input type="date" id="empresa-cliente-cumple" />
+              </div>
+            </div>
+          </div>
+
+          <div class="kanm-modal-section">
+            <h4>Credito y preferencias</h4>
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label class="kanm-input-toggle" for="empresa-cliente-credito-activo">
+                  <span>Permitir credito</span>
+                  <input type="checkbox" id="empresa-cliente-credito-activo" />
+                </label>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-credito-limite">Limite credito</label>
+                <input type="text" id="empresa-cliente-credito-limite" inputmode="decimal" data-money placeholder="0.00" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-credito-dias">Dias de credito</label>
+                <input type="number" id="empresa-cliente-credito-dias" min="0" step="1" placeholder="0" />
+              </div>
+              <div class="kanm-input-group">
+                <label class="kanm-input-toggle" for="empresa-cliente-credito-bloqueo">
+                  <span>Bloquear si excede limite</span>
+                  <input type="checkbox" id="empresa-cliente-credito-bloqueo" />
+                </label>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-metodo">Metodo de pago preferido</label>
+                <input type="text" id="empresa-cliente-metodo" placeholder="Efectivo / transferencia" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-tags">Tags</label>
+                <input type="text" id="empresa-cliente-tags" placeholder="VIP, Delivery, etc." />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-notas">Nota rapida</label>
+                <input type="text" id="empresa-cliente-notas" placeholder="Preferencias, alergias..." />
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-notas-internas">Notas internas</label>
+                <textarea id="empresa-cliente-notas-internas" rows="2" placeholder="Notas internas"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="kanm-modal-actions">
+            <button type="button" class="kanm-button ghost" id="empresa-cliente-cancelar">Cancelar</button>
+            <button type="button" class="kanm-button ghost" id="empresa-cliente-guardar-estado">Guardar y abrir estado</button>
+            <button type="submit" class="kanm-button primary" id="empresa-cliente-guardar">Guardar cliente</button>
+          </div>
+          <div id="empresa-cliente-mensaje" class="kanm-message"></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="empresa-cliente-view-modal" hidden>
+      <div class="kanm-modal kanm-modal--wide empresa-cliente-view-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-cliente-view-nombre">
+        <div class="empresa-cliente-view-header">
+          <div>
+            <h3 id="empresa-cliente-view-nombre">Cliente</h3>
+            <p class="kanm-subtitle" id="empresa-cliente-view-subtitulo">--</p>
+          </div>
+          <div class="empresa-cliente-view-actions">
+            <button type="button" class="kanm-button ghost" id="empresa-cliente-view-editar">Editar</button>
+            <button type="button" class="kanm-button ghost" id="empresa-cliente-view-abonar">Abonar / Cobrar</button>
+            <button type="button" class="kanm-button ghost" id="empresa-cliente-view-estado">Estado de cuenta</button>
+            <button type="button" class="kanm-button ghost" id="empresa-cliente-view-bloquear">Bloquear</button>
+            <button type="button" class="kanm-button primary" id="empresa-cliente-view-cerrar">Cerrar</button>
+          </div>
+        </div>
+
+        <div class="empresa-cliente-view-tabs">
+          <button type="button" class="kanm-tab active" data-cliente-view-tab="resumen">Resumen</button>
+          <button type="button" class="kanm-tab" data-cliente-view-tab="compras">Historial compras</button>
+          <button type="button" class="kanm-tab" data-cliente-view-tab="cxc">Cuenta por cobrar</button>
+          <button type="button" class="kanm-tab" data-cliente-view-tab="pagos">Pagos y abonos</button>
+          <button type="button" class="kanm-tab" data-cliente-view-tab="notas">Notas</button>
+          <button type="button" class="kanm-tab" data-cliente-view-tab="documentos">Documentos</button>
+        </div>
+
+        <div class="empresa-cliente-view-body">
+          <section class="empresa-cliente-view-panel active" data-cliente-view-panel="resumen">
+            <div class="empresa-cliente-view-kpis">
+              <div class="empresa-mini-stat">
+                <span>Total comprado</span>
+                <strong id="empresa-cliente-kpi-total">RD$0.00</strong>
+              </div>
+              <div class="empresa-mini-stat">
+                <span>Compras</span>
+                <strong id="empresa-cliente-kpi-compras">0</strong>
+              </div>
+              <div class="empresa-mini-stat">
+                <span>Ticket promedio</span>
+                <strong id="empresa-cliente-kpi-ticket">RD$0.00</strong>
+              </div>
+              <div class="empresa-mini-stat">
+                <span>Saldo actual</span>
+                <strong id="empresa-cliente-kpi-saldo">RD$0.00</strong>
+              </div>
+            </div>
+            <div id="empresa-cliente-view-info" class="empresa-cliente-view-info"></div>
+          </section>
+
+          <section class="empresa-cliente-view-panel" data-cliente-view-panel="compras">
+            <div class="kanm-table-wrapper">
+              <table class="kanm-table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Descripcion</th>
+                    <th>Monto</th>
+                    <th>Saldo</th>
+                    <th>Sucursal</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="empresa-cliente-compras-body">
+                  <tr>
+                    <td colspan="6">Cargando...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="empresa-cliente-view-panel" data-cliente-view-panel="cxc">
+            <div class="empresa-cliente-cxc-header">
+              <button type="button" class="kanm-button primary" id="empresa-cliente-nueva-factura">+ Nueva factura</button>
+            </div>
+            <div class="kanm-table-wrapper">
+              <table class="kanm-table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Descripcion</th>
+                    <th>Monto</th>
+                    <th>Pagado</th>
+                    <th>Saldo</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="empresa-cliente-cxc-body">
+                  <tr>
+                    <td colspan="7">Cargando...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="empresa-cliente-view-panel" data-cliente-view-panel="pagos">
+            <div class="kanm-table-wrapper">
+              <table class="kanm-table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Monto</th>
+                    <th>Metodo</th>
+                    <th>Factura</th>
+                    <th>Sucursal</th>
+                  </tr>
+                </thead>
+                <tbody id="empresa-cliente-pagos-body">
+                  <tr>
+                    <td colspan="5">Cargando...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="empresa-cliente-view-panel" data-cliente-view-panel="notas">
+            <form id="empresa-cliente-nota-form" class="empresa-cliente-nota-form">
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-nota-texto">Nueva nota</label>
+                <textarea id="empresa-cliente-nota-texto" rows="2" placeholder="Nota interna"></textarea>
+              </div>
+              <button type="submit" class="kanm-button primary">Guardar nota</button>
+              <span id="empresa-cliente-nota-mensaje" class="kanm-subtitle"></span>
+            </form>
+            <div id="empresa-cliente-notas-list" class="empresa-cliente-notas-list"></div>
+          </section>
+
+          <section class="empresa-cliente-view-panel" data-cliente-view-panel="documentos">
+            <div class="empresa-cliente-docs">
+              <p class="kanm-subtitle">No hay documentos cargados.</p>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="empresa-cliente-abono-modal" hidden>
+      <div class="kanm-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-cliente-abono-titulo">
+        <h3 id="empresa-cliente-abono-titulo">Abonar / Cobrar</h3>
+        <p class="kanm-subtitle" id="empresa-cliente-abono-subtitulo">Registra un pago para una factura.</p>
+        <form id="empresa-cliente-abono-form" class="kanm-form" novalidate>
+          <input type="hidden" id="empresa-cliente-abono-cliente-id" />
+          <div class="kanm-input-group">
+            <label for="empresa-cliente-abono-deuda">Factura / Deuda</label>
+            <select id="empresa-cliente-abono-deuda">
+              <option value="">Selecciona factura</option>
+            </select>
+          </div>
+          <div class="kanm-input-group">
+            <label for="empresa-cliente-abono-fecha">Fecha</label>
+            <input type="date" id="empresa-cliente-abono-fecha" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="empresa-cliente-abono-monto">Monto</label>
+            <input type="text" id="empresa-cliente-abono-monto" inputmode="decimal" data-money placeholder="0.00" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="empresa-cliente-abono-metodo">Metodo</label>
+            <select id="empresa-cliente-abono-metodo">
+              <option value="EFECTIVO">Efectivo</option>
+              <option value="TRANSFERENCIA">Transferencia</option>
+              <option value="TARJETA">Tarjeta</option>
+            </select>
+          </div>
+          <div class="kanm-input-group">
+            <label for="empresa-cliente-abono-notas">Notas</label>
+            <textarea id="empresa-cliente-abono-notas" rows="2" placeholder="Referencia o detalle"></textarea>
+          </div>
+          <div class="kanm-modal-actions">
+            <button type="button" class="kanm-button ghost" id="empresa-cliente-abono-cancelar">Cancelar</button>
+            <button type="submit" class="kanm-button primary">Registrar pago</button>
+          </div>
+          <div id="empresa-cliente-abono-mensaje" class="kanm-message"></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="empresa-cliente-estado-modal" hidden>
+      <div class="kanm-modal kanm-modal--wide" role="dialog" aria-modal="true" aria-labelledby="empresa-cliente-estado-titulo">
+        <h3 id="empresa-cliente-estado-titulo">Estado de cuenta</h3>
+        <p class="kanm-subtitle" id="empresa-cliente-estado-subtitulo">Detalle de facturas y balance.</p>
+        <div class="empresa-cliente-estado-filtros">
+          <div class="kanm-input-group">
+            <label for="empresa-cliente-estado-desde">Desde</label>
+            <input type="date" id="empresa-cliente-estado-desde" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="empresa-cliente-estado-hasta">Hasta</label>
+            <input type="date" id="empresa-cliente-estado-hasta" />
+          </div>
+          <button type="button" class="kanm-button" id="empresa-cliente-estado-actualizar">Actualizar</button>
+          <button type="button" class="kanm-button ghost" id="empresa-cliente-estado-imprimir">Imprimir</button>
+          <button type="button" class="kanm-button ghost" id="empresa-cliente-estado-cerrar">Cerrar</button>
+        </div>
+        <div class="empresa-clientes-estado-resumen">
+          <div class="empresa-mini-stat">
+            <span>Total facturado</span>
+            <strong id="empresa-cliente-estado-total">RD$0.00</strong>
+          </div>
+          <div class="empresa-mini-stat">
+            <span>Pagado</span>
+            <strong id="empresa-cliente-estado-pagado">RD$0.00</strong>
+          </div>
+          <div class="empresa-mini-stat">
+            <span>Saldo</span>
+            <strong id="empresa-cliente-estado-saldo">RD$0.00</strong>
+          </div>
         </div>
         <div class="kanm-table-wrapper">
           <table class="kanm-table">
             <thead>
               <tr>
+                <th>Fecha</th>
+                <th>Descripcion</th>
+                <th>Monto</th>
+                <th>Pagado</th>
+                <th>Saldo</th>
                 <th>Sucursal</th>
-                <th>Ventas</th>
-                <th>Gastos</th>
-                <th>Ganancia</th>
-                <th>Ticket</th>
-                <th>Acciones</th>
               </tr>
             </thead>
-            <tbody id="empresa-sucursales-body">
+            <tbody id="empresa-cliente-estado-body">
               <tr>
                 <td colspan="6">Cargando...</td>
               </tr>
             </tbody>
           </table>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="empresa-cliente-factura-modal" hidden>
+      <div class="kanm-modal kanm-modal--wide empresa-cliente-factura-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-cliente-factura-titulo">
+        <h3 id="empresa-cliente-factura-titulo">Nueva factura</h3>
+        <p class="kanm-subtitle" id="empresa-cliente-factura-subtitulo">Registra una venta para el cliente seleccionado.</p>
+        <form id="empresa-cliente-factura-form" class="kanm-form" novalidate>
+          <input type="hidden" id="empresa-cliente-factura-cliente-id" />
+          <div class="kanm-form-grid empresa-form-grid">
+            <div class="kanm-input-group">
+              <label for="empresa-cliente-factura-fecha">Fecha</label>
+              <input type="date" id="empresa-cliente-factura-fecha" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-cliente-factura-descripcion">Descripcion</label>
+              <input type="text" id="empresa-cliente-factura-descripcion" placeholder="Detalle de la venta" />
+            </div>
+          </div>
+
+          <div class="empresa-cliente-factura-items">
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-factura-producto">Producto</label>
+                <select id="empresa-cliente-factura-producto">
+                  <option value="">Selecciona producto</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-cliente-factura-cantidad">Cantidad</label>
+                <input type="number" id="empresa-cliente-factura-cantidad" min="0.01" step="0.01" value="1" />
+              </div>
+              <div class="kanm-input-group">
+                <label>&nbsp;</label>
+                <button type="button" class="kanm-button ghost" id="empresa-cliente-factura-agregar">Agregar</button>
+              </div>
+            </div>
+            <div class="kanm-table-wrapper">
+              <table class="kanm-table">
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Cantidad</th>
+                    <th>Precio</th>
+                    <th>Total</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="empresa-cliente-factura-items-body">
+                  <tr>
+                    <td colspan="5">No hay items agregados.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="kanm-form-grid empresa-form-grid">
+            <div class="kanm-input-group">
+              <label for="empresa-cliente-factura-notas">Notas</label>
+              <textarea id="empresa-cliente-factura-notas" rows="2" placeholder="Notas para la factura"></textarea>
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-cliente-factura-subtotal">Subtotal</label>
+              <input type="text" id="empresa-cliente-factura-subtotal" inputmode="decimal" data-money readonly />
+            </div>
+            <div class="kanm-input-group">
+              <label id="empresa-cliente-factura-itbis-label" for="empresa-cliente-factura-itbis">ITBIS</label>
+              <input type="text" id="empresa-cliente-factura-itbis" inputmode="decimal" data-money readonly />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-cliente-factura-total">Total</label>
+              <input type="text" id="empresa-cliente-factura-total" inputmode="decimal" data-money readonly />
+            </div>
+          </div>
+
+          <div class="kanm-modal-actions">
+            <button type="button" class="kanm-button ghost" id="empresa-cliente-factura-cancelar">Cancelar</button>
+            <button type="submit" class="kanm-button primary">Guardar factura</button>
+          </div>
+          <div id="empresa-cliente-factura-mensaje" class="kanm-message"></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="empresa-factura-modal" hidden>
+      <div class="kanm-modal kanm-modal--wide empresa-factura-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-factura-titulo">
+        <h3 id="empresa-factura-titulo">Nueva factura</h3>
+        <p class="kanm-subtitle" id="empresa-factura-subtitulo">Registra una venta para el cliente seleccionado.</p>
+        <form id="empresa-factura-form" class="kanm-form" novalidate>
+          <div class="kanm-form-grid empresa-form-grid">
+            <div class="kanm-input-group">
+              <label for="empresa-factura-cliente">Cliente / Sucursal</label>
+              <select id="empresa-factura-cliente">
+                <option value="">Selecciona cliente</option>
+              </select>
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-factura-fecha">Fecha</label>
+              <input type="date" id="empresa-factura-fecha" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-factura-descripcion">Descripcion</label>
+              <input type="text" id="empresa-factura-descripcion" placeholder="Detalle de la venta" />
+            </div>
+          </div>
+
+          <div class="empresa-cliente-factura-items">
+            <div class="kanm-form-grid empresa-form-grid">
+              <div class="kanm-input-group">
+                <label for="empresa-factura-producto">Producto</label>
+                <select id="empresa-factura-producto">
+                  <option value="">Selecciona producto</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="empresa-factura-cantidad">Cantidad</label>
+                <input type="number" id="empresa-factura-cantidad" min="0.01" step="0.01" value="1" />
+              </div>
+              <div class="kanm-input-group">
+                <label>&nbsp;</label>
+                <button type="button" class="kanm-button ghost" id="empresa-factura-agregar">Agregar</button>
+              </div>
+            </div>
+            <div class="kanm-table-wrapper">
+              <table class="kanm-table">
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Cantidad</th>
+                    <th>Precio</th>
+                    <th>Total</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="empresa-factura-items-body">
+                  <tr>
+                    <td colspan="5">No hay items agregados.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="kanm-form-grid empresa-form-grid">
+            <div class="kanm-input-group">
+              <label for="empresa-factura-notas">Notas</label>
+              <textarea id="empresa-factura-notas" rows="2" placeholder="Notas para la factura"></textarea>
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-factura-subtotal">Subtotal</label>
+              <input type="text" id="empresa-factura-subtotal" inputmode="decimal" data-money readonly />
+            </div>
+            <div class="kanm-input-group">
+              <label id="empresa-factura-itbis-label" for="empresa-factura-itbis">ITBIS</label>
+              <input type="text" id="empresa-factura-itbis" inputmode="decimal" data-money readonly />
+            </div>
+            <div class="kanm-input-group">
+              <label for="empresa-factura-total">Total</label>
+              <input type="text" id="empresa-factura-total" inputmode="decimal" data-money readonly />
+            </div>
+          </div>
+
+          <div class="kanm-modal-actions">
+            <button type="button" class="kanm-button ghost" id="empresa-factura-cancelar">Cancelar</button>
+            <button type="submit" class="kanm-button primary">Guardar factura</button>
+          </div>
+          <div id="empresa-factura-mensaje" class="kanm-message"></div>
+        </form>
+      </div>
+    </div>
 
     <div class="kanm-modal-overlay" id="empresa-supervisor-modal" hidden>
       <div class="kanm-modal" role="dialog" aria-modal="true" aria-labelledby="empresa-supervisor-titulo">
@@ -119,8 +2364,8 @@
           <input type="text" id="empresa-supervisor-usuario" placeholder="usuario.supervisor" />
         </div>
         <div class="kanm-input-group">
-          <label for="empresa-supervisor-password">Contraseña</label>
-          <input type="password" id="empresa-supervisor-password" placeholder="Contraseña" autocomplete="new-password" />
+          <label for="empresa-supervisor-password">Contrasena</label>
+          <input type="password" id="empresa-supervisor-password" placeholder="Contrasena" autocomplete="new-password" />
         </div>
         <div class="kanm-modal-actions">
           <button type="button" class="kanm-button ghost" id="empresa-supervisor-cancelar">Cancelar</button>
