@@ -4,6 +4,7 @@ const roleRoutes = {
   bar: '/bar.html',
   caja: '/caja.html',
   vendedor: '/mostrador.html',
+  delivery: '/delivery.html',
   admin: '/admin.html',
   supervisor: '/supervisor.html',
   empresa: '/empresa.html',
@@ -114,6 +115,7 @@ const roleLabels = {
   bar: 'Bar',
   caja: 'Caja',
   vendedor: 'Mostrador',
+  delivery: 'Delivery',
   admin: 'Admin',
   supervisor: 'Supervisor',
   empresa: 'Empresa',
@@ -278,6 +280,7 @@ const applyTemaNegocio = (tema) => {
       bar: false,
       caja: true,
       mostrador: true,
+      delivery: true,
       historialCocina: true,
     };
 
@@ -357,6 +360,7 @@ const applyTemaNegocio = (tema) => {
       bar: false,
       caja: true,
       mostrador: true,
+      delivery: true,
       historialCocina: true,
     };
 

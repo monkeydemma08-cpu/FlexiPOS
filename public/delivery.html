@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Delivery - KANM</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="js/auth.js" defer></script>
+    <script src="js/delivery.js" defer></script>
+  </head>
+  <body data-role="delivery">
+    <header class="kanm-header">
+      <div class="kanm-header-left">
+        <div class="kanm-header-logo-container">
+          <img id="kanm-header-logo" alt="" />
+          <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
+        </div>
+
+        <div class="kanm-header-texts">
+          <div
+            id="kanm-header-negocio-nombre-principal"
+            class="kanm-header-title"
+            data-negocio-titulo
+          ></div>
+          <div id="kanm-header-negocio-subtitulo" class="kanm-header-subtitle">
+            Panel de delivery
+          </div>
+        </div>
+      </div>
+
+      <div class="kanm-header-right">
+        <div class="kanm-header-actions">
+          <span class="tag-rol">Delivery</span>
+          <a class="kanm-button ghost chat-link" href="/chat.html"
+            >Chat interno <span id="chat-unread-badge" class="chat-unread-badge"></span
+          ></a>
+          <button class="kanm-button ghost" type="button" onclick="logout()">Cerrar sesión</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="kanm-main delivery-main">
+      <section class="kanm-page-header">
+        <h1 class="kanm-page-title">Pedidos de delivery</h1>
+        <p class="kanm-page-subtitle">
+          Acepta pedidos listos, gestiona entregas y registra tu historial diario.
+        </p>
+      </section>
+
+      <section class="delivery-summary-grid">
+        <div class="kanm-card delivery-summary-card">
+          <span class="delivery-summary-label">Disponibles</span>
+          <strong id="delivery-metric-disponibles">0</strong>
+        </div>
+        <div class="kanm-card delivery-summary-card">
+          <span class="delivery-summary-label">En camino</span>
+          <strong id="delivery-metric-asignados">0</strong>
+        </div>
+        <div class="kanm-card delivery-summary-card">
+          <span class="delivery-summary-label">Entregados</span>
+          <strong id="delivery-metric-entregados">0</strong>
+        </div>
+      </section>
+
+      <div class="delivery-tabs">
+        <button class="kanm-tab active" data-tab="disponibles" type="button">Disponibles</button>
+        <button class="kanm-tab" data-tab="asignados" type="button">En camino</button>
+        <button class="kanm-tab" data-tab="entregados" type="button">Entregados</button>
+      </div>
+
+      <section class="delivery-panel active" id="delivery-panel-disponibles">
+        <div class="kanm-card delivery-panel-card">
+          <div class="kanm-card-header">
+            <h2>Pedidos listos para entregar</h2>
+            <p class="kanm-subtitle">Elige un pedido, acéptalo y sigue la ruta de entrega.</p>
+          </div>
+          <div id="delivery-msg-disponibles" class="kanm-message"></div>
+          <div id="delivery-list-disponibles" class="delivery-list"></div>
+        </div>
+      </section>
+
+      <section class="delivery-panel" id="delivery-panel-asignados" hidden>
+        <div class="kanm-card delivery-panel-card">
+          <div class="kanm-card-header">
+            <h2>Tus entregas en camino</h2>
+            <p class="kanm-subtitle">Confirma cuando completes cada entrega.</p>
+          </div>
+          <div id="delivery-msg-asignados" class="kanm-message"></div>
+          <div id="delivery-list-asignados" class="delivery-list"></div>
+        </div>
+      </section>
+
+      <section class="delivery-panel" id="delivery-panel-entregados" hidden>
+        <div class="kanm-card delivery-panel-card">
+          <div class="kanm-card-header">
+            <h2>Historial de entregas</h2>
+            <p class="kanm-subtitle">Consulta los pedidos entregados recientemente.</p>
+          </div>
+          <div id="delivery-msg-entregados" class="kanm-message"></div>
+          <div id="delivery-list-entregados" class="delivery-list"></div>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast-container"></div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/notifications.js" defer></script>
+  </body>
+</html>

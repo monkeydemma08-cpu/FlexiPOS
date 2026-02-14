@@ -846,6 +846,24 @@ img {
   justify-content: flex-end;
 }
 
+body[data-role='mesera'] .kanm-main {
+  padding-bottom: 140px;
+}
+
+#mesera-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  box-shadow: 0 -12px 30px rgba(15, 42, 68, 0.08);
+}
+
+#mesera-footer .flex-between {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
 #toast-container {
   position: fixed;
   bottom: 16px;
@@ -1464,6 +1482,10 @@ img {
   }
 
   .kanm-main .datos-mesa {
+    grid-column: span 3;
+  }
+
+  .kanm-main .delivery-datos {
     grid-column: span 3;
   }
 
@@ -2540,8 +2562,246 @@ img {
   background: var(--tone-08);
 }
 
+.cliente-row--selected {
+  background: var(--tone-08);
+}
+
+.cliente-row--selected:hover {
+  background: var(--tone-08);
+}
+
 .resumen-value.deuda-saldo {
   color: var(--kanm-error);
+}
+
+.admin-clientes-hero {
+  background: linear-gradient(135deg, #ffffff 0%, var(--surface-soft) 55%, #f7fbff 100%);
+  border: 1px solid var(--tone-12);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
+  position: relative;
+  overflow: hidden;
+}
+
+.admin-clientes-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top right, rgba(145, 162, 244, 0.18), transparent 55%);
+  pointer-events: none;
+}
+
+.admin-clientes-hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+.admin-clientes-hero-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.admin-clientes-hero-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.admin-clientes-hero-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.admin-clientes-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.admin-clientes-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-clientes-filtros {
+  position: relative;
+}
+
+.admin-clientes-filtros-scroll {
+  display: grid;
+  gap: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.admin-clientes-filtros-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.admin-clientes-lista {
+  min-height: 420px;
+}
+
+.admin-clientes-lista-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-clientes-table-scroll {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.admin-clientes-perfil-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-clientes-badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  background: var(--surface-soft-strong);
+  color: var(--kanm-gray-900);
+}
+
+.admin-clientes-badge[data-status='activo'] {
+  background: #def7e5;
+  color: #0f5132;
+}
+
+.admin-clientes-badge[data-status='inactivo'] {
+  background: #fde8e8;
+  color: #b42318;
+}
+
+.admin-clientes-badge[data-status='none'] {
+  background: #f2f2f2;
+  color: var(--kanm-gray-600);
+}
+
+.admin-clientes-resumen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface-soft);
+  border: 1px solid var(--tone-12);
+}
+
+.admin-clientes-resumen-item span {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--kanm-gray-600);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.admin-clientes-resumen-item strong {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--kanm-gray-900);
+}
+
+.admin-clientes-facturas-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-clientes-facturas-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.admin-clientes-deudas-scroll {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.admin-clientes-subcard {
+  background: var(--surface-soft);
+  border-radius: 16px;
+  padding: 16px;
+  border: 1px solid var(--tone-12);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-clientes-subcard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-clientes-subcard-header h4 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.admin-clientes-abonos-scroll {
+  max-height: 240px;
+  overflow: auto;
+}
+
+.admin-clientes-table-scroll .acciones-inline .kanm-button,
+.admin-clientes-deudas-scroll .acciones-inline .kanm-button {
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  line-height: 1.1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--kanm-gray-800);
+  border: 1px solid var(--tone-25);
+  box-shadow: none;
+  font-weight: 500;
+  transform: none;
+}
+
+.admin-clientes-table-scroll .acciones-inline .kanm-button:hover,
+.admin-clientes-deudas-scroll .acciones-inline .kanm-button:hover {
+  background: var(--kanm-gray-100);
+  box-shadow: none;
+  transform: none;
+}
+
+@media (max-width: 1100px) {
+  .admin-clientes-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-clientes-filtros-scroll,
+  .admin-clientes-table-scroll,
+  .admin-clientes-deudas-scroll,
+  .admin-clientes-abonos-scroll {
+    max-height: none;
+  }
 }
 
 .categorias-layout {
@@ -6328,4 +6588,144 @@ img {
     flex-direction: column;
     align-items: stretch;
   }
+}
+
+.delivery-form-grid .delivery-span-full {
+  grid-column: 1 / -1;
+}
+
+.acciones-pedido--delivery {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.delivery-main {
+  grid-template-columns: 1fr;
+}
+
+.delivery-summary-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.delivery-summary-card {
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.delivery-summary-label {
+  font-size: 0.86rem;
+  opacity: 0.7;
+}
+
+.delivery-summary-card strong {
+  font-size: 1.45rem;
+  color: var(--color-texto);
+}
+
+.delivery-tabs {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.delivery-panel {
+  display: none;
+}
+
+.delivery-panel.active {
+  display: block;
+}
+
+.delivery-panel-card {
+  gap: 20px;
+}
+
+.delivery-list {
+  display: grid;
+  gap: 16px;
+}
+
+.delivery-card {
+  gap: 14px;
+}
+
+.delivery-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.delivery-card-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.delivery-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.9rem;
+  color: var(--kanm-gray-600);
+}
+
+.delivery-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.delivery-card-line {
+  margin: 0;
+  font-size: 0.93rem;
+  color: var(--kanm-gray-900);
+}
+
+.delivery-card-line strong {
+  color: var(--kanm-gray-600);
+  font-weight: 600;
+}
+
+.delivery-card-items h4 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
+.delivery-card-items ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.delivery-card-note {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  background: var(--surface-soft);
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+.delivery-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.kanm-badge.estado-disponible {
+  background: color-mix(in srgb, var(--color-primario) 18%, #ffffff);
+  color: var(--color-texto);
+}
+
+.kanm-badge.estado-asignado {
+  background: color-mix(in srgb, var(--color-secundario) 22%, #ffffff);
+  color: var(--color-texto);
+}
+
+.kanm-badge.estado-entregado {
+  background: color-mix(in srgb, var(--kanm-success) 18%, #ffffff);
+  color: var(--kanm-success);
 }

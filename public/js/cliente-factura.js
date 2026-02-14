@@ -2,6 +2,8 @@
   const authApi = window.kanmAuth;
   const params = new URLSearchParams(window.location.search || '');
   const deudaId = params.get('deudaId');
+  const scope = params.get('scope');
+  const sessionUser = window.KANMSession?.getUser?.() || window.APP_SESION;
 
   const dom = {
     emisorNombre: document.getElementById('cliente-factura-emisor-nombre'),
@@ -91,6 +93,27 @@
     if (dom.notas) dom.notas.textContent = factura.notas || '';
   };
 
+  const resolverEndpointFactura = () => {
+    if (scope === 'admin') return `/api/clientes/deudas/${deudaId}/factura`;
+    if (scope === 'empresa') return `/api/empresa/clientes/deudas/${deudaId}/factura`;
+    if (sessionUser?.rol === 'empresa') return `/api/empresa/clientes/deudas/${deudaId}/factura`;
+    if (sessionUser?.rol === 'admin') return `/api/clientes/deudas/${deudaId}/factura`;
+    if (sessionUser?.empresa_id || sessionUser?.empresaId) {
+      return `/api/empresa/clientes/deudas/${deudaId}/factura`;
+    }
+    return `/api/clientes/deudas/${deudaId}/factura`;
+  };
+
+  const obtenerEndpointsFactura = () => {
+    const principal = resolverEndpointFactura();
+    const alterno =
+      principal.indexOf('/api/empresa/') === 0
+        ? `/api/clientes/deudas/${deudaId}/factura`
+        : `/api/empresa/clientes/deudas/${deudaId}/factura`;
+    if (principal === alterno) return [principal];
+    return [principal, alterno];
+  };
+
   const cargarFactura = async () => {
     if (!deudaId) {
       alert('No se encontro la factura.');
@@ -98,12 +121,24 @@
     }
     try {
       const headers = authApi?.getAuthHeaders?.() || {};
-      const resp = await fetch(`/api/empresa/clientes/deudas/${deudaId}/factura`, { headers });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data?.ok === false) {
-        throw new Error(data?.error || 'No se pudo cargar la factura');
+      const endpoints = obtenerEndpointsFactura();
+      let ultimoError = null;
+
+      for (const endpoint of endpoints) {
+        try {
+          const resp = await fetch(endpoint, { headers });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || data?.ok === false) {
+            throw new Error(data?.error || 'No se pudo cargar la factura');
+          }
+          renderFactura(data);
+          return;
+        } catch (error) {
+          ultimoError = error;
+        }
       }
-      renderFactura(data);
+
+      throw ultimoError || new Error('No se pudo cargar la factura');
     } catch (error) {
       console.error('Error cargando factura cliente:', error);
       alert(error.message || 'No se pudo cargar la factura.');

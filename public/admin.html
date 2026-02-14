@@ -462,7 +462,7 @@
     <section class="admin-panel hidden" data-admin-section="usuarios" id="admin-section-usuarios">
       <div class="kanm-card-header">
         <h2>Usuarios</h2>
-        <p class="kanm-subtitle">Administra las cuentas de meseras, cocina, caja y mostrador.</p>
+        <p class="kanm-subtitle">Administra las cuentas de meseras, cocina, caja, mostrador y delivery.</p>
       </div>
       <div class="admin-layout-two-cols">
         <section class="kanm-card admin-card">
@@ -478,6 +478,7 @@
               <option value="bar">Bar</option>
               <option value="caja">Caja</option>
               <option value="vendedor">Mostrador</option>
+              <option value="delivery">Delivery</option>
               <option value="admin">Administrador</option>
             </select>
           </div>
@@ -546,6 +547,7 @@
                   <option value="bar">Bar</option>
                   <option value="caja">Caja</option>
                   <option value="vendedor">Mostrador</option>
+                  <option value="delivery">Delivery</option>
                   <option value="supervisor">Supervisor</option>
                 </select>
               </div>
@@ -639,70 +641,145 @@
 
     <!-- Clientes -->
     <section class="admin-panel hidden" data-admin-section="clientes" id="admin-section-clientes">
-      <div class="kanm-card-header">
-        <h2>Clientes</h2>
-        <p class="kanm-subtitle">Gestiona clientes y reutiliza sus datos en cotizaciones y caja.</p>
-      </div>
-      <div class="admin-layout-two-cols clientes-layout">
-        <section class="kanm-card admin-card">
-          <header class="kanm-card-header">
-            <h3>Listado de clientes</h3>
-            <p class="kanm-subtitle">Busca por nombre o documento.</p>
-          </header>
-          <div class="clientes-busqueda">
-            <div class="kanm-input-group">
-              <label for="clientes-buscar">Buscar</label>
-              <input type="text" id="clientes-buscar" placeholder="Nombre o documento" />
-            </div>
-            <button type="button" class="kanm-button secondary" id="clientes-filtrar">Buscar</button>
+      <section class="kanm-card admin-clientes-hero">
+        <div class="admin-clientes-hero-row">
+          <div>
+            <h2>Clientes &amp; facturacion</h2>
+            <p class="kanm-subtitle">Gestiona clientes, facturas y cuentas por cobrar en un mismo flujo.</p>
           </div>
-          <div id="clientes-lista-mensaje" class="kanm-message"></div>
-          <div class="kanm-table-wrapper">
-            <table class="kanm-table">
-              <thead>
-                <tr>
-                  <th>Nombre</th>
-                  <th>Documento</th>
-                  <th>Teléfono</th>
-                  <th>Email</th>
-                  <th>Saldo pendiente</th>
-                  <th>Estado</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="clientes-tabla"></tbody>
-            </table>
+          <div class="admin-clientes-hero-actions">
+            <button type="button" class="kanm-button ghost" id="cliente-nuevo">Nuevo cliente</button>
           </div>
-        </section>
+        </div>
+        <div class="admin-clientes-hero-stats">
+          <div class="empresa-mini-stat">
+            <span>Total clientes</span>
+            <strong id="admin-clientes-total">0</strong>
+          </div>
+          <div class="empresa-mini-stat">
+            <span>Clientes activos</span>
+            <strong id="admin-clientes-activos">0</strong>
+          </div>
+          <div class="empresa-mini-stat">
+            <span>Saldo total</span>
+            <strong id="admin-clientes-saldo-total">RD$0.00</strong>
+          </div>
+        </div>
+      </section>
 
-        <div class="clientes-side">
-          <section class="kanm-card admin-card">
+      <div class="admin-clientes-layout">
+        <div class="admin-clientes-col admin-clientes-col--list">
+          <aside class="kanm-card admin-clientes-filtros">
             <header class="kanm-card-header">
-              <h3>Formulario de cliente</h3>
-              <p class="kanm-subtitle">Crea o edita información de contacto.</p>
+              <h3>Filtros</h3>
+              <p class="kanm-subtitle">Encuentra clientes por estado o documento.</p>
             </header>
+            <div class="admin-clientes-filtros-scroll">
+              <div class="kanm-input-group">
+                <label for="clientes-buscar">Buscar</label>
+                <input type="text" id="clientes-buscar" placeholder="Nombre, documento o telefono" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="clientes-estado">Estado</label>
+                <select id="clientes-estado">
+                  <option value="">Todos</option>
+                  <option value="activos">Activos</option>
+                  <option value="inactivos">Inactivos</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="clientes-saldo">Saldo</label>
+                <select id="clientes-saldo">
+                  <option value="">Todos</option>
+                  <option value="pendiente">Con saldo</option>
+                  <option value="cero">En cero</option>
+                </select>
+              </div>
+            </div>
+            <div class="admin-clientes-filtros-actions">
+              <button type="button" class="kanm-button" id="clientes-filtrar">Buscar</button>
+              <button type="button" class="kanm-button ghost" id="clientes-limpiar">Limpiar</button>
+              <span id="clientes-lista-mensaje" class="kanm-subtitle"></span>
+            </div>
+          </aside>
+
+          <section class="kanm-card admin-clientes-lista">
+            <header class="kanm-card-header admin-clientes-lista-header">
+              <div>
+                <h3>Listado de clientes</h3>
+                <p class="kanm-subtitle">Selecciona un cliente para ver su facturacion.</p>
+              </div>
+            </header>
+            <div class="kanm-table-wrapper admin-clientes-table-scroll">
+              <table class="kanm-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Documento</th>
+                    <th>Telefono</th>
+                    <th>Email</th>
+                    <th>Saldo pendiente</th>
+                    <th>Estado</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="clientes-tabla"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div class="admin-clientes-col admin-clientes-col--detail">
+          <section class="kanm-card admin-clientes-perfil">
+            <header class="kanm-card-header admin-clientes-perfil-header">
+              <div>
+                <h3>Perfil del cliente</h3>
+                <p class="kanm-subtitle">Datos esenciales y contacto.</p>
+              </div>
+              <span class="admin-clientes-badge" id="admin-cliente-estado-badge">Sin selecci?n</span>
+            </header>
+
+            <div class="admin-clientes-resumen">
+              <div class="admin-clientes-resumen-item">
+                <span>Cliente</span>
+                <strong id="admin-cliente-resumen-nombre">--</strong>
+              </div>
+              <div class="admin-clientes-resumen-item">
+                <span>Documento</span>
+                <strong id="admin-cliente-resumen-documento">--</strong>
+              </div>
+              <div class="admin-clientes-resumen-item">
+                <span>Telefono</span>
+                <strong id="admin-cliente-resumen-telefono">--</strong>
+              </div>
+              <div class="admin-clientes-resumen-item">
+                <span>Email</span>
+                <strong id="admin-cliente-resumen-email">--</strong>
+              </div>
+            </div>
+
             <form id="cliente-form" class="kanm-form" novalidate>
               <input type="hidden" id="cliente-id" />
               <div class="kanm-form-grid clientes-grid">
                 <div class="kanm-input-group">
                   <label for="cliente-nombre">Nombre del cliente *</label>
-                  <input type="text" id="cliente-nombre" required placeholder="Ej. Juan Pérez" />
+                  <input type="text" id="cliente-nombre" required placeholder="Ej. Juan Perez" />
                 </div>
                 <div class="kanm-input-group">
                   <label for="cliente-documento">Documento</label>
-                  <input type="text" id="cliente-documento" placeholder="RNC o cédula" />
+                  <input type="text" id="cliente-documento" placeholder="RNC o cedula" />
                 </div>
                 <div class="kanm-input-group">
                   <label for="cliente-tipo-documento">Tipo de documento</label>
                   <select id="cliente-tipo-documento">
                     <option value="">Selecciona</option>
-                    <option value="cedula">Cédula</option>
+                    <option value="cedula">Cedula</option>
                     <option value="rnc">RNC</option>
                     <option value="pasaporte">Pasaporte</option>
                   </select>
                 </div>
                 <div class="kanm-input-group">
-                  <label for="cliente-telefono">Teléfono</label>
+                  <label for="cliente-telefono">Telefono</label>
                   <input type="text" id="cliente-telefono" placeholder="809..." />
                 </div>
                 <div class="kanm-input-group">
@@ -713,8 +790,8 @@
 
               <div class="kanm-form-grid clientes-grid">
                 <div class="kanm-input-group">
-                  <label for="cliente-direccion">Dirección</label>
-                  <textarea id="cliente-direccion" rows="2" placeholder="Calle, número, sector"></textarea>
+                  <label for="cliente-direccion">Direcci?n</label>
+                  <textarea id="cliente-direccion" rows="2" placeholder="Calle, n?mero, sector"></textarea>
                 </div>
                 <div class="kanm-input-group">
                   <label for="cliente-notas">Notas internas</label>
@@ -728,43 +805,47 @@
               </div>
 
               <div class="admin-form-actions">
-                <button type="button" class="kanm-button ghost" id="cliente-nuevo">Nuevo</button>
                 <button type="submit" class="kanm-button" id="cliente-guardar">Guardar cliente</button>
               </div>
               <div id="cliente-mensaje" class="kanm-message"></div>
             </form>
           </section>
 
-          <section class="kanm-card admin-card" id="clientes-deudas-card">
-            <header class="kanm-card-header">
-              <h3>Cuentas por cobrar</h3>
-              <p class="kanm-subtitle">Registra deudas y abonos del cliente seleccionado.</p>
+          <section class="kanm-card admin-clientes-facturas" id="clientes-deudas-card">
+            <header class="kanm-card-header admin-clientes-facturas-header">
+              <div>
+                <h3>Facturacion y CxC</h3>
+                <p class="kanm-subtitle">Registra facturas, abonos y consulta historial.</p>
+              </div>
+              <div class="admin-clientes-facturas-actions">
+                <button type="button" class="kanm-button primary" id="cliente-factura-nueva">+ Nueva factura</button>
+              </div>
             </header>
 
             <div class="admin-resumen-grid deudas-resumen-grid">
               <div class="resumen-metric">
-                <span class="resumen-label">Total adeudado</span>
+                <span class="resumen-label">Total facturado</span>
                 <span class="resumen-value" id="clientes-deudas-total">DOP&nbsp;0.00</span>
               </div>
               <div class="resumen-metric">
-                <span class="resumen-label">Total abonado</span>
+                <span class="resumen-label">Total cobrado</span>
                 <span class="resumen-value" id="clientes-deudas-pagado">DOP&nbsp;0.00</span>
               </div>
               <div class="resumen-metric">
-                <span class="resumen-label">Saldo pendiente</span>
+                <span class="resumen-label">Saldo por cobrar</span>
                 <span class="resumen-value" id="clientes-deudas-saldo">DOP&nbsp;0.00</span>
               </div>
             </div>
 
             <div id="cliente-deudas-mensaje" class="kanm-message"></div>
-            <div class="kanm-table-wrapper">
+            <div class="kanm-table-wrapper admin-clientes-deudas-scroll">
               <table class="kanm-table">
                 <thead>
                   <tr>
                     <th>Fecha</th>
-                    <th>Detalle</th>
-                    <th>Monto</th>
-                    <th>Abonado</th>
+                    <th>Factura / Detalle</th>
+                    <th>Total</th>
+                    <th>Pagado</th>
                     <th>Saldo</th>
                     <th>Estado</th>
                     <th></th>
@@ -774,83 +855,88 @@
               </table>
             </div>
 
-            <form id="cliente-deuda-form" class="kanm-form" novalidate>
-              <input type="hidden" id="deuda-id" />
-              <div class="kanm-form-grid deudas-grid">
-                <div class="kanm-input-group deuda-productos-group">
-                  <label for="deuda-producto-select">¿Qué debe?</label>
-                  <div class="deuda-productos-controls">
-                    <select id="deuda-producto-select">
-                      <option value="">Selecciona producto</option>
-                    </select>
+            <div class="admin-clientes-subcard">
+              <div class="admin-clientes-subcard-header">
+                <h4>Crear o editar factura</h4>
+                <button type="button" class="kanm-button ghost" id="deuda-nueva">Nueva factura</button>
+              </div>
+              <form id="cliente-deuda-form" class="kanm-form" novalidate>
+                <input type="hidden" id="deuda-id" />
+                <div class="kanm-form-grid deudas-grid">
+                  <div class="kanm-input-group deuda-productos-group">
+                    <label for="deuda-producto-select">Productos facturados</label>
+                    <div class="deuda-productos-controls">
+                      <select id="deuda-producto-select">
+                        <option value="">Selecciona producto</option>
+                      </select>
+                      <input
+                        type="number"
+                        id="deuda-producto-cantidad"
+                        min="0.01"
+                        step="0.01"
+                        inputmode="decimal"
+                        value="1"
+                      />
+                      <button type="button" class="kanm-button secondary" id="deuda-producto-agregar">
+                        Agregar
+                      </button>
+                    </div>
+                    <div class="kanm-table-wrapper deuda-productos-table">
+                      <table class="kanm-table">
+                        <thead>
+                          <tr>
+                            <th>Producto</th>
+                            <th class="text-right">Cantidad</th>
+                            <th class="text-right">Precio</th>
+                            <th class="text-right">Total</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody id="deuda-productos-tabla"></tbody>
+                      </table>
+                    </div>
+                    <span class="kanm-input-help">
+                      El monto se calcula automaticamente con los productos agregados.
+                    </span>
+                  </div>
+                  <div class="kanm-input-group">
+                    <label for="deuda-fecha">Fecha</label>
+                    <input type="date" id="deuda-fecha" />
+                  </div>
+                  <div class="kanm-input-group">
+                    <label for="deuda-descripcion">Referencia</label>
+                    <input type="text" id="deuda-descripcion" placeholder="Ej. Credito fiado" />
+                  </div>
+                  <div class="kanm-input-group">
+                    <label for="deuda-monto">Total factura *</label>
                     <input
-                      type="number"
-                      id="deuda-producto-cantidad"
-                      min="0.01"
-                      step="0.01"
+                      type="text"
+                      id="deuda-monto"
                       inputmode="decimal"
-                      value="1"
+                      data-money
+                      placeholder="0.00"
+                      readonly
+                      required
                     />
-                    <button type="button" class="kanm-button secondary" id="deuda-producto-agregar">
-                      Agregar
-                    </button>
                   </div>
-                  <div class="kanm-table-wrapper deuda-productos-table">
-                    <table class="kanm-table">
-                      <thead>
-                        <tr>
-                          <th>Producto</th>
-                          <th class="text-right">Cantidad</th>
-                          <th class="text-right">Precio</th>
-                          <th class="text-right">Total</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody id="deuda-productos-tabla"></tbody>
-                    </table>
+                  <div class="kanm-input-group">
+                    <label for="deuda-notas">Notas</label>
+                    <textarea id="deuda-notas" rows="2" placeholder="Detalles adicionales"></textarea>
                   </div>
-                  <span class="kanm-input-help">
-                    El monto se calcula automáticamente con los productos agregados.
-                  </span>
                 </div>
-                <div class="kanm-input-group">
-                  <label for="deuda-fecha">Fecha</label>
-                  <input type="date" id="deuda-fecha" />
+                <div class="admin-form-actions">
+                  <button type="submit" class="kanm-button" id="deuda-guardar">Guardar factura</button>
                 </div>
-                <div class="kanm-input-group">
-                  <label for="deuda-descripcion">Referencia</label>
-                  <input type="text" id="deuda-descripcion" placeholder="Ej. Crédito fiado" />
-                </div>
-                <div class="kanm-input-group">
-                  <label for="deuda-monto">Monto adeudado *</label>
-                  <input
-                    type="text"
-                    id="deuda-monto"
-                    inputmode="decimal"
-                    data-money
-                    placeholder="0.00"
-                    readonly
-                    required
-                  />
-                </div>
-                <div class="kanm-input-group">
-                  <label for="deuda-notas">Notas</label>
-                  <textarea id="deuda-notas" rows="2" placeholder="Detalles adicionales"></textarea>
-                </div>
-              </div>
-              <div class="admin-form-actions">
-                <button type="button" class="kanm-button ghost" id="deuda-nueva">Nueva deuda</button>
-                <button type="submit" class="kanm-button" id="deuda-guardar">Guardar deuda</button>
-              </div>
-              <div id="deuda-mensaje" class="kanm-message"></div>
-            </form>
+                <div id="deuda-mensaje" class="kanm-message"></div>
+              </form>
+            </div>
 
-            <div class="deudas-abonos-panel">
-              <div class="deudas-abonos-header">
+            <div class="admin-clientes-subcard">
+              <div class="admin-clientes-subcard-header">
                 <div>
                   <h4>Abonos</h4>
                   <p class="kanm-subtitle" id="deuda-seleccionada">
-                    Selecciona una deuda para registrar abonos.
+                    Selecciona una factura para registrar abonos.
                   </p>
                 </div>
               </div>
@@ -866,7 +952,7 @@
                     <input type="text" id="abono-monto" inputmode="decimal" data-money placeholder="0.00" required />
                   </div>
                   <div class="kanm-input-group">
-                    <label for="abono-metodo">Método de pago</label>
+                    <label for="abono-metodo">Metodo de pago</label>
                     <select id="abono-metodo">
                       <option value="">Selecciona</option>
                       <option value="efectivo">Efectivo</option>
@@ -886,13 +972,13 @@
                 <div id="deuda-abono-mensaje" class="kanm-message"></div>
               </form>
 
-              <div class="kanm-table-wrapper">
+              <div class="kanm-table-wrapper admin-clientes-abonos-scroll">
                 <table class="kanm-table">
                   <thead>
                     <tr>
                       <th>Fecha</th>
                       <th>Monto</th>
-                      <th>Método</th>
+                      <th>Metodo</th>
                       <th>Notas</th>
                     </tr>
                   </thead>
@@ -2155,10 +2241,14 @@
                 <input type="checkbox" id="kanm-modulo-caja" checked />
                 <span>Caja</span>
               </label>
-                <label class="kanm-checkbox">
-                  <input type="checkbox" id="kanm-modulo-mostrador" checked />
-                  <span>Mostrador</span>
-                </label>
+              <label class="kanm-checkbox">
+                <input type="checkbox" id="kanm-modulo-mostrador" checked />
+                <span>Mostrador</span>
+              </label>
+              <label class="kanm-checkbox">
+                <input type="checkbox" id="kanm-modulo-delivery" checked />
+                <span>Delivery</span>
+              </label>
               <label class="kanm-checkbox">
                 <input type="checkbox" id="kanm-modulo-historial" checked />
                 <span>Historial de preparación</span>

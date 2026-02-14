@@ -6,6 +6,19 @@
   const mensajeLista = document.getElementById('clientes-lista-mensaje');
   const inputBuscar = document.getElementById('clientes-buscar');
   const btnBuscar = document.getElementById('clientes-filtrar');
+  const selectEstado = document.getElementById('clientes-estado');
+  const selectSaldo = document.getElementById('clientes-saldo');
+  const btnLimpiar = document.getElementById('clientes-limpiar');
+
+  const resumenClientesTotal = document.getElementById('admin-clientes-total');
+  const resumenClientesActivos = document.getElementById('admin-clientes-activos');
+  const resumenClientesSaldo = document.getElementById('admin-clientes-saldo-total');
+
+  const resumenClienteNombre = document.getElementById('admin-cliente-resumen-nombre');
+  const resumenClienteDocumento = document.getElementById('admin-cliente-resumen-documento');
+  const resumenClienteTelefono = document.getElementById('admin-cliente-resumen-telefono');
+  const resumenClienteEmail = document.getElementById('admin-cliente-resumen-email');
+  const resumenClienteEstado = document.getElementById('admin-cliente-estado-badge');
 
   const form = document.getElementById('cliente-form');
   const inputId = document.getElementById('cliente-id');
@@ -18,6 +31,7 @@
   const inputNotas = document.getElementById('cliente-notas');
   const inputActivo = document.getElementById('cliente-activo');
   const btnNuevo = document.getElementById('cliente-nuevo');
+  const btnFacturaNueva = document.getElementById('cliente-factura-nueva');
   const mensajeForm = document.getElementById('cliente-mensaje');
 
   const resumenDeudasTotal = document.getElementById('clientes-deudas-total');
@@ -71,6 +85,54 @@
     }).format(numero);
   };
 
+  const aplicarFiltrosClientes = (lista = []) => {
+    let resultado = Array.isArray(lista) ? [...lista] : [];
+    const estado = selectEstado?.value || '';
+    if (estado === 'activos') {
+      resultado = resultado.filter((cli) => Number(cli?.activo ?? 1) !== 0);
+    }
+    if (estado === 'inactivos') {
+      resultado = resultado.filter((cli) => Number(cli?.activo ?? 1) === 0);
+    }
+    const saldo = selectSaldo?.value || '';
+    if (saldo === 'pendiente') {
+      resultado = resultado.filter((cli) => Number(cli?.saldo_pendiente ?? 0) > 0);
+    }
+    if (saldo === 'cero') {
+      resultado = resultado.filter((cli) => Number(cli?.saldo_pendiente ?? 0) <= 0);
+    }
+    return resultado;
+  };
+
+  const renderResumenClientes = (lista = []) => {
+    if (!resumenClientesTotal && !resumenClientesActivos && !resumenClientesSaldo) {
+      return;
+    }
+    const total = lista.length;
+    const activos = lista.filter((cli) => Number(cli?.activo ?? 1) !== 0).length;
+    const saldoTotal = lista.reduce((acc, cli) => acc + (Number(cli?.saldo_pendiente ?? 0) || 0), 0);
+    if (resumenClientesTotal) resumenClientesTotal.textContent = total;
+    if (resumenClientesActivos) resumenClientesActivos.textContent = activos;
+    if (resumenClientesSaldo) resumenClientesSaldo.textContent = formatCurrency(saldoTotal);
+  };
+
+  const actualizarResumenCliente = (cliente = null) => {
+    if (resumenClienteNombre) resumenClienteNombre.textContent = cliente?.nombre || '--';
+    if (resumenClienteDocumento) resumenClienteDocumento.textContent = cliente?.documento || '--';
+    if (resumenClienteTelefono) resumenClienteTelefono.textContent = cliente?.telefono || '--';
+    if (resumenClienteEmail) resumenClienteEmail.textContent = cliente?.email || '--';
+    if (resumenClienteEstado) {
+      if (!cliente) {
+        resumenClienteEstado.textContent = 'Sin selección';
+        resumenClienteEstado.dataset.status = 'none';
+      } else {
+        const activo = Number(cliente?.activo ?? 1) !== 0;
+        resumenClienteEstado.textContent = activo ? 'Activo' : 'Inactivo';
+        resumenClienteEstado.dataset.status = activo ? 'activo' : 'inactivo';
+      }
+    }
+  };
+
   const parseMoneyValue = (input, { fallback = 0, allowEmpty = true } = {}) => {
     const raw =
       input && typeof input === 'object' && 'value' in input ? input.value : input ?? '';
@@ -116,7 +178,7 @@
 
   const cargarProductos = async () => {
     try {
-      const resp = await fetchAutorizado('/api/productos');
+      const resp = await fetchAutorizado('/api/productos?solo_venta=1');
       if (!resp.ok) throw new Error('No se pudieron cargar los productos');
       productos = ((await resp.json()) || []).filter((p) => Number(p?.activo ?? 1) !== 0);
       productosMap = new Map(productos.map((p) => [Number(p.id), p]));
@@ -229,7 +291,7 @@
       );
       const data = await resp.json();
       if (!resp.ok || data?.error) {
-        throw new Error(data?.error || 'No se pudo cargar el detalle de la deuda');
+        throw new Error(data?.error || 'No se pudo cargar el detalle de la factura');
       }
       const items = Array.isArray(data.items) ? data.items : [];
       deudaItems = items.map((item) => ({
@@ -240,7 +302,7 @@
       }));
       renderDeudaItems();
     } catch (error) {
-      console.error('Error al cargar detalle de deuda:', error);
+      console.error('Error al cargar detalle de factura:', error);
       limpiarDeudaItems();
     }
   };
@@ -379,9 +441,9 @@
     renderResumenDeudas();
     if (deudaSeleccionadaLabel) {
       deudaSeleccionadaLabel.textContent =
-        'Selecciona una deuda para registrar abonos.';
+        'Selecciona una factura para registrar abonos.';
     }
-    setMessage(mensajeDeudas, mensaje || 'Selecciona un cliente para ver sus cuentas por cobrar.', 'info');
+    setMessage(mensajeDeudas, mensaje || 'Selecciona un cliente para ver sus facturas y cuentas por cobrar.', 'info');
     limpiarDeudaForm();
     limpiarAbonoForm();
     setFormEnabled(deudaForm, false);
@@ -392,19 +454,25 @@
     if (!tablaBody) return;
     tablaBody.innerHTML = '';
 
-    if (!clientes.length) {
+    const lista = aplicarFiltrosClientes(clientes);
+    renderResumenClientes(lista);
+
+    if (!lista.length) {
       const fila = document.createElement('tr');
       const celda = document.createElement('td');
       celda.colSpan = 7;
       celda.className = 'tabla-vacia';
-      celda.textContent = 'No hay clientes registrados.';
+      celda.textContent = clientes.length ? 'No hay clientes para los filtros seleccionados.' : 'No hay clientes registrados.';
       fila.appendChild(celda);
       tablaBody.appendChild(fila);
       return;
     }
 
-    clientes.forEach((cli) => {
+    lista.forEach((cli) => {
       const fila = document.createElement('tr');
+      if (clienteActual?.id === cli.id) {
+        fila.classList.add('cliente-row--selected');
+      }
       const saldo = Number(cli.saldo_pendiente ?? 0) || 0;
       fila.innerHTML = `
         <td>${cli.nombre || ''}</td>
@@ -466,7 +534,7 @@
       const celda = document.createElement('td');
       celda.colSpan = 7;
       celda.className = 'tabla-vacia';
-      celda.textContent = 'No hay deudas registradas.';
+      celda.textContent = 'No hay facturas registradas.';
       fila.appendChild(celda);
       tablaDeudas.appendChild(fila);
       return;
@@ -501,8 +569,11 @@
           estadoTexto[estado] || 'Pendiente'
         }</span></td>
         <td>
-          <button type="button" class="kanm-button ghost" data-deuda-abonos="${deuda.id}">Abonos</button>
-          <button type="button" class="kanm-button ghost" data-deuda-editar="${deuda.id}">Editar</button>
+          <div class="acciones-inline">
+            <button type="button" class="kanm-button ghost" data-deuda-ver="${deuda.id}">Ver</button>
+            <button type="button" class="kanm-button ghost" data-deuda-abonos="${deuda.id}">Abonar</button>
+            <button type="button" class="kanm-button ghost" data-deuda-editar="${deuda.id}">Editar</button>
+          </div>
         </td>
       `;
       tablaDeudas.appendChild(fila);
@@ -518,7 +589,7 @@
       const celda = document.createElement('td');
       celda.colSpan = 4;
       celda.className = 'tabla-vacia';
-      celda.textContent = deudaActual ? 'Sin abonos registrados.' : 'Selecciona una deuda para ver abonos.';
+      celda.textContent = deudaActual ? 'Sin abonos registrados.' : 'Selecciona una factura para ver abonos.';
       fila.appendChild(celda);
       tablaAbonos.appendChild(fila);
       return;
@@ -540,10 +611,10 @@
     if (deudaSeleccionadaLabel) {
       if (deudaActual) {
         const { saldo } = obtenerTotalesDeuda(deudaActual);
-        const detalle = deudaActual.descripcion || `Deuda #${deudaActual.id}`;
+        const detalle = deudaActual.descripcion || `Factura #${deudaActual.id}`;
         deudaSeleccionadaLabel.textContent = `${detalle} · Saldo ${formatCurrency(saldo)}`;
       } else {
-        deudaSeleccionadaLabel.textContent = 'Selecciona una deuda para registrar abonos.';
+        deudaSeleccionadaLabel.textContent = 'Selecciona una factura para registrar abonos.';
       }
     }
     setFormEnabled(abonoForm, Boolean(deudaActual?.id));
@@ -555,11 +626,11 @@
       return;
     }
 
-    setMessage(mensajeDeudas, 'Cargando deudas...', 'info');
+    setMessage(mensajeDeudas, 'Cargando facturas...', 'info');
     try {
       const resp = await fetchAutorizado(`/api/clientes/${clienteActual.id}/deudas`);
       const data = await resp.json();
-      if (!resp.ok || data?.error) throw new Error(data?.error || 'No se pudieron cargar las deudas');
+      if (!resp.ok || data?.error) throw new Error(data?.error || 'No se pudieron cargar las facturas');
       deudas = Array.isArray(data.deudas) ? data.deudas : [];
       renderResumenDeudas(data.resumen);
       const objetivo = seleccionarId ?? (mantenerSeleccion ? deudaActual?.id : null);
@@ -582,8 +653,8 @@
       setMessage(mensajeDeudas, '');
       setFormEnabled(deudaForm, true);
     } catch (error) {
-      console.error('Error al cargar deudas:', error);
-      setMessage(mensajeDeudas, 'No fue posible obtener las deudas.', 'error');
+      console.error('Error al cargar facturas:', error);
+      setMessage(mensajeDeudas, 'No fue posible obtener las facturas.', 'error');
     }
   };
 
@@ -623,6 +694,8 @@
     inputNotas.value = cli.notas || '';
     inputActivo.checked = cli.activo !== 0;
     setMessage(mensajeForm, '');
+    actualizarResumenCliente(cli);
+    renderClientes();
     setFormEnabled(deudaForm, true);
     limpiarDeudaForm();
     limpiarAbonoForm();
@@ -736,13 +809,13 @@
       : `/api/clientes/${clienteActual.id}/deudas`;
     const method = esEdicion ? 'PUT' : 'POST';
 
-    setMessage(mensajeDeuda, 'Guardando deuda...', 'info');
+    setMessage(mensajeDeuda, 'Guardando factura...', 'info');
 
     try {
       const resp = await fetchJsonAutorizado(url, { method, body: JSON.stringify(payload) });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data?.error || data?.ok === false) {
-        throw new Error(data.error || 'No se pudo guardar la deuda');
+        throw new Error(data.error || 'No se pudo guardar la factura');
       }
 
       const nuevaId = data?.deuda?.id || deudaId;
@@ -757,16 +830,16 @@
         limpiarDeudaForm();
       }
 
-      setMessage(mensajeDeuda, 'Deuda guardada correctamente.', 'info');
+      setMessage(mensajeDeuda, 'Factura guardada correctamente.', 'info');
     } catch (error) {
-      console.error('Error al guardar deuda:', error);
-      setMessage(mensajeDeuda, error.message || 'No se pudo guardar la deuda.', 'error');
+      console.error('Error al guardar factura:', error);
+      setMessage(mensajeDeuda, error.message || 'No se pudo guardar la factura.', 'error');
     }
   };
 
   const guardarAbono = async () => {
     if (!clienteActual?.id || !deudaActual?.id) {
-      setMessage(mensajeAbono, 'Selecciona una deuda primero.', 'error');
+      setMessage(mensajeAbono, 'Selecciona una factura primero.', 'error');
       return;
     }
 
@@ -821,7 +894,9 @@
     inputNotas.value = '';
     inputActivo.checked = true;
     setMessage(mensajeForm, '');
+    actualizarResumenCliente(null);
     resetDeudasUI();
+    renderClientes();
   };
 
   tablaBody?.addEventListener('click', (event) => {
@@ -835,10 +910,19 @@
   });
 
   tablaDeudas?.addEventListener('click', (event) => {
+    const btnVer = event.target.closest('[data-deuda-ver]');
     const btnAbonos = event.target.closest('[data-deuda-abonos]');
     const btnEditar = event.target.closest('[data-deuda-editar]');
 
-    if (!btnAbonos && !btnEditar) return;
+    if (!btnVer && !btnAbonos && !btnEditar) return;
+
+    if (btnVer) {
+      const id = Number(btnVer.dataset.deudaVer);
+      if (Number.isFinite(id)) {
+        window.open(`/cliente-factura.html?deudaId=${id}&scope=admin`, '_blank');
+      }
+      return;
+    }
 
     if (btnEditar) {
       const id = Number(btnEditar.dataset.deudaEditar);
@@ -905,6 +989,22 @@
     cargarClientes();
   });
 
+  btnLimpiar?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (inputBuscar) inputBuscar.value = '';
+    if (selectEstado) selectEstado.value = '';
+    if (selectSaldo) selectSaldo.value = '';
+    cargarClientes();
+  });
+
+  selectEstado?.addEventListener('change', () => {
+    renderClientes();
+  });
+
+  selectSaldo?.addEventListener('change', () => {
+    renderClientes();
+  });
+
   inputBuscar?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -919,6 +1019,16 @@
 
   btnDeudaNueva?.addEventListener('click', (e) => {
     e.preventDefault();
+    limpiarDeudaForm();
+    if (inputDeudaId) inputDeudaId.value = '';
+  });
+
+  btnFacturaNueva?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (!clienteActual?.id) {
+      setMessage(mensajeDeuda, 'Selecciona un cliente primero.', 'warning');
+      return;
+    }
     limpiarDeudaForm();
     if (inputDeudaId) inputDeudaId.value = '';
   });
@@ -939,6 +1049,7 @@
   });
 
   resetDeudasUI();
+  actualizarResumenCliente(null);
   cargarClientes();
   cargarProductos();
 })();

@@ -1,4 +1,4 @@
-﻿require('dotenv').config();
+require('dotenv').config({ debug: false });
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -24,6 +24,13 @@ app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(dgiiRoutes);
+const LOG_DELIVERY_REQUESTS = process.env.LOG_DELIVERY_REQUESTS === '1';
+app.use((req, res, next) => {
+  if (LOG_DELIVERY_REQUESTS && req.url.startsWith('/api/delivery')) {
+    console.log('[delivery]', req.method, req.url);
+  }
+  next();
+});
 
 const NEGOCIO_ID_DEFAULT = 1;
 const DEFAULT_CONFIG_MODULOS = {
@@ -33,6 +40,7 @@ const DEFAULT_CONFIG_MODULOS = {
   bar: false,
   caja: true,
   mostrador: true,
+  delivery: true,
   historialCocina: true,
 };
 const AREAS_PREPARACION = ['ninguna', 'cocina', 'bar'];
@@ -104,6 +112,7 @@ const seedUsuariosIniciales = async () => {
 };
 
 const estadosValidos = ['pendiente', 'preparando', 'listo', 'pagado', 'cancelado'];
+const ESTADOS_DELIVERY = ['pendiente', 'disponible', 'asignado', 'entregado', 'cancelado'];
 const ADMIN_PASSWORD = 'admin123';
 const SESSION_EXPIRATION_HOURS = 12; // Ventana m?xima para considerar una sesi?n activa
 const ANALYTICS_CACHE_TTL_MS = 2 * 60 * 1000;
@@ -128,7 +137,7 @@ const limpiarCacheAnalitica = (negocioId) => {
   }
 };
 
-const ROLES_OPERATIVOS = ['mesera', 'cocina', 'bar', 'caja', 'vendedor'];
+const ROLES_OPERATIVOS = ['mesera', 'cocina', 'bar', 'caja', 'vendedor', 'delivery'];
 const ROLES_GESTION = ['admin', 'supervisor', 'empresa'];
 const usuarioRolesPermitidos = [...ROLES_OPERATIVOS, 'supervisor'];
 
@@ -1135,6 +1144,7 @@ const requireUsuarioSesion = (req, res, next) => {
 
 const esUsuarioCocina = (usuario) => usuario?.rol === 'cocina';
 const esUsuarioBar = (usuario) => usuario?.rol === 'bar';
+const esUsuarioDelivery = (usuario) => usuario?.rol === 'delivery';
 const esUsuarioAdmin = (usuario) => usuario?.rol === 'admin' || usuario?.rol === 'empresa';
 const esUsuarioSupervisor = (usuario) => usuario?.rol === 'supervisor';
 const esUsuarioEmpresa = (usuario) => usuario?.rol === 'empresa';
@@ -2599,6 +2609,17 @@ const normalizarEstadoCotizacion = (valor, original = 'borrador') => {
   return ESTADOS_COTIZACION.includes(original) ? original : 'borrador';
 };
 
+const normalizarEstadoDelivery = (valor, fallback = null) => {
+  if (typeof valor !== 'string') {
+    return fallback;
+  }
+  const limpio = valor.trim().toLowerCase();
+  if (ESTADOS_DELIVERY.includes(limpio)) {
+    return limpio;
+  }
+  return fallback;
+};
+
 const limpiarTextoGeneral = (valor) => {
   if (valor === undefined || valor === null) return null;
   if (typeof valor === 'string') {
@@ -3219,11 +3240,12 @@ const obtenerCuentasPorEstados = async (estados, negocioId, opciones = {}) => {
 const obtenerPedidoConDetalle = async (pedidoId, negocioId) => {
   const pedido = await db.get(
     `
-      SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
-             impuesto, total, fecha_creacion, fecha_listo, fecha_cierre,
-             cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, cliente_documento, ncf, tipo_comprobante, propina_monto,
-             descuento_monto
-      FROM pedidos
+        SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
+               impuesto, total, fecha_creacion, fecha_listo, fecha_cierre,
+               cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, cliente_documento, ncf, tipo_comprobante, propina_monto,
+               descuento_monto, delivery_estado, delivery_usuario_id, delivery_usuario_nombre, delivery_fecha_asignacion,
+               delivery_fecha_entrega, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas
+        FROM pedidos
       WHERE id = ? AND negocio_id = ?
     `,
     [pedidoId, negocioId]
@@ -5862,10 +5884,12 @@ const actualizarEstadoPedido = async ({ pedidoId, estadoDeseado, usuarioSesion, 
     }
   }
 
-  const pedidoActual = await db.get(
-    `SELECT id, estado, cocinero_id, cocinero_nombre, bartender_id, bartender_nombre FROM pedidos WHERE id = ? AND negocio_id = ?`,
-    [pedidoId, negocioId]
-  );
+    const pedidoActual = await db.get(
+      `SELECT id, estado, modo_servicio, delivery_estado, cocinero_id, cocinero_nombre, bartender_id, bartender_nombre
+         FROM pedidos
+        WHERE id = ? AND negocio_id = ?`,
+      [pedidoId, negocioId]
+    );
 
   if (!pedidoActual) {
     return { ok: false, status: 404, error: 'Pedido no encontrado.' };
@@ -5935,6 +5959,14 @@ const actualizarEstadoPedido = async ({ pedidoId, estadoDeseado, usuarioSesion, 
 
   if (nuevoEstadoGlobal === 'listo') {
     campos.push('fecha_listo = CURRENT_TIMESTAMP');
+  }
+
+  if (nuevoEstadoGlobal === 'listo' && pedidoActual?.modo_servicio === 'delivery') {
+    const estadoDeliveryActual = (pedidoActual.delivery_estado || '').toString().toLowerCase();
+    if (!estadoDeliveryActual || estadoDeliveryActual === 'pendiente') {
+      campos.push('delivery_estado = ?');
+      valores.push('disponible');
+    }
   }
 
   const resultado = await db.run(
@@ -6490,7 +6522,29 @@ app.post('/api/pedidos', (req, res) => {
     const esParaCaja = destino === 'caja';
     const mesa = limpiarTextoGeneral(payload.mesa);
     const cliente = limpiarTextoGeneral(payload.cliente);
-    const nota = limpiarTextoGeneral(payload.nota);
+      const nota = limpiarTextoGeneral(payload.nota);
+      const deliveryPayload = payload.delivery && typeof payload.delivery === 'object' ? payload.delivery : {};
+      const deliveryTelefono = limpiarTextoGeneral(
+        deliveryPayload.telefono ?? payload.delivery_telefono ?? payload.deliveryTelefono ?? payload.telefono_delivery
+      );
+      const deliveryDireccion = limpiarTextoGeneral(
+        deliveryPayload.direccion ?? payload.delivery_direccion ?? payload.deliveryDireccion
+      );
+      const deliveryReferencia = limpiarTextoGeneral(
+        deliveryPayload.referencia ?? payload.delivery_referencia ?? payload.deliveryReferencia
+      );
+      const deliveryNotas = limpiarTextoGeneral(
+        deliveryPayload.notas ?? deliveryPayload.nota ?? payload.delivery_notas ?? payload.deliveryNotas
+      );
+      const omitirPreparacion =
+        normalizarFlag(
+          deliveryPayload.omitir_preparacion ??
+            payload.omitir_preparacion ??
+            payload.delivery_directo ??
+            payload.directo,
+          0
+        ) === 1;
+      const esDelivery = modoServicio === 'delivery';
     const cuentaReferencia = payload.cuenta_id || null;
     const origenFallback = usuarioSesion?.rol === 'vendedor' ? 'mostrador' : 'caja';
     const origenCaja = normalizarOrigenCaja(payload.origen_caja ?? payload.origen, origenFallback);
@@ -6642,8 +6696,11 @@ app.post('/api/pedidos', (req, res) => {
       const impuestoPorcentaje = Number(await obtenerImpuestoConfiguradoAsync(negocioId)) || 0;
       const impuesto = Number((subtotal * (impuestoPorcentaje / 100)).toFixed(2));
       const total = Number((subtotal + impuesto).toFixed(2));
-      const estadoInicial = esParaCaja || !tienePreparacion ? 'listo' : 'pendiente';
-      const fechaListo = esParaCaja || !tienePreparacion ? new Date() : null;
+        const omitirPreparacionEntrega = esDelivery && omitirPreparacion;
+        const marcarListo = esParaCaja || omitirPreparacionEntrega || !tienePreparacion;
+        const estadoInicial = marcarListo ? 'listo' : 'pendiente';
+        const fechaListo = marcarListo ? new Date() : null;
+        const deliveryEstadoInicial = esDelivery ? (marcarListo ? 'disponible' : 'pendiente') : null;
 
       await db.run('BEGIN');
 
@@ -6651,27 +6708,33 @@ app.post('/api/pedidos', (req, res) => {
 
       const insertResult = await db.run(
         `
-          INSERT INTO pedidos (
-            cuenta_id, mesa, cliente, modo_servicio, nota, estado,
-            subtotal, impuesto, total, fecha_listo, origen_caja, creado_por, negocio_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          cuentaReferencia,
-          mesa,
-          cliente,
-          modoServicio,
-          nota,
-          estadoInicial,
-          subtotal,
-          impuesto,
-          total,
-          fechaListo,
-          origenCaja,
-          usuarioSesion.id,
-          negocioId,
-        ]
-      );
+            INSERT INTO pedidos (
+              cuenta_id, mesa, cliente, modo_servicio, nota, estado,
+              subtotal, impuesto, total, fecha_listo, origen_caja, creado_por, negocio_id,
+              delivery_estado, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          [
+            cuentaReferencia,
+            mesa,
+            cliente,
+            modoServicio,
+            nota,
+            estadoInicial,
+            subtotal,
+            impuesto,
+            total,
+            fechaListo,
+            origenCaja,
+            usuarioSesion.id,
+            negocioId,
+            deliveryEstadoInicial,
+            deliveryTelefono,
+            deliveryDireccion,
+            deliveryReferencia,
+            deliveryNotas,
+          ]
+        );
 
       const pedidoId = insertResult.lastID;
       const cuentaAsignada = cuentaReferencia || pedidoId;
@@ -6748,20 +6811,25 @@ app.post('/api/pedidos', (req, res) => {
 
       return res.status(201).json({
         ok: true,
-        pedido: {
-          id: pedidoId,
-          cuenta_id: cuentaAsignada,
-          estado: estadoInicial,
-          subtotal,
-          impuesto,
-          total,
-          modo_servicio: modoServicio,
-          mesa,
-          cliente,
-          nota,
-          fecha_listo: fechaListo,
-          items: itemsProcesados,
-        },
+          pedido: {
+            id: pedidoId,
+            cuenta_id: cuentaAsignada,
+            estado: estadoInicial,
+            subtotal,
+            impuesto,
+            total,
+            modo_servicio: modoServicio,
+            mesa,
+            cliente,
+            nota,
+            delivery_estado: deliveryEstadoInicial,
+            delivery_telefono: deliveryTelefono,
+            delivery_direccion: deliveryDireccion,
+            delivery_referencia: deliveryReferencia,
+            delivery_notas: deliveryNotas,
+            fecha_listo: fechaListo,
+            items: itemsProcesados,
+          },
         advertencias: advertenciasInsumos.length ? advertenciasInsumos : undefined,
       });
     } catch (error) {
@@ -6801,9 +6869,9 @@ app.put('/api/pedidos/:id/estado', (req, res) => {
   });
 });
 
-app.put('/api/pedidos/:id/cancelar', (req, res) => {
-  requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    const pedidoId = Number(req.params.id);
+  app.put('/api/pedidos/:id/cancelar', (req, res) => {
+    requireUsuarioSesion(req, res, async (usuarioSesion) => {
+      const pedidoId = Number(req.params.id);
     if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
       return res.status(400).json({ error: 'Pedido no válido.' });
     }
@@ -6824,10 +6892,10 @@ app.put('/api/pedidos/:id/cancelar', (req, res) => {
 
     try {
       await db.run('BEGIN');
-      await db.run(
-        'UPDATE pedidos SET estado = ? WHERE id = ? AND negocio_id = ?',
-        ['cancelado', pedidoId, negocioId]
-      );
+        await db.run(
+          "UPDATE pedidos SET estado = ?, delivery_estado = CASE WHEN modo_servicio = 'delivery' THEN 'cancelado' ELSE delivery_estado END WHERE id = ? AND negocio_id = ?",
+          ['cancelado', pedidoId, negocioId]
+        );
       await ajustarStockPorPedido(pedidoId, negocioId, 1);
       await revertirConsumoInsumosPorPedido(pedidoId, negocioId);
       await db.run('COMMIT');
@@ -8839,6 +8907,168 @@ app.put('/api/clientes/:id', (req, res) => {
       }
       res.json({ ok: true });
     });
+  });
+});
+
+app.get('/api/delivery/pedidos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (
+      !esUsuarioDelivery(usuarioSesion) &&
+      !esUsuarioAdmin(usuarioSesion) &&
+      !esUsuarioEmpresa(usuarioSesion) &&
+      !esUsuarioSupervisor(usuarioSesion)
+    ) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const estadoSolicitado = normalizarEstadoDelivery(req.query?.estado, null);
+    const soloMios =
+      normalizarFlag(req.query?.mios ?? req.query?.solo_mios ?? req.query?.soloMios, 0) === 1;
+
+    const filtros = ["p.modo_servicio = 'delivery'", 'p.negocio_id = ?'];
+    const params = [negocioId];
+    if (estadoSolicitado) {
+      filtros.push("COALESCE(p.delivery_estado, 'pendiente') = ?");
+      params.push(estadoSolicitado);
+    }
+    if (soloMios) {
+      filtros.push('p.delivery_usuario_id = ?');
+      params.push(usuarioSesion.id);
+    }
+
+    try {
+      const pedidos = await db.all(
+        `
+          SELECT p.id, p.cuenta_id, p.mesa, p.cliente, p.modo_servicio, p.estado, p.nota,
+                 p.subtotal, p.impuesto, p.total, p.fecha_creacion, p.fecha_listo, p.fecha_cierre,
+                 p.delivery_estado, p.delivery_usuario_id, p.delivery_usuario_nombre,
+                 p.delivery_fecha_asignacion, p.delivery_fecha_entrega,
+                 p.delivery_telefono, p.delivery_direccion, p.delivery_referencia, p.delivery_notas
+          FROM pedidos p
+          WHERE ${filtros.join(' AND ')}
+          ORDER BY COALESCE(p.fecha_listo, p.fecha_creacion) ASC
+        `,
+        params
+      );
+
+      if (!pedidos.length) {
+        return res.json([]);
+      }
+
+      const pedidoIds = pedidos.map((pedido) => pedido.id);
+      const detalle = await obtenerDetallePedidosPorIds(pedidoIds, negocioId);
+
+      const pedidosConItems = pedidos.map((pedido) => ({
+        ...pedido,
+        items: detalle.get(pedido.id) || [],
+      }));
+
+      res.json(pedidosConItems);
+    } catch (error) {
+      console.error('Error al obtener pedidos delivery:', error);
+      res.status(500).json({ error: 'No se pudieron obtener los pedidos de delivery.' });
+    }
+  });
+});
+
+app.put('/api/delivery/pedidos/:id/aceptar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioDelivery(usuarioSesion) && !esUsuarioAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const pedidoId = Number(req.params.id);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+      return res.status(400).json({ error: 'Pedido no válido.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const pedido = await db.get(
+        `SELECT id, modo_servicio, delivery_estado, delivery_usuario_id
+           FROM pedidos
+          WHERE id = ? AND negocio_id = ?`,
+        [pedidoId, negocioId]
+      );
+
+      if (!pedido) {
+        return res.status(404).json({ error: 'Pedido no encontrado.' });
+      }
+
+      if (pedido.modo_servicio !== 'delivery') {
+        return res.status(400).json({ error: 'El pedido no es de delivery.' });
+      }
+
+      const estadoActual = (pedido.delivery_estado || 'pendiente').toString().toLowerCase();
+      if (estadoActual !== 'disponible') {
+        return res.status(400).json({ error: 'El pedido no está disponible para delivery.' });
+      }
+
+      await db.run(
+        `UPDATE pedidos
+            SET delivery_estado = ?, delivery_usuario_id = ?, delivery_usuario_nombre = ?, delivery_fecha_asignacion = CURRENT_TIMESTAMP
+          WHERE id = ? AND negocio_id = ?`,
+        ['asignado', usuarioSesion.id, usuarioSesion.nombre, pedidoId, negocioId]
+      );
+
+      res.json({ ok: true, estado: 'asignado' });
+    } catch (error) {
+      console.error('Error al aceptar pedido delivery:', error);
+      res.status(500).json({ error: 'No se pudo aceptar el pedido de delivery.' });
+    }
+  });
+});
+
+app.put('/api/delivery/pedidos/:id/entregar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioDelivery(usuarioSesion) && !esUsuarioAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const pedidoId = Number(req.params.id);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+      return res.status(400).json({ error: 'Pedido no válido.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const pedido = await db.get(
+        `SELECT id, modo_servicio, delivery_estado, delivery_usuario_id
+           FROM pedidos
+          WHERE id = ? AND negocio_id = ?`,
+        [pedidoId, negocioId]
+      );
+
+      if (!pedido) {
+        return res.status(404).json({ error: 'Pedido no encontrado.' });
+      }
+
+      if (pedido.modo_servicio !== 'delivery') {
+        return res.status(400).json({ error: 'El pedido no es de delivery.' });
+      }
+
+      const estadoActual = (pedido.delivery_estado || 'pendiente').toString().toLowerCase();
+      if (estadoActual !== 'asignado') {
+        return res.status(400).json({ error: 'El pedido no está asignado para entrega.' });
+      }
+
+      if (esUsuarioDelivery(usuarioSesion) && pedido.delivery_usuario_id !== usuarioSesion.id) {
+        return res.status(403).json({ error: 'No puedes entregar un pedido asignado a otro delivery.' });
+      }
+
+      await db.run(
+        `UPDATE pedidos
+            SET delivery_estado = ?, delivery_fecha_entrega = CURRENT_TIMESTAMP
+          WHERE id = ? AND negocio_id = ?`,
+        ['entregado', pedidoId, negocioId]
+      );
+
+      res.json({ ok: true, estado: 'entregado' });
+    } catch (error) {
+      console.error('Error al entregar pedido delivery:', error);
+      res.status(500).json({ error: 'No se pudo marcar el pedido como entregado.' });
+    }
   });
 });
 
@@ -15229,6 +15459,108 @@ app.post('/api/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
   });
 });
 
+app.get('/api/clientes/deudas/:deudaId/factura', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const deudaId = Number(req.params.deudaId);
+    if (!Number.isFinite(deudaId) || deudaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Factura invalida.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    try {
+      const deuda = await db.get(
+        `SELECT d.id, d.fecha, d.descripcion, d.monto_total, d.notas, d.negocio_id,
+                c.nombre AS cliente_nombre, c.documento AS cliente_documento, c.telefono AS cliente_telefono,
+                c.direccion AS cliente_direccion, c.email AS cliente_email,
+                n.nombre AS sucursal_nombre, n.rnc AS sucursal_rnc, n.direccion AS sucursal_direccion, n.telefono AS sucursal_telefono
+           FROM clientes_deudas d
+           JOIN clientes c ON c.id = d.cliente_id
+           JOIN negocios n ON n.id = d.negocio_id
+          WHERE d.id = ?
+            AND d.negocio_id = ?
+          LIMIT 1`,
+        [deudaId, negocioId]
+      );
+
+      if (!deuda) {
+        return res.status(404).json({ ok: false, error: 'Factura no encontrada.' });
+      }
+
+      const config = await obtenerConfiguracionFacturacion(deuda.negocio_id);
+      const impuestoPorcentaje = Number(await obtenerImpuestoConfiguradoAsync(deuda.negocio_id)) || 0;
+      const items = await db.all(
+        `SELECT producto_id, nombre_producto, cantidad, precio_unitario, total_linea
+           FROM clientes_deudas_detalle
+          WHERE deuda_id = ?
+          ORDER BY id ASC`,
+        [deudaId]
+      );
+
+      let itemsFinal = items || [];
+      if (!itemsFinal.length) {
+        itemsFinal = [
+          {
+            producto_id: 0,
+            nombre_producto: deuda.descripcion || 'Servicio',
+            cantidad: 1,
+            precio_unitario: Number(deuda.monto_total) || 0,
+            total_linea: Number(deuda.monto_total) || 0,
+          },
+        ];
+      }
+
+      const subtotalItems = Number(
+        itemsFinal.reduce((acc, item) => acc + (Number(item.total_linea) || 0), 0).toFixed(2)
+      );
+      let total = Number(deuda.monto_total) || subtotalItems;
+      let itbis = 0;
+      if (impuestoPorcentaje > 0) {
+        itbis = Number((total - subtotalItems).toFixed(2));
+        if (itbis <= 0) {
+          itbis = Number((subtotalItems * (impuestoPorcentaje / 100)).toFixed(2));
+          total = Number((subtotalItems + itbis).toFixed(2));
+        }
+      }
+
+      res.json({
+        ok: true,
+        factura: {
+          numero: deuda.id,
+          fecha: deuda.fecha,
+          condicion: 'CREDITO',
+          emisor: {
+            nombre: deuda.sucursal_nombre,
+            rnc: config?.rnc || deuda.sucursal_rnc || '',
+            direccion: config?.direccion || deuda.sucursal_direccion || '',
+            telefonos: config?.telefonos || (deuda.sucursal_telefono ? [deuda.sucursal_telefono] : []),
+          },
+          cliente: {
+            nombre: deuda.cliente_nombre,
+            documento: deuda.cliente_documento || '',
+            direccion: deuda.cliente_direccion || '',
+            telefono: deuda.cliente_telefono || '',
+            email: deuda.cliente_email || '',
+          },
+          items: itemsFinal,
+          subtotal: subtotalItems,
+          itbis,
+          itbis_porcentaje: impuestoPorcentaje,
+          total,
+          notas: deuda.notas || '',
+        },
+      });
+    } catch (error) {
+      console.error('Error al generar factura de cliente (admin):', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo generar la factura.' });
+    }
+  });
+});
+
 // Categor?as
 app.get('/api/categorias', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
@@ -20533,6 +20865,11 @@ app.post('/api/login', async (req, res) => {
     const configModulosLogin = await obtenerConfigModulosNegocio(negocioId);
     if (row.rol === 'bar' && configModulosLogin.bar === false) {
       return res.status(403).json({ ok: false, error: 'El modulo de Bar esta desactivado para este negocio.' });
+    }
+    if (row.rol === 'delivery' && configModulosLogin.delivery === false) {
+      return res
+        .status(403)
+        .json({ ok: false, error: 'El modulo de Delivery esta desactivado para este negocio.' });
     }
     if (row.rol === 'vendedor' && configModulosLogin.mostrador === false) {
       return res

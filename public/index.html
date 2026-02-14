@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>POSIUM</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="js/password-toggle.js" defer></script>
+    <script src="js/login.js" defer></script>
+    <style>
+      :root {
+        --posium-ink: #122428;
+        --posium-ink-deep: #0f1e22;
+        --posium-ink-glow: rgba(20, 37, 42, 0.12);
+        --posium-ink-glow-strong: rgba(20, 37, 42, 0.2);
+        --posium-gold: #c9a46b;
+        --posium-gold-strong: rgba(201, 164, 107, 0.7);
+        --posium-gold-glow: rgba(201, 164, 107, 0.22);
+        --posium-gold-glow-soft: rgba(201, 164, 107, 0.2);
+        --posium-gold-soft: rgba(201, 164, 107, 0.35);
+        --posium-cloud: #f7f3ed;
+        --posium-mist: #edf1f2;
+        --posium-ice: #f4f7f9;
+        --posium-line: rgba(15, 30, 34, 0.12);
+        --posium-shadow: rgba(15, 30, 34, 0.12);
+        --posium-shadow-strong: rgba(15, 30, 34, 0.18);
+        --posium-shadow-deep: rgba(15, 30, 34, 0.24);
+        --posium-shadow-press: rgba(15, 30, 34, 0.2);
+        --posium-gold-shadow: rgba(201, 164, 107, 0.15);
+        --posium-cream: #f8f4ec;
+        --posium-ink-soft: rgba(18, 36, 40, 0.72);
+        --posium-ink-muted: rgba(18, 36, 40, 0.85);
+        --posium-inset: rgba(15, 30, 34, 0.06);
+        --posium-error: #b4233b;
+        --posium-ink-button: #1c2f35;
+        --posium-ink-button-alt: #2d434a;
+        --password-toggle-color: var(--posium-ink-muted);
+        --password-toggle-hover: var(--posium-ink);
+        --password-toggle-focus: var(--posium-gold-strong);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: 'Manrope', sans-serif;
+        color: var(--posium-ink);
+        background: radial-gradient(1200px circle at 12% 12%, var(--posium-ink-glow), transparent 60%),
+          radial-gradient(900px circle at 88% 6%, var(--posium-gold-glow), transparent 55%),
+          linear-gradient(135deg, var(--posium-cloud) 0%, var(--posium-mist) 45%, var(--posium-ice) 100%);
+        position: relative;
+        overflow-x: hidden;
+      }
+
+      body::before,
+      body::after {
+        content: '';
+        position: absolute;
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      body::before {
+        width: 420px;
+        height: 420px;
+        right: -160px;
+        top: -180px;
+        background: radial-gradient(circle, var(--posium-gold-soft), transparent 70%);
+        filter: blur(2px);
+      }
+
+      body::after {
+        width: 520px;
+        height: 520px;
+        left: -220px;
+        bottom: -240px;
+        background: radial-gradient(circle, var(--posium-ink-glow-strong), transparent 70%);
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .landing-shell {
+        position: relative;
+        z-index: 1;
+      }
+
+      .landing-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 24px clamp(16px, 6vw, 72px);
+        gap: 20px;
+      }
+
+      .landing-brand {
+        font-family: 'Playfair Display', serif;
+        font-weight: 600;
+        font-size: 1.6rem;
+        letter-spacing: 0.32em;
+        text-transform: uppercase;
+        background: linear-gradient(120deg, var(--posium-ink-deep), var(--posium-gold));
+        -webkit-background-clip: text;
+        color: transparent;
+        -webkit-text-fill-color: transparent;
+      }
+
+      .landing-nav {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        font-size: 0.95rem;
+        color: var(--posium-ink-soft);
+      }
+
+      .landing-nav a {
+        transition: color 0.2s ease;
+      }
+
+      .landing-nav a:hover {
+        color: var(--posium-ink);
+      }
+
+      .landing-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .btn {
+        border-radius: 999px;
+        padding: 12px 20px;
+        font-weight: 600;
+        font-size: 0.95rem;
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        font-family: inherit;
+      }
+
+      .btn.primary {
+        background: linear-gradient(135deg, var(--posium-ink-deep), var(--posium-ink-button-alt));
+        color: #fff;
+        box-shadow: 0 14px 30px rgba(15, 30, 34, 0.2);
+      }
+
+      .btn.primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 18px 32px rgba(15, 30, 34, 0.28);
+      }
+
+      .btn.secondary {
+        background: transparent;
+        color: var(--posium-ink);
+        border-color: var(--posium-line);
+      }
+
+      .btn.secondary:hover {
+        background: rgba(255, 255, 255, 0.6);
+        transform: translateY(-1px);
+      }
+
+      .nav-toggle {
+        display: none;
+        border: 1px solid var(--posium-line);
+        background: rgba(255, 255, 255, 0.7);
+        border-radius: 12px;
+        padding: 8px 10px;
+        font-size: 1.1rem;
+        cursor: pointer;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: clamp(28px, 5vw, 80px);
+        align-items: center;
+        padding: 12px clamp(16px, 6vw, 72px) 64px;
+      }
+
+      .hero h1 {
+        font-size: clamp(2rem, 3.4vw, 3.1rem);
+        margin: 0 0 16px;
+        font-family: 'Playfair Display', serif;
+      }
+
+      .hero .hero-slogan {
+        font-weight: 600;
+        font-size: 1.05rem;
+        color: var(--posium-ink-soft);
+        margin-bottom: 18px;
+      }
+
+      .hero p {
+        margin: 0 0 20px;
+        color: var(--posium-ink-muted);
+        font-size: 1rem;
+        line-height: 1.6;
+      }
+
+      .hero-bullets {
+        display: grid;
+        gap: 12px;
+        margin: 0 0 28px;
+      }
+
+      .hero-bullet {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 500;
+        color: var(--posium-ink);
+      }
+
+      .hero-bullet span {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--posium-gold), var(--posium-ink));
+        box-shadow: 0 0 0 4px var(--posium-gold-glow-soft);
+        flex-shrink: 0;
+      }
+
+      .hero-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .hero-mockup {
+        background: rgba(255, 255, 255, 0.92);
+        border-radius: 32px;
+        padding: 24px;
+        box-shadow: 0 30px 60px var(--posium-shadow), 0 10px 22px var(--posium-gold-shadow);
+        border: 1px solid var(--posium-line);
+        display: grid;
+        gap: 18px;
+      }
+
+      .mockup-cards {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+      }
+
+      .mockup-card {
+        background: linear-gradient(140deg, #ffffff, #f7f4ee);
+        border-radius: 18px;
+        padding: 14px;
+        border: 1px solid rgba(15, 30, 34, 0.08);
+        display: grid;
+        gap: 6px;
+      }
+
+      .mockup-card span {
+        font-size: 0.8rem;
+        color: var(--posium-ink-soft);
+      }
+
+      .mockup-card strong {
+        font-size: 1.1rem;
+      }
+
+      .mockup-table {
+        background: #fff;
+        border-radius: 18px;
+        padding: 16px;
+        border: 1px solid rgba(15, 30, 34, 0.08);
+      }
+
+      .mockup-table h4 {
+        margin: 0 0 12px;
+        font-size: 0.95rem;
+        color: var(--posium-ink);
+      }
+
+      .mockup-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.85rem;
+        padding: 6px 0;
+        border-bottom: 1px solid rgba(15, 30, 34, 0.06);
+        color: var(--posium-ink-soft);
+      }
+
+      .mockup-row:last-child {
+        border-bottom: none;
+      }
+
+      .mockup-chart {
+        background: #fff;
+        border-radius: 18px;
+        padding: 16px;
+        border: 1px solid rgba(15, 30, 34, 0.08);
+      }
+
+      .chart-bars {
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+        height: 120px;
+      }
+
+      .chart-bars span {
+        flex: 1;
+        border-radius: 10px 10px 4px 4px;
+        background: linear-gradient(180deg, var(--posium-gold), rgba(201, 164, 107, 0.3));
+      }
+
+      .section {
+        padding: 0 clamp(16px, 6vw, 72px) 80px;
+      }
+
+      .section-title {
+        font-family: 'Playfair Display', serif;
+        font-size: clamp(1.6rem, 2.4vw, 2.2rem);
+        margin: 0 0 14px;
+      }
+
+      .section-subtitle {
+        margin: 0 0 32px;
+        color: var(--posium-ink-soft);
+      }
+
+      .cards-grid {
+        display: grid;
+        gap: 18px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .info-card {
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 22px;
+        padding: 20px;
+        border: 1px solid rgba(15, 30, 34, 0.08);
+        box-shadow: 0 18px 34px rgba(15, 30, 34, 0.08);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      .info-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 22px 40px rgba(15, 30, 34, 0.12);
+      }
+
+      .info-card h3 {
+        margin: 0 0 10px;
+        font-size: 1.1rem;
+      }
+
+      .info-card p {
+        margin: 0;
+        color: var(--posium-ink-soft);
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+
+      .modules-grid .info-card {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .modules-grid .info-card span {
+        font-size: 0.85rem;
+        color: var(--posium-ink-soft);
+      }
+
+      .plans-grid {
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      .plan-card {
+        display: grid;
+        gap: 12px;
+      }
+
+      .plan-tag {
+        font-size: 0.85rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--posium-ink-soft);
+      }
+
+      .plan-price {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: var(--posium-ink);
+      }
+
+      .plan-price span {
+        font-size: 0.9rem;
+        color: var(--posium-ink-soft);
+        font-weight: 500;
+      }
+
+      .plan-setup {
+        font-size: 0.95rem;
+        color: var(--posium-ink-muted);
+      }
+
+      .plan-list {
+        margin: 0;
+        padding-left: 18px;
+        display: grid;
+        gap: 8px;
+        color: var(--posium-ink-soft);
+        font-size: 0.95rem;
+      }
+
+      .plan-footnote {
+        margin-top: 24px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 24px;
+        align-items: center;
+        color: var(--posium-ink-soft);
+        font-size: 0.95rem;
+      }
+
+      .plan-footnote .btn {
+        margin-left: auto;
+      }
+
+      .steps {
+        display: grid;
+        gap: 20px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .step-card {
+        background: rgba(255, 255, 255, 0.92);
+        border-radius: 22px;
+        padding: 20px;
+        border: 1px solid rgba(15, 30, 34, 0.08);
+      }
+
+      .step-number {
+        font-weight: 700;
+        font-size: 1.1rem;
+        color: var(--posium-gold);
+      }
+
+      .support-block {
+        background: rgba(255, 255, 255, 0.92);
+        border-radius: 28px;
+        padding: 28px;
+        border: 1px solid rgba(15, 30, 34, 0.08);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 20px;
+        flex-wrap: wrap;
+      }
+
+      footer {
+        padding: 24px clamp(16px, 6vw, 72px) 40px;
+        color: var(--posium-ink-soft);
+        font-size: 0.9rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .footer-links {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .login-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(8, 15, 18, 0.55);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        z-index: 999;
+      }
+
+      .login-modal.is-open {
+        display: flex;
+      }
+
+      .login-modal-dialog {
+        width: 100%;
+        max-width: 620px;
+        position: relative;
+      }
+
+      .login-modal-close {
+        position: absolute;
+        top: -18px;
+        right: -18px;
+        background: #fff;
+        border: 1px solid var(--posium-line);
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        font-size: 1.1rem;
+        cursor: pointer;
+        box-shadow: 0 10px 18px rgba(15, 30, 34, 0.18);
+      }
+
+      .login-modal .login-shell {
+        width: 100%;
+        max-width: 560px;
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+        align-items: center;
+        margin: 0 auto;
+      }
+
+      .login-modal .login-brand {
+        font-family: 'Playfair Display', serif;
+        font-weight: 600;
+        font-size: 2.3rem;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        background: linear-gradient(120deg, var(--posium-ink-deep), var(--posium-gold));
+        -webkit-background-clip: text;
+        color: transparent;
+        -webkit-text-fill-color: transparent;
+        text-align: center;
+        opacity: 0;
+        transform: translateY(8px);
+        animation: fadeUp 0.6s ease forwards;
+        animation-delay: 0.05s;
+      }
+
+      .login-modal .login-card {
+        width: 100%;
+        background: rgba(255, 255, 255, 0.92);
+        border-radius: 28px;
+        padding: 40px 38px;
+        box-shadow: 0 30px 60px var(--posium-shadow), 0 10px 22px var(--posium-gold-shadow);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--posium-line);
+        opacity: 0;
+        transform: translateY(16px) scale(0.98);
+        animation: cardReveal 0.8s ease-out forwards;
+        animation-delay: 0.15s;
+      }
+
+      .login-modal .login-card h1 {
+        margin: 0 0 12px;
+        font-size: 1.8rem;
+        font-weight: 600;
+        font-family: 'Playfair Display', serif;
+        text-align: center;
+        color: var(--posium-ink);
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fadeUp 0.6s ease forwards;
+        animation-delay: 0.25s;
+      }
+
+      .login-modal .login-card p {
+        margin: 0 0 26px;
+        font-size: 1rem;
+        color: var(--posium-ink-soft);
+        text-align: center;
+        line-height: 1.5;
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fadeUp 0.6s ease forwards;
+        animation-delay: 0.35s;
+      }
+
+      .login-modal .login-card .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 18px;
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fadeUp 0.6s ease forwards;
+      }
+
+      .login-modal .login-card label {
+        font-size: 0.9rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        color: var(--posium-ink-muted);
+      }
+
+      .login-modal .login-card input {
+        padding: 14px 16px;
+        border-radius: 14px;
+        border: 1px solid var(--posium-line);
+        background-color: rgba(255, 255, 255, 0.92);
+        font-size: 1rem;
+        outline: none;
+        color: var(--posium-ink);
+        box-shadow: inset 0 1px 2px var(--posium-inset);
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+      }
+
+      .login-modal .login-card input:focus {
+        border-color: var(--posium-gold-strong);
+        box-shadow: 0 0 0 4px var(--posium-gold-glow-soft);
+        transform: translateY(-1px);
+      }
+
+      .login-modal .password-field {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+
+      .login-modal .password-field input {
+        width: 100%;
+        padding-right: 90px;
+      }
+
+      .login-modal .password-toggle {
+        position: absolute;
+        right: 10px;
+        padding: 6px 10px;
+        border: none;
+        background: transparent;
+        font-weight: 600;
+        color: var(--password-toggle-color, var(--posium-ink-muted));
+        cursor: pointer;
+      }
+
+      .login-modal .login-card button[type='submit'] {
+        width: 100%;
+        margin-top: 12px;
+        padding: 15px 16px;
+        border-radius: 16px;
+        border: 1px solid var(--posium-gold-strong);
+        background: linear-gradient(135deg, var(--posium-ink-button), var(--posium-ink-button-alt));
+        color: var(--posium-cream);
+        font-size: 1.05rem;
+        font-weight: 600;
+        cursor: pointer;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        box-shadow: 0 18px 35px var(--posium-shadow-strong);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fadeUp 0.6s ease forwards;
+        animation-delay: 0.65s;
+      }
+
+      .login-modal .login-card button[type='submit']:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 24px 42px var(--posium-shadow-deep);
+      }
+
+      .login-modal .login-card button[type='submit']:active {
+        transform: translateY(0);
+        box-shadow: 0 14px 24px var(--posium-shadow-press);
+      }
+
+      .login-modal #login-error {
+        margin-top: 16px;
+        min-height: 20px;
+        font-size: 0.9rem;
+        color: var(--posium-error);
+        font-weight: 500;
+        text-align: center;
+      }
+
+      .login-modal .login-card .form-group:nth-of-type(1) {
+        animation-delay: 0.45s;
+      }
+
+      .login-modal .login-card .form-group:nth-of-type(2) {
+        animation-delay: 0.55s;
+      }
+
+      @keyframes cardReveal {
+        from {
+          opacity: 0;
+          transform: translateY(16px) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      body.modal-open {
+        overflow: hidden;
+      }
+
+      @media (max-width: 960px) {
+        .landing-header {
+          flex-wrap: wrap;
+        }
+
+        .landing-nav {
+          display: none;
+          width: 100%;
+          flex-direction: column;
+          background: rgba(255, 255, 255, 0.92);
+          border-radius: 18px;
+          padding: 16px;
+          border: 1px solid var(--posium-line);
+        }
+
+        .landing-header.is-open .landing-nav {
+          display: flex;
+        }
+
+        .landing-actions {
+          margin-left: auto;
+        }
+
+        .nav-toggle {
+          display: inline-flex;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .landing-actions {
+          width: 100%;
+          justify-content: flex-start;
+          flex-wrap: wrap;
+        }
+
+        .hero {
+          padding-bottom: 40px;
+        }
+
+        .mockup-cards {
+          grid-template-columns: 1fr;
+        }
+
+        .support-block {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .login-modal-close {
+          right: 0;
+        }
+
+        .plan-footnote .btn {
+          margin-left: 0;
+          width: 100%;
+          text-align: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="landing-shell">
+      <header class="landing-header" id="landing-header">
+        <div class="landing-brand">POSIUM</div>
+        <nav class="landing-nav">
+          <a href="#soluciones">Soluciones</a>
+          <a href="#modulos">Módulos</a>
+          <a href="#planes">Planes</a>
+          <a href="#soporte">Soporte</a>
+        </nav>
+        <div class="landing-actions">
+          <button class="btn secondary" type="button" data-open-login>Iniciar sesión</button>
+          <a
+            class="btn primary"
+            href="https://wa.me/18099672501?text=Hola%2C%20quiero%20informaci%C3%B3n%20para%20obtener%20POSIUM%20para%20mi%20negocio.%20%C2%BFMe%20apoyas%20con%20planes%20y%20configuraci%C3%B3n%3F"
+            target="_blank"
+            rel="noopener"
+            >Contáctanos</a
+          >
+        </div>
+        <button class="nav-toggle" type="button" aria-label="Abrir menú" id="nav-toggle">☰</button>
+      </header>
+
+      <section class="hero" id="soluciones">
+        <div>
+          <h1>Control total de tu negocio. Ventas, caja e inventario en un solo lugar.</h1>
+          <div class="hero-slogan">POSIUM: donde tus ventas se convierten en control.</div>
+          <p>
+            POSIUM centraliza ventas, caja, inventario y operación diaria en tiempo real. Diseñado para
+            negocios que quieren orden, velocidad y crecimiento.
+          </p>
+          <div class="hero-bullets">
+            <div class="hero-bullet"><span></span>Ventas rápidas y sin errores</div>
+            <div class="hero-bullet"><span></span>Caja clara y cierres confiables</div>
+            <div class="hero-bullet"><span></span>Inventario inteligente y preciso</div>
+            <div class="hero-bullet"><span></span>Listo para operar multi-dispositivo</div>
+          </div>
+          <div class="hero-actions">
+            <a
+              class="btn primary"
+              href="https://wa.me/18099672501?text=Hola%2C%20quiero%20informaci%C3%B3n%20para%20obtener%20POSIUM%20para%20mi%20negocio.%20%C2%BFMe%20apoyas%20con%20planes%20y%20configuraci%C3%B3n%3F"
+              target="_blank"
+              rel="noopener"
+              >Contáctanos</a
+            >
+            <button class="btn secondary" type="button" data-open-login>Iniciar sesión</button>
+          </div>
+        </div>
+        <div class="hero-mockup" aria-hidden="true">
+          <div class="mockup-cards">
+            <div class="mockup-card">
+              <span>Ventas del día</span>
+              <strong>RD$24,560</strong>
+            </div>
+            <div class="mockup-card">
+              <span>Caja actual</span>
+              <strong>RD$8,940</strong>
+            </div>
+            <div class="mockup-card">
+              <span>Inventario crítico</span>
+              <strong>5 items</strong>
+            </div>
+            <div class="mockup-card">
+              <span>Pedidos / Delivery</span>
+              <strong>12 activos</strong>
+            </div>
+          </div>
+          <div class="mockup-table">
+            <h4>Últimas ventas</h4>
+            <div class="mockup-row"><span>Factura #3021</span><strong>RD$1,250</strong></div>
+            <div class="mockup-row"><span>Factura #3020</span><strong>RD$980</strong></div>
+            <div class="mockup-row"><span>Factura #3019</span><strong>RD$1,740</strong></div>
+          </div>
+          <div class="mockup-chart">
+            <h4>Actividad semanal</h4>
+            <div class="chart-bars">
+              <span style="height: 35%"></span>
+              <span style="height: 55%"></span>
+              <span style="height: 48%"></span>
+              <span style="height: 70%"></span>
+              <span style="height: 60%"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="planes">
+        <h2 class="section-title">Planes y suscripciones</h2>
+        <p class="section-subtitle">
+          Precios con ITBIS incluido. Activación única. Planes anuales con ahorro (paga 10, usa 12).
+        </p>
+        <div class="cards-grid plans-grid">
+          <div class="info-card plan-card">
+            <div class="plan-tag">Micro - Básico (1 puesto)</div>
+            <div class="plan-price">RD$2,950 <span>/mes</span></div>
+            <div class="plan-setup">Activación: RD$3,500</div>
+            <ul class="plan-list">
+              <li>1 puesto (1 caja)</li>
+              <li>Productos e inventario</li>
+              <li>Usuarios y roles</li>
+              <li>Soporte WhatsApp</li>
+            </ul>
+          </div>
+          <div class="info-card plan-card">
+            <div class="plan-tag">Pequeño - Crecimiento (2 puestos)</div>
+            <div class="plan-price">RD$5,400 <span>/mes</span></div>
+            <div class="plan-setup">Activación: RD$6,500</div>
+            <ul class="plan-list">
+              <li>2 puestos operativos</li>
+              <li>Permisos avanzados</li>
+              <li>Reportes por turno y cierres</li>
+              <li>Inventario y alertas</li>
+            </ul>
+          </div>
+          <div class="info-card plan-card">
+            <div class="plan-tag">Mediano - Expansión (3 puestos)</div>
+            <div class="plan-price">RD$7,650 <span>/mes</span></div>
+            <div class="plan-setup">Activación: RD$9,000</div>
+            <ul class="plan-list">
+              <li>3 puestos operativos</li>
+              <li>Roles y reportes avanzados</li>
+              <li>Respaldo en la nube</li>
+              <li>Soporte prioritario</li>
+            </ul>
+          </div>
+        </div>
+        <div class="plan-footnote">
+          <div>Anual: Básico RD$29,500 · Crecimiento RD$54,000 · Expansión RD$75,000.</div>
+          <div>Combos con equipos (impresora térmica, gaveta, tablet o PC) disponibles bajo cotización.</div>
+          <a
+            class="btn primary"
+            href="https://wa.me/18099672501?text=Hola%2C%20quiero%20informaci%C3%B3n%20para%20obtener%20POSIUM%20para%20mi%20negocio.%20%C2%BFMe%20apoyas%20con%20planes%20y%20configuraci%C3%B3n%3F"
+            target="_blank"
+            rel="noopener"
+            >Contáctanos</a
+          >
+        </div>
+      </section>
+
+      <section class="section" id="modulos">
+        <h2 class="section-title">Módulos pensados para crecer</h2>
+        <p class="section-subtitle">Cada área conectada en un mismo flujo operativo.</p>
+        <div class="cards-grid modules-grid">
+          <div class="info-card">
+            <h3>POS de Ventas</h3>
+            <span>Ventas ágiles y controladas.</span>
+          </div>
+          <div class="info-card">
+            <h3>Caja</h3>
+            <span>Aperturas, cierres y arqueos claros.</span>
+          </div>
+          <div class="info-card">
+            <h3>Inventario</h3>
+            <span>Stock preciso y alertas inteligentes.</span>
+          </div>
+          <div class="info-card">
+            <h3>Clientes</h3>
+            <span>Historial y cuentas por cobrar.</span>
+          </div>
+          <div class="info-card">
+            <h3>Compras / Abastecimiento</h3>
+            <span>Control de insumos y reposición.</span>
+          </div>
+          <div class="info-card">
+            <h3>Delivery</h3>
+            <span>Pedidos listos y asignaciones claras.</span>
+          </div>
+          <div class="info-card">
+            <h3>Reportes</h3>
+            <span>KPIs en tiempo real.</span>
+          </div>
+          <div class="info-card">
+            <h3>Facturación electrónica</h3>
+            <span>Estructura lista para integrarse.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">Cómo funciona</h2>
+        <p class="section-subtitle">Un flujo simple para operar sin fricción.</p>
+        <div class="steps">
+          <div class="step-card">
+            <div class="step-number">Paso 1</div>
+            <h3>Te configuramos POSIUM</h3>
+            <p>Setup guiado con tu operación real.</p>
+          </div>
+          <div class="step-card">
+            <div class="step-number">Paso 2</div>
+            <h3>Entrenas tu equipo en minutos</h3>
+            <p>Interfaz clara y procesos simples.</p>
+          </div>
+          <div class="step-card">
+            <div class="step-number">Paso 3</div>
+            <h3>Operas y creces con control total</h3>
+            <p>Todo conectado, todo bajo control.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="soporte">
+        <div class="support-block">
+          <div>
+            <h2 class="section-title">Acompañamiento real</h2>
+            <p class="section-subtitle">
+              Implementación, soporte y evolución continua para tu operación.
+            </p>
+          </div>
+          <a
+            class="btn primary"
+            href="https://wa.me/18099672501?text=Hola%2C%20quiero%20informaci%C3%B3n%20para%20obtener%20POSIUM%20para%20mi%20negocio.%20%C2%BFMe%20apoyas%20con%20planes%20y%20configuraci%C3%B3n%3F"
+            target="_blank"
+            rel="noopener"
+            >Contáctanos</a
+          >
+        </div>
+      </section>
+
+      <footer>
+        <div>POSIUM © <span id="footer-year"></span></div>
+        <div class="footer-links">
+          <a href="#privacidad">Privacidad</a>
+          <a href="#terminos">Términos</a>
+          <a href="#soporte">Soporte</a>
+        </div>
+        <div>WhatsApp: +1 809-967-2501</div>
+      </footer>
+    </div>
+
+    <div class="login-modal" id="login-modal" aria-hidden="true">
+      <div class="login-modal-dialog">
+        <button class="login-modal-close" type="button" aria-label="Cerrar" id="login-modal-close">×</button>
+        <div class="login-shell">
+          <div class="login-brand">POSIUM</div>
+          <div class="login-card">
+            <h1>Bienvenido a POSIUM</h1>
+            <p>La suite premium para ventas, caja e inventario en tiempo real.</p>
+            <form id="login-form" novalidate>
+              <div class="form-group">
+                <label for="usuario">Usuario</label>
+                <input type="text" id="usuario" name="usuario" autocomplete="username" />
+              </div>
+              <div class="form-group">
+                <label for="password">Contrasena</label>
+                <div class="password-field">
+                  <input type="password" id="password" name="password" autocomplete="current-password" />
+                  <button
+                    type="button"
+                    class="password-toggle"
+                    data-password-toggle
+                    aria-pressed="false"
+                    aria-label="Mostrar contrasena"
+                  >
+                    Mostrar
+                  </button>
+                </div>
+              </div>
+              <button type="submit">Entrar a POSIUM</button>
+            </form>
+            <div id="login-error"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const modal = document.getElementById('login-modal');
+      const closeModalBtn = document.getElementById('login-modal-close');
+      const openButtons = document.querySelectorAll('[data-open-login]');
+      const navToggle = document.getElementById('nav-toggle');
+      const header = document.getElementById('landing-header');
+      const footerYear = document.getElementById('footer-year');
+
+      const openModal = () => {
+        modal.classList.add('is-open');
+        modal.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('modal-open');
+        const userInput = document.getElementById('usuario');
+        if (userInput) userInput.focus();
+      };
+
+      const closeModal = () => {
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('modal-open');
+      };
+
+      openButtons.forEach((btn) => btn.addEventListener('click', openModal));
+      closeModalBtn.addEventListener('click', closeModal);
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+          closeModal();
+        }
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && modal.classList.contains('is-open')) {
+          closeModal();
+        }
+      });
+
+      navToggle.addEventListener('click', () => {
+        header.classList.toggle('is-open');
+      });
+
+      if (footerYear) {
+        footerYear.textContent = new Date().getFullYear();
+      }
+    </script>
+  </body>
+</html>

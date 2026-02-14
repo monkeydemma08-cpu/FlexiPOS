@@ -4837,7 +4837,7 @@
     if (action === 'ver') {
       const deudaId = Number(btn.dataset.facturaId);
       if (Number.isFinite(deudaId)) {
-        window.open(`/cliente-factura.html?deudaId=${deudaId}`, '_blank');
+        window.open(`/cliente-factura.html?deudaId=${deudaId}&scope=empresa`, '_blank');
       }
       return;
     }
@@ -4890,7 +4890,7 @@
     const deudaId = Number(btn.dataset.deudaId);
     if (!Number.isFinite(deudaId)) return;
     if (btn.dataset.deudaAction === 'factura') {
-      window.open(`/cliente-factura.html?deudaId=${deudaId}`, '_blank');
+      window.open(`/cliente-factura.html?deudaId=${deudaId}&scope=empresa`, '_blank');
     }
   });
 
@@ -4904,7 +4904,7 @@
       return;
     }
     if (btn.dataset.deudaAction === 'factura') {
-      window.open(`/cliente-factura.html?deudaId=${deudaId}`, '_blank');
+      window.open(`/cliente-factura.html?deudaId=${deudaId}&scope=empresa`, '_blank');
     }
   });
 

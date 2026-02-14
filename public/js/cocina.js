@@ -186,8 +186,11 @@ const textoMesaCliente = (pedido) => {
   return partes.length ? partes.join(' • ') : 'Mesa/cliente no especificado';
 };
 
-const textoServicio = (pedido) =>
-  pedido.modo_servicio === 'para_llevar' ? 'Para llevar' : 'Consumir en el negocio';
+const textoServicio = (pedido) => {
+  if (pedido.modo_servicio === 'para_llevar') return 'Para llevar';
+  if (pedido.modo_servicio === 'delivery') return 'Delivery';
+  return 'Consumir en el negocio';
+};
 
 const estadoCocinaDeCuenta = (cuenta) => {
   const estados = new Set(

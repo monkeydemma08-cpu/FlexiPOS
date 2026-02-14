@@ -48,6 +48,7 @@
       </section>
       <div class="mesera-tabs">
         <button class="mesera-tab-btn active" data-tab="tomar" type="button">Tomar pedido</button>
+        <button class="mesera-tab-btn" data-tab="delivery" type="button">Delivery</button>
         <button class="mesera-tab-btn" data-tab="pendientes" type="button">Pendientes</button>
         <button class="mesera-tab-btn" data-tab="preparando" type="button">En preparación</button>
         <button class="mesera-tab-btn" data-tab="listos" type="button">
@@ -91,71 +92,142 @@
           </div>
         </section>
 
-                <section class="kanm-card productos">
-          <div class="kanm-mesera-productos-top">
-            <div class="kanm-card-header">
-              <h2>Productos</h2>
-              <p class="kanm-subtitle">Explora el menú, filtra por nombre y selecciona los favoritos.</p>
-            </div>
-            <div class="busqueda-productos">
-              <div class="buscador-input">
-                <span class="buscador-icono">🔍</span>
-                <input
-                  type="search"
-                  id="buscador-productos"
-                  class="kanm-input"
-                  placeholder="Buscar por nombre..."
-                  autocomplete="off"
-                />
-              </div>
-              <p class="search-results-info" id="contador-productos"></p>
-            </div>
-          </div>
-          <div class="kanm-mesera-productos-lista-scroll">
-            <div id="lista-productos" class="lista-productos"></div>
-          </div>
-        </section>
-        <section class="kanm-card carrito">
-          <div class="kanm-card-header">
-            <h2>Carrito</h2>
-            <p class="kanm-subtitle">
-              Revisa los artículos agregados, ajusta cantidades y valida el pedido antes de enviarlo.
-            </p>
-          </div>
-          <div id="carrito" class="lista-carrito"></div>
-          <div class="carrito-resumen" id="resumen-carrito">
-            <div class="resumen-item">
-              <span>Subtotal</span>
-              <span id="resumen-subtotal">DOP 0.00</span>
-            </div>
-            <div class="resumen-item">
-              <span>Impuesto estimado</span>
-              <span id="resumen-impuesto">DOP 0.00</span>
-            </div>
-            <div class="resumen-item total">
-              <span>Total estimado</span>
-              <span id="resumen-total">DOP 0.00</span>
-            </div>
-          </div>
-        </section>
-
-        <footer class="kanm-footer" id="mesera-footer">
-          <div class="flex-between" style="width: 100%; gap: 16px; flex-wrap: wrap;">
-            <div id="mesera-mensaje" class="kanm-message"></div>
-            <div class="acciones-pedido">
-              <button id="boton-cancelar-edicion" type="button" class="kanm-button secondary" hidden>
-                Cancelar edición
-              </button>
-              <button id="boton-enviar" type="button" class="kanm-button primary" data-accion="enviar-cocina">
-                Enviar a preparar orden
-              </button>
-              <button id="boton-enviar-caja" type="button" class="kanm-button primary">
-                Enviar pedido a caja
-              </button>
-            </div>
-          </div>
-        </footer>
       </div>
+
+      <div class="mesera-tab-panel" data-tab="delivery">
+        <section class="kanm-card delivery-datos">
+          <div class="kanm-card-header">
+            <h2>Delivery</h2>
+            <p class="kanm-subtitle">Registra la información de entrega antes de enviar el pedido.</p>
+          </div>
+          <div class="kanm-form-grid delivery-form-grid">
+            <div class="kanm-input-group">
+              <label for="delivery-cliente" class="kanm-label">Cliente</label>
+              <input
+                type="text"
+                id="delivery-cliente"
+                class="kanm-input"
+                placeholder="Nombre del cliente"
+                autocomplete="off"
+              />
+            </div>
+            <div class="kanm-input-group">
+              <label for="delivery-telefono" class="kanm-label">Teléfono</label>
+              <input
+                type="text"
+                id="delivery-telefono"
+                class="kanm-input"
+                placeholder="809-000-0000"
+                autocomplete="off"
+              />
+            </div>
+            <div class="kanm-input-group delivery-span-full">
+              <label for="delivery-direccion" class="kanm-label">Dirección</label>
+              <input
+                type="text"
+                id="delivery-direccion"
+                class="kanm-input"
+                placeholder="Ej. Calle 8, Res. Las Flores, #12"
+                autocomplete="off"
+              />
+            </div>
+            <div class="kanm-input-group">
+              <label for="delivery-referencia" class="kanm-label">Referencia (opcional)</label>
+              <input
+                type="text"
+                id="delivery-referencia"
+                class="kanm-input"
+                placeholder="Apto, piso, color de casa..."
+                autocomplete="off"
+              />
+            </div>
+            <div class="kanm-input-group delivery-span-full">
+              <label for="delivery-nota" class="kanm-label">Nota de entrega (opcional)</label>
+              <textarea
+                id="delivery-nota"
+                class="kanm-input"
+                rows="2"
+                maxlength="200"
+                placeholder="Ej. Llamar al llegar, dejar en conserjería..."
+              ></textarea>
+              <p class="kanm-helper">Máx. 200 caracteres</p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="kanm-card productos" data-tab-shared="tomar,delivery">
+        <div class="kanm-mesera-productos-top">
+          <div class="kanm-card-header">
+            <h2>Productos</h2>
+            <p class="kanm-subtitle">Explora el menú, filtra por nombre y selecciona los favoritos.</p>
+          </div>
+          <div class="busqueda-productos">
+            <div class="buscador-input">
+              <span class="buscador-icono">🔍</span>
+              <input
+                type="search"
+                id="buscador-productos"
+                class="kanm-input"
+                placeholder="Buscar por nombre..."
+                autocomplete="off"
+              />
+            </div>
+            <p class="search-results-info" id="contador-productos"></p>
+          </div>
+        </div>
+        <div class="kanm-mesera-productos-lista-scroll">
+          <div id="lista-productos" class="lista-productos"></div>
+        </div>
+      </section>
+      <section class="kanm-card carrito" data-tab-shared="tomar,delivery">
+        <div class="kanm-card-header">
+          <h2>Carrito</h2>
+          <p class="kanm-subtitle">
+            Revisa los artículos agregados, ajusta cantidades y valida el pedido antes de enviarlo.
+          </p>
+        </div>
+        <div id="carrito" class="lista-carrito"></div>
+        <div class="carrito-resumen" id="resumen-carrito">
+          <div class="resumen-item">
+            <span>Subtotal</span>
+            <span id="resumen-subtotal">DOP 0.00</span>
+          </div>
+          <div class="resumen-item">
+            <span>Impuesto estimado</span>
+            <span id="resumen-impuesto">DOP 0.00</span>
+          </div>
+          <div class="resumen-item total">
+            <span>Total estimado</span>
+            <span id="resumen-total">DOP 0.00</span>
+          </div>
+        </div>
+      </section>
+
+      <footer class="kanm-footer" id="mesera-footer" data-tab-shared="tomar,delivery">
+        <div class="flex-between" style="width: 100%; gap: 16px; flex-wrap: wrap;">
+          <div id="mesera-mensaje" class="kanm-message"></div>
+          <div class="acciones-pedido" data-acciones="tomar">
+            <button id="boton-cancelar-edicion" type="button" class="kanm-button secondary" hidden>
+              Cancelar edición
+            </button>
+            <button id="boton-enviar" type="button" class="kanm-button primary" data-accion="enviar-cocina">
+              Enviar a preparar orden
+            </button>
+            <button id="boton-enviar-caja" type="button" class="kanm-button primary">
+              Enviar pedido a caja
+            </button>
+          </div>
+          <div class="acciones-pedido acciones-pedido--delivery" data-acciones="delivery" hidden>
+            <button id="boton-delivery-prep" type="button" class="kanm-button secondary">
+              Enviar a preparación
+            </button>
+            <button id="boton-delivery-directo" type="button" class="kanm-button primary">
+              Enviar directo a delivery
+            </button>
+          </div>
+        </div>
+      </footer>
 
       <div class="mesera-tab-panel" data-tab="pendientes">
         <section class="kanm-card pedidos-activos">

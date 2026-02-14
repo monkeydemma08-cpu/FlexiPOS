@@ -36,6 +36,7 @@ const ROLES_HOME = {
   bar: '/bar.html',
   caja: '/caja.html',
   vendedor: '/mostrador.html',
+  delivery: '/delivery.html',
 };
 
 const state = {

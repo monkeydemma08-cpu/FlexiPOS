@@ -1,10 +1,17 @@
 const campoMesa = document.getElementById('campo-mesa');
 const selectServicio = document.getElementById('tipo-servicio');
 const notaInput = document.getElementById('nota-pedido');
+const deliveryClienteInput = document.getElementById('delivery-cliente');
+const deliveryTelefonoInput = document.getElementById('delivery-telefono');
+const deliveryDireccionInput = document.getElementById('delivery-direccion');
+const deliveryReferenciaInput = document.getElementById('delivery-referencia');
+const deliveryNotaInput = document.getElementById('delivery-nota');
 const listaProductos = document.getElementById('lista-productos');
 const carritoContainer = document.getElementById('carrito');
 const botonEnviar = document.getElementById('boton-enviar');
 const botonEnviarCaja = document.getElementById('boton-enviar-caja');
+const botonDeliveryPrep = document.getElementById('boton-delivery-prep');
+const botonDeliveryDirecto = document.getElementById('boton-delivery-directo');
 const botonCancelarEdicion = document.getElementById('boton-cancelar-edicion');
 const mensajeMesera = document.getElementById('mesera-mensaje');
 const buscadorInput = document.getElementById('buscador-productos');
@@ -15,6 +22,8 @@ const resumenTotal = document.getElementById('resumen-total');
 const identidadMesera = document.getElementById('mesera-identidad');
 const tabsMesera = document.querySelectorAll('.mesera-tab-btn');
 const panelesMesera = document.querySelectorAll('.mesera-tab-panel');
+const panelesCompartidos = document.querySelectorAll('[data-tab-shared]');
+const gruposAcciones = document.querySelectorAll('[data-acciones]');
 const footerMesera = document.getElementById('mesera-footer');
 const badgeListosEl = document.getElementById('mesera-listos-badge');
 const LISTOS_BADGE_KEY = 'kanm:mesera:listos-unread';
@@ -362,6 +371,14 @@ const formatCurrency = (valor) => {
   }).format(numero);
 };
 
+const obtenerDatosDelivery = () => ({
+  cliente: deliveryClienteInput?.value?.trim() || '',
+  telefono: deliveryTelefonoInput?.value?.trim() || '',
+  direccion: deliveryDireccionInput?.value?.trim() || '',
+  referencia: deliveryReferenciaInput?.value?.trim() || '',
+  nota: deliveryNotaInput?.value?.trim() || '',
+});
+
 const normalizarOpcionesPrecioProducto = (producto = {}) => {
   const opciones = [];
   const baseValor = Number(producto.precio) || 0;
@@ -430,6 +447,13 @@ const formatDateTime = (valor) => {
     hour12: true,
     timeZone: 'America/Santo_Domingo',
   }).format(fecha);
+};
+
+const obtenerTextoServicio = (modoServicio) => {
+  const modo = (modoServicio || '').toString().toLowerCase();
+  if (modo === 'para_llevar') return 'Para llevar';
+  if (modo === 'delivery') return 'Delivery';
+  return 'Consumir en el negocio';
 };
 
 const SYNC_STORAGE_KEY = 'kanm:last-update';
@@ -506,12 +530,18 @@ const aplicarModulosMesera = () => {
     cocina: true,
     bar: false,
     caja: true,
+    delivery: true,
     historialCocina: true,
   };
   const btnEnviarCocina = document.querySelector('[data-accion="enviar-cocina"]') || botonEnviar;
   const sinPreparacion = modulos.cocina === false && modulos.bar === false;
   if (btnEnviarCocina && sinPreparacion) {
     btnEnviarCocina.style.display = 'none';
+  }
+
+  const deliveryTab = document.querySelector('.mesera-tab-btn[data-tab="delivery"]');
+  if (deliveryTab && modulos.delivery === false) {
+    deliveryTab.style.display = 'none';
   }
 };
 
@@ -527,8 +557,23 @@ const activarTab = (tabId = 'tomar') => {
     panel.classList.toggle('active', panel.dataset.tab === tabId);
   });
 
+  panelesCompartidos.forEach((panel) => {
+    const tabs = (panel.dataset.tabShared || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    panel.hidden = !tabs.includes(tabId);
+  });
+
+  gruposAcciones.forEach((grupo) => {
+    const destino = (grupo.dataset.acciones || '').trim();
+    if (!destino) return;
+    grupo.hidden = destino !== tabId;
+  });
+
   if (footerMesera) {
-    footerMesera.style.display = tabId === 'tomar' ? '' : 'none';
+    const visible = Array.from(panelesCompartidos).some((panel) => !panel.hidden && panel.contains(footerMesera));
+    footerMesera.style.display = visible ? '' : 'none';
   }
 
   if (tabId === 'listos') {
@@ -839,7 +884,8 @@ const ajustarCantidad = (itemKey, cantidadDeseada) => {
 };
 
 const obtenerPayloadPedido = (destino = 'cocina') => {
-  const mesa = campoMesa?.value.trim();
+  const esDelivery = estado.tabActiva === 'delivery';
+  const mesa = esDelivery ? null : campoMesa?.value.trim();
   const items = Array.from(estado.carrito.values()).map((item) => {
     const precioUnitario = Number(item.precio_unitario);
     return {
@@ -848,22 +894,53 @@ const obtenerPayloadPedido = (destino = 'cocina') => {
       precio_unitario: Number.isFinite(precioUnitario) ? precioUnitario : 0,
     };
   });
-  const modoServicioSeleccionado = selectServicio?.value || 'en_local';
-  const nota = notaInput?.value?.trim() || '';
+  const modoServicioSeleccionado = esDelivery ? 'delivery' : selectServicio?.value || 'en_local';
+  const nota = esDelivery ? '' : notaInput?.value?.trim() || '';
+  const destinoNormalizado =
+    destino === 'delivery-directo' || destino === 'delivery-prep' ? 'delivery' : destino;
 
-  return {
+  const payload = {
     mesa: mesa || null,
-    cliente: null,
+    cliente: esDelivery ? obtenerDatosDelivery().cliente || null : null,
     items,
     modo_servicio: modoServicioSeleccionado,
-    destino,
+    destino: destinoNormalizado,
     cuenta_id: estado.cuentaReferenciaId || null,
     nota,
   };
+
+  if (esDelivery) {
+    const datos = obtenerDatosDelivery();
+    payload.delivery_telefono = datos.telefono || null;
+    payload.delivery_direccion = datos.direccion || null;
+    payload.delivery_referencia = datos.referencia || null;
+    payload.delivery_notas = datos.nota || null;
+    payload.omitir_preparacion = destino === 'delivery-directo' ? 1 : 0;
+  }
+
+  return payload;
 };
 
 const validarPedido = () => {
-  if (notaInput && notaInput.value.length > 200) {
+  if (estado.tabActiva === 'delivery') {
+    const datos = obtenerDatosDelivery();
+    if (deliveryNotaInput && deliveryNotaInput.value.length > 200) {
+      mostrarMensaje('La nota de entrega no puede superar 200 caracteres.', 'error');
+      return false;
+    }
+    if (!datos.cliente) {
+      mostrarMensaje('Ingresa el nombre del cliente para delivery.', 'error');
+      return false;
+    }
+    if (!datos.telefono) {
+      mostrarMensaje('Ingresa el teléfono de contacto para delivery.', 'error');
+      return false;
+    }
+    if (!datos.direccion) {
+      mostrarMensaje('Ingresa la dirección de entrega.', 'error');
+      return false;
+    }
+  } else if (notaInput && notaInput.value.length > 200) {
     mostrarMensaje('La nota no puede superar 200 caracteres.', 'error');
     return false;
   }
@@ -916,6 +993,11 @@ const cancelarEdicion = () => {
   if (botonCancelarEdicion) botonCancelarEdicion.hidden = true;
   if (selectServicio) selectServicio.value = 'en_local';
   if (notaInput) notaInput.value = '';
+  if (deliveryClienteInput) deliveryClienteInput.value = '';
+  if (deliveryTelefonoInput) deliveryTelefonoInput.value = '';
+  if (deliveryDireccionInput) deliveryDireccionInput.value = '';
+  if (deliveryReferenciaInput) deliveryReferenciaInput.value = '';
+  if (deliveryNotaInput) deliveryNotaInput.value = '';
   actualizarCarritoUI();
   mostrarMensaje('Edición cancelada.', 'info');
 };
@@ -1024,7 +1106,7 @@ const crearCardCuenta = (cuenta) => {
   if (cuenta.mesa) mesaCliente.push(cuenta.mesa);
   if (cuenta.cliente) mesaCliente.push(cuenta.cliente);
 
-  const servicioTexto = cuenta.modo_servicio === 'para_llevar' ? 'Para llevar' : 'Consumir en el negocio';
+  const servicioTexto = obtenerTextoServicio(cuenta.modo_servicio);
   const cuentaTexto = `Cuenta #${cuenta.cuenta_id}`;
   info.innerHTML = `
       <h3>${cuentaTexto}</h3>
@@ -1310,11 +1392,14 @@ const enviarPedido = async (destino = 'cocina') => {
   const esEdicion = Boolean(estado.pedidoEditandoId);
   const url = '/api/pedidos';
   const metodo = 'POST';
-  const botonActivo = destino === 'caja' ? botonEnviarCaja : botonEnviar;
+  let botonActivo = botonEnviar;
+  if (destino === 'caja') botonActivo = botonEnviarCaja;
+  if (destino === 'delivery-prep') botonActivo = botonDeliveryPrep;
+  if (destino === 'delivery-directo') botonActivo = botonDeliveryDirecto;
 
   try {
     estado.cargando = true;
-    [botonEnviar, botonEnviarCaja]
+    [botonEnviar, botonEnviarCaja, botonDeliveryPrep, botonDeliveryDirecto]
       .filter(Boolean)
       .forEach((btn) => {
         btn.disabled = true;
@@ -1347,11 +1432,20 @@ const enviarPedido = async (destino = 'cocina') => {
       ? 'Nueva orden agregada a la cuenta correctamente.'
       : destino === 'caja'
         ? 'Pedido enviado a caja correctamente.'
-        : 'Pedido enviado a preparacion correctamente.';
+        : destino === 'delivery-prep'
+          ? 'Pedido enviado a preparación y delivery correctamente.'
+          : destino === 'delivery-directo'
+            ? 'Pedido enviado directo a delivery correctamente.'
+            : 'Pedido enviado a preparación correctamente.';
     mostrarMensaje(mensajeExito, 'info');
     notificarActualizacionGlobal('stock-actualizado', { tipo: esEdicion ? 'actualizado' : 'creado' });
     estado.carrito.clear();
     if (notaInput) notaInput.value = '';
+    if (deliveryClienteInput) deliveryClienteInput.value = '';
+    if (deliveryTelefonoInput) deliveryTelefonoInput.value = '';
+    if (deliveryDireccionInput) deliveryDireccionInput.value = '';
+    if (deliveryReferenciaInput) deliveryReferenciaInput.value = '';
+    if (deliveryNotaInput) deliveryNotaInput.value = '';
     actualizarCarritoUI();
     if (esEdicion) {
       cancelarEdicion();
@@ -1362,7 +1456,7 @@ const enviarPedido = async (destino = 'cocina') => {
     mostrarMensaje('Ocurrió un error al enviar el pedido. Intenta más tarde.', 'error');
   } finally {
     estado.cargando = false;
-    [botonEnviar, botonEnviarCaja]
+    [botonEnviar, botonEnviarCaja, botonDeliveryPrep, botonDeliveryDirecto]
       .filter(Boolean)
       .forEach((btn) => {
         btn.disabled = false;
@@ -1425,6 +1519,8 @@ const inicializarEventos = () => {
 
   botonEnviar?.addEventListener('click', () => enviarPedido('cocina'));
   botonEnviarCaja?.addEventListener('click', () => enviarPedido('caja'));
+  botonDeliveryPrep?.addEventListener('click', () => enviarPedido('delivery-prep'));
+  botonDeliveryDirecto?.addEventListener('click', () => enviarPedido('delivery-directo'));
   botonCancelarEdicion?.addEventListener('click', () => {
     cancelarEdicion();
   });

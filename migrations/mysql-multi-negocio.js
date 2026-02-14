@@ -1625,6 +1625,15 @@ async function runMigrations() {
   await ensureColumn('pedidos', 'bartender_nombre VARCHAR(255) NULL');
   await ensureColumn('pedidos', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
   await ensureColumn('pedidos', 'cogs_total DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn('pedidos', 'delivery_estado VARCHAR(20) NULL');
+  await ensureColumn('pedidos', 'delivery_usuario_id INT NULL');
+  await ensureColumn('pedidos', 'delivery_usuario_nombre VARCHAR(255) NULL');
+  await ensureColumn('pedidos', 'delivery_fecha_asignacion DATETIME NULL');
+  await ensureColumn('pedidos', 'delivery_fecha_entrega DATETIME NULL');
+  await ensureColumn('pedidos', 'delivery_telefono VARCHAR(50) NULL');
+  await ensureColumn('pedidos', 'delivery_direccion TEXT NULL');
+  await ensureColumn('pedidos', 'delivery_referencia VARCHAR(255) NULL');
+  await ensureColumn('pedidos', 'delivery_notas TEXT NULL');
   await ensureColumn('cierres_caja', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
   await ensureColumn('salidas_caja', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
   await ensureColumn('detalle_pedido', 'costo_unitario_snapshot DECIMAL(12,2) NOT NULL DEFAULT 0');

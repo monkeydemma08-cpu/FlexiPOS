@@ -2624,7 +2624,7 @@ const guardarConfiguracionFactura = async () => {
 /* =====================
  * GestiÃ³n de usuarios
  * ===================== */
-const ROLES_PERMITIDOS_BASE = ['mesera', 'cocina', 'bar', 'caja', 'vendedor', 'supervisor'];
+const ROLES_PERMITIDOS_BASE = ['mesera', 'cocina', 'bar', 'caja', 'vendedor', 'delivery', 'supervisor'];
 const obtenerRolesPermitidos = () =>
   puedeGestionarSupervisores()
     ? ROLES_PERMITIDOS_BASE
@@ -5299,6 +5299,7 @@ const getNegociosDom = () => ({
     chkModuloBar: document.getElementById('kanm-modulo-bar'),
     chkModuloCaja: document.getElementById('kanm-modulo-caja'),
     chkModuloMostrador: document.getElementById('kanm-modulo-mostrador'),
+    chkModuloDelivery: document.getElementById('kanm-modulo-delivery'),
     chkModuloHistorial: document.getElementById('kanm-modulo-historial'),
   inputAdminCorreo: document.getElementById('kanm-negocios-admin-correo'),
   inputAdminUsuario: document.getElementById('kanm-negocios-admin-usuario'),
@@ -5881,6 +5882,7 @@ const abrirModalNegocio = async (id = null) => {
     if (dom.chkModuloBar) dom.chkModuloBar.checked = configParsed.bar !== false;
     if (dom.chkModuloCaja) dom.chkModuloCaja.checked = configParsed.caja !== false;
     if (dom.chkModuloMostrador) dom.chkModuloMostrador.checked = configParsed.mostrador !== false;
+    if (dom.chkModuloDelivery) dom.chkModuloDelivery.checked = configParsed.delivery !== false;
     if (dom.chkModuloHistorial) dom.chkModuloHistorial.checked = configParsed.historialCocina !== false;
 
   if (dom.inputAdminCorreo) {
@@ -5942,6 +5944,7 @@ const guardarNegocio = async (event) => {
       bar: dom.chkModuloBar?.checked !== false,
       caja: dom.chkModuloCaja?.checked !== false,
       mostrador: dom.chkModuloMostrador?.checked !== false,
+      delivery: dom.chkModuloDelivery?.checked !== false,
       historialCocina: dom.chkModuloHistorial?.checked !== false,
     };
 

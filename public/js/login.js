@@ -9,6 +9,7 @@ const roleRoutes = {
   bar: '/bar.html',
   caja: '/caja.html',
   vendedor: '/mostrador.html',
+  delivery: '/delivery.html',
   admin: '/admin.html',
   supervisor: '/supervisor.html',
   empresa: '/empresa.html',
