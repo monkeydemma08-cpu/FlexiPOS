@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>POSIUM - Registro</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="js/password-toggle.js" defer></script>
+    <script src="js/registro.js" defer></script>
+    <style>
+      :root {
+        --ink: #132529;
+        --ink-soft: rgba(19, 37, 41, 0.75);
+        --gold: #c7a166;
+        --line: rgba(15, 30, 34, 0.16);
+        --bg-a: #f7f3ed;
+        --bg-b: #eef2f3;
+        --bg-c: #f9fbfc;
+        --success: #1d7748;
+        --danger: #b4233b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: 'Manrope', sans-serif;
+        color: var(--ink);
+        background: radial-gradient(1000px circle at 10% 10%, rgba(20, 37, 42, 0.12), transparent 62%),
+          radial-gradient(900px circle at 90% 0%, rgba(199, 161, 102, 0.2), transparent 58%),
+          linear-gradient(130deg, var(--bg-a) 0%, var(--bg-b) 45%, var(--bg-c) 100%);
+        padding: 24px 14px 40px;
+      }
+
+      .shell {
+        max-width: 980px;
+        margin: 0 auto;
+      }
+
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .brand {
+        font-family: 'Playfair Display', serif;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        font-size: 1.5rem;
+        color: var(--ink);
+      }
+
+      .top a {
+        color: var(--ink-soft);
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .card {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 24px;
+        box-shadow: 0 20px 46px rgba(15, 30, 34, 0.12);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-family: 'Playfair Display', serif;
+        font-size: clamp(1.5rem, 2.8vw, 2.1rem);
+      }
+
+      .subtitle {
+        margin: 0 0 18px;
+        color: var(--ink-soft);
+      }
+
+      .grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid.three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+
+      label {
+        font-size: 0.9rem;
+        font-weight: 600;
+      }
+
+      input,
+      select {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 13px;
+        font-size: 0.95rem;
+        font-family: inherit;
+        color: var(--ink);
+        background: #fff;
+      }
+
+      input:focus,
+      select:focus {
+        outline: none;
+        border-color: var(--gold);
+        box-shadow: 0 0 0 4px rgba(199, 161, 102, 0.17);
+      }
+
+      .password-field {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .password-field input {
+        flex: 1;
+      }
+
+      .password-toggle {
+        border: none;
+        background: transparent;
+        font-weight: 700;
+        color: var(--ink-soft);
+        cursor: pointer;
+      }
+
+      .section {
+        margin-top: 16px;
+        border-top: 1px solid rgba(15, 30, 34, 0.08);
+        padding-top: 16px;
+      }
+
+      .section h2 {
+        margin: 0 0 6px;
+        font-size: 1.05rem;
+      }
+
+      .section p {
+        margin: 0 0 14px;
+        color: var(--ink-soft);
+        font-size: 0.92rem;
+      }
+
+      .module-grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      }
+
+      .module {
+        border: 1px solid rgba(15, 30, 34, 0.09);
+        border-radius: 12px;
+        padding: 10px 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: #fff;
+      }
+
+      .module.disabled {
+        opacity: 0.55;
+        background: #f6f7f7;
+      }
+
+      .module input[type='checkbox'] {
+        margin: 0;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .btn {
+        border: none;
+        border-radius: 999px;
+        padding: 11px 18px;
+        cursor: pointer;
+        font-weight: 700;
+        font-family: inherit;
+        font-size: 0.9rem;
+      }
+
+      .btn.primary {
+        background: linear-gradient(135deg, #102126, #28424a);
+        color: #fff;
+      }
+
+      .btn.secondary {
+        background: #fff;
+        border: 1px solid var(--line);
+        color: var(--ink);
+      }
+
+      .recommendation {
+        margin-top: 14px;
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(199, 161, 102, 0.12);
+        border: 1px solid rgba(199, 161, 102, 0.3);
+        font-size: 0.92rem;
+      }
+
+      .recommendation ul {
+        margin: 8px 0 0;
+        padding-left: 18px;
+      }
+
+      .message {
+        margin-top: 14px;
+        min-height: 22px;
+        font-size: 0.93rem;
+        font-weight: 600;
+      }
+
+      .message.error {
+        color: var(--danger);
+      }
+
+      .message.success {
+        color: var(--success);
+      }
+
+      .notice {
+        margin-top: 14px;
+        padding: 14px;
+        border-radius: 12px;
+        border: 1px solid rgba(29, 119, 72, 0.35);
+        background: rgba(29, 119, 72, 0.08);
+        color: #165f3a;
+        display: none;
+      }
+
+      .notice.visible {
+        display: block;
+      }
+
+      .muted {
+        color: var(--ink-soft);
+      }
+
+      @media (max-width: 860px) {
+        .grid.two,
+        .grid.three {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="top">
+        <div class="brand">POSIUM</div>
+        <a href="/login.html">Iniciar sesion</a>
+      </header>
+
+      <section class="card">
+        <h1>Registro de nueva cuenta</h1>
+        <p class="subtitle">
+          Completa este formulario para crear tu solicitud. Al finalizar, se enviara una notificacion al super admin
+          y recibiras instrucciones para pago y activacion.
+        </p>
+
+        <form id="registro-form" novalidate>
+          <div class="grid two">
+            <div class="field">
+              <label for="registro-negocio">Nombre del negocio</label>
+              <input type="text" id="registro-negocio" required />
+            </div>
+            <div class="field">
+              <label for="registro-tipo">Tipo de negocio</label>
+              <select id="registro-tipo" required>
+                <option value="">Selecciona</option>
+                <option value="colmado">Colmado</option>
+                <option value="cafeteria">Cafeteria</option>
+                <option value="restaurante">Restaurante</option>
+                <option value="foodtruck">Foodtruck</option>
+                <option value="tienda">Tienda</option>
+                <option value="otro">Otro</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid two">
+            <div class="field">
+              <label for="registro-admin-nombre">Nombre del admin</label>
+              <input type="text" id="registro-admin-nombre" required />
+            </div>
+            <div class="field">
+              <label for="registro-admin-usuario">Usuario admin</label>
+              <input type="text" id="registro-admin-usuario" autocomplete="username" required />
+            </div>
+          </div>
+
+          <div class="grid two">
+            <div class="field">
+              <label for="registro-admin-password">Password admin</label>
+              <div class="password-field">
+                <input type="password" id="registro-admin-password" autocomplete="new-password" required />
+                <button
+                  type="button"
+                  class="password-toggle"
+                  data-password-toggle
+                  aria-pressed="false"
+                  aria-label="Mostrar password"
+                >
+                  Mostrar
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="registro-usuarios">Usuarios estimados</label>
+              <select id="registro-usuarios">
+                <option value="">Selecciona</option>
+                <option value="1-3">1-3</option>
+                <option value="4-10">4-10</option>
+                <option value="11+">11+</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid three">
+            <div class="field">
+              <label for="registro-telefono">Telefono</label>
+              <input type="text" id="registro-telefono" />
+            </div>
+            <div class="field">
+              <label for="registro-email">Correo</label>
+              <input type="email" id="registro-email" />
+            </div>
+            <div class="field">
+              <label for="registro-ciudad">Ciudad</label>
+              <input type="text" id="registro-ciudad" />
+            </div>
+          </div>
+
+          <div class="section">
+            <h2>Preguntas rapidas para recomendar modulos</h2>
+            <p>Responde en menos de 20 segundos para estimar el mejor paquete.</p>
+            <div class="grid three">
+              <div class="field">
+                <label for="registro-cocina">Tiene cocina activa</label>
+                <select id="registro-cocina">
+                  <option value="no">No</option>
+                  <option value="si">Si</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="registro-delivery">Maneja delivery</label>
+                <select id="registro-delivery">
+                  <option value="no">No</option>
+                  <option value="si">Si</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="registro-bar">Maneja bar</label>
+                <select id="registro-bar">
+                  <option value="no">No</option>
+                  <option value="si">Si</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <h2>Modulos a usar</h2>
+            <p>Puedes escoger manualmente o usar la recomendacion automatica.</p>
+            <div class="module-grid">
+              <label class="module"><input type="checkbox" value="pos" data-modulo />POS</label>
+              <label class="module"><input type="checkbox" value="inventario" data-modulo />Inventario</label>
+              <label class="module"><input type="checkbox" value="caja" data-modulo />Caja</label>
+              <label class="module"><input type="checkbox" value="mesera" data-modulo />Mesera</label>
+              <label class="module"><input type="checkbox" value="kds" data-modulo />KDS</label>
+              <label class="module"><input type="checkbox" value="bar" data-modulo />Bar</label>
+              <label class="module"><input type="checkbox" value="delivery" data-modulo />Delivery</label>
+              <label class="module"><input type="checkbox" value="compras" data-modulo />Compras</label>
+              <label class="module"><input type="checkbox" value="clientes" data-modulo />Clientes</label>
+              <label class="module"><input type="checkbox" value="gastos" data-modulo />Gastos</label>
+              <label class="module"><input type="checkbox" value="reportes" data-modulo />Reportes</label>
+              <label class="module disabled">
+                <input type="checkbox" value="facturacion_electronica" disabled />
+                Facturacion electronica (no disponible por el momento)
+              </label>
+            </div>
+            <div class="toolbar">
+              <button type="button" class="btn secondary" id="registro-recomendar">Recomendar modulos</button>
+              <button type="submit" class="btn primary" id="registro-enviar">Completar registro</button>
+            </div>
+            <div class="recommendation" id="registro-recomendacion">
+              Se mostrara aqui la recomendacion de modulos para tu negocio.
+            </div>
+          </div>
+
+          <div class="message" id="registro-mensaje"></div>
+          <div class="notice" id="registro-notice"></div>
+        </form>
+
+        <p class="muted">
+          Contacto directo: WhatsApp +1 809-967-2501 | Correo: posiumtech@gmail.com
+        </p>
+      </section>
+    </div>
+  </body>
+</html>

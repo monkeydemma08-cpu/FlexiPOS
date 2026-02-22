@@ -162,6 +162,42 @@ CREATE TABLE IF NOT EXISTS admin_impersonations (
   CONSTRAINT fk_admin_impersonations_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS registro_solicitudes (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  codigo VARCHAR(24) NOT NULL,
+  negocio_nombre VARCHAR(180) NOT NULL,
+  negocio_id INT NULL,
+  negocio_slug VARCHAR(140) NULL,
+  negocio_tipo VARCHAR(80) NULL,
+  admin_nombre VARCHAR(180) NOT NULL,
+  admin_usuario VARCHAR(120) NOT NULL,
+  admin_usuario_id INT NULL,
+  admin_password_hash TEXT NULL,
+  telefono VARCHAR(40) NULL,
+  email VARCHAR(255) NULL,
+  ciudad VARCHAR(120) NULL,
+  cantidad_usuarios VARCHAR(40) NULL,
+  usa_cocina TINYINT(1) NOT NULL DEFAULT 0,
+  usa_delivery TINYINT(1) NOT NULL DEFAULT 0,
+  modulo_kds TINYINT(1) NOT NULL DEFAULT 0,
+  modulos_solicitados_json JSON NULL,
+  modulos_recomendados_json JSON NULL,
+  respuestas_json JSON NULL,
+  estado VARCHAR(30) NOT NULL DEFAULT 'pendiente_pago',
+  estado_pago_limite DATETIME NULL,
+  notas_publicas TEXT NULL,
+  notas_internas TEXT NULL,
+  correo_enviado TINYINT(1) NOT NULL DEFAULT 0,
+  correo_error TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_registro_solicitudes_codigo (codigo),
+  KEY idx_registro_solicitudes_estado (estado),
+  KEY idx_registro_solicitudes_creado (created_at),
+  KEY idx_registro_solicitudes_negocio (negocio_id),
+  KEY idx_registro_solicitudes_admin_usuario (admin_usuario_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS cotizaciones (
   id INT AUTO_INCREMENT PRIMARY KEY,
   codigo VARCHAR(100),

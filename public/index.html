@@ -676,6 +676,20 @@
         box-shadow: 0 14px 24px var(--posium-shadow-press);
       }
 
+      .login-modal .login-register-link {
+        margin-top: 10px;
+        display: inline-flex;
+        width: 100%;
+        justify-content: center;
+        align-items: center;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid var(--posium-line);
+        color: var(--posium-ink);
+        background: rgba(255, 255, 255, 0.84);
+        font-weight: 600;
+      }
+
       .login-modal #login-error {
         margin-top: 16px;
         min-height: 20px;
@@ -791,6 +805,7 @@
         </nav>
         <div class="landing-actions">
           <button class="btn secondary" type="button" data-open-login>Iniciar sesión</button>
+          <a class="btn secondary" href="/registro.html">Registrarse</a>
           <a
             class="btn primary"
             href="https://wa.me/18099672501?text=Hola%2C%20quiero%20informaci%C3%B3n%20para%20obtener%20POSIUM%20para%20mi%20negocio.%20%C2%BFMe%20apoyas%20con%20planes%20y%20configuraci%C3%B3n%3F"
@@ -825,6 +840,7 @@
               >Contáctanos</a
             >
             <button class="btn secondary" type="button" data-open-login>Iniciar sesión</button>
+            <a class="btn secondary" href="/registro.html">Registrarse</a>
           </div>
         </div>
         <div class="hero-mockup" aria-hidden="true">
@@ -968,7 +984,7 @@
           </div>
           <div class="info-card">
             <h3>Facturación electrónica</h3>
-            <span>Estructura lista para integrarse.</span>
+            <span>No disponible por el momento.</span>
           </div>
         </div>
       </section>
@@ -1002,6 +1018,7 @@
             <p class="section-subtitle">
               Implementación, soporte y evolución continua para tu operación.
             </p>
+            <p class="section-subtitle">Contacto: posiumtech@gmail.com</p>
           </div>
           <a
             class="btn primary"
@@ -1021,6 +1038,7 @@
           <a href="#soporte">Soporte</a>
         </div>
         <div>WhatsApp: +1 809-967-2501</div>
+        <div>Correo: posiumtech@gmail.com</div>
       </footer>
     </div>
 
@@ -1053,6 +1071,7 @@
                 </div>
               </div>
               <button type="submit">Entrar a POSIUM</button>
+              <a class="login-register-link" href="/registro.html">Registrarse</a>
             </form>
             <div id="login-error"></div>
           </div>

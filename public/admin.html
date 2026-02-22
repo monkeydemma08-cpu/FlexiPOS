@@ -118,6 +118,7 @@
       <button type="button" class="kanm-tab" data-admin-tab="abastecimiento" data-modulo="admin">Abastecimiento</button>
       <button type="button" class="kanm-tab" data-admin-tab="gastos" data-modulo="admin">Gastos</button>
       <button type="button" class="kanm-tab" data-admin-tab="ventas" data-modulo="caja">Ventas &amp; 607</button>
+      <button type="button" class="kanm-tab super-admin-only" data-admin-tab="dgiiPaso2" data-modulo="admin">DGII Paso 2</button>
       <button type="button" class="kanm-tab" data-admin-tab="analisis" data-modulo="admin">Analisis del negocio</button>
       <button type="button" class="kanm-tab" data-admin-tab="cuadres" data-modulo="caja">Cuadres de caja</button>
       <button type="button" class="kanm-tab" data-admin-tab="historial" data-modulo="historialCocina">Historial de preparación</button>
@@ -1736,6 +1737,153 @@
       </section>
     </section>
 
+    <!-- DGII Paso 2 -->
+    <section class="admin-panel hidden" data-admin-section="dgiiPaso2" id="admin-section-dgii-paso2">
+      <div class="kanm-card-header">
+        <h2>Pruebas DGII Paso 2</h2>
+        <p class="kanm-subtitle">Importa set XLSX, genera XML sin firma en carpeta y procesa certificacion.</p>
+      </div>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Configuracion certificacion</h3>
+          <p class="kanm-subtitle">Credenciales DGII y certificado digital del emisor.</p>
+        </header>
+        <div class="kanm-grid-3">
+          <div class="kanm-input-group">
+            <label for="dgii-config-usuario">Usuario certificacion</label>
+            <input type="text" id="dgii-config-usuario" placeholder="usuario portal DGII" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="dgii-config-clave">Clave certificacion</label>
+            <input type="password" id="dgii-config-clave" placeholder="Clave DGII" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="dgii-config-rnc">RNC emisor</label>
+            <input type="text" id="dgii-config-rnc" placeholder="101000000" />
+          </div>
+        </div>
+        <div class="kanm-grid-3">
+          <div class="kanm-input-group">
+            <label for="dgii-config-modo">Modo autenticacion</label>
+            <select id="dgii-config-modo">
+              <option value="AUTO">Auto</option>
+              <option value="CREDENCIALES">Credenciales</option>
+              <option value="SEMILLA">Semilla</option>
+            </select>
+          </div>
+          <div class="kanm-input-group">
+            <label for="dgii-config-p12">Certificado P12</label>
+            <input type="file" id="dgii-config-p12" accept=".p12,.pfx,application/x-pkcs12" />
+          </div>
+          <div class="kanm-input-group">
+            <label for="dgii-config-p12-password">Clave P12</label>
+            <input type="password" id="dgii-config-p12-password" placeholder="Clave certificado" />
+          </div>
+        </div>
+        <div class="kanm-grid-3">
+          <div class="kanm-input-group">
+            <label for="dgii-semilla-firmada-file">Semilla firmada (XML externo)</label>
+            <input type="file" id="dgii-semilla-firmada-file" accept=".xml,text/xml,application/xml" />
+          </div>
+        </div>
+        <div class="admin-report-actions">
+          <button type="button" class="kanm-button" id="dgii-config-guardar">Guardar configuracion</button>
+          <button type="button" class="kanm-button secondary" id="dgii-config-test">Probar autenticacion</button>
+          <button type="button" class="kanm-button ghost" id="dgii-semilla-validar">Validar semilla firmada</button>
+        </div>
+        <div id="dgii-config-mensaje" class="kanm-message"></div>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Importar set de pruebas</h3>
+          <p class="kanm-subtitle">Carga el XLSX descargado del portal de certificacion DGII.</p>
+        </header>
+        <div class="admin-report-controls">
+          <div class="kanm-input-group">
+            <label for="dgii-set-file">Archivo set (XLSX)</label>
+            <input type="file" id="dgii-set-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+          </div>
+          <div class="admin-report-actions">
+            <button type="button" class="kanm-button" id="dgii-set-importar">Importar set</button>
+            <button type="button" class="kanm-button ghost" id="dgii-set-refrescar">Recargar lotes</button>
+          </div>
+        </div>
+        <div id="dgii-set-mensaje" class="kanm-message"></div>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Ejecucion y progreso</h3>
+          <p class="kanm-subtitle">Controla el procesamiento y revisa aceptados/rechazados.</p>
+        </header>
+        <div class="admin-report-controls">
+          <div class="kanm-input-group">
+            <label for="dgii-set-select">Lote cargado</label>
+            <select id="dgii-set-select">
+              <option value="">Selecciona lote</option>
+            </select>
+          </div>
+          <div class="admin-report-actions">
+            <button type="button" class="kanm-button ghost" id="dgii-set-generar-xml">Generar XML sin firma</button>
+            <button type="button" class="kanm-button" id="dgii-set-procesar">Procesar pendientes</button>
+            <button type="button" class="kanm-button secondary" id="dgii-set-reprocesar">Reprocesar rechazados</button>
+          </div>
+        </div>
+        <div id="dgii-set-resumen" class="kanm-subtitle">Sin datos.</div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Lote</th>
+                <th>Archivo</th>
+                <th>Total</th>
+                <th>Aceptados</th>
+                <th>Rechazados</th>
+                <th>Resúmenes</th>
+              </tr>
+            </thead>
+            <tbody id="dgii-sets-tabla">
+              <tr>
+                <td colspan="6">Sin lotes cargados.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Casos del set</h3>
+          <p class="kanm-subtitle">Trazabilidad por caso: flujo, trackId, codigo y estado final.</p>
+        </header>
+        <div id="dgii-casos-mensaje" class="kanm-message"></div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Orden</th>
+                <th>Caso</th>
+                <th>Flujo</th>
+                <th>Monto</th>
+                <th>Estado</th>
+                <th>Codigo</th>
+                <th>TrackId</th>
+                <th>Intentos</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="dgii-casos-tabla">
+              <tr>
+                <td colspan="9">Selecciona un lote.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
     <!-- Analisis -->
     <section class="admin-panel hidden" data-admin-section="analisis" id="admin-section-analisis">
       <div class="kanm-card-header">
@@ -2122,6 +2270,58 @@
             <tbody id="kanm-negocios-tbody">
               <tr>
                 <td colspan="7">Cargando...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="kanm-card admin-card">
+        <div class="kanm-card-header kanm-card-header--actions">
+          <div>
+            <h3>Solicitudes de registro web</h3>
+            <p class="kanm-subtitle">Registros enviados desde el formulario de onboarding.</p>
+          </div>
+          <div class="kanm-negocios-actions">
+            <div class="kanm-input-group">
+              <input
+                type="search"
+                id="kanm-registros-buscar"
+                placeholder="Buscar por codigo, negocio o admin..."
+              />
+            </div>
+            <div class="kanm-input-group">
+              <select id="kanm-registros-estado">
+                <option value="">Todos los estados</option>
+                <option value="pendiente_pago">Pendiente pago</option>
+                <option value="en_revision">En revision</option>
+                <option value="pago_recibido">Pago recibido</option>
+                <option value="aprobado">Aprobado</option>
+                <option value="rechazado">Rechazado</option>
+              </select>
+            </div>
+            <button type="button" class="kanm-button ghost" id="kanm-registros-refrescar">Refrescar</button>
+          </div>
+        </div>
+        <div id="kanm-registros-mensaje" class="kanm-subtitle"></div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table" id="kanm-registros-tabla">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Codigo</th>
+                <th>Negocio</th>
+                <th>Admin</th>
+                <th>Contacto</th>
+                <th>Modulos</th>
+                <th>Correo</th>
+                <th>Estado</th>
+                <th>Accion</th>
+              </tr>
+            </thead>
+            <tbody id="kanm-registros-tbody">
+              <tr>
+                <td colspan="9">Sin registros.</td>
               </tr>
             </tbody>
           </table>

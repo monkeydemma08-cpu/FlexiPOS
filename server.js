@@ -7,11 +7,19 @@ const bcrypt = require('bcryptjs');
 const http = require('http');
 const { Server } = require('socket.io');
 
+let nodemailer = null;
+try {
+  nodemailer = require('nodemailer');
+} catch (error) {
+  console.warn('nodemailer no disponible. El envio de correos de registro quedara desactivado.');
+}
+
 const db = require('./db');
 const usuariosRepo = require('./repos/usuarios-mysql');
 const runMultiNegocioMigrations = require('./migrations/mysql-multi-negocio');
 const runChatMigrations = require('./migrations/mysql-chat');
 const dgiiRoutes = require('./dgii.routes');
+const createDgiiPaso2Router = require('./dgii-paso2.routes');
 console.log('server.js cargó correctamente');
 
 const app = express();
@@ -20,7 +28,7 @@ let io = null;
 app.set('trust proxy', 1);
 
 // Allow larger payloads for long logo URLs or data URIs in configuration.
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '35mb' }));
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(dgiiRoutes);
@@ -56,6 +64,33 @@ const IMPERSONATION_JWT_SECRET =
 
 const INVENTARIO_VALORACION_DEFAULT = 'PROMEDIO';
 const INVENTARIO_VALORACION_METODOS = new Set(['PROMEDIO', 'PEPS']);
+const REGISTRO_DESTINO_CORREO = process.env.REGISTRO_DESTINO_CORREO || 'posiumtech@gmail.com';
+const REGISTRO_PAGO_HORAS = 24;
+const REGISTRO_ESTADOS_VALIDOS = new Set([
+  'pendiente_pago',
+  'en_revision',
+  'pago_recibido',
+  'aprobado',
+  'rechazado',
+]);
+const REGISTRO_MODULOS_CATALOGO = Object.freeze([
+  { key: 'pos', label: 'POS', disponible: true },
+  { key: 'inventario', label: 'Inventario', disponible: true },
+  { key: 'caja', label: 'Caja', disponible: true },
+  { key: 'mesera', label: 'Mesera', disponible: true },
+  { key: 'kds', label: 'KDS', disponible: true },
+  { key: 'bar', label: 'Bar', disponible: true },
+  { key: 'delivery', label: 'Delivery', disponible: true },
+  { key: 'compras', label: 'Compras', disponible: true },
+  { key: 'clientes', label: 'Clientes', disponible: true },
+  { key: 'gastos', label: 'Gastos', disponible: true },
+  { key: 'reportes', label: 'Reportes', disponible: true },
+  { key: 'facturacion_electronica', label: 'Facturacion electronica', disponible: false },
+]);
+const REGISTRO_MODULOS_MAP = new Map(REGISTRO_MODULOS_CATALOGO.map((item) => [item.key, item]));
+
+let registroMailTransporter = null;
+let registroMailTransporterIntentado = false;
 
 const seedUsuariosIniciales = async () => {
   const iniciales = [
@@ -255,6 +290,602 @@ function normalizarMonto(valor) {
   }
   const numero = Number(texto);
   return Number.isFinite(numero) ? numero : null;
+}
+
+function normalizarListaTexto(input) {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) {
+    if (typeof input === 'string') {
+      try {
+        const parsed = JSON.parse(input);
+        if (Array.isArray(parsed)) {
+          input = parsed;
+        } else {
+          input = input.split(',');
+        }
+      } catch (error) {
+        input = input.split(',');
+      }
+    } else {
+      return [];
+    }
+  }
+
+  const salida = [];
+  const vistos = new Set();
+  for (const item of input) {
+    const texto = normalizarCampoTexto(item);
+    if (!texto) continue;
+    const valor = texto.toLowerCase();
+    if (vistos.has(valor)) continue;
+    vistos.add(valor);
+    salida.push(valor);
+  }
+  return salida;
+}
+
+function normalizarModulosRegistro(input) {
+  const modulos = normalizarListaTexto(input);
+  return modulos.filter((item) => REGISTRO_MODULOS_MAP.has(item));
+}
+
+function moduloRegistroDisponible(key) {
+  return REGISTRO_MODULOS_MAP.get(key)?.disponible !== false;
+}
+
+function toRegistroLabelList(keys = []) {
+  return keys
+    .map((key) => REGISTRO_MODULOS_MAP.get(key)?.label || key)
+    .filter((item) => !!item);
+}
+
+function normalizarBooleanRegistro(valor, fallback = false) {
+  if (valor === undefined || valor === null) return fallback;
+  if (typeof valor === 'boolean') return valor;
+  if (typeof valor === 'number') return valor !== 0;
+  if (typeof valor === 'string') {
+    const clean = valor.trim().toLowerCase();
+    if (['1', 'true', 'si', 'yes', 'on'].includes(clean)) return true;
+    if (['0', 'false', 'no', 'off'].includes(clean)) return false;
+  }
+  return Boolean(valor);
+}
+
+function normalizarTipoNegocioRegistro(valor) {
+  const clean = normalizarCampoTexto(valor);
+  if (!clean) return null;
+  return clean.toLowerCase().slice(0, 80);
+}
+
+function normalizarCantidadUsuariosRegistro(valor) {
+  const clean = normalizarCampoTexto(valor);
+  if (!clean) return null;
+  const asNumber = Number(clean);
+  if (Number.isFinite(asNumber) && asNumber > 0) {
+    if (asNumber <= 3) return '1-3';
+    if (asNumber <= 10) return '4-10';
+    return '11+';
+  }
+  const normalized = clean.toLowerCase();
+  if (['1-3', '4-10', '11+', '10+'].includes(normalized)) return normalized === '10+' ? '11+' : normalized;
+  return normalized.slice(0, 40);
+}
+
+function recomendarModulosRegistro({
+  tipoNegocio = null,
+  usaCocina = false,
+  usaDelivery = false,
+  usaBar = false,
+  cantidadUsuarios = null,
+}) {
+  const tipo = normalizarTipoNegocioRegistro(tipoNegocio) || '';
+  const moduloSet = new Set(['pos', 'caja', 'inventario', 'reportes', 'clientes', 'compras', 'gastos']);
+
+  if (usaCocina || tipo.includes('restaurante') || tipo.includes('cafeteria') || tipo.includes('food')) {
+    moduloSet.add('mesera');
+    moduloSet.add('kds');
+  }
+
+  if (usaBar || tipo.includes('bar')) {
+    moduloSet.add('bar');
+    moduloSet.add('kds');
+  }
+
+  if (usaDelivery) {
+    moduloSet.add('delivery');
+  }
+
+  if (cantidadUsuarios === '11+' || cantidadUsuarios === '4-10') {
+    moduloSet.add('mesera');
+  }
+
+  const recomendado = Array.from(moduloSet).filter((key) => moduloRegistroDisponible(key));
+  return {
+    keys: recomendado,
+    labels: toRegistroLabelList(recomendado),
+  };
+}
+
+function resolverModulosSolicitadosRegistro(solicitados = [], recomendados = []) {
+  const validos = normalizarModulosRegistro(solicitados).filter((key) => moduloRegistroDisponible(key));
+  if (validos.length) return validos;
+  return normalizarModulosRegistro(recomendados).filter((key) => moduloRegistroDisponible(key));
+}
+
+function generarCodigoRegistroSolicitud() {
+  const timestamp = Date.now().toString(36).toUpperCase().slice(-6);
+  const random = crypto.randomBytes(3).toString('hex').toUpperCase();
+  return `RG${timestamp}${random}`;
+}
+
+function slugifyRegistro(input = '') {
+  const base = (input || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 110);
+  return base || 'negocio';
+}
+
+async function generarSlugRegistroUnico(nombreNegocio = '') {
+  const base = slugifyRegistro(nombreNegocio);
+  let candidato = base;
+  let intentos = 0;
+  while (intentos < 30) {
+    // Incluye negocios activos y eliminados para evitar colisiones del indice UNIQUE.
+    const existente = await db.get('SELECT id FROM negocios WHERE slug = ? LIMIT 1', [candidato]);
+    if (!existente?.id) {
+      return candidato;
+    }
+    intentos += 1;
+    candidato = `${base}-${(intentos + 1).toString(36)}${crypto.randomBytes(1).toString('hex')}`;
+  }
+  return `${base}-${Date.now().toString(36)}`;
+}
+
+function construirConfigModulosRegistro({ modulosSolicitados = [], usaCocina = false, usaDelivery = false, usaBar = false } = {}) {
+  const selected = new Set(normalizarModulosRegistro(modulosSolicitados));
+  const pos = selected.has('pos');
+  const caja = selected.has('caja') || pos;
+  const mostrador = pos || selected.has('inventario');
+  const cocina = usaCocina || selected.has('kds');
+  const bar = usaBar || selected.has('bar');
+  const delivery = usaDelivery || selected.has('delivery');
+  const mesera = selected.has('mesera') || cocina;
+
+  return {
+    ...DEFAULT_CONFIG_MODULOS,
+    admin: true,
+    mesera: mesera,
+    cocina: cocina,
+    bar: bar,
+    caja: caja,
+    mostrador: mostrador,
+    delivery: delivery,
+    historialCocina: cocina || bar,
+  };
+}
+
+async function obtenerTemaBaseRegistro() {
+  const columns = `
+    color_primario,
+    color_secundario,
+    color_texto,
+    color_header,
+    color_boton_primario,
+    color_boton_secundario,
+    color_boton_peligro,
+    logo_url,
+    titulo_sistema
+  `;
+
+  let row = await db.get(`SELECT ${columns} FROM negocios WHERE id = ? LIMIT 1`, [NEGOCIO_ID_DEFAULT]);
+  if (!row) {
+    row = await db.get(`SELECT ${columns} FROM negocios ORDER BY id ASC LIMIT 1`);
+  }
+
+  const colorPrimario = normalizarCampoTexto(row?.color_primario ?? row?.colorPrimario, null) || '#36c1b3';
+  const colorSecundario = normalizarCampoTexto(row?.color_secundario ?? row?.colorSecundario, null) || '#91a2f4';
+  const colorTexto = normalizarCampoTexto(row?.color_texto ?? row?.colorTexto, null) || DEFAULT_COLOR_TEXTO;
+  const colorHeader =
+    normalizarCampoTexto(row?.color_header ?? row?.colorHeader, null) || colorPrimario || colorSecundario;
+  const colorBotonPrimario =
+    normalizarCampoTexto(row?.color_boton_primario ?? row?.colorBotonPrimario, null) || colorPrimario;
+  const colorBotonSecundario =
+    normalizarCampoTexto(row?.color_boton_secundario ?? row?.colorBotonSecundario, null) || colorSecundario;
+  const colorBotonPeligro =
+    normalizarCampoTexto(row?.color_boton_peligro ?? row?.colorBotonPeligro, null) || DEFAULT_COLOR_PELIGRO;
+  const logoUrl = normalizarCampoTexto(row?.logo_url ?? row?.logoUrl, null);
+  const tituloSistema =
+    normalizarCampoTexto(row?.titulo_sistema ?? row?.tituloSistema, null) || 'POSIUM';
+
+  return {
+    colorPrimario,
+    colorSecundario,
+    colorTexto,
+    colorHeader,
+    colorBotonPrimario,
+    colorBotonSecundario,
+    colorBotonPeligro,
+    logoUrl,
+    tituloSistema,
+  };
+}
+
+function parseJsonSeguro(valor, fallback) {
+  if (valor === undefined || valor === null || valor === '') return fallback;
+  if (typeof valor === 'object') return valor;
+  if (typeof valor !== 'string') return fallback;
+  try {
+    return JSON.parse(valor);
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function mapRegistroSolicitud(row = {}) {
+  const modulosSolicitados = normalizarModulosRegistro(parseJsonSeguro(row.modulos_solicitados_json, []));
+  const modulosRecomendados = normalizarModulosRegistro(parseJsonSeguro(row.modulos_recomendados_json, []));
+  const respuestas = parseJsonSeguro(row.respuestas_json, {});
+
+  return {
+    id: row.id,
+    codigo: row.codigo || null,
+    negocio_nombre: row.negocio_nombre || '',
+    negocio_id: row.negocio_id || null,
+    negocio_slug: row.negocio_slug || null,
+    negocio_tipo: row.negocio_tipo || '',
+    admin_nombre: row.admin_nombre || '',
+    admin_usuario: row.admin_usuario || '',
+    admin_usuario_id: row.admin_usuario_id || null,
+    telefono: row.telefono || '',
+    email: row.email || '',
+    ciudad: row.ciudad || '',
+    cantidad_usuarios: row.cantidad_usuarios || '',
+    usa_cocina: !!row.usa_cocina,
+    usa_delivery: !!row.usa_delivery,
+    modulo_kds: !!row.modulo_kds,
+    modulos_solicitados: modulosSolicitados,
+    modulos_solicitados_labels: toRegistroLabelList(modulosSolicitados),
+    modulos_recomendados: modulosRecomendados,
+    modulos_recomendados_labels: toRegistroLabelList(modulosRecomendados),
+    respuestas: respuestas && typeof respuestas === 'object' ? respuestas : {},
+    estado: row.estado || 'pendiente_pago',
+    estado_pago_limite: row.estado_pago_limite || null,
+    notas_publicas: row.notas_publicas || '',
+    notas_internas: row.notas_internas || '',
+    correo_enviado: !!row.correo_enviado,
+    correo_error: row.correo_error || null,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+  };
+}
+
+function getRegistroMailTransporter() {
+  if (registroMailTransporterIntentado) return registroMailTransporter;
+  registroMailTransporterIntentado = true;
+
+  if (!nodemailer) {
+    registroMailTransporter = null;
+    return registroMailTransporter;
+  }
+
+  const smtpHost = normalizarCampoTexto(process.env.SMTP_HOST);
+  const smtpUser = normalizarCampoTexto(process.env.SMTP_USER);
+  const smtpPass = normalizarCampoTexto(process.env.SMTP_PASS);
+  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const smtpSecure = normalizarBooleanRegistro(process.env.SMTP_SECURE, smtpPort === 465);
+
+  if (!smtpUser || !smtpPass) {
+    registroMailTransporter = null;
+    return registroMailTransporter;
+  }
+
+  try {
+    if (smtpHost) {
+      registroMailTransporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: Number.isFinite(smtpPort) ? smtpPort : 587,
+        secure: smtpSecure,
+        auth: { user: smtpUser, pass: smtpPass },
+      });
+    } else {
+      registroMailTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: smtpUser, pass: smtpPass },
+      });
+    }
+  } catch (error) {
+    console.warn('No se pudo inicializar transportador de correo SMTP:', error?.message || error);
+    registroMailTransporter = null;
+  }
+
+  return registroMailTransporter;
+}
+
+async function enviarCorreoRegistroSolicitud(registro = {}) {
+  const smtpFrom = normalizarCampoTexto(process.env.SMTP_FROM) || normalizarCampoTexto(process.env.SMTP_USER);
+  const destinatario = normalizarCampoTexto(REGISTRO_DESTINO_CORREO) || 'posiumtech@gmail.com';
+  const webhookUrl = normalizarCampoTexto(process.env.REGISTRO_EMAIL_WEBHOOK_URL);
+  const transporter = getRegistroMailTransporter();
+  const fechaRegistro = registro?.created_at ? new Date(registro.created_at) : new Date();
+  const fechaLimite = registro?.estado_pago_limite ? new Date(registro.estado_pago_limite) : null;
+  const fechaRegistroTexto = Number.isNaN(fechaRegistro.getTime())
+    ? '--'
+    : fechaRegistro.toLocaleString('es-DO', { timeZone: 'America/Santo_Domingo', hour12: false });
+  const fechaLimiteTexto =
+    fechaLimite && !Number.isNaN(fechaLimite.getTime())
+      ? fechaLimite.toLocaleString('es-DO', { timeZone: 'America/Santo_Domingo', hour12: false })
+      : '--';
+
+  const lineas = [
+    `Nueva solicitud de registro POSIUM (${registro?.codigo || 'sin-codigo'})`,
+    '',
+    `Negocio: ${registro?.negocio_nombre || '--'}`,
+    `Negocio ID: ${registro?.negocio_id || '--'} | Slug: ${registro?.negocio_slug || '--'}`,
+    `Tipo de negocio: ${registro?.negocio_tipo || '--'}`,
+    `Ciudad: ${registro?.ciudad || '--'}`,
+    `Admin: ${registro?.admin_nombre || '--'}`,
+    `Usuario admin: ${registro?.admin_usuario || '--'} (listo para usar en /login.html)`,
+    `Telefono: ${registro?.telefono || '--'}`,
+    `Email: ${registro?.email || '--'}`,
+    `Usuarios estimados: ${registro?.cantidad_usuarios || '--'}`,
+    `Usa cocina: ${registro?.usa_cocina ? 'Si' : 'No'}`,
+    `Usa delivery: ${registro?.usa_delivery ? 'Si' : 'No'}`,
+    `Modulos solicitados: ${(registro?.modulos_solicitados_labels || []).join(', ') || '--'}`,
+    `Modulos recomendados: ${(registro?.modulos_recomendados_labels || []).join(', ') || '--'}`,
+    `Fecha registro: ${fechaRegistroTexto}`,
+    `Limite de pago (24h): ${fechaLimiteTexto}`,
+    '',
+    'Recordatorio para el cliente: enviar foto del comprobante por WhatsApp o correo.',
+  ];
+
+  if (!transporter && webhookUrl) {
+    try {
+      const resp = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: destinatario,
+          subject: `Nuevo registro POSIUM - ${registro?.negocio_nombre || 'Negocio sin nombre'}`,
+          text: lineas.join('\n'),
+          registro,
+        }),
+      });
+      if (!resp.ok) {
+        throw new Error(`Webhook respondio ${resp.status}`);
+      }
+      return { enviado: true, error: null };
+    } catch (error) {
+      return { enviado: false, error: error?.message || 'No se pudo enviar correo por webhook.' };
+    }
+  }
+
+  if (!transporter) {
+    return {
+      enviado: false,
+      error:
+        'Correo no configurado: define SMTP_HOST/SMTP_USER/SMTP_PASS o REGISTRO_EMAIL_WEBHOOK_URL para envio automatico.',
+    };
+  }
+
+  try {
+    await transporter.sendMail({
+      from: smtpFrom || destinatario,
+      to: destinatario,
+      subject: `Nuevo registro POSIUM - ${registro?.negocio_nombre || 'Negocio sin nombre'}`,
+      text: lineas.join('\n'),
+    });
+    return { enviado: true, error: null };
+  } catch (error) {
+    const detalle = normalizarErrorCorreoRegistro(error);
+    return { enviado: false, error: detalle };
+  }
+}
+
+function normalizarErrorCorreoRegistro(error) {
+  const detalle = (error?.message || '').toString().trim();
+  if (!detalle) return 'No se pudo enviar el correo de registro.';
+
+  if (/535|BadCredentials|Username and Password not accepted|Invalid login/i.test(detalle)) {
+    return 'SMTP rechazo las credenciales. Si usas Gmail, configura SMTP_PASS con una App Password de 16 caracteres.';
+  }
+
+  return detalle;
+}
+
+async function materializarSolicitudRegistroPendiente(row = {}) {
+  const solicitudId = Number(row?.id);
+  if (!Number.isInteger(solicitudId) || solicitudId <= 0) {
+    throw new Error('Solicitud de registro invalida.');
+  }
+
+  if (row?.negocio_id && row?.admin_usuario_id) {
+    return row;
+  }
+
+  const negocioNombre = normalizarCampoTexto(row.negocio_nombre) || `Negocio ${solicitudId}`;
+  const negocioTipo = normalizarTipoNegocioRegistro(row.negocio_tipo) || 'otro';
+  const adminNombre = normalizarCampoTexto(row.admin_nombre) || 'Administrador';
+  const adminUsuario = normalizarCampoTexto(row.admin_usuario)?.toLowerCase();
+  if (!adminUsuario) {
+    throw new Error('La solicitud no tiene usuario admin para crear la cuenta.');
+  }
+
+  const email = normalizarCampoTexto(row.email);
+  const telefono = normalizarCampoTexto(row.telefono);
+  const direccion = normalizarCampoTexto(row.ciudad);
+  const cantidadUsuarios = normalizarCantidadUsuariosRegistro(row.cantidad_usuarios);
+
+  const respuestas = parseJsonSeguro(row.respuestas_json, {});
+  const usaCocina = normalizarBooleanRegistro(row.usa_cocina, false);
+  const usaDelivery = normalizarBooleanRegistro(row.usa_delivery, false);
+  const usaBar = normalizarBooleanRegistro(respuestas?.usa_bar ?? respuestas?.usaBar, false);
+
+  let modulosSolicitados = normalizarModulosRegistro(parseJsonSeguro(row.modulos_solicitados_json, []));
+  if (!modulosSolicitados.length) {
+    modulosSolicitados = recomendarModulosRegistro({
+      tipoNegocio: negocioTipo,
+      usaCocina,
+      usaDelivery,
+      usaBar,
+      cantidadUsuarios,
+    }).keys;
+  }
+  if (normalizarBooleanRegistro(row.modulo_kds, false) && moduloRegistroDisponible('kds') && !modulosSolicitados.includes('kds')) {
+    modulosSolicitados.push('kds');
+  }
+  modulosSolicitados = modulosSolicitados.filter((item) => item !== 'facturacion_electronica');
+
+  const configModulosNegocio = construirConfigModulosRegistro({
+    modulosSolicitados,
+    usaCocina,
+    usaDelivery,
+    usaBar,
+  });
+  const configModulosJson = stringifyConfigModulos(configModulosNegocio);
+  const adminPasswordHashRaw = normalizarCampoTexto(row.admin_password_hash);
+  const adminPasswordHash = adminPasswordHashRaw ? await hashPasswordIfNeeded(adminPasswordHashRaw) : null;
+
+  const temaBase = await obtenerTemaBaseRegistro();
+  const empresaId = (await resolverEmpresaId({ empresaNombre: negocioNombre })) || 1;
+  const usuarioExistente = await usuariosRepo.findByUsuario(adminUsuario);
+
+  if (
+    usuarioExistente?.id &&
+    usuarioExistente.negocio_id &&
+    Number(usuarioExistente.negocio_id) !== Number(row.negocio_id || 0)
+  ) {
+    throw new Error(`El usuario admin ${adminUsuario} ya existe en otro negocio.`);
+  }
+
+  if (!usuarioExistente?.id && !adminPasswordHash) {
+    throw new Error('La solicitud no tiene password del admin para crear la cuenta.');
+  }
+
+  const respuestasActualizadas = {
+    ...(respuestas && typeof respuestas === 'object' ? respuestas : {}),
+    usuario_listo: true,
+    facturacion_electronica_disponible: false,
+  };
+
+  let negocioId = row.negocio_id ? Number(row.negocio_id) : null;
+  let negocioSlug = normalizarCampoTexto(row.negocio_slug);
+  let adminUsuarioId = row.admin_usuario_id ? Number(row.admin_usuario_id) : usuarioExistente?.id || null;
+
+  await db.run('BEGIN');
+  try {
+    if (!negocioId) {
+      if (!negocioSlug) {
+        negocioSlug = await generarSlugRegistroUnico(negocioNombre);
+      }
+
+      const negocioInsert = await db.run(
+        `INSERT INTO negocios (
+           nombre, slug, telefono, direccion, color_primario, color_secundario, color_texto, color_header,
+           color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos,
+           admin_principal_correo, logo_url, titulo_sistema, activo, empresa_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        [
+          negocioNombre,
+          negocioSlug,
+          telefono || null,
+          direccion || null,
+          temaBase.colorPrimario,
+          temaBase.colorSecundario,
+          temaBase.colorTexto,
+          temaBase.colorHeader,
+          temaBase.colorBotonPrimario,
+          temaBase.colorBotonSecundario,
+          temaBase.colorBotonPeligro,
+          configModulosJson,
+          email || null,
+          temaBase.logoUrl || null,
+          temaBase.tituloSistema || 'POSIUM',
+          empresaId,
+        ]
+      );
+      negocioId = negocioInsert?.lastID || null;
+      if (!negocioId) {
+        throw new Error('No se pudo crear el negocio para la solicitud.');
+      }
+    } else {
+      const negocioActual = await db.get('SELECT slug FROM negocios WHERE id = ? LIMIT 1', [negocioId]);
+      negocioSlug = normalizarCampoTexto(negocioActual?.slug) || negocioSlug;
+      await db.run(
+        `UPDATE negocios
+            SET config_modulos = COALESCE(config_modulos, ?),
+                admin_principal_correo = COALESCE(admin_principal_correo, ?),
+                empresa_id = COALESCE(empresa_id, ?),
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+        [configModulosJson, email || null, empresaId, negocioId]
+      );
+    }
+
+    if (adminUsuarioId) {
+      await db.run(
+        `UPDATE usuarios
+            SET nombre = ?,
+                rol = 'admin',
+                activo = 1,
+                negocio_id = ?,
+                empresa_id = COALESCE(empresa_id, ?),
+                password = COALESCE(?, password),
+                force_password_change = 0,
+                password_reset_at = CASE WHEN ? IS NOT NULL THEN NULL ELSE password_reset_at END
+          WHERE id = ?`,
+        [adminNombre, negocioId, empresaId, adminPasswordHash, adminPasswordHash, adminUsuarioId]
+      );
+    } else {
+      const usuarioInsert = await db.run(
+        `INSERT INTO usuarios (
+           nombre, usuario, password, rol, activo, negocio_id, empresa_id, es_super_admin, force_password_change, password_reset_at
+         ) VALUES (?, ?, ?, 'admin', 1, ?, ?, 0, 0, NULL)`,
+        [adminNombre, adminUsuario, adminPasswordHash, negocioId, empresaId]
+      );
+      adminUsuarioId = usuarioInsert?.lastID || null;
+      if (!adminUsuarioId) {
+        throw new Error('No se pudo crear el usuario admin para la solicitud.');
+      }
+    }
+
+    await db.run(
+      'UPDATE negocios SET admin_principal_usuario_id = ?, admin_principal_correo = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [adminUsuarioId, email || null, negocioId]
+    );
+
+    await db.run(
+      `UPDATE registro_solicitudes
+          SET negocio_id = ?,
+              negocio_slug = ?,
+              admin_usuario_id = ?,
+              modulos_solicitados_json = ?,
+              respuestas_json = ?,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`,
+      [
+        negocioId,
+        negocioSlug || null,
+        adminUsuarioId,
+        JSON.stringify(modulosSolicitados),
+        JSON.stringify(respuestasActualizadas),
+        solicitudId,
+      ]
+    );
+
+    await db.run('COMMIT');
+  } catch (error) {
+    await db.run('ROLLBACK').catch(() => {});
+    throw error;
+  }
+
+  return await db.get('SELECT * FROM registro_solicitudes WHERE id = ? LIMIT 1', [solicitudId]);
 }
 
 function getLocalDateISO(value = new Date()) {
@@ -4614,6 +5245,16 @@ const obtenerRangoAnterior = (desde, dias) => {
   };
 };
 
+app.use(
+  '/api/dgii/paso2',
+  createDgiiPaso2Router({
+    db,
+    requireUsuarioSesion,
+    tienePermisoAdmin: esSuperAdmin,
+    obtenerNegocioIdUsuario,
+  })
+);
+
 app.post('/api/caja/cierres', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     try {
@@ -5115,6 +5756,10 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.get('/registro', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'registro.html'));
 });
 
 app.get('/admin/cotizaciones', (req, res) => {
@@ -7215,6 +7860,139 @@ app.get('/api/negocios', (req, res) => {
       const negocios = (rows || []).map((row) => mapNegocioWithDefaults(row));
       res.json({ ok: true, negocios });
     });
+  });
+});
+
+app.get('/api/admin/registros-solicitudes', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
+    const estadoFiltro = normalizarCampoTexto(req.query?.estado)?.toLowerCase() || null;
+    const busqueda = normalizarCampoTexto(req.query?.q)?.toLowerCase() || null;
+    const where = [];
+    const params = [];
+
+    if (estadoFiltro) {
+      where.push('estado = ?');
+      params.push(estadoFiltro);
+    }
+
+    if (busqueda) {
+      where.push(
+        `(LOWER(codigo) LIKE ? OR LOWER(negocio_nombre) LIKE ? OR LOWER(admin_nombre) LIKE ? OR LOWER(admin_usuario) LIKE ? OR LOWER(COALESCE(email, '')) LIKE ? OR LOWER(COALESCE(telefono, '')) LIKE ?)`
+      );
+      const pattern = `%${busqueda}%`;
+      params.push(pattern, pattern, pattern, pattern, pattern, pattern);
+    }
+
+    const sql = `
+      SELECT *
+        FROM registro_solicitudes
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY created_at DESC, id DESC
+       LIMIT 500
+    `;
+
+    try {
+      const rows = await db.all(sql, params);
+      const registros = (rows || []).map((row) => mapRegistroSolicitud(row));
+      res.json({ ok: true, registros });
+    } catch (error) {
+      console.error('Error cargando solicitudes de registro:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron cargar las solicitudes de registro.' });
+    }
+  });
+});
+
+app.patch('/api/admin/registros-solicitudes/:id', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de solicitud invalido.' });
+    }
+
+    const payload = req.body || {};
+    const estado = normalizarCampoTexto(payload.estado)?.toLowerCase() || null;
+    const notasInternas = normalizarCampoTexto(payload.notas_internas ?? payload.notasInternas);
+    const fields = [];
+    const params = [];
+
+    if (estado !== null) {
+      if (!REGISTRO_ESTADOS_VALIDOS.has(estado)) {
+        return res.status(400).json({ ok: false, error: 'Estado de solicitud invalido.' });
+      }
+      fields.push('estado = ?');
+      params.push(estado);
+    }
+
+    if (payload.notas_internas !== undefined || payload.notasInternas !== undefined) {
+      fields.push('notas_internas = ?');
+      params.push(notasInternas);
+    }
+
+    if (!fields.length) {
+      return res.status(400).json({ ok: false, error: 'No hay campos para actualizar.' });
+    }
+
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(id);
+
+    try {
+      const result = await db.run(`UPDATE registro_solicitudes SET ${fields.join(', ')} WHERE id = ?`, params);
+      let row = await db.get('SELECT * FROM registro_solicitudes WHERE id = ? LIMIT 1', [id]);
+      if (!row) {
+        return res.status(404).json({ ok: false, error: 'Solicitud no encontrada.' });
+      }
+
+      if ((row.estado || '').toLowerCase() === 'aprobado' && !row.negocio_id) {
+        try {
+          row = await materializarSolicitudRegistroPendiente(row);
+        } catch (materializarError) {
+          return res.status(409).json({
+            ok: false,
+            error:
+              materializarError?.message ||
+              'La solicitud fue actualizada, pero no se pudo crear automaticamente el negocio.',
+          });
+        }
+      }
+
+      res.json({ ok: true, solicitud: mapRegistroSolicitud(row || {}) });
+    } catch (error) {
+      console.error('Error actualizando solicitud de registro:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar la solicitud.' });
+    }
+  });
+});
+
+app.post('/api/admin/registros-solicitudes/:id/reenviar-correo', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de solicitud invalido.' });
+    }
+
+    try {
+      const row = await db.get('SELECT * FROM registro_solicitudes WHERE id = ? LIMIT 1', [id]);
+      if (!row) {
+        return res.status(404).json({ ok: false, error: 'Solicitud no encontrada.' });
+      }
+
+      const registro = mapRegistroSolicitud(row);
+      const correoResultado = await enviarCorreoRegistroSolicitud(registro);
+      await db.run(
+        'UPDATE registro_solicitudes SET correo_enviado = ?, correo_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [correoResultado.enviado ? 1 : 0, correoResultado.error || null, id]
+      );
+
+      const actualizado = await db.get('SELECT * FROM registro_solicitudes WHERE id = ? LIMIT 1', [id]);
+      return res.json({
+        ok: true,
+        solicitud: mapRegistroSolicitud(actualizado || {}),
+        correo: { enviado: correoResultado.enviado, error: correoResultado.error || null },
+      });
+    } catch (error) {
+      console.error('Error reenviando correo de solicitud:', error?.message || error);
+      return res.status(500).json({ ok: false, error: 'No se pudo reenviar el correo de la solicitud.' });
+    }
   });
 });
 
@@ -20807,6 +21585,249 @@ app.get('/api/chat/messages/search', (req, res) => {
       res.status(500).json({ ok: false, error: 'No se pudieron buscar mensajes en el chat' });
     }
   });
+});
+
+app.post('/api/public/registro', async (req, res) => {
+  const payload = req.body || {};
+
+  const negocioNombre = normalizarCampoTexto(payload.negocio_nombre ?? payload.negocioNombre);
+  const adminNombre = normalizarCampoTexto(payload.admin_nombre ?? payload.adminNombre);
+  const adminUsuario = normalizarCampoTexto(payload.admin_usuario ?? payload.adminUsuario)?.toLowerCase();
+  const adminPassword = normalizarCampoTexto(payload.admin_password ?? payload.adminPassword);
+  const negocioTipo = normalizarTipoNegocioRegistro(payload.negocio_tipo ?? payload.negocioTipo);
+  const telefono = normalizarCampoTexto(payload.telefono);
+  const email = normalizarCampoTexto(payload.email);
+  const ciudad = normalizarCampoTexto(payload.ciudad);
+  const cantidadUsuarios = normalizarCantidadUsuariosRegistro(
+    payload.cantidad_usuarios ?? payload.cantidadUsuarios ?? payload.usuarios_estimados
+  );
+
+  const usaCocina = normalizarBooleanRegistro(payload.usa_cocina ?? payload.usaCocina ?? payload.tiene_cocina, false);
+  const usaDelivery = normalizarBooleanRegistro(payload.usa_delivery ?? payload.usaDelivery ?? payload.tiene_delivery, false);
+  const usaBar = normalizarBooleanRegistro(payload.usa_bar ?? payload.usaBar, false);
+
+  if (!negocioNombre || !adminNombre || !adminUsuario || !adminPassword) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Completa negocio, nombre admin, usuario admin y password para registrarte.',
+    });
+  }
+
+  if (adminPassword.length < 6) {
+    return res.status(400).json({ ok: false, error: 'La password del admin debe tener al menos 6 caracteres.' });
+  }
+
+  try {
+    const usuarioExistentePrevio = await usuariosRepo.findByUsuario(adminUsuario);
+    if (usuarioExistentePrevio) {
+      return res.status(409).json({
+        ok: false,
+        error: 'El usuario admin ya existe. Usa otro usuario para el registro.',
+      });
+    }
+
+    const recomendacion = recomendarModulosRegistro({
+      tipoNegocio: negocioTipo,
+      usaCocina,
+      usaDelivery,
+      usaBar,
+      cantidadUsuarios,
+    });
+
+    const modulosEntrada =
+      payload.modulos_solicitados ?? payload.modulosSolicitados ?? payload.modulos ?? payload.modulos_requeridos ?? [];
+    let modulosSolicitados = resolverModulosSolicitadosRegistro(modulosEntrada, recomendacion.keys);
+    const kdsSolicitado = normalizarBooleanRegistro(payload.modulo_kds ?? payload.kds, false);
+    if (kdsSolicitado && !modulosSolicitados.includes('kds') && moduloRegistroDisponible('kds')) {
+      modulosSolicitados.push('kds');
+    }
+
+    modulosSolicitados = modulosSolicitados.filter((item) => item !== 'facturacion_electronica');
+
+    const passwordHash = await hashPasswordIfNeeded(adminPassword);
+    const configModulosNegocio = construirConfigModulosRegistro({
+      modulosSolicitados,
+      usaCocina,
+      usaDelivery,
+      usaBar,
+    });
+    const configModulosJson = stringifyConfigModulos(configModulosNegocio);
+    const codigo = generarCodigoRegistroSolicitud();
+    const slugNegocio = await generarSlugRegistroUnico(negocioNombre);
+    const temaBase = await obtenerTemaBaseRegistro();
+    const empresaId = (await resolverEmpresaId({ empresaNombre: negocioNombre })) || 1;
+    const ahora = new Date();
+    const limitePago = new Date(ahora.getTime() + REGISTRO_PAGO_HORAS * 60 * 60 * 1000);
+
+    const respuestas = {
+      tipo_negocio: negocioTipo,
+      usa_cocina: usaCocina,
+      usa_delivery: usaDelivery,
+      usa_bar: usaBar,
+      cantidad_usuarios: cantidadUsuarios,
+      canal_pago: 'whatsapp_o_correo',
+      facturacion_electronica_disponible: false,
+      usuario_listo: true,
+    };
+
+    let negocioId = null;
+    let adminUsuarioId = null;
+    let solicitudId = null;
+
+    await db.run('BEGIN');
+    try {
+      const negocioInsert = await db.run(
+        `INSERT INTO negocios (
+           nombre, slug, color_primario, color_secundario, color_texto, color_header,
+           color_boton_primario, color_boton_secundario, color_boton_peligro,
+           config_modulos, admin_principal_correo, logo_url, titulo_sistema, activo, empresa_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        [
+          negocioNombre,
+          slugNegocio,
+          temaBase.colorPrimario,
+          temaBase.colorSecundario,
+          temaBase.colorTexto,
+          temaBase.colorHeader,
+          temaBase.colorBotonPrimario,
+          temaBase.colorBotonSecundario,
+          temaBase.colorBotonPeligro,
+          configModulosJson,
+          email || null,
+          temaBase.logoUrl || null,
+          temaBase.tituloSistema || 'POSIUM',
+          empresaId,
+        ]
+      );
+      negocioId = negocioInsert?.lastID || null;
+      if (!negocioId) {
+        throw new Error('No se pudo crear el negocio del registro.');
+      }
+
+      const usuarioInsert = await db.run(
+        `INSERT INTO usuarios (
+           nombre, usuario, password, rol, activo, negocio_id, empresa_id, es_super_admin, force_password_change, password_reset_at
+         ) VALUES (?, ?, ?, 'admin', 1, ?, ?, 0, 0, NULL)`,
+        [adminNombre, adminUsuario, passwordHash, negocioId, empresaId]
+      );
+      adminUsuarioId = usuarioInsert?.lastID || null;
+      if (!adminUsuarioId) {
+        throw new Error('No se pudo crear el usuario admin del registro.');
+      }
+
+      await db.run(
+        'UPDATE negocios SET admin_principal_usuario_id = ?, admin_principal_correo = ? WHERE id = ?',
+        [adminUsuarioId, email || null, negocioId]
+      );
+
+      const solicitudInsert = await db.run(
+        `INSERT INTO registro_solicitudes (
+           codigo, negocio_nombre, negocio_id, negocio_slug, negocio_tipo,
+           admin_nombre, admin_usuario, admin_usuario_id, admin_password_hash,
+           telefono, email, ciudad, cantidad_usuarios, usa_cocina, usa_delivery, modulo_kds,
+           modulos_solicitados_json, modulos_recomendados_json, respuestas_json,
+           estado, estado_pago_limite, notas_publicas, correo_enviado, correo_error
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+        [
+          codigo,
+          negocioNombre,
+          negocioId,
+          slugNegocio,
+          negocioTipo,
+          adminNombre,
+          adminUsuario,
+          adminUsuarioId,
+          passwordHash,
+          telefono,
+          email,
+          ciudad,
+          cantidadUsuarios,
+          usaCocina ? 1 : 0,
+          usaDelivery ? 1 : 0,
+          modulosSolicitados.includes('kds') ? 1 : 0,
+          JSON.stringify(modulosSolicitados),
+          JSON.stringify(recomendacion.keys),
+          JSON.stringify(respuestas),
+          'pendiente_pago',
+          limitePago,
+          'Usuario habilitado. Enviar comprobante de pago por WhatsApp o correo dentro de 24 horas.',
+        ]
+      );
+      solicitudId = solicitudInsert?.lastID || null;
+      if (!solicitudId) {
+        throw new Error('No se pudo guardar la solicitud de registro.');
+      }
+
+      await db.run('COMMIT');
+    } catch (txError) {
+      await db.run('ROLLBACK').catch(() => {});
+      throw txError;
+    }
+
+    const row =
+      (solicitudId && (await db.get('SELECT * FROM registro_solicitudes WHERE id = ? LIMIT 1', [solicitudId]))) ||
+      null;
+
+    const registro = mapRegistroSolicitud(
+      row || {
+        id: solicitudId,
+        codigo,
+        negocio_nombre: negocioNombre,
+        negocio_id: negocioId,
+        negocio_slug: slugNegocio,
+        negocio_tipo: negocioTipo,
+        admin_nombre: adminNombre,
+        admin_usuario: adminUsuario,
+        admin_usuario_id: adminUsuarioId,
+        telefono,
+        email,
+        ciudad,
+        cantidad_usuarios: cantidadUsuarios,
+        usa_cocina: usaCocina ? 1 : 0,
+        usa_delivery: usaDelivery ? 1 : 0,
+        modulo_kds: modulosSolicitados.includes('kds') ? 1 : 0,
+        modulos_solicitados_json: JSON.stringify(modulosSolicitados),
+        modulos_recomendados_json: JSON.stringify(recomendacion.keys),
+        respuestas_json: JSON.stringify(respuestas),
+        estado: 'pendiente_pago',
+        estado_pago_limite: limitePago,
+        created_at: ahora,
+      }
+    );
+
+    const correoResultado = await enviarCorreoRegistroSolicitud(registro);
+    await db.run(
+      'UPDATE registro_solicitudes SET correo_enviado = ?, correo_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [correoResultado.enviado ? 1 : 0, correoResultado.error || null, solicitudId]
+    );
+
+    registro.correo_enviado = correoResultado.enviado;
+    registro.correo_error = correoResultado.error || null;
+
+    res.status(201).json({
+      ok: true,
+      solicitud: registro,
+      acceso: {
+        login_url: '/login.html',
+        usuario: adminUsuario,
+        negocio_id: negocioId,
+        negocio_slug: slugNegocio,
+      },
+      recomendaciones: {
+        modulos: recomendacion.keys,
+        etiquetas: recomendacion.labels,
+      },
+      mensaje:
+        'Registro completado. Tu usuario admin ya esta listo para usarse. Tienes 24 horas para realizar el pago y enviar el comprobante por WhatsApp o correo.',
+      facturacion_electronica_disponible: false,
+    });
+  } catch (error) {
+    console.error('Error creando solicitud de registro publico:', error?.message || error);
+    if (error?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ ok: false, error: 'No se pudo completar el registro por datos duplicados.' });
+    }
+    res.status(500).json({ ok: false, error: 'No se pudo completar el registro. Intenta nuevamente.' });
+  }
 });
 
 app.post('/api/login', async (req, res) => {

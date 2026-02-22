@@ -190,8 +190,15 @@
         transform: translateY(-1px);
       }
 
+      .login-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
       button[type='submit'] {
-        width: 100%;
+        flex: 1;
         margin-top: 12px;
         padding: 15px 16px;
         border: 1px solid var(--posium-gold-strong);
@@ -219,6 +226,28 @@
       button[type='submit']:active {
         transform: translateY(0);
         box-shadow: 0 14px 24px var(--posium-shadow-press);
+      }
+
+      .register-link {
+        flex: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-top: 12px;
+        padding: 15px 16px;
+        border-radius: 16px;
+        border: 1px solid var(--posium-line);
+        color: var(--posium-ink);
+        font-size: 1rem;
+        font-weight: 600;
+        text-decoration: none;
+        background: rgba(255, 255, 255, 0.88);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .register-link:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 16px 30px var(--posium-shadow);
       }
 
       #login-error {
@@ -315,7 +344,10 @@
               </button>
             </div>
           </div>
-          <button type="submit">Entrar a POSIUM</button>
+          <div class="login-actions">
+            <button type="submit">Iniciar sesion</button>
+            <a class="register-link" href="/registro.html">Registrarse</a>
+          </div>
         </form>
         <div id="login-error"></div>
       </div>

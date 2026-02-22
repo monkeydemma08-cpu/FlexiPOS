@@ -270,6 +270,29 @@ const histCocinaPrev = document.getElementById('hist-cocina-prev');
 const histCocinaNext = document.getElementById('hist-cocina-next');
 const histCocinaInfo = document.getElementById('hist-cocina-info');
 const histCocinaCocineroSelect = document.getElementById('hist-cocina-cocinero');
+const dgiiConfigUsuarioInput = document.getElementById('dgii-config-usuario');
+const dgiiConfigClaveInput = document.getElementById('dgii-config-clave');
+const dgiiConfigRncInput = document.getElementById('dgii-config-rnc');
+const dgiiConfigModoInput = document.getElementById('dgii-config-modo');
+const dgiiConfigP12Input = document.getElementById('dgii-config-p12');
+const dgiiConfigP12PasswordInput = document.getElementById('dgii-config-p12-password');
+const dgiiSemillaFirmadaFileInput = document.getElementById('dgii-semilla-firmada-file');
+const dgiiConfigGuardarBtn = document.getElementById('dgii-config-guardar');
+const dgiiConfigTestBtn = document.getElementById('dgii-config-test');
+const dgiiSemillaValidarBtn = document.getElementById('dgii-semilla-validar');
+const dgiiConfigMensaje = document.getElementById('dgii-config-mensaje');
+const dgiiSetFileInput = document.getElementById('dgii-set-file');
+const dgiiSetImportarBtn = document.getElementById('dgii-set-importar');
+const dgiiSetRefrescarBtn = document.getElementById('dgii-set-refrescar');
+const dgiiSetMensaje = document.getElementById('dgii-set-mensaje');
+const dgiiSetSelect = document.getElementById('dgii-set-select');
+const dgiiSetGenerarXmlBtn = document.getElementById('dgii-set-generar-xml');
+const dgiiSetProcesarBtn = document.getElementById('dgii-set-procesar');
+const dgiiSetReprocesarBtn = document.getElementById('dgii-set-reprocesar');
+const dgiiSetResumen = document.getElementById('dgii-set-resumen');
+const dgiiSetsTabla = document.getElementById('dgii-sets-tabla');
+const dgiiCasosMensaje = document.getElementById('dgii-casos-mensaje');
+const dgiiCasosTabla = document.getElementById('dgii-casos-tabla');
 const adminTabs = Array.from(document.querySelectorAll('[data-admin-tab]'));
 const adminSections = Array.from(document.querySelectorAll('[data-admin-section]'));
 
@@ -291,6 +314,8 @@ let abastecimientoEditId = null;
 let usuarios = [];
 let acreditaItbisConfig = true;
 let recetaProductoIdActivo = null;
+let dgiiSets = [];
+let dgiiCasos = [];
 
 const REFRESH_INTERVAL_ADMIN = 15000;
 const SYNC_STORAGE_KEY = 'kanm:last-update';
@@ -400,6 +425,451 @@ const fetchJsonAutorizado = async (url, options = {}) => {
     authApi?.handleUnauthorized?.();
   }
   return response;
+};
+
+const DGII_FLOW_LABELS = {
+  ECF_NORMAL: 'e-CF >= 250k',
+  FC_MENOR_250K: 'Factura consumo < 250k',
+  RESUMEN_FC: 'Resumen FC',
+};
+
+const leerArchivoBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    if (!file) {
+      resolve('');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const base64 = result.includes(',') ? result.split(',').pop() : result;
+      resolve(base64 || '');
+    };
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo seleccionado.'));
+    reader.readAsDataURL(file);
+  });
+
+const renderResumenDgii = (resumen) => {
+  if (!dgiiSetResumen) return;
+  const data = resumen || {};
+  const total = Number(data.total || 0);
+  const aceptados = Number(data.aceptados || 0);
+  const rechazados = Number(data.rechazados || 0);
+  const pendientes = Number(data.pendientes || 0);
+  const comp = data.comprobantes || {};
+  const resu = data.resumenes || {};
+  dgiiSetResumen.textContent =
+    `Progreso: ${aceptados}/${total} aceptados | ` +
+    `${rechazados} rechazados | ${pendientes} pendientes | ` +
+    `Comprobantes ${Number(comp.aceptados || 0)}/${Number(comp.total || 0)} | ` +
+    `Resúmenes ${Number(resu.aceptados || 0)}/${Number(resu.total || 0)}`;
+};
+
+const renderSetsDgii = () => {
+  if (dgiiSetSelect) {
+    const actual = dgiiSetSelect.value;
+    const options = [`<option value=\"\">Selecciona lote</option>`];
+    (dgiiSets || []).forEach((setItem) => {
+      const resumen = setItem?.resumen || {};
+      const label =
+        `#${setItem.id} - ${setItem.nombre_archivo || 'set'} ` +
+        `(${Number(resumen.aceptados || 0)}/${Number(resumen.total || 0)} aceptados)`;
+      options.push(`<option value=\"${setItem.id}\">${label}</option>`);
+    });
+    dgiiSetSelect.innerHTML = options.join('');
+    if (actual) {
+      dgiiSetSelect.value = actual;
+    }
+  }
+
+  if (!dgiiSetsTabla) return;
+  if (!Array.isArray(dgiiSets) || !dgiiSets.length) {
+    dgiiSetsTabla.innerHTML = '<tr><td colspan=\"6\">Sin lotes cargados.</td></tr>';
+    return;
+  }
+
+  dgiiSetsTabla.innerHTML = dgiiSets
+    .map((setItem) => {
+      const resumen = setItem?.resumen || {};
+      const resu = resumen?.resumenes || {};
+      return `
+        <tr>
+          <td>#${setItem.id}</td>
+          <td>${setItem.nombre_archivo || '--'}</td>
+          <td>${Number(resumen.total || 0)}</td>
+          <td>${Number(resumen.aceptados || 0)}</td>
+          <td>${Number(resumen.rechazados || 0)}</td>
+          <td>${Number(resu.aceptados || 0)}/${Number(resu.total || 0)}</td>
+        </tr>
+      `;
+    })
+    .join('');
+};
+
+const renderCasosDgii = () => {
+  if (!dgiiCasosTabla) return;
+  if (!Array.isArray(dgiiCasos) || !dgiiCasos.length) {
+    dgiiCasosTabla.innerHTML = '<tr><td colspan=\"9\">Sin casos para este lote.</td></tr>';
+    return;
+  }
+
+  dgiiCasosTabla.innerHTML = dgiiCasos
+    .map((caso) => {
+      const flujo = DGII_FLOW_LABELS[caso.flujo] || caso.flujo || '--';
+      const estado = caso.estado_local || '--';
+      return `
+        <tr>
+          <td>${Number(caso.orden_envio || 0)}</td>
+          <td>${caso.caso_codigo || '--'}</td>
+          <td>${flujo}</td>
+          <td>${formatCurrency(caso.monto_total || 0)}</td>
+          <td>${estado}</td>
+          <td>${caso.dgii_codigo || '--'}</td>
+          <td>${caso.dgii_track_id || '--'}</td>
+          <td>${Number(caso.intentos || 0)}</td>
+          <td>
+            <button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-procesar-caso=\"${caso.id}\">Procesar</button>
+            <button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-consultar-caso=\"${caso.id}\">Consultar</button>
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+};
+
+const cargarConfigDgii = async () => {
+  if (!dgiiConfigUsuarioInput) return;
+  try {
+    const resp = await fetchConAutorizacion('/api/dgii/paso2/config');
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo cargar configuracion DGII.');
+    }
+    const config = data?.config || {};
+    dgiiConfigUsuarioInput.value = config.usuario_certificacion || '';
+    if (dgiiConfigClaveInput) dgiiConfigClaveInput.value = '';
+    if (dgiiConfigRncInput) dgiiConfigRncInput.value = config.rnc_emisor || '';
+    if (dgiiConfigModoInput) dgiiConfigModoInput.value = config.modo_autenticacion || 'AUTO';
+    if (dgiiConfigP12PasswordInput) dgiiConfigP12PasswordInput.value = '';
+
+    const parts = [];
+    if (config.tiene_clave) parts.push('Clave guardada');
+    if (config.tiene_certificado) {
+      parts.push(`Certificado guardado${config.p12_nombre_archivo ? `: ${config.p12_nombre_archivo}` : ''}`);
+    }
+    if (config.token_expira_en) parts.push(`Token cache hasta ${formatDateTime(config.token_expira_en)}`);
+    setMessage(dgiiConfigMensaje, parts.join(' | '), 'info');
+  } catch (error) {
+    console.error('Error cargando configuracion DGII:', error);
+    setMessage(dgiiConfigMensaje, error.message || 'No se pudo cargar configuracion DGII.', 'error');
+  }
+};
+
+const guardarConfigDgii = async () => {
+  try {
+    if (!dgiiConfigGuardarBtn) return;
+    dgiiConfigGuardarBtn.disabled = true;
+    const p12File = dgiiConfigP12Input?.files?.[0] || null;
+    const p12Base64 = p12File ? await leerArchivoBase64(p12File) : undefined;
+
+    const payload = {
+      usuario_certificacion: dgiiConfigUsuarioInput?.value?.trim() || '',
+      clave_certificacion: dgiiConfigClaveInput?.value || undefined,
+      rnc_emisor: dgiiConfigRncInput?.value?.trim() || '',
+      modo_autenticacion: dgiiConfigModoInput?.value || 'AUTO',
+      p12_password: dgiiConfigP12PasswordInput?.value || undefined,
+      p12_nombre_archivo: p12File ? p12File.name : undefined,
+      p12_base64: p12Base64,
+    };
+
+    const resp = await fetchJsonAutorizado('/api/dgii/paso2/config', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo guardar configuracion DGII.');
+    }
+    setMessage(dgiiConfigMensaje, 'Configuracion DGII guardada.', 'info');
+    if (dgiiConfigClaveInput) dgiiConfigClaveInput.value = '';
+    if (dgiiConfigP12PasswordInput) dgiiConfigP12PasswordInput.value = '';
+    if (dgiiConfigP12Input) dgiiConfigP12Input.value = '';
+    await cargarConfigDgii();
+  } catch (error) {
+    console.error('Error guardando configuracion DGII:', error);
+    setMessage(dgiiConfigMensaje, error.message || 'No se pudo guardar configuracion DGII.', 'error');
+  } finally {
+    if (dgiiConfigGuardarBtn) dgiiConfigGuardarBtn.disabled = false;
+  }
+};
+
+const probarAutenticacionDgii = async () => {
+  try {
+    if (dgiiConfigTestBtn) dgiiConfigTestBtn.disabled = true;
+    const resp = await fetchJsonAutorizado('/api/dgii/paso2/probar-autenticacion', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo autenticar con DGII.');
+    }
+    setMessage(
+      dgiiConfigMensaje,
+      `Autenticacion correcta. Endpoint: ${data?.endpoint || '--'} | Token: ${data?.token_preview || '--'}`,
+      'info'
+    );
+  } catch (error) {
+    console.error('Error probando autenticacion DGII:', error);
+    setMessage(dgiiConfigMensaje, error.message || 'No se pudo autenticar con DGII.', 'error');
+  } finally {
+    if (dgiiConfigTestBtn) dgiiConfigTestBtn.disabled = false;
+  }
+};
+
+const validarSemillaFirmadaDgii = async () => {
+  try {
+    const file = dgiiSemillaFirmadaFileInput?.files?.[0];
+    if (!file) {
+      setMessage(dgiiConfigMensaje, 'Selecciona el archivo XML de semilla firmada.', 'warning');
+      return;
+    }
+    if (dgiiSemillaValidarBtn) dgiiSemillaValidarBtn.disabled = true;
+    const xmlBase64 = await leerArchivoBase64(file);
+    const resp = await fetchJsonAutorizado('/api/dgii/paso2/autenticacion/validar-semilla-firmada', {
+      method: 'POST',
+      body: JSON.stringify({
+        nombre_archivo: file.name,
+        xml_firmada_base64: xmlBase64,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo validar la semilla firmada.');
+    }
+    setMessage(
+      dgiiConfigMensaje,
+      `Semilla validada. Endpoint: ${data?.endpoint || '--'} | Token: ${data?.token_preview || '--'}`,
+      'info'
+    );
+    if (dgiiSemillaFirmadaFileInput) dgiiSemillaFirmadaFileInput.value = '';
+    await cargarConfigDgii();
+  } catch (error) {
+    console.error('Error validando semilla firmada DGII:', error);
+    setMessage(dgiiConfigMensaje, error.message || 'No se pudo validar la semilla firmada.', 'error');
+  } finally {
+    if (dgiiSemillaValidarBtn) dgiiSemillaValidarBtn.disabled = false;
+  }
+};
+
+const cargarSetsDgii = async ({ mantenerSeleccion = true } = {}) => {
+  if (!dgiiSetSelect) return;
+  const selected = mantenerSeleccion ? dgiiSetSelect.value : '';
+  try {
+    const resp = await fetchConAutorizacion('/api/dgii/paso2/sets');
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudieron cargar lotes DGII.');
+    }
+    dgiiSets = Array.isArray(data?.sets) ? data.sets : [];
+    renderSetsDgii();
+    if (selected) {
+      dgiiSetSelect.value = selected;
+    }
+    const setActivoId = Number(dgiiSetSelect.value || 0);
+    if (setActivoId > 0) {
+      const setActivo = dgiiSets.find((item) => Number(item.id) === setActivoId);
+      renderResumenDgii(setActivo?.resumen || null);
+    } else {
+      renderResumenDgii(null);
+    }
+  } catch (error) {
+    console.error('Error cargando lotes DGII:', error);
+    setMessage(dgiiSetMensaje, error.message || 'No se pudieron cargar lotes DGII.', 'error');
+  }
+};
+
+const cargarCasosDgii = async (setId) => {
+  const lote = Number(setId || 0);
+  if (!lote) {
+    dgiiCasos = [];
+    renderCasosDgii();
+    setMessage(dgiiCasosMensaje, 'Selecciona un lote para ver casos.', 'info');
+    return;
+  }
+  try {
+    const resp = await fetchConAutorizacion(`/api/dgii/paso2/sets/${lote}/casos`);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudieron cargar casos del set.');
+    }
+    dgiiCasos = Array.isArray(data?.casos) ? data.casos : [];
+    renderCasosDgii();
+    renderResumenDgii(data?.resumen || null);
+    setMessage(dgiiCasosMensaje, `Casos cargados: ${dgiiCasos.length}.`, 'info');
+  } catch (error) {
+    console.error('Error cargando casos DGII:', error);
+    setMessage(dgiiCasosMensaje, error.message || 'No se pudieron cargar casos DGII.', 'error');
+  }
+};
+
+const importarSetDgii = async () => {
+  try {
+    const file = dgiiSetFileInput?.files?.[0];
+    if (!file) {
+      setMessage(dgiiSetMensaje, 'Selecciona un archivo XLSX para importar.', 'warning');
+      return;
+    }
+    if (dgiiSetImportarBtn) dgiiSetImportarBtn.disabled = true;
+    const base64 = await leerArchivoBase64(file);
+    const resp = await fetchJsonAutorizado('/api/dgii/paso2/importar-set', {
+      method: 'POST',
+      body: JSON.stringify({
+        nombre_archivo: file.name,
+        archivo_base64: base64,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo importar el set DGII.');
+    }
+    setMessage(
+      dgiiSetMensaje,
+      `Set importado (#${data?.set_id || '--'}). Casos: ${Number(data?.totals?.totalCases || 0)}.`,
+      'info'
+    );
+    if (dgiiSetFileInput) dgiiSetFileInput.value = '';
+    await cargarSetsDgii({ mantenerSeleccion: false });
+    if (dgiiSetSelect && data?.set_id) {
+      dgiiSetSelect.value = String(data.set_id);
+      await cargarCasosDgii(data.set_id);
+    }
+  } catch (error) {
+    console.error('Error importando set DGII:', error);
+    setMessage(dgiiSetMensaje, error.message || 'No se pudo importar el set DGII.', 'error');
+  } finally {
+    if (dgiiSetImportarBtn) dgiiSetImportarBtn.disabled = false;
+  }
+};
+
+const generarXmlSetDgii = async () => {
+  const setId = Number(dgiiSetSelect?.value || 0);
+  if (!setId) {
+    setMessage(dgiiSetMensaje, 'Selecciona un lote para generar XML.', 'warning');
+    return;
+  }
+  try {
+    if (dgiiSetGenerarXmlBtn) dgiiSetGenerarXmlBtn.disabled = true;
+    if (dgiiSetProcesarBtn) dgiiSetProcesarBtn.disabled = true;
+    if (dgiiSetReprocesarBtn) dgiiSetReprocesarBtn.disabled = true;
+    setMessage(dgiiSetMensaje, 'Generando XML sin firma en carpeta local...', 'info');
+    const resp = await fetchJsonAutorizado(`/api/dgii/paso2/sets/${setId}/generar-xml`, {
+      method: 'POST',
+      body: JSON.stringify({
+        incluir_campos_set: true,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo generar XML del set.');
+    }
+    const carpeta = data?.carpeta_absoluta || data?.carpeta_relativa || '--';
+    setMessage(
+      dgiiSetMensaje,
+      `XML generados: ${Number(data?.casos || 0)}. Carpeta: ${carpeta}`,
+      'info'
+    );
+    await cargarSetsDgii({ mantenerSeleccion: true });
+    await cargarCasosDgii(setId);
+  } catch (error) {
+    console.error('Error generando XML DGII:', error);
+    setMessage(dgiiSetMensaje, error.message || 'No se pudo generar XML DGII.', 'error');
+  } finally {
+    if (dgiiSetGenerarXmlBtn) dgiiSetGenerarXmlBtn.disabled = false;
+    if (dgiiSetProcesarBtn) dgiiSetProcesarBtn.disabled = false;
+    if (dgiiSetReprocesarBtn) dgiiSetReprocesarBtn.disabled = false;
+  }
+};
+
+const procesarSetDgii = async ({ reprocesar = false } = {}) => {
+  const setId = Number(dgiiSetSelect?.value || 0);
+  if (!setId) {
+    setMessage(dgiiSetMensaje, 'Selecciona un lote para procesar.', 'warning');
+    return;
+  }
+  try {
+    if (dgiiSetGenerarXmlBtn) dgiiSetGenerarXmlBtn.disabled = true;
+    if (dgiiSetProcesarBtn) dgiiSetProcesarBtn.disabled = true;
+    if (dgiiSetReprocesarBtn) dgiiSetReprocesarBtn.disabled = true;
+    setMessage(dgiiSetMensaje, 'Procesando lote DGII...', 'info');
+    const resp = await fetchJsonAutorizado(`/api/dgii/paso2/sets/${setId}/procesar`, {
+      method: 'POST',
+      body: JSON.stringify({
+        reprocesar_rechazados: reprocesar,
+        solo_pendientes: !reprocesar,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo procesar el lote DGII.');
+    }
+    setMessage(
+      dgiiSetMensaje,
+      `Proceso finalizado. Casos evaluados: ${Number(data?.procesados || 0)}.`,
+      'info'
+    );
+    await cargarSetsDgii({ mantenerSeleccion: true });
+    await cargarCasosDgii(setId);
+  } catch (error) {
+    console.error('Error procesando set DGII:', error);
+    setMessage(dgiiSetMensaje, error.message || 'No se pudo procesar el lote DGII.', 'error');
+  } finally {
+    if (dgiiSetGenerarXmlBtn) dgiiSetGenerarXmlBtn.disabled = false;
+    if (dgiiSetProcesarBtn) dgiiSetProcesarBtn.disabled = false;
+    if (dgiiSetReprocesarBtn) dgiiSetReprocesarBtn.disabled = false;
+  }
+};
+
+const procesarCasoDgii = async (casoId) => {
+  try {
+    const resp = await fetchJsonAutorizado(`/api/dgii/paso2/casos/${casoId}/procesar`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo procesar el caso.');
+    }
+    setMessage(dgiiCasosMensaje, `Caso ${casoId} procesado.`, 'info');
+    await cargarCasosDgii(dgiiSetSelect?.value);
+    await cargarSetsDgii({ mantenerSeleccion: true });
+  } catch (error) {
+    console.error('Error procesando caso DGII:', error);
+    setMessage(dgiiCasosMensaje, error.message || 'No se pudo procesar el caso DGII.', 'error');
+  }
+};
+
+const consultarCasoDgii = async (casoId) => {
+  try {
+    const resp = await fetchJsonAutorizado(`/api/dgii/paso2/casos/${casoId}/consultar`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo consultar el caso.');
+    }
+    setMessage(
+      dgiiCasosMensaje,
+      `Caso ${casoId}: ${data?.estado || '--'} | Codigo: ${data?.codigo || '--'}`,
+      'info'
+    );
+    await cargarCasosDgii(dgiiSetSelect?.value);
+    await cargarSetsDgii({ mantenerSeleccion: true });
+  } catch (error) {
+    console.error('Error consultando caso DGII:', error);
+    setMessage(dgiiCasosMensaje, error.message || 'No se pudo consultar el caso DGII.', 'error');
+  }
 };
 
 const restaurarSesionEmpresa = () => {
@@ -697,7 +1167,7 @@ const tabsSoloAdmin = [
   'cuadres',
   'historial',
 ];
-const tabsSoloSuperAdmin = ['negocios'];
+const tabsSoloSuperAdmin = ['negocios', 'dgiiPaso2'];
 
 const aplicarModulosUI = () => {
   const modulos = window.APP_MODULOS || DEFAULT_CONFIG_MODULOS;
@@ -5191,6 +5661,14 @@ const recargarEstadoAdmin = async (mostrarCarga = false) => {
       tareas.push(cargarHistorialCocina(paginaHistorialCocina));
     }
 
+    const dgiiSectionActiva = !document.getElementById('admin-section-dgii-paso2')?.classList.contains('hidden');
+    if (dgiiSetSelect && dgiiSectionActiva) {
+      tareas.push(cargarSetsDgii({ mantenerSeleccion: true }));
+      if (dgiiSetSelect.value) {
+        tareas.push(cargarCasosDgii(dgiiSetSelect.value));
+      }
+    }
+
     if (tareas.length) {
       await Promise.allSettled(tareas);
     }
@@ -5245,6 +5723,7 @@ const procesarSyncGlobal = (valor) => {
  * ===================== */
 let KANM_NEGOCIOS_CACHE = [];
 let KANM_NEGOCIOS_CARGADO = false;
+let KANM_REGISTROS_CACHE = [];
 let empresaUsuarioEstado = null;
 let EMPRESAS_TEMPLATE_CACHE = [];
 let EMPRESAS_TEMPLATE_MAP = new Map();
@@ -5273,9 +5752,14 @@ const obtenerSesionNegocios = () =>
 const getNegociosDom = () => ({
   section: document.getElementById('kanm-negocios-section'),
   mensaje: document.getElementById('kanm-negocios-mensaje'),
+  mensajeRegistros: document.getElementById('kanm-registros-mensaje'),
   inputBuscar: document.getElementById('kanm-negocios-buscar'),
+  inputBuscarRegistros: document.getElementById('kanm-registros-buscar'),
+  selectEstadoRegistros: document.getElementById('kanm-registros-estado'),
   tablaBody: document.getElementById('kanm-negocios-tbody'),
+  tablaRegistrosBody: document.getElementById('kanm-registros-tbody'),
   btnNuevo: document.getElementById('kanm-negocios-btn-nuevo'),
+  btnRefrescarRegistros: document.getElementById('kanm-registros-refrescar'),
   modal: document.getElementById('kanm-negocios-modal'),
   modalTitulo: document.getElementById('kanm-negocios-modal-titulo'),
   form: document.getElementById('kanm-negocios-form'),
@@ -5334,6 +5818,182 @@ const setNegociosMsg = (msg = '', type = 'info') => {
     setMessage(mensaje, msg, type);
   } else if (mensaje) {
     mensaje.textContent = msg || '';
+  }
+};
+
+const setRegistrosMsg = (msg = '', type = 'info') => {
+  const { mensajeRegistros } = getNegociosDom();
+  if (typeof setMessage === 'function') {
+    setMessage(mensajeRegistros, msg, type);
+  } else if (mensajeRegistros) {
+    mensajeRegistros.textContent = msg || '';
+  }
+};
+
+const ESTADOS_REGISTRO_OPCIONES = [
+  { value: 'pendiente_pago', label: 'Pendiente pago' },
+  { value: 'en_revision', label: 'En revision' },
+  { value: 'pago_recibido', label: 'Pago recibido' },
+  { value: 'aprobado', label: 'Aprobado' },
+  { value: 'rechazado', label: 'Rechazado' },
+];
+const ESTADO_REGISTRO_LABEL = ESTADOS_REGISTRO_OPCIONES.reduce((acc, item) => {
+  acc[item.value] = item.label;
+  return acc;
+}, {});
+
+const formatoFechaRegistro = (valor) => {
+  if (!valor) return '--';
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return '--';
+  return new Intl.DateTimeFormat('es-DO', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    hour12: false,
+    timeZone: 'America/Santo_Domingo',
+  }).format(fecha);
+};
+
+const obtenerRegistrosFiltrados = () => {
+  const dom = getNegociosDom();
+  const texto = (dom.inputBuscarRegistros?.value || '').trim().toLowerCase();
+  const estado = (dom.selectEstadoRegistros?.value || '').trim().toLowerCase();
+  return (KANM_REGISTROS_CACHE || []).filter((item) => {
+    if (estado && (item.estado || '').toLowerCase() !== estado) {
+      return false;
+    }
+    if (!texto) return true;
+    const compuesto = [
+      item.codigo,
+      item.negocio_nombre,
+      item.admin_nombre,
+      item.admin_usuario,
+      item.email,
+      item.telefono,
+    ]
+      .map((v) => (v || '').toString().toLowerCase())
+      .join(' ');
+    return compuesto.includes(texto);
+  });
+};
+
+const renderRegistrosTabla = () => {
+  const dom = getNegociosDom();
+  if (!dom.tablaRegistrosBody) return;
+  const registros = obtenerRegistrosFiltrados();
+  if (!registros.length) {
+    dom.tablaRegistrosBody.innerHTML = '<tr><td colspan="9">Sin solicitudes registradas.</td></tr>';
+    return;
+  }
+
+  dom.tablaRegistrosBody.innerHTML = registros
+    .map((item) => {
+      const estadoActual = (item.estado || 'pendiente_pago').toLowerCase();
+      const contacto = [item.telefono, item.email].filter(Boolean).join(' | ') || '--';
+      const modulos = (item.modulos_solicitados_labels || []).join(', ') || '--';
+      const fecha = formatoFechaRegistro(item.created_at);
+      const correoEstado = item.correo_enviado
+        ? '<span class="estado-pill">Enviado</span>'
+        : `<span class="estado-pill estado-suspendido">Pendiente</span>${item.correo_error ? `<div class="negocio-motivo">Error: ${item.correo_error}</div>` : ''}`;
+      const opcionesEstado = ESTADOS_REGISTRO_OPCIONES.map(
+        (estado) =>
+          `<option value="${estado.value}" ${estado.value === estadoActual ? 'selected' : ''}>${estado.label}</option>`
+      ).join('');
+
+      return `
+        <tr>
+          <td>${fecha}</td>
+          <td>${item.codigo || '--'}</td>
+          <td>${item.negocio_nombre || '--'}<br /><small>ID: ${item.negocio_id || '--'} | ${item.negocio_slug || '--'}</small></td>
+          <td>${item.admin_nombre || '--'}<br /><small>${item.admin_usuario || '--'}</small></td>
+          <td>${contacto}</td>
+          <td>${modulos}</td>
+          <td>${correoEstado}</td>
+          <td>${ESTADO_REGISTRO_LABEL[estadoActual] || estadoActual}</td>
+          <td>
+            <div class="negocio-actions">
+              <select data-registro-estado="${item.id}" class="kanm-input">
+                ${opcionesEstado}
+              </select>
+              <button type="button" class="kanm-button ghost" data-registro-guardar="${item.id}">Guardar</button>
+              <button type="button" class="kanm-button ghost" data-registro-reenviar="${item.id}">Reenviar correo</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+};
+
+const cargarRegistrosSolicitudes = async () => {
+  const sesion = obtenerSesionNegocios();
+  if (!sesion?.esSuperAdmin) return;
+
+  setRegistrosMsg('Cargando solicitudes de registro...', 'info');
+  try {
+    const dom = getNegociosDom();
+    const estado = (dom.selectEstadoRegistros?.value || '').trim();
+    const q = (dom.inputBuscarRegistros?.value || '').trim();
+    const params = new URLSearchParams();
+    if (estado) params.set('estado', estado);
+    if (q) params.set('q', q);
+    const query = params.toString();
+    const url = query ? `/api/admin/registros-solicitudes?${query}` : '/api/admin/registros-solicitudes';
+    const resp = await fetchConAutorizacion(url);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudieron cargar las solicitudes de registro.');
+    }
+    KANM_REGISTROS_CACHE = Array.isArray(data?.registros) ? data.registros : [];
+    renderRegistrosTabla();
+    setRegistrosMsg(`Solicitudes cargadas: ${KANM_REGISTROS_CACHE.length}.`, 'info');
+  } catch (error) {
+    console.error('Error cargando solicitudes de registro:', error);
+    setRegistrosMsg(error.message || 'No se pudieron cargar las solicitudes.', 'error');
+  }
+};
+
+const actualizarEstadoRegistro = async (id, estado) => {
+  if (!id || !estado) return;
+  try {
+    setRegistrosMsg('Actualizando estado de solicitud...', 'info');
+    const resp = await fetchJsonAutorizado(`/api/admin/registros-solicitudes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ estado }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo actualizar el estado de la solicitud.');
+    }
+    await cargarRegistrosSolicitudes();
+    setRegistrosMsg('Estado actualizado correctamente.', 'info');
+  } catch (error) {
+    console.error('Error actualizando estado de solicitud:', error);
+    setRegistrosMsg(error.message || 'No se pudo actualizar el estado.', 'error');
+  }
+};
+
+const reenviarCorreoRegistro = async (id) => {
+  if (!id) return;
+  try {
+    setRegistrosMsg('Reenviando correo de solicitud...', 'info');
+    const resp = await fetchJsonAutorizado(`/api/admin/registros-solicitudes/${id}/reenviar-correo`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo reenviar el correo.');
+    }
+    await cargarRegistrosSolicitudes();
+    const enviado = data?.correo?.enviado === true;
+    setRegistrosMsg(
+      enviado ? 'Correo reenviado correctamente.' : `Correo pendiente: ${data?.correo?.error || 'error desconocido'}`,
+      enviado ? 'info' : 'error'
+    );
+  } catch (error) {
+    console.error('Error reenviando correo de registro:', error);
+    setRegistrosMsg(error.message || 'No se pudo reenviar el correo.', 'error');
   }
 };
 
@@ -6055,6 +6715,16 @@ const initNegociosAdmin = () => {
     dom.inputBuscar.addEventListener('input', () => renderNegociosFiltrados());
   }
 
+  if (dom.inputBuscarRegistros) {
+    dom.inputBuscarRegistros.addEventListener('input', () => renderRegistrosTabla());
+  }
+  if (dom.selectEstadoRegistros) {
+    dom.selectEstadoRegistros.addEventListener('change', () => renderRegistrosTabla());
+  }
+  if (dom.btnRefrescarRegistros) {
+    dom.btnRefrescarRegistros.addEventListener('click', () => cargarRegistrosSolicitudes());
+  }
+
   if (dom.tablaBody) {
     dom.tablaBody.addEventListener('click', (event) => {
       const btnEditar = event.target.closest('.kanm-negocios-btn-editar');
@@ -6074,6 +6744,27 @@ const initNegociosAdmin = () => {
     });
   } else {
     console.warn('Tbody de negocios no encontrado');
+  }
+
+  if (dom.tablaRegistrosBody) {
+    dom.tablaRegistrosBody.addEventListener('click', (event) => {
+      const botonGuardar = event.target.closest('[data-registro-guardar]');
+      if (botonGuardar) {
+        const id = Number(botonGuardar.dataset.registroGuardar);
+        if (!Number.isFinite(id) || id <= 0) return;
+        const selector = dom.tablaRegistrosBody.querySelector(`[data-registro-estado="${id}"]`);
+        const estado = selector?.value || '';
+        actualizarEstadoRegistro(id, estado);
+        return;
+      }
+
+      const botonReenviar = event.target.closest('[data-registro-reenviar]');
+      if (botonReenviar) {
+        const id = Number(botonReenviar.dataset.registroReenviar);
+        if (!Number.isFinite(id) || id <= 0) return;
+        reenviarCorreoRegistro(id);
+      }
+    });
   }
 
   if (dom.form) {
@@ -6121,6 +6812,7 @@ const initNegociosAdmin = () => {
   }
 
   cargarNegocios();
+  cargarRegistrosSolicitudes();
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -6639,6 +7331,80 @@ modalEliminarConfirmar?.addEventListener('click', (event) => {
   ejecutarEliminacionAdmin();
 });
 
+dgiiConfigGuardarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  guardarConfigDgii();
+});
+
+dgiiConfigTestBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  probarAutenticacionDgii();
+});
+
+dgiiSemillaValidarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  validarSemillaFirmadaDgii();
+});
+
+dgiiSetImportarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  importarSetDgii();
+});
+
+dgiiSetRefrescarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  cargarSetsDgii({ mantenerSeleccion: true });
+  if (dgiiSetSelect?.value) {
+    cargarCasosDgii(dgiiSetSelect.value);
+  }
+});
+
+dgiiSetSelect?.addEventListener('change', () => {
+  const setId = Number(dgiiSetSelect.value || 0);
+  if (!setId) {
+    renderResumenDgii(null);
+    dgiiCasos = [];
+    renderCasosDgii();
+    return;
+  }
+  const setActivo = dgiiSets.find((item) => Number(item.id) === setId);
+  renderResumenDgii(setActivo?.resumen || null);
+  cargarCasosDgii(setId);
+});
+
+dgiiSetGenerarXmlBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  generarXmlSetDgii();
+});
+
+dgiiSetProcesarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  procesarSetDgii({ reprocesar: false });
+});
+
+dgiiSetReprocesarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  procesarSetDgii({ reprocesar: true });
+});
+
+dgiiCasosTabla?.addEventListener('click', (event) => {
+  const btnProcesar = event.target.closest('[data-dgii-procesar-caso]');
+  if (btnProcesar) {
+    const casoId = Number(btnProcesar.dataset.dgiiProcesarCaso);
+    if (Number.isFinite(casoId) && casoId > 0) {
+      procesarCasoDgii(casoId);
+    }
+    return;
+  }
+  const btnConsultar = event.target.closest('[data-dgii-consultar-caso]');
+  if (btnConsultar) {
+    const casoId = Number(btnConsultar.dataset.dgiiConsultarCaso);
+    if (Number.isFinite(casoId) && casoId > 0) {
+      consultarCasoDgii(casoId);
+    }
+  }
+});
+
 adminTabs.forEach((btn) =>
   btn.addEventListener('click', () => {
     if (btn.classList.contains('hidden')) {
@@ -6651,8 +7417,24 @@ adminTabs.forEach((btn) =>
       return;
     }
     mostrarTabAdmin(tab);
-    if (tab === 'negocios' && sesion?.esSuperAdmin && !KANM_NEGOCIOS_CARGADO) {
-      initNegociosAdmin();
+    if (tab === 'negocios' && sesion?.esSuperAdmin) {
+      if (!KANM_NEGOCIOS_CARGADO) {
+        initNegociosAdmin();
+      } else {
+        cargarNegocios();
+        cargarRegistrosSolicitudes();
+      }
+    }
+    if (tab === 'dgiiPaso2') {
+      if (!sesion?.esSuperAdmin) {
+        setMessage(dgiiSetMensaje, 'Modulo DGII Paso 2 habilitado solo para super admin.', 'warning');
+        return;
+      }
+      cargarConfigDgii();
+      cargarSetsDgii({ mantenerSeleccion: true });
+      if (dgiiSetSelect?.value) {
+        cargarCasosDgii(dgiiSetSelect.value);
+      }
     }
     const tabUrl = btn.dataset.tabUrl;
     if (tabUrl) {
@@ -6734,6 +7516,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   const esAdmin = esRolAdmin(usuarioActual?.rol);
   if (!esAdmin) {
     return;
+  }
+
+  if (tabInicial === 'dgiiPaso2' && (usuarioActual?.esSuperAdmin || usuarioActual?.es_super_admin)) {
+    await cargarConfigDgii();
+    await cargarSetsDgii({ mantenerSeleccion: true });
+    if (dgiiSetSelect?.value) {
+      await cargarCasosDgii(dgiiSetSelect.value);
+    }
   }
 
   await cargarCocinerosHistorial();

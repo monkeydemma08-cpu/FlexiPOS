@@ -539,6 +539,115 @@ async function ensureTablePosiumFacturas() {
   `);
 }
 
+async function ensureTableDgiiPaso2Config() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS dgii_paso2_config (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      usuario_certificacion VARCHAR(180) NULL,
+      clave_certificacion_enc LONGTEXT NULL,
+      p12_nombre_archivo VARCHAR(255) NULL,
+      p12_base64 LONGTEXT NULL,
+      p12_password_enc LONGTEXT NULL,
+      rnc_emisor VARCHAR(20) NULL,
+      modo_autenticacion VARCHAR(30) NOT NULL DEFAULT 'CREDENCIALES',
+      endpoints_json LONGTEXT NULL,
+      token_cache LONGTEXT NULL,
+      token_expira_en DATETIME NULL,
+      updated_by_usuario_id INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_dgii_paso2_config_negocio (negocio_id),
+      CONSTRAINT fk_dgii_paso2_config_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableDgiiPaso2Sets() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS dgii_paso2_sets (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      nombre_archivo VARCHAR(255) NOT NULL,
+      hash_sha256 VARCHAR(64) NULL,
+      metadata_json LONGTEXT NULL,
+      total_casos INT NOT NULL DEFAULT 0,
+      total_ecf INT NOT NULL DEFAULT 0,
+      total_fc INT NOT NULL DEFAULT 0,
+      total_resumenes INT NOT NULL DEFAULT 0,
+      estado VARCHAR(20) NOT NULL DEFAULT 'CARGADO',
+      creado_por_usuario_id INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_dgii_paso2_sets_negocio_fecha (negocio_id, created_at),
+      CONSTRAINT fk_dgii_paso2_sets_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableDgiiPaso2Casos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS dgii_paso2_casos (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      set_id BIGINT NOT NULL,
+      negocio_id INT NOT NULL,
+      hoja VARCHAR(120) NULL,
+      fila_excel INT NULL,
+      caso_codigo VARCHAR(120) NULL,
+      orden_envio INT NOT NULL DEFAULT 0,
+      flujo VARCHAR(30) NOT NULL DEFAULT 'ECF_NORMAL',
+      tipo_documento VARCHAR(60) NULL,
+      encf VARCHAR(30) NULL,
+      ncf VARCHAR(30) NULL,
+      monto_total DECIMAL(14,2) NOT NULL DEFAULT 0,
+      payload_json LONGTEXT NOT NULL,
+      xml_generado LONGTEXT NULL,
+      xml_firmado LONGTEXT NULL,
+      estado_local VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
+      dgii_estado VARCHAR(30) NULL,
+      dgii_codigo VARCHAR(80) NULL,
+      dgii_mensaje LONGTEXT NULL,
+      dgii_track_id VARCHAR(120) NULL,
+      intentos INT NOT NULL DEFAULT 0,
+      ultimo_procesado_at DATETIME NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_dgii_paso2_casos_set (set_id),
+      KEY idx_dgii_paso2_casos_negocio_estado (negocio_id, estado_local),
+      KEY idx_dgii_paso2_casos_negocio_orden (negocio_id, orden_envio),
+      KEY idx_dgii_paso2_casos_negocio_flujo (negocio_id, flujo),
+      CONSTRAINT fk_dgii_paso2_casos_set FOREIGN KEY (set_id) REFERENCES dgii_paso2_sets(id),
+      CONSTRAINT fk_dgii_paso2_casos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableDgiiPaso2Intentos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS dgii_paso2_intentos (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      caso_id BIGINT NOT NULL,
+      negocio_id INT NOT NULL,
+      tipo_envio VARCHAR(30) NOT NULL,
+      endpoint VARCHAR(300) NULL,
+      request_headers_json LONGTEXT NULL,
+      request_body LONGTEXT NULL,
+      response_status INT NULL,
+      response_headers_json LONGTEXT NULL,
+      response_body LONGTEXT NULL,
+      resultado VARCHAR(20) NOT NULL DEFAULT 'ERROR',
+      codigo VARCHAR(80) NULL,
+      mensaje LONGTEXT NULL,
+      track_id VARCHAR(120) NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_dgii_paso2_intentos_caso (caso_id),
+      KEY idx_dgii_paso2_intentos_negocio_fecha (negocio_id, created_at),
+      CONSTRAINT fk_dgii_paso2_intentos_caso FOREIGN KEY (caso_id) REFERENCES dgii_paso2_casos(id),
+      CONSTRAINT fk_dgii_paso2_intentos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
 async function ensureTableGastos() {
   await query(`
     CREATE TABLE IF NOT EXISTS gastos (
@@ -1440,6 +1549,52 @@ async function ensureTableAdminActions() {
   await ensureIndexByName('admin_actions', 'idx_admin_actions_accion', '(accion)');
 }
 
+async function ensureTableRegistroSolicitudes() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS registro_solicitudes (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      codigo VARCHAR(24) NOT NULL,
+      negocio_nombre VARCHAR(180) NOT NULL,
+      negocio_id INT NULL,
+      negocio_slug VARCHAR(140) NULL,
+      negocio_tipo VARCHAR(80) NULL,
+      admin_nombre VARCHAR(180) NOT NULL,
+      admin_usuario VARCHAR(120) NOT NULL,
+      admin_usuario_id INT NULL,
+      admin_password_hash TEXT NULL,
+      telefono VARCHAR(40) NULL,
+      email VARCHAR(255) NULL,
+      ciudad VARCHAR(120) NULL,
+      cantidad_usuarios VARCHAR(40) NULL,
+      usa_cocina TINYINT(1) NOT NULL DEFAULT 0,
+      usa_delivery TINYINT(1) NOT NULL DEFAULT 0,
+      modulo_kds TINYINT(1) NOT NULL DEFAULT 0,
+      modulos_solicitados_json JSON NULL,
+      modulos_recomendados_json JSON NULL,
+      respuestas_json JSON NULL,
+      estado VARCHAR(30) NOT NULL DEFAULT 'pendiente_pago',
+      estado_pago_limite DATETIME NULL,
+      notas_publicas TEXT NULL,
+      notas_internas TEXT NULL,
+      correo_enviado TINYINT(1) NOT NULL DEFAULT 0,
+      correo_error TEXT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uk_registro_solicitudes_codigo (codigo),
+      KEY idx_registro_solicitudes_estado (estado),
+      KEY idx_registro_solicitudes_creado (created_at),
+      KEY idx_registro_solicitudes_negocio (negocio_id),
+      KEY idx_registro_solicitudes_admin_usuario (admin_usuario_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureColumn('registro_solicitudes', 'negocio_id INT NULL');
+  await ensureColumn('registro_solicitudes', 'negocio_slug VARCHAR(140) NULL');
+  await ensureColumn('registro_solicitudes', 'admin_usuario_id INT NULL');
+  await ensureIndexByName('registro_solicitudes', 'idx_registro_solicitudes_negocio', '(negocio_id)');
+  await ensureIndexByName('registro_solicitudes', 'idx_registro_solicitudes_admin_usuario', '(admin_usuario_id)');
+}
+
 async function migrateDetalleCompraManual() {
   if (!(await tableExists('detalle_compra'))) {
     return;
@@ -1582,6 +1737,10 @@ async function runMigrations() {
   await ensureTableHistorialBar();
   await ensureTablePosiumFacturacionConfig();
   await ensureTablePosiumFacturas();
+  await ensureTableDgiiPaso2Config();
+  await ensureTableDgiiPaso2Sets();
+  await ensureTableDgiiPaso2Casos();
+  await ensureTableDgiiPaso2Intentos();
   await ensureTableGastos();
   await ensureTableGastosPagos();
   await ensureTableGastosAdjuntos();
@@ -1664,6 +1823,7 @@ async function runMigrations() {
   await ensurePasswordControlColumns();
   await ensureTableAdminImpersonations();
   await ensureTableAdminActions();
+  await ensureTableRegistroSolicitudes();
   await normalizeConfiguracionKeys();
   await normalizeSecuenciasPk();
 }
