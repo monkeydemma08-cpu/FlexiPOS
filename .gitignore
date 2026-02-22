@@ -21,3 +21,12 @@ node_modules/
 
 # PDFs generados (si no quieres versionarlos)
 # docs/*.pdf
+
+# Temporales locales de desarrollo
+/logs/
+/tools/tmp/
+/_tmp_*
+/temp_write_check.txt
+/maxParen.depth){maxParen
+/server_stdout.log
+/server_stderr.log

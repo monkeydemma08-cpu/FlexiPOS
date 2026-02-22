@@ -1,6 +1,0 @@
-﻿from pathlib import Path
-path = Path("public/mesera.html")
-text = path.read_text(encoding="utf-8")
-text = text.replace("Nota para cocina (opcional)", "Nota para preparación (opcional)")
-text = text.replace("Enviar pedido a cocina", "Enviar a preparar orden")
-path.write_text(text, encoding="utf-8")
