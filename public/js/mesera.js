@@ -540,8 +540,33 @@ const aplicarModulosMesera = () => {
   }
 
   const deliveryTab = document.querySelector('.mesera-tab-btn[data-tab="delivery"]');
+  const deliveryPanel = document.querySelector('.mesera-tab-panel[data-tab="delivery"]');
+  const deliveryAcciones = document.querySelector('[data-acciones="delivery"]');
   if (deliveryTab && modulos.delivery === false) {
     deliveryTab.style.display = 'none';
+    deliveryTab.setAttribute('aria-hidden', 'true');
+    if (estado.tabActiva === 'delivery') {
+      estado.tabActiva = 'tomar';
+    }
+  } else if (deliveryTab) {
+    deliveryTab.style.display = '';
+    deliveryTab.removeAttribute('aria-hidden');
+  }
+
+  if (deliveryPanel && modulos.delivery === false) {
+    deliveryPanel.classList.remove('active');
+    deliveryPanel.hidden = true;
+  } else if (deliveryPanel) {
+    deliveryPanel.hidden = false;
+  }
+
+  if (deliveryAcciones && modulos.delivery === false) {
+    deliveryAcciones.hidden = true;
+  }
+
+  if (selectServicio && modulos.delivery === false) {
+    const optionDelivery = selectServicio.querySelector('option[value="delivery"]');
+    optionDelivery?.remove();
   }
 };
 

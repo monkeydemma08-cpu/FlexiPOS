@@ -1788,13 +1788,41 @@ const esImpersonacionEmpresa = (usuario) =>
       (usuario?.impersonated_by_role === 'empresa' || usuario?.impersonatedByRole === 'empresa')
   );
 const puedeGestionarSupervisores = (usuario) =>
-  esSuperAdmin(usuario) || esUsuarioAdmin(usuario) || esUsuarioEmpresa(usuario) || esImpersonacionEmpresa(usuario);
+  esSuperAdmin(usuario) || esUsuarioEmpresa(usuario) || esImpersonacionEmpresa(usuario);
 const puedeGestionarRol = (usuario, rolObjetivo) => {
   if (!rolObjetivo) return true;
   if (rolObjetivo === 'empresa') return esSuperAdmin(usuario);
   if (rolObjetivo === 'supervisor') return puedeGestionarSupervisores(usuario);
   return true;
 };
+
+const ROLES_POR_MODULO = Object.freeze({
+  mesera: 'mesera',
+  cocina: 'cocina',
+  bar: 'bar',
+  caja: 'caja',
+  vendedor: 'mostrador',
+  delivery: 'delivery',
+});
+
+const MODULO_LABELS = Object.freeze({
+  mesera: 'Mesera',
+  cocina: 'Cocina',
+  bar: 'Bar',
+  caja: 'Caja',
+  mostrador: 'Mostrador',
+  delivery: 'Delivery',
+});
+
+async function validarRolSegunModulosNegocio(rol, negocioId) {
+  if (!rol || !negocioId) return null;
+  const modulo = ROLES_POR_MODULO[rol];
+  if (!modulo) return null;
+  const activo = await moduloActivoParaNegocio(modulo, negocioId);
+  if (activo !== false) return null;
+  const nombreModulo = MODULO_LABELS[modulo] || modulo;
+  return `El modulo de ${nombreModulo} esta desactivado para este negocio.`;
+}
 const requireSuperAdmin = (req, res, next) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     if (!esSuperAdmin(usuarioSesion)) {
@@ -9247,11 +9275,9 @@ app.post('/api/usuarios', (req, res) => {
     } catch (error) {
       console.warn('No se pudo obtener empresa del negocio para usuario:', error?.message || error);
     }
-    if (rol === 'bar') {
-      const barActivo = await moduloActivoParaNegocio('bar', negocioDestino);
-      if (!barActivo) {
-        return res.status(403).json({ error: 'El m�dulo de bar est� desactivado para este negocio.' });
-      }
+    const errorModuloRol = await validarRolSegunModulosNegocio(rol, negocioDestino);
+    if (errorModuloRol) {
+      return res.status(403).json({ error: errorModuloRol });
     }
     if (rol === 'supervisor') {
       const existenteSupervisor = await db.get(
@@ -9341,11 +9367,9 @@ app.put('/api/usuarios/:id', (req, res) => {
       if (!puedeGestionarRol(usuarioSesion, rolDestino)) {
         return res.status(403).json({ error: 'Acceso restringido' });
       }
-      if (rolDestino === 'bar') {
-        const barActivo = await moduloActivoParaNegocio('bar', negocioDestino);
-        if (!barActivo) {
-          return res.status(403).json({ error: 'El m�dulo de bar est� desactivado para este negocio.' });
-        }
+      const errorModuloRol = await validarRolSegunModulosNegocio(rolDestino, negocioDestino);
+      if (errorModuloRol) {
+        return res.status(403).json({ error: errorModuloRol });
       }
       if (rolDestino === 'supervisor') {
         const existenteSupervisor = await db.get(
@@ -9877,7 +9901,7 @@ app.put('/api/clientes/:id/estado', (req, res) => {
 // --- Empresa: gestion de sucursales ---
 app.get('/api/empresa/negocios', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -9903,7 +9927,7 @@ app.get('/api/empresa/negocios', (req, res) => {
 
 app.get('/api/empresa/analytics/overview', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10115,7 +10139,7 @@ app.get('/api/empresa/analytics/overview', (req, res) => {
 // Empresa: productos maestro
 app.get('/api/empresa/productos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10177,7 +10201,7 @@ app.get('/api/empresa/productos', (req, res) => {
 
 app.post('/api/empresa/productos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10287,7 +10311,7 @@ app.post('/api/empresa/productos', (req, res) => {
 
 app.put('/api/empresa/productos/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10383,7 +10407,7 @@ app.put('/api/empresa/productos/:id', (req, res) => {
 
 app.delete('/api/empresa/productos/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10409,7 +10433,7 @@ app.delete('/api/empresa/productos/:id', (req, res) => {
 
 app.get('/api/empresa/inventario/config', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10428,7 +10452,7 @@ app.get('/api/empresa/inventario/config', (req, res) => {
 
 app.put('/api/empresa/inventario/config', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10449,7 +10473,7 @@ app.put('/api/empresa/inventario/config', (req, res) => {
 
 app.get('/api/empresa/inventario/movimientos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10500,7 +10524,7 @@ app.get('/api/empresa/inventario/movimientos', (req, res) => {
 
 app.post('/api/empresa/inventario/movimientos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10646,7 +10670,7 @@ app.post('/api/empresa/inventario/movimientos', (req, res) => {
 // Empresa: nomina
 app.get('/api/empresa/nomina/empleados', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10672,7 +10696,7 @@ app.get('/api/empresa/nomina/empleados', (req, res) => {
 
 app.post('/api/empresa/nomina/empleados', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10733,7 +10757,7 @@ app.post('/api/empresa/nomina/empleados', (req, res) => {
 
 app.put('/api/empresa/nomina/empleados/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10803,7 +10827,7 @@ app.put('/api/empresa/nomina/empleados/:id', (req, res) => {
 
 app.delete('/api/empresa/nomina/empleados/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10829,7 +10853,7 @@ app.delete('/api/empresa/nomina/empleados/:id', (req, res) => {
 
 app.post('/api/empresa/nomina/asistencias', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10884,7 +10908,7 @@ app.post('/api/empresa/nomina/asistencias', (req, res) => {
 
 app.post('/api/empresa/nomina/movimientos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -10925,7 +10949,7 @@ app.post('/api/empresa/nomina/movimientos', (req, res) => {
 
 app.get('/api/empresa/nomina/resumen', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -11708,7 +11732,7 @@ const obtenerBalanzaContable = async (empresaId, desde, hasta) => {
 // Empresa: contabilidad
 app.get('/api/empresa/contabilidad', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -11749,7 +11773,7 @@ app.get('/api/empresa/contabilidad', (req, res) => {
 
 app.post('/api/empresa/contabilidad', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -11789,7 +11813,7 @@ app.post('/api/empresa/contabilidad', (req, res) => {
 
 app.put('/api/empresa/contabilidad/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -11838,7 +11862,7 @@ app.put('/api/empresa/contabilidad/:id', (req, res) => {
 
 app.delete('/api/empresa/contabilidad/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -11868,7 +11892,7 @@ app.delete('/api/empresa/contabilidad/:id', (req, res) => {
 // Nuevo motor contable
 app.get('/api/empresa/contabilidad/cuentas', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -11888,7 +11912,7 @@ app.get('/api/empresa/contabilidad/cuentas', (req, res) => {
 
 app.get('/api/empresa/contabilidad/reportes', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -11909,7 +11933,7 @@ app.get('/api/empresa/contabilidad/reportes', (req, res) => {
 
 app.get('/api/empresa/contabilidad/asientos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -11944,7 +11968,7 @@ app.get('/api/empresa/contabilidad/asientos', (req, res) => {
 
 app.get('/api/empresa/contabilidad/mayor', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -12106,7 +12130,7 @@ const obtenerAdjuntosGasto = async (gastoId, incluirContenido = false) => {
 
 app.get('/api/empresa/gastos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -12297,7 +12321,7 @@ app.get('/api/empresa/gastos', (req, res) => {
 
 app.get('/api/empresa/gastos/export', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -12370,7 +12394,7 @@ app.get('/api/empresa/gastos/export', (req, res) => {
 
 app.get('/api/empresa/gastos/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -12416,7 +12440,7 @@ app.get('/api/empresa/gastos/:id', (req, res) => {
 
 app.post('/api/empresa/gastos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -12593,7 +12617,7 @@ app.post('/api/empresa/gastos', (req, res) => {
 
 app.put('/api/empresa/gastos/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -12840,7 +12864,7 @@ app.put('/api/empresa/gastos/:id', (req, res) => {
 
 app.post('/api/empresa/gastos/:id/aprobar', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -12891,7 +12915,7 @@ app.post('/api/empresa/gastos/:id/aprobar', (req, res) => {
 
 app.post('/api/empresa/gastos/:id/anular', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -12989,7 +13013,7 @@ app.post('/api/empresa/gastos/:id/anular', (req, res) => {
 
 app.post('/api/empresa/gastos/:id/pagar', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -13082,7 +13106,7 @@ app.post('/api/empresa/gastos/:id/pagar', (req, res) => {
 
 app.post('/api/empresa/gastos/batch', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -13142,7 +13166,7 @@ app.post('/api/empresa/gastos/batch', (req, res) => {
 // ==========================
 app.get('/api/empresa/negocios/:id/productos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
 
@@ -13208,7 +13232,7 @@ const resolverCategoriaSucursal = async (negocioId, nombreCategoria) => {
 
 app.get('/api/empresa/negocios/:id/inventario', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
 
@@ -13288,7 +13312,7 @@ app.get('/api/empresa/negocios/:id/inventario', (req, res) => {
 
 app.post('/api/empresa/negocios/:id/inventario', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const negocioId = Number(req.params.id);
@@ -13370,7 +13394,7 @@ app.post('/api/empresa/negocios/:id/inventario', (req, res) => {
 
 app.put('/api/empresa/negocios/:id/inventario/:productoId', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const negocioId = Number(req.params.id);
@@ -13440,7 +13464,7 @@ app.put('/api/empresa/negocios/:id/inventario/:productoId', (req, res) => {
 
 app.delete('/api/empresa/negocios/:id/inventario/:productoId', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const negocioId = Number(req.params.id);
@@ -13471,7 +13495,7 @@ app.delete('/api/empresa/negocios/:id/inventario/:productoId', (req, res) => {
 
 app.post('/api/empresa/clientes/desde-sucursal', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -13529,7 +13553,7 @@ app.post('/api/empresa/clientes/desde-sucursal', (req, res) => {
 
 app.get('/api/empresa/clientes', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -13778,7 +13802,7 @@ app.get('/api/empresa/clientes', (req, res) => {
 
 app.get('/api/empresa/clientes/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -13858,7 +13882,7 @@ app.get('/api/empresa/clientes/:id', (req, res) => {
 
 app.post('/api/empresa/clientes', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -13982,7 +14006,7 @@ app.post('/api/empresa/clientes', (req, res) => {
 
 app.put('/api/empresa/clientes/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -14145,7 +14169,7 @@ app.put('/api/empresa/clientes/:id', (req, res) => {
 
 app.put('/api/empresa/clientes/:id/estado', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -14181,7 +14205,7 @@ app.put('/api/empresa/clientes/:id/estado', (req, res) => {
 
 app.get('/api/empresa/clientes/:id/notas', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -14213,7 +14237,7 @@ app.get('/api/empresa/clientes/:id/notas', (req, res) => {
 
 app.post('/api/empresa/clientes/:id/notas', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -14252,7 +14276,7 @@ app.post('/api/empresa/clientes/:id/notas', (req, res) => {
 
 app.get('/api/empresa/facturas', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -14395,7 +14419,7 @@ app.get('/api/empresa/facturas', (req, res) => {
 
 app.get('/api/empresa/clientes/:id/deudas', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -14469,7 +14493,7 @@ app.get('/api/empresa/clientes/:id/deudas', (req, res) => {
 
 app.get('/api/empresa/clientes/:id/deudas/:deudaId/detalle', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -14513,7 +14537,7 @@ app.get('/api/empresa/clientes/:id/deudas/:deudaId/detalle', (req, res) => {
 
 app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -14844,7 +14868,7 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
 
 app.get('/api/empresa/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -14889,7 +14913,7 @@ app.get('/api/empresa/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
 
 app.post('/api/empresa/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -14945,7 +14969,7 @@ app.post('/api/empresa/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
 
 app.get('/api/empresa/clientes/:id/abonos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -14981,7 +15005,7 @@ app.get('/api/empresa/clientes/:id/abonos', (req, res) => {
 
 app.get('/api/empresa/clientes/:id/estado-cuenta', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -15047,7 +15071,7 @@ app.get('/api/empresa/clientes/:id/estado-cuenta', (req, res) => {
 
 app.get('/api/empresa/clientes/deudas/:deudaId/factura', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const empresaId = usuarioSesion?.empresa_id ?? usuarioSesion?.empresaId;
@@ -15227,7 +15251,7 @@ app.post('/api/empresa/negocios/:id/supervisor', (req, res) => {
 
 app.post('/api/empresa/negocios/:id/impersonar', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!esUsuarioEmpresa(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+    if (!esUsuarioEmpresa(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
     }
     const id = Number(req.params.id);

@@ -362,7 +362,6 @@ const esImpersonacionEmpresa = () =>
   );
 const puedeGestionarSupervisores = () => {
   if (usuarioActual?.es_super_admin || usuarioActual?.esSuperAdmin) return true;
-  if (usuarioActual?.rol === 'admin') return true;
   if (usuarioActual?.rol === 'empresa') return true;
   if (esImpersonacionEmpresa()) return true;
   return false;
@@ -377,7 +376,7 @@ const solicitarPasswordSupervisor = (motivo = 'continuar') => {
 };
 const puedeVerPanelEmpresa = () => {
   if (usuarioActual?.es_super_admin || usuarioActual?.esSuperAdmin) return true;
-  return usuarioActual?.rol === 'admin' || usuarioActual?.rol === 'empresa';
+  return usuarioActual?.rol === 'empresa' || esImpersonacionEmpresa();
 };
 const puedeImprimirCierres = () => {
   if (esRolAdmin(usuarioActual?.rol)) return true;
@@ -3095,45 +3094,86 @@ const guardarConfiguracionFactura = async () => {
  * GestiÃ³n de usuarios
  * ===================== */
 const ROLES_PERMITIDOS_BASE = ['mesera', 'cocina', 'bar', 'caja', 'vendedor', 'delivery', 'supervisor'];
-const obtenerRolesPermitidos = () =>
-  puedeGestionarSupervisores()
+const ROLES_FILTRO_USUARIOS_BASE = ['mesera', 'cocina', 'bar', 'caja', 'vendedor', 'delivery', 'admin', 'supervisor'];
+const ROLES_LABELS_USUARIO = Object.freeze({
+  mesera: 'Mesera',
+  cocina: 'Cocina',
+  bar: 'Bar',
+  caja: 'Caja',
+  vendedor: 'Mostrador',
+  delivery: 'Delivery',
+  supervisor: 'Supervisor',
+  admin: 'Administrador',
+});
+const ROL_MODULO_REQUERIDO = Object.freeze({
+  mesera: 'mesera',
+  cocina: 'cocina',
+  bar: 'bar',
+  caja: 'caja',
+  vendedor: 'mostrador',
+  delivery: 'delivery',
+});
+
+const labelRolUsuario = (rol = '') => ROLES_LABELS_USUARIO[rol] || rol;
+
+const rolDisponiblePorModulo = (rol = '') => {
+  const modulo = ROL_MODULO_REQUERIDO[rol];
+  if (!modulo) return true;
+  const modulos = window.APP_MODULOS || DEFAULT_CONFIG_MODULOS;
+  return modulos?.[modulo] !== false;
+};
+
+const obtenerRolesPermitidos = () => {
+  const base = puedeGestionarSupervisores()
     ? ROLES_PERMITIDOS_BASE
     : ROLES_PERMITIDOS_BASE.filter((rol) => rol !== 'supervisor');
+  return base.filter((rol) => rolDisponiblePorModulo(rol));
+};
+
+const obtenerRolesFiltroUsuarios = () => {
+  const base = puedeGestionarSupervisores()
+    ? ROLES_FILTRO_USUARIOS_BASE
+    : ROLES_FILTRO_USUARIOS_BASE.filter((rol) => rol !== 'supervisor');
+  return base.filter((rol) => rolDisponiblePorModulo(rol));
+};
+
+const reconstruirSelectRoles = (select, roles = [], preferredValue = '') => {
+  if (!select) return;
+  const rolesValidos = Array.isArray(roles) ? roles.filter(Boolean) : [];
+  if (!rolesValidos.length) {
+    select.innerHTML = '';
+    select.value = '';
+    return;
+  }
+  const valorActual = select.value;
+  select.innerHTML = rolesValidos
+    .map((rol) => `<option value="${rol}">${labelRolUsuario(rol)}</option>`)
+    .join('');
+
+  const siguienteValor = rolesValidos.includes(valorActual)
+    ? valorActual
+    : rolesValidos.includes(preferredValue)
+      ? preferredValue
+      : rolesValidos[0];
+  select.value = siguienteValor;
+};
 
 const ajustarRolesUsuariosUI = () => {
-  const puedeSupervisores = puedeGestionarSupervisores();
-  const limpiarOpcion = (select, value) => {
-    if (!select) return;
-    const opcion = select.querySelector(`option[value="${value}"]`);
-    if (opcion) {
-      if (select.value === value) {
-        select.value = 'mesera';
-      }
-      opcion.remove();
-    }
-  };
-  const asegurarOpcion = (select, value, label) => {
-    if (!select) return;
-    if (select.querySelector(`option[value="${value}"]`)) return;
-    const opcion = document.createElement('option');
-    opcion.value = value;
-    opcion.textContent = label;
-    select.appendChild(opcion);
-  };
+  const rolesFiltro = obtenerRolesFiltroUsuarios();
+  const rolesFormulario = obtenerRolesPermitidos();
 
-  if (puedeSupervisores) {
-    asegurarOpcion(usuarioRolInput, 'supervisor', 'Supervisor');
-    asegurarOpcion(usuariosRolSelect, 'supervisor', 'Supervisor');
-  } else {
-    limpiarOpcion(usuarioRolInput, 'supervisor');
-    limpiarOpcion(usuariosRolSelect, 'supervisor');
-  }
+  reconstruirSelectRoles(usuariosRolSelect, rolesFiltro, 'mesera');
+  reconstruirSelectRoles(usuarioRolInput, rolesFormulario, usuariosRolSelect?.value || 'mesera');
 };
 
 const limpiarFormularioUsuario = () => {
   usuarioForm?.reset();
   if (usuarioIdInput) usuarioIdInput.value = '';
-  if (usuarioRolInput) usuarioRolInput.value = usuariosRolSelect?.value || 'mesera';
+  if (usuarioRolInput) {
+    const rolesPermitidos = obtenerRolesPermitidos();
+    const rolPreferido = usuariosRolSelect?.value;
+    usuarioRolInput.value = rolesPermitidos.includes(rolPreferido) ? rolPreferido : rolesPermitidos[0] || 'mesera';
+  }
   if (usuarioActivoInput) usuarioActivoInput.checked = true;
   setMessage(usuarioFormMensaje, '');
 };
@@ -3295,9 +3335,7 @@ const validarFormularioUsuario = ({ nombre, usuario, password, rol }, esEdicion)
 
   const rolesPermitidos = obtenerRolesPermitidos();
   if (!rolesPermitidos.includes(rol)) {
-    const textoRoles = rolesPermitidos.includes('supervisor')
-      ? 'mesera, cocina, bar, caja, mostrador o supervisor'
-      : 'mesera, cocina, bar, caja o mostrador';
+    const textoRoles = rolesPermitidos.map((item) => labelRolUsuario(item)).join(', ');
     setMessage(
       usuarioFormMensaje,
       `Selecciona un rol valido (${textoRoles}).`,
@@ -5734,6 +5772,7 @@ const DEFAULT_CONFIG_MODULOS = {
   bar: false,
   caja: true,
   mostrador: true,
+  delivery: true,
   historialCocina: true,
 };
 const DEFAULT_NEGOCIO_COLORS = {
@@ -6912,7 +6951,8 @@ usuarioLimpiarBtn?.addEventListener('click', () => {
 usuariosRolSelect?.addEventListener('change', (event) => {
   const rol = event.target.value;
   if (usuarioRolInput) {
-    usuarioRolInput.value = rol;
+    const rolesPermitidos = obtenerRolesPermitidos();
+    usuarioRolInput.value = rolesPermitidos.includes(rol) ? rol : rolesPermitidos[0] || 'mesera';
   }
   cargarUsuarios(rol);
 });
@@ -6929,7 +6969,12 @@ usuariosTablaBody?.addEventListener('click', (event) => {
     if (usuarioIdInput) usuarioIdInput.value = usuarioSeleccionado.id;
     if (usuarioNombreInput) usuarioNombreInput.value = usuarioSeleccionado.nombre || '';
     if (usuarioUsuarioInput) usuarioUsuarioInput.value = usuarioSeleccionado.usuario || '';
-    if (usuarioRolInput) usuarioRolInput.value = usuarioSeleccionado.rol;
+    if (usuarioRolInput) {
+      const rolesPermitidos = obtenerRolesPermitidos();
+      usuarioRolInput.value = rolesPermitidos.includes(usuarioSeleccionado.rol)
+        ? usuarioSeleccionado.rol
+        : rolesPermitidos[0] || 'mesera';
+    }
     if (usuarioActivoInput) usuarioActivoInput.checked = !!usuarioSeleccionado.activo;
     setMessage(usuarioFormMensaje, `Editando usuario ${usuarioSeleccionado.usuario}`, 'info');
   }

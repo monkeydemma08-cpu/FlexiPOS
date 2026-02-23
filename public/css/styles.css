@@ -4488,6 +4488,18 @@ body[data-role='mesera'] .kanm-main {
   min-width: 0;
 }
 
+@media (max-width: 640px) {
+  .admin-grid-two.admin-config-grid .factura-telefono-row,
+  .factura-telefono-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-grid-two.admin-config-grid .factura-telefono-row .kanm-button,
+  .factura-telefono-row .kanm-button {
+    justify-self: flex-start;
+  }
+}
+
 .factura-rangos {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
