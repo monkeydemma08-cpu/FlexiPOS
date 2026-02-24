@@ -14,13 +14,65 @@ const STORAGE_KEY = 'kanmUser';
 const STORAGE_APP_KEY = 'sesionApp';
 const FORCE_PASSWORD_PATH = '/force-password.html';
 const DEFAULT_THEME = {
-  colorPrimario: '#36c1b3',
-  colorSecundario: '#91a2f4',
-  colorTexto: '#1f2a2a',
-  colorHeader: '#36c1b3',
-  colorBotonPrimario: '#36c1b3',
-  colorBotonSecundario: '#91a2f4',
+  colorPrimario: '#255bc7',
+  colorSecundario: '#7b8fb8',
+  colorTexto: '#24344a',
+  colorHeader: '#255bc7',
+  colorBotonPrimario: '#255bc7',
+  colorBotonSecundario: '#7b8fb8',
   colorBotonPeligro: '#ff4b4b',
+};
+const AUTH_DEFAULT_CONFIG_MODULOS = Object.freeze({
+  admin: true,
+  mesera: true,
+  cocina: true,
+  bar: false,
+  caja: true,
+  mostrador: true,
+  delivery: true,
+  historialCocina: true,
+});
+
+const normalizarModuloFlag = (value, fallback = true) => {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return fallback;
+    if (['1', 'true', 'si', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off', 'null', 'undefined'].includes(normalized)) return false;
+    return fallback;
+  }
+  return Boolean(value);
+};
+
+const normalizarConfigModulos = (rawConfig) => {
+  let parsed = rawConfig;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch (error) {
+      parsed = null;
+    }
+  }
+
+  const base = { ...AUTH_DEFAULT_CONFIG_MODULOS };
+  if (!parsed || typeof parsed !== 'object') {
+    return base;
+  }
+
+  Object.keys(base).forEach((key) => {
+    base[key] = normalizarModuloFlag(parsed[key], base[key]);
+  });
+
+  Object.entries(parsed).forEach(([key, value]) => {
+    if (!(key in base)) {
+      base[key] = value;
+    }
+  });
+
+  return base;
 };
 
 const redirectTo = (path) => {
@@ -270,25 +322,13 @@ const applyTemaNegocio = (tema) => {
   const colorBotonPeligro = tema?.colorBotonPeligro || tema?.color_boton_peligro || DEFAULT_THEME.colorBotonPeligro;
   const titulo = tema?.titulo || tema?.titulo_sistema || tema?.nombre || tema?.slug || '';
   const logoUrl = tema?.logoUrl || tema?.logo_url || '';
-  const configModulos =
-    tema?.configModulos ||
-    tema?.config_modulos ||
-    window.APP_MODULOS || {
-      admin: true,
-      mesera: true,
-      cocina: true,
-      bar: false,
-      caja: true,
-      mostrador: true,
-      delivery: true,
-      historialCocina: true,
-    };
+  const configModulos = normalizarConfigModulos(tema?.configModulos ?? tema?.config_modulos ?? window.APP_MODULOS);
 
   root.style.setProperty('--color-primario', colorPrimario);
   root.style.setProperty('--color-secundario', colorSecundario);
   root.style.setProperty('--color-texto', colorTexto);
   root.style.setProperty('--color-header', colorHeader);
-  root.style.setProperty('--color-boton-texto', colorTexto);
+  root.style.setProperty('--color-boton-texto', '#ffffff');
   root.style.setProperty('--color-boton-primario', colorBotonPrimario);
   root.style.setProperty('--color-boton-secundario', colorBotonSecundario);
   root.style.setProperty('--color-boton-peligro', colorBotonPeligro);
@@ -352,17 +392,12 @@ const applyTemaNegocio = (tema) => {
     }
   }
 
-  window.APP_MODULOS =
-    configModulos || {
-      admin: true,
-      mesera: true,
-      cocina: true,
-      bar: false,
-      caja: true,
-      mostrador: true,
-      delivery: true,
-      historialCocina: true,
-    };
+  window.APP_MODULOS = configModulos;
+  try {
+    window.dispatchEvent(new CustomEvent('kanm:modulos-updated', { detail: configModulos }));
+  } catch (error) {
+    // noop
+  }
 
   window.APP_TEMA_NEGOCIO =
     tema ||

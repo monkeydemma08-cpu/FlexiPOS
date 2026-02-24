@@ -602,7 +602,7 @@
 
   const renderKpis = (kpis = {}) => {
     if (kpiNomina) kpiNomina.textContent = formatCurrency(kpis.nomina_total || 0);
-    const deudaValor = kpis.deudas_saldo ?? kpis.deudas_total ?? 0;
+    const deudaValor = kpis.deudas_saldo ? kpis.deudas_total ? 0;
     if (kpiDeudas) kpiDeudas.textContent = formatCurrency(deudaValor || 0);
     if (kpiUsuarios) kpiUsuarios.textContent = formatNumber(kpis.usuarios_activos || 0);
   };
@@ -639,8 +639,8 @@
       if (productoTagsInput) productoTagsInput.value = producto.tags || '';
       if (productoUbicacionInput) productoUbicacionInput.value = producto.ubicacion || '';
       if (productoBodegaInput) productoBodegaInput.value = producto.bodega || '';
-      if (productoStockInput) productoStockInput.value = producto.stock ?? '';
-      if (productoStockMinInput) productoStockMinInput.value = producto.stock_minimo ?? '';
+      if (productoStockInput) productoStockInput.value = producto.stock ? '';
+      if (productoStockMinInput) productoStockMinInput.value = producto.stock_minimo ? '';
       if (productoStockIndefInput) productoStockIndefInput.checked = Number(producto.stock_indefinido || 0) === 1;
       if (productoSerializableInput) productoSerializableInput.checked = Number(producto.serializable || 0) === 1;
       if (productoTipoSelect) productoTipoSelect.value = producto.tipo_producto || 'FINAL';
@@ -737,7 +737,7 @@
         if (estadoStock !== 'indef') {
           const stock = Number(item.stock || 0);
           const costoBase = Number(item.costo_valoracion || item.costo_promedio_actual || item.costo_base || 0);
-          const valor = Number(item.valor_inventario ?? stock * costoBase) || 0;
+          const valor = Number(item.valor_inventario ? stock * costoBase) || 0;
           acc.valor += valor;
         }
         return acc;
@@ -1023,7 +1023,7 @@
         const stockDespues = Number(mov.stock_despues);
         const stockTexto =
           Number.isFinite(stockAntes) && Number.isFinite(stockDespues)
-            ? `${formatNumber(stockAntes)} â†’ ${formatNumber(stockDespues)}`
+            ? `${formatNumber(stockAntes)} ? ${formatNumber(stockDespues)}`
             : '--';
         return `
           <tr>
@@ -1142,7 +1142,7 @@
       stock_indefinido: stockIndefinido ? 1 : 0,
       stock: stockIndefinido ? null : Number(item.stock || 0),
       serializable: Number(item.serializable || 0) === 1 ? 1 : 0,
-      atributos_json: item.atributos_json ?? null,
+      atributos_json: item.atributos_json ? null,
       ...overrides,
     };
   };
@@ -1529,10 +1529,10 @@
     const ingresos = resultados.ingresos || [];
     const costos = resultados.costos || [];
     const gastos = resultados.gastos || [];
-    const totalIngresos = resultados.total_ingresos ?? ingresos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
-    const totalCostos = resultados.total_costos ?? costos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
-    const totalGastos = resultados.total_gastos ?? gastos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
-    const utilidad = resultados.utilidad ?? Number((totalIngresos - totalCostos - totalGastos).toFixed(2));
+    const totalIngresos = resultados.total_ingresos ? ingresos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
+    const totalCostos = resultados.total_costos ? costos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
+    const totalGastos = resultados.total_gastos ? gastos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
+    const utilidad = resultados.utilidad ? Number((totalIngresos - totalCostos - totalGastos).toFixed(2));
 
     const rows = [];
     const pushGrupo = (label, items, total) => {
@@ -1562,13 +1562,13 @@
     const pasivos = balance.pasivos || [];
     const patrimonio = balance.patrimonio || [];
     const totalActivos =
-      balance.total_activos ?? activos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
+      balance.total_activos ? activos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
     const totalPasivos =
-      balance.total_pasivos ?? pasivos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
+      balance.total_pasivos ? pasivos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
     const totalPatrimonio =
-      balance.total_patrimonio ?? patrimonio.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
+      balance.total_patrimonio ? patrimonio.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
     const totalPasivoPatrimonio =
-      balance.total_pasivo_patrimonio ?? Number((totalPasivos + totalPatrimonio).toFixed(2));
+      balance.total_pasivo_patrimonio ? Number((totalPasivos + totalPatrimonio).toFixed(2));
 
     const rows = [];
     const pushGrupo = (label, items, total) => {
@@ -2258,7 +2258,7 @@
       if (gastoViewSubtitulo) {
         const estadoInfo = formatearEstadoGasto(gasto.estado);
         const sucursal = gasto.sucursal_nombre || (gasto.negocio_id ? '' : 'Empresa');
-        gastoViewSubtitulo.textContent = `${sucursal ? `${sucursal} Â· ` : ''}${estadoInfo.label}`;
+        gastoViewSubtitulo.textContent = `${sucursal ? `${sucursal} ? ` : ''}${estadoInfo.label}`;
       }
 
       if (gastoViewResumen) {
@@ -2286,7 +2286,7 @@
           gastoViewTimeline.innerHTML = '<li>Sin eventos registrados.</li>';
         } else {
           gastoViewTimeline.innerHTML = eventos
-            .map((item) => `<li><strong>${item.label}</strong> Â· ${formatShortDate(item.fecha)}</li>`)
+            .map((item) => `<li><strong>${item.label}</strong> ? ${formatShortDate(item.fecha)}</li>`)
             .join('');
         }
       }
@@ -2297,7 +2297,7 @@
         } else {
           gastoViewPagos.innerHTML = pagos
             .map((pago) => {
-              return `<div>${formatShortDate(pago.fecha)} Â· ${formatCurrency(pago.monto || 0)} Â· ${
+              return `<div>${formatShortDate(pago.fecha)} ? ${formatCurrency(pago.monto || 0)} ? ${
                 pago.metodo_pago || '--'
               }</div>`;
             })
@@ -2501,19 +2501,19 @@
   };
 
   const iniciarSesionImpersonada = (data = {}, redirectUrl = '/admin.html') => {
-    const usuarioId = data.usuario_id ?? data.id ?? null;
+    const usuarioId = data.usuario_id ? data.id ? null;
     const sesion = {
       usuario: data.usuario,
       nombre: data.nombre,
       rol: data.rol || 'admin',
       id: usuarioId,
       usuarioId,
-      negocioId: data.negocio_id ?? data.negocioId,
+      negocioId: data.negocio_id ? data.negocioId,
       esSuperAdmin: false,
       forcePasswordChange: data.force_password_change === true,
       impersonated: true,
-      impersonated_by_role: data.impersonated_by_role ?? data.impersonatedByRole ?? 'empresa',
-      impersonatedByRole: data.impersonated_by_role ?? data.impersonatedByRole ?? 'empresa',
+      impersonated_by_role: data.impersonated_by_role ? data.impersonatedByRole ? 'empresa',
+      impersonatedByRole: data.impersonated_by_role ? data.impersonatedByRole ? 'empresa',
       token: data.token,
     };
 
@@ -2608,7 +2608,7 @@
     const password = supervisorPasswordInput?.value?.trim() || '';
 
     if (!nombre || !usuario || !password) {
-      setSupervisorMensaje('Completa nombre, usuario y contraseÃ±a.', 'warning');
+      setSupervisorMensaje('Completa nombre, usuario y contrase?a.', 'warning');
       return;
     }
 
@@ -2908,7 +2908,7 @@
             <div class="empresa-cliente-card-header">
               <div>
                 <h4>${item.nombre || '--'}</h4>
-                <span class="empresa-cliente-sub">${tipo === 'EMPRESA' ? 'Empresa' : 'Persona'} Â· ${item.segmento || ''}</span>
+                <span class="empresa-cliente-sub">${tipo === 'EMPRESA' ? 'Empresa' : 'Persona'} ? ${item.segmento || ''}</span>
               </div>
               <div class="empresa-cliente-badges">${badges.join('')}</div>
             </div>
@@ -3169,7 +3169,7 @@
       </div>
     `;
     if (clienteViewSubtitulo) {
-      clienteViewSubtitulo.textContent = `${cliente.tipo_cliente || 'PERSONA'} Â· ${cliente.segmento || ''}`;
+      clienteViewSubtitulo.textContent = `${cliente.tipo_cliente || 'PERSONA'} ? ${cliente.segmento || ''}`;
     }
     if (clienteViewBloquearBtn) {
       const activo = ['ACTIVO', 'MORA'].includes(estado);
@@ -3401,7 +3401,7 @@
     if (clienteAbonoDeudaSelect) {
       const opciones = clienteDeudas
         .filter((deuda) => Number(deuda.saldo || 0) > 0)
-        .map((deuda) => `<option value="${deuda.id}">#${deuda.id} Â· ${formatCurrency(deuda.saldo || 0)}</option>`);
+        .map((deuda) => `<option value="${deuda.id}">#${deuda.id} ? ${formatCurrency(deuda.saldo || 0)}</option>`);
       clienteAbonoDeudaSelect.innerHTML = `<option value="">Selecciona factura</option>${opciones.join('')}`;
       if (deudaId) {
         clienteAbonoDeudaSelect.value = String(deudaId);
@@ -3891,7 +3891,7 @@
       );
       const opcionesClientes = facturaEmpresaClientes
         .map((cliente) => {
-          const doc = cliente.documento ? ` Â· ${cliente.documento}` : '';
+          const doc = cliente.documento ? ` ? ${cliente.documento}` : '';
           const key = `c-${cliente.id}`;
           facturaEmpresaDestinos.set(key, {
             tipo: 'cliente',
@@ -4428,9 +4428,9 @@
     if (empleadoTipoSelect) empleadoTipoSelect.value = empleado.tipo_pago || 'MENSUAL';
     if (empleadoSueldoInput) empleadoSueldoInput.value = empleado.sueldo_base || '';
     if (empleadoTarifaInput) empleadoTarifaInput.value = empleado.tarifa_hora || '';
-    if (empleadoArsInput) empleadoArsInput.value = empleado.ars_porcentaje ?? '';
-    if (empleadoAfpInput) empleadoAfpInput.value = empleado.afp_porcentaje ?? '';
-    if (empleadoIsrInput) empleadoIsrInput.value = empleado.isr_porcentaje ?? '';
+    if (empleadoArsInput) empleadoArsInput.value = empleado.ars_porcentaje ? '';
+    if (empleadoAfpInput) empleadoAfpInput.value = empleado.afp_porcentaje ? '';
+    if (empleadoIsrInput) empleadoIsrInput.value = empleado.isr_porcentaje ? '';
     if (empleadoActivoInput) empleadoActivoInput.checked = !!empleado.activo;
     setMensajeGenerico(empleadoMensaje, 'Editando empleado.', 'info');
     mostrarTabEmpresa('nomina');

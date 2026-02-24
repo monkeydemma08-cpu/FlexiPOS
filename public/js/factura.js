@@ -27,12 +27,12 @@
   const pieSpan = document.getElementById('factura-pie');
 
   const DEFAULT_THEME = {
-    colorPrimario: '#36c1b3',
-    colorSecundario: '#91a2f4',
-    colorTexto: '#1f2a2a',
-    colorHeader: '#36c1b3',
-    colorBotonPrimario: '#36c1b3',
-    colorBotonSecundario: '#91a2f4',
+    colorPrimario: '#255bc7',
+    colorSecundario: '#7b8fb8',
+    colorTexto: '#24344a',
+    colorHeader: '#255bc7',
+    colorBotonPrimario: '#255bc7',
+    colorBotonSecundario: '#7b8fb8',
     colorBotonPeligro: '#ff4b4b',
   };
 

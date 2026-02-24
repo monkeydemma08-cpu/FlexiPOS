@@ -388,7 +388,7 @@ const obtenerAuthHeaders = () => {
   try {
     return authApi?.getAuthHeaders?.() || {};
   } catch (error) {
-    console.warn('No se pudieron obtener encabezados de autenticaciÃ³n:', error);
+    console.warn('No se pudieron obtener encabezados de autenticaci?n:', error);
     return {};
   }
 };
@@ -996,12 +996,12 @@ const parseDateTimeToUtc = (value) => {
 };
 
 const DEFAULT_TEMA_ADMIN = {
-  colorPrimario: '#36c1b3',
-  colorSecundario: '#91a2f4',
-  colorTexto: '#1f2a2a',
-  colorHeader: '#36c1b3',
-  colorBotonPrimario: '#36c1b3',
-  colorBotonSecundario: '#91a2f4',
+  colorPrimario: '#255bc7',
+  colorSecundario: '#7b8fb8',
+  colorTexto: '#24344a',
+  colorHeader: '#255bc7',
+  colorBotonPrimario: '#255bc7',
+  colorBotonSecundario: '#7b8fb8',
   colorBotonPeligro: '#ff4b4b',
 };
 
@@ -1031,7 +1031,7 @@ const aplicarTemaAdmin = (tema) => {
   root.style.setProperty('--color-secundario', colorSecundario);
   root.style.setProperty('--color-texto', colorTexto);
   root.style.setProperty('--color-header', colorHeader);
-  root.style.setProperty('--color-boton-texto', colorTexto);
+  root.style.setProperty('--color-boton-texto', '#ffffff');
   root.style.setProperty('--color-boton-primario', colorBotonPrimario);
   root.style.setProperty('--color-boton-secundario', colorBotonSecundario);
   root.style.setProperty('--color-boton-peligro', colorBotonPeligro);
@@ -1056,7 +1056,7 @@ const aplicarTemaAdmin = (tema) => {
   }
   const headerSubtitulo = document.getElementById('kanm-header-negocio-subtitulo');
   if (headerSubtitulo && !headerSubtitulo.textContent) {
-    headerSubtitulo.textContent = 'Panel de administraciÃ³n';
+    headerSubtitulo.textContent = 'Panel de administraci?n';
   }
 
   const logoEl = document.getElementById('kanm-header-logo');
@@ -1169,10 +1169,10 @@ const tabsSoloAdmin = [
 const tabsSoloSuperAdmin = ['negocios', 'dgiiPaso2'];
 
 const aplicarModulosUI = () => {
-  const modulos = window.APP_MODULOS || DEFAULT_CONFIG_MODULOS;
+  const modulos = obtenerConfigModulosUI();
   document.querySelectorAll('[data-modulo]').forEach((tab) => {
     const mod = tab.dataset.modulo;
-    if (mod && modulos && modulos[mod] === false) {
+    if (mod && modulos[mod] === false) {
       tab.style.display = 'none';
       if (tab.classList?.contains('kanm-tab')) {
         tab.classList.remove('active');
@@ -1288,7 +1288,7 @@ const abrirModalEliminar = ({ titulo, descripcion, endpoint, forzar = false, ext
 
   modalEliminarTitulo.textContent = titulo || 'Eliminar registro';
   modalEliminarDescripcion.textContent =
-    descripcion || 'Esta acciÃ³n es irreversible. Confirma la eliminaciÃ³n del registro seleccionado.';
+    descripcion || 'Esta acci?n es irreversible. Confirma la eliminaci?n del registro seleccionado.';
 
   if (modalEliminarPassword) {
     modalEliminarPassword.value = '';
@@ -1312,12 +1312,12 @@ const ejecutarEliminacionAdmin = async () => {
 
   const password = modalEliminarPassword?.value?.trim();
   if (!password) {
-    setMessage(modalEliminarMensaje, 'Ingresa la contraseÃ±a de administrador para continuar.', 'warning');
+    setMessage(modalEliminarMensaje, 'Ingresa la contrase?a de administrador para continuar.', 'warning');
     return;
   }
 
   if (!modalEliminarEstado.endpoint) {
-    setMessage(modalEliminarMensaje, 'No se ha definido la acciÃ³n a ejecutar.', 'error');
+    setMessage(modalEliminarMensaje, 'No se ha definido la acci?n a ejecutar.', 'error');
     return;
   }
 
@@ -1363,7 +1363,7 @@ const ejecutarEliminacionAdmin = async () => {
     }
   } catch (error) {
     console.error('Error al eliminar registro administrativo:', error);
-    setMessage(modalEliminarMensaje, 'OcurriÃ³ un error al eliminar el registro.', 'error');
+    setMessage(modalEliminarMensaje, 'Ocurri? un error al eliminar el registro.', 'error');
   } finally {
     if (modalEliminarConfirmar) {
       modalEliminarConfirmar.disabled = false;
@@ -2698,7 +2698,7 @@ const guardarImpuesto = async () => {
   if (valorTexto === '' || Number.isNaN(valorNumerico) || valorNumerico < 0) {
     setMessage(
       impuestoMensaje,
-      'El valor del impuesto es obligatorio y debe ser un nÃºmero mayor o igual a 0.',
+      'El valor del impuesto es obligatorio y debe ser un n?mero mayor o igual a 0.',
       'error'
     );
     return;
@@ -3091,7 +3091,7 @@ const guardarConfiguracionFactura = async () => {
 };
 
 /* =====================
- * GestiÃ³n de usuarios
+ * Gesti?n de usuarios
  * ===================== */
 const ROLES_PERMITIDOS_BASE = ['mesera', 'cocina', 'bar', 'caja', 'vendedor', 'delivery', 'supervisor'];
 const ROLES_FILTRO_USUARIOS_BASE = ['mesera', 'cocina', 'bar', 'caja', 'vendedor', 'delivery', 'admin', 'supervisor'];
@@ -3116,10 +3116,54 @@ const ROL_MODULO_REQUERIDO = Object.freeze({
 
 const labelRolUsuario = (rol = '') => ROLES_LABELS_USUARIO[rol] || rol;
 
+const normalizarFlagModuloUI = (value, fallback = true) => {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return fallback;
+    if (['1', 'true', 'si', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off', 'null', 'undefined'].includes(normalized)) return false;
+    return fallback;
+  }
+  return Boolean(value);
+};
+
+const normalizarConfigModulosUI = (rawConfig) => {
+  let parsed = rawConfig;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch (error) {
+      parsed = null;
+    }
+  }
+
+  const base = { ...DEFAULT_CONFIG_MODULOS };
+  if (!parsed || typeof parsed !== 'object') {
+    return base;
+  }
+
+  Object.keys(base).forEach((key) => {
+    base[key] = normalizarFlagModuloUI(parsed[key], base[key]);
+  });
+
+  Object.entries(parsed).forEach(([key, value]) => {
+    if (!(key in base)) {
+      base[key] = value;
+    }
+  });
+
+  return base;
+};
+
+const obtenerConfigModulosUI = () => normalizarConfigModulosUI(window.APP_MODULOS);
+
 const rolDisponiblePorModulo = (rol = '') => {
   const modulo = ROL_MODULO_REQUERIDO[rol];
   if (!modulo) return true;
-  const modulos = window.APP_MODULOS || DEFAULT_CONFIG_MODULOS;
+  const modulos = obtenerConfigModulosUI();
   return modulos?.[modulo] !== false;
 };
 
@@ -3329,7 +3373,7 @@ const validarFormularioUsuario = ({ nombre, usuario, password, rol }, esEdicion)
   }
 
   if (!esEdicion && !password) {
-    setMessage(usuarioFormMensaje, 'La contraseÃ±a es obligatoria para crear usuarios.', 'error');
+    setMessage(usuarioFormMensaje, 'La contrase?a es obligatoria para crear usuarios.', 'error');
     return false;
   }
 
@@ -3373,7 +3417,7 @@ const guardarUsuario = async () => {
         throw new Error(error.error || 'No se pudo actualizar el usuario');
       }
     } else {
-      body.password = password; // obligatorio en creaciÃ³n
+      body.password = password; // obligatorio en creaci?n
       const respuesta = await fetchJsonAutorizado('/api/usuarios', {
         method: 'POST',
         body: JSON.stringify(body),
@@ -3414,7 +3458,7 @@ const cambiarEstadoUsuario = async (id, activo) => {
 };
 
 const eliminarUsuario = async (id) => {
-  const confirmar = window.confirm('Â¿Seguro que deseas eliminar este usuario? Esta acciÃ³n no se puede deshacer.');
+  const confirmar = window.confirm('?Seguro que deseas eliminar este usuario? Esta acci?n no se puede deshacer.');
   if (!confirmar) return;
 
   try {
@@ -5748,11 +5792,11 @@ const procesarSyncGlobal = (valor) => {
 
     if (!data.evento || eventosRelevantes.includes(data.evento)) {
       recargarEstadoAdmin(false).catch((error) => {
-        console.error('Error al refrescar el panel administrativo tras sincronizaciÃ³n:', error);
+        console.error('Error al refrescar el panel administrativo tras sincronizaci?n:', error);
       });
     }
   } catch (error) {
-    console.warn('No se pudo procesar la sincronizaciÃ³n de administrador:', error);
+    console.warn('No se pudo procesar la sincronizaci?n de administrador:', error);
   }
 };
 
@@ -5776,12 +5820,12 @@ const DEFAULT_CONFIG_MODULOS = {
   historialCocina: true,
 };
 const DEFAULT_NEGOCIO_COLORS = {
-  primario: '#36c1b3',
-  secundario: '#91a2f4',
-  texto: '#1f2a2a',
-  header: '#36c1b3',
-  botonPrimario: '#36c1b3',
-  botonSecundario: '#91a2f4',
+  primario: '#255bc7',
+  secundario: '#7b8fb8',
+  texto: '#24344a',
+  header: '#255bc7',
+  botonPrimario: '#255bc7',
+  botonSecundario: '#7b8fb8',
   botonPeligro: '#ff4b4b',
 };
 
@@ -6561,19 +6605,7 @@ const abrirModalNegocio = async (id = null) => {
   }
 
   const rawConfig = negocioSeleccionado?.configModulos || negocioSeleccionado?.config_modulos;
-  let configParsed = { ...DEFAULT_CONFIG_MODULOS };
-  if (typeof rawConfig === 'string') {
-    try {
-      const parsed = JSON.parse(rawConfig);
-      if (parsed && typeof parsed === 'object') {
-        configParsed = { ...DEFAULT_CONFIG_MODULOS, ...parsed };
-      }
-    } catch (error) {
-      configParsed = { ...DEFAULT_CONFIG_MODULOS };
-    }
-  } else if (rawConfig && typeof rawConfig === 'object') {
-    configParsed = { ...DEFAULT_CONFIG_MODULOS, ...rawConfig };
-  }
+  const configParsed = normalizarConfigModulosUI(rawConfig);
 
   if (dom.chkModuloAdmin) dom.chkModuloAdmin.checked = configParsed.admin !== false;
     if (dom.chkModuloMesera) dom.chkModuloMesera.checked = configParsed.mesera !== false;
@@ -6623,6 +6655,10 @@ const reaplicarTemaNegocioActual = async () => {
     const data = await resp.json();
     const tema = data?.tema || data;
     aplicarTemaAdmin(tema);
+    const modulosTema = normalizarConfigModulosUI(tema?.configModulos ?? tema?.config_modulos ?? window.APP_MODULOS);
+    window.APP_MODULOS = modulosTema;
+    aplicarModulosUI();
+    ajustarRolesUsuariosUI();
   } catch (error) {
     console.warn('No se pudo refrescar el tema del negocio actual:', error);
   }
@@ -6693,12 +6729,12 @@ const guardarNegocio = async (event) => {
     const empresaInfo = data?.empresaUsuario;
     if (adminInfo?.passwordGenerada) {
       alert(
-        `Se creÃ³ el usuario admin ${adminInfo.correo} con la contraseÃ±a: ${adminInfo.passwordGenerada}. GuÃ¡rdala, no se mostrarÃ¡ de nuevo.`
+        `Se cre? el usuario admin ${adminInfo.correo} con la contrase?a: ${adminInfo.passwordGenerada}. Gu?rdala, no se mostrar? de nuevo.`
       );
     }
     if (empresaInfo?.passwordGenerada) {
       alert(
-        `Se creÃ³ el usuario empresa ${empresaInfo.usuario} con la contraseÃ±a: ${empresaInfo.passwordGenerada}. GuÃ¡rdala, no se mostrarÃ¡ de nuevo.`
+        `Se cre? el usuario empresa ${empresaInfo.usuario} con la contrase?a: ${empresaInfo.passwordGenerada}. Gu?rdala, no se mostrar? de nuevo.`
       );
     }
     cerrarModalNegocio();
@@ -6724,12 +6760,12 @@ const initNegociosAdmin = () => {
   const sesion = obtenerSesionNegocios();
   const dom = getNegociosDom();
   if (!dom.section) {
-    console.warn('SecciÃ³n de negocios no encontrada');
+    console.warn('Secci?n de negocios no encontrada');
     return;
   }
   console.log('[Negocios] initNegociosAdmin llamado. APP_SESION:', window.APP_SESION);
   if (!sesion?.esSuperAdmin) {
-    console.log('[Negocios] Usuario no es super admin, ocultando secciÃ³n');
+    console.log('[Negocios] Usuario no es super admin, ocultando secci?n');
     dom.section.style.display = 'none';
     return;
   }
@@ -7347,7 +7383,7 @@ cierresTabla?.addEventListener('click', (event) => {
   abrirModalEliminar({
     titulo: 'Eliminar cuadre de caja',
     descripcion:
-      'Esta acciÃ³n es irreversible. Confirma que deseas eliminar el registro de cuadre de caja seleccionado.',
+      'Esta acci?n es irreversible. Confirma que deseas eliminar el registro de cuadre de caja seleccionado.',
     endpoint: `/api/admin/eliminar/cierre-caja/${id}`,
     onSuccess: () => {
       cierresCaja = cierresCaja.filter((item) => item.id !== id);
@@ -7514,6 +7550,20 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+window.addEventListener('kanm:modulos-updated', () => {
+  window.APP_MODULOS = normalizarConfigModulosUI(window.APP_MODULOS);
+  aplicarModulosUI();
+  ajustarRolesUsuariosUI();
+  if (usuarioIdInput && !usuarioIdInput.value) {
+    limpiarFormularioUsuario();
+  }
+  if (usuariosRolSelect) {
+    cargarUsuarios(usuariosRolSelect.value || '').catch((error) => {
+      console.warn('No se pudo refrescar usuarios tras actualizar modulos:', error);
+    });
+  }
+});
+
 window.addEventListener('DOMContentLoaded', async () => {
   mostrarBotonVolverEmpresa();
   configurarBotonPanelEmpresa();
@@ -7551,6 +7601,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     analisisDesdeInput.value = getLocalDateISO(inicioAnalisis);
   }
 
+  await reaplicarTemaNegocioActual();
   ocultarTabsNoPermitidos();
   aplicarModulosUI();
   ajustarRolesUsuariosUI();
@@ -7621,7 +7672,7 @@ window.addEventListener('storage', (event) => {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     recargarEstadoAdmin(false).catch((error) => {
-      console.error('Error al refrescar el panel administrativo al volver a la pestaÃ±a:', error);
+      console.error('Error al refrescar el panel administrativo al volver a la pesta?a:', error);
     });
   }
 });

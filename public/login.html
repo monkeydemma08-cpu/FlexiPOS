@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+    <meta http-equiv="Pragma" content="no-cache" />
     <title>POSIUM - Iniciar sesion</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,9 +12,9 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600&family=Playfair+Display:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="css/styles.css" />
-    <script src="js/password-toggle.js" defer></script>
-    <script src="js/login.js" defer></script>
+    <link rel="stylesheet" href="css/styles.css?v=20260224e" />
+    <script src="js/password-toggle.js?v=20260224e" defer></script>
+    <script src="js/login.js?v=20260224e" defer></script>
     <style>
       * {
         box-sizing: border-box;
@@ -22,31 +24,31 @@
         margin: 0;
         min-height: 100vh;
         font-family: 'Manrope', sans-serif;
-        --posium-ink: #122428;
-        --posium-ink-deep: #0f1e22;
-        --posium-ink-glow: rgba(20, 37, 42, 0.12);
-        --posium-ink-glow-strong: rgba(20, 37, 42, 0.2);
-        --posium-gold: #c9a46b;
-        --posium-gold-strong: rgba(201, 164, 107, 0.7);
-        --posium-gold-glow: rgba(201, 164, 107, 0.22);
-        --posium-gold-glow-soft: rgba(201, 164, 107, 0.2);
-        --posium-gold-soft: rgba(201, 164, 107, 0.35);
-        --posium-cloud: #f7f3ed;
-        --posium-mist: #edf1f2;
-        --posium-ice: #f4f7f9;
-        --posium-line: rgba(15, 30, 34, 0.12);
-        --posium-shadow: rgba(15, 30, 34, 0.12);
-        --posium-shadow-strong: rgba(15, 30, 34, 0.18);
-        --posium-shadow-deep: rgba(15, 30, 34, 0.24);
-        --posium-shadow-press: rgba(15, 30, 34, 0.2);
-        --posium-gold-shadow: rgba(201, 164, 107, 0.15);
-        --posium-cream: #f8f4ec;
-        --posium-ink-soft: rgba(18, 36, 40, 0.72);
-        --posium-ink-muted: rgba(18, 36, 40, 0.85);
-        --posium-inset: rgba(15, 30, 34, 0.06);
+        --posium-ink: #1f355f;
+        --posium-ink-deep: #255bc7;
+        --posium-ink-glow: rgba(37, 91, 199, 0.16);
+        --posium-ink-glow-strong: rgba(37, 91, 199, 0.24);
+        --posium-gold: #255bc7;
+        --posium-gold-strong: rgba(37, 91, 199, 0.82);
+        --posium-gold-glow: rgba(37, 91, 199, 0.28);
+        --posium-gold-glow-soft: rgba(37, 91, 199, 0.24);
+        --posium-gold-soft: rgba(37, 91, 199, 0.34);
+        --posium-cloud: #f3f7ff;
+        --posium-mist: #eaf2ff;
+        --posium-ice: #f8fbff;
+        --posium-line: rgba(31, 53, 95, 0.16);
+        --posium-shadow: rgba(37, 91, 199, 0.14);
+        --posium-shadow-strong: rgba(37, 91, 199, 0.24);
+        --posium-shadow-deep: rgba(37, 91, 199, 0.3);
+        --posium-shadow-press: rgba(37, 91, 199, 0.24);
+        --posium-gold-shadow: rgba(37, 91, 199, 0.2);
+        --posium-cream: #ffffff;
+        --posium-ink-soft: rgba(31, 53, 95, 0.72);
+        --posium-ink-muted: rgba(31, 53, 95, 0.86);
+        --posium-inset: rgba(37, 91, 199, 0.06);
         --posium-error: #b4233b;
-        --posium-ink-button: #1c2f35;
-        --posium-ink-button-alt: #2d434a;
+        --posium-ink-button: #255bc7;
+        --posium-ink-button-alt: #2f6ad8;
         --password-toggle-color: var(--posium-ink-muted);
         --password-toggle-hover: var(--posium-ink);
         --password-toggle-focus: var(--posium-gold-strong);
@@ -104,10 +106,7 @@
         font-size: 2.3rem;
         letter-spacing: 0.28em;
         text-transform: uppercase;
-        background: linear-gradient(120deg, var(--posium-ink-deep), var(--posium-gold));
-        -webkit-background-clip: text;
-        color: transparent;
-        -webkit-text-fill-color: transparent;
+        color: var(--posium-gold);
         text-align: center;
         opacity: 0;
         transform: translateY(8px);

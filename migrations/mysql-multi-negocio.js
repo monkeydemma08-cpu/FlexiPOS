@@ -11,18 +11,18 @@ const DEFAULT_CONFIG_MODULOS = {
   mostrador: true,
   historialCocina: true,
 };
-const DEFAULT_COLOR_TEXTO = '#222222';
+const DEFAULT_COLOR_TEXTO = '#24344a';
 const DEFAULT_COLOR_PELIGRO = '#ff4b4b';
 const DEFAULT_NEGOCIO = {
   id: DEFAULT_NEGOCIO_ID,
   nombre: 'Negocio Principal',
   slug: 'negocio-principal',
   activo: 1,
-  color_primario: '#f06292',
-  color_secundario: '#d85682',
-  color_header: '#f06292',
-  color_boton_primario: '#f06292',
-  color_boton_secundario: '#d85682',
+  color_primario: '#255bc7',
+  color_secundario: '#7b8fb8',
+  color_header: '#255bc7',
+  color_boton_primario: '#255bc7',
+  color_boton_secundario: '#7b8fb8',
   color_boton_peligro: DEFAULT_COLOR_PELIGRO,
   color_texto: DEFAULT_COLOR_TEXTO,
   titulo_sistema: 'KANM',
