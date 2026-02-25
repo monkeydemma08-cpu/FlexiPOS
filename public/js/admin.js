@@ -429,6 +429,27 @@ const fetchJsonAutorizado = async (url, options = {}) => {
   return response;
 };
 
+const leerRespuestaApi = async (response) => {
+  const contentType = response?.headers?.get?.('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return response.json().catch(() => ({}));
+  }
+  const raw = await response.text().catch(() => '');
+  if (raw && raw.trim().startsWith('<')) {
+    return {
+      ok: false,
+      error:
+        'El servidor devolvio HTML en vez de JSON. Revisa sesion/permisos y que la ruta API exista.',
+      raw,
+    };
+  }
+  return {
+    ok: false,
+    error: raw || `Respuesta inesperada del servidor (${response?.status || 'sin estado'})`,
+    raw,
+  };
+};
+
 const DGII_FLOW_LABELS = {
   ECF_NORMAL: 'e-CF >= 250k',
   FC_MENOR_250K: 'Factura consumo < 250k',
@@ -6508,7 +6529,7 @@ const cargarNegocios = async () => {
   setNegociosMsg('Cargando negocios...', 'info');
   try {
     const resp = await fetchJsonAutorizado('/api/negocios');
-    const data = await resp.json();
+    const data = await leerRespuestaApi(resp);
     if (!resp.ok || data?.ok === false) {
       throw new Error(data?.error || 'No se pudieron obtener los negocios');
     }
@@ -6525,7 +6546,7 @@ const cargarNegocios = async () => {
 
 const ejecutarAccionNegocio = async (url, options = {}) => {
   const resp = await fetchJsonAutorizado(url, options);
-  const data = await resp.json().catch(() => ({}));
+  const data = await leerRespuestaApi(resp);
   if (!resp.ok || data?.ok === false) {
     throw new Error(data?.error || 'No se pudo completar la accion');
   }
@@ -6810,7 +6831,7 @@ const guardarNegocio = async (event) => {
       method,
       body: JSON.stringify(payload),
     });
-    const data = await resp.json();
+    const data = await leerRespuestaApi(resp);
     if (!resp.ok || data?.ok === false) {
       throw new Error(data?.error || 'No se pudo guardar el negocio');
     }
