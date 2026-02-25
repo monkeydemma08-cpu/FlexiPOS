@@ -8658,7 +8658,12 @@ app.put('/api/negocios/:id', (req, res) => {
       normalizarCampoTexto(payload.admin_usuario, null) ||
       null;
     const adminPrincipalPassword = payload.adminPrincipalPassword || payload.admin_password || payload.adminPassword || null;
-    const logoUrlProvided = payload.logo_url ?? payload.logoUrl;
+    const payloadTieneLogoUrl =
+      Object.prototype.hasOwnProperty.call(payload, 'logo_url') ||
+      Object.prototype.hasOwnProperty.call(payload, 'logoUrl');
+    const logoUrlProvided = payloadTieneLogoUrl
+      ? (Object.prototype.hasOwnProperty.call(payload, 'logo_url') ? payload.logo_url : payload.logoUrl)
+      : undefined;
     const rncProvided = payload.rnc;
     const telefonoProvided = payload.telefono ?? payload.telefonoNegocio;
     const direccionProvided = payload.direccion ?? payload.direccionNegocio;
@@ -8731,7 +8736,7 @@ app.put('/api/negocios/:id', (req, res) => {
       fields.push('admin_principal_usuario_id = ?');
       params.push(Number.isFinite(parsedId) ? parsedId : null);
     }
-    if (logoUrlProvided !== undefined) {
+    if (payloadTieneLogoUrl) {
       fields.push('logo_url = ?');
       params.push(normalizarCampoTexto(logoUrlProvided, null));
     }
