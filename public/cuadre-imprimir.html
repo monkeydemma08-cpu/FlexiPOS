@@ -21,7 +21,7 @@
           <div class="header-logo" data-negocio-titulo>Negocio</div>
         </div>
         <div class="cotizacion-print__identity">
-          <p class="cotizacion-print__title">Detalle de cuadre de caja</p>
+          <p class="cotizacion-print__title" id="cuadre-titulo">Detalle de cuadre de caja</p>
           <p class="cotizacion-print__meta" id="cuadre-fecha-operacion">Fecha operacion: --</p>
           <p class="cotizacion-print__meta" id="cuadre-usuario">Usuario: --</p>
         </div>
@@ -50,6 +50,28 @@
         <div class="cotizacion-print__field">
           <span class="cotizacion-print__label">Diferencia</span>
           <span class="cotizacion-print__value" id="cuadre-diferencia">DOP 0.00</span>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel" id="cuadre-cierres-mes-panel" hidden>
+        <div class="cotizacion-print__section-header">
+          <h2>Cuadres incluidos en el mes</h2>
+        </div>
+        <div class="cotizacion-print__table-wrapper">
+          <table class="cotizacion-print__table">
+            <thead>
+              <tr>
+                <th>Cierre</th>
+                <th>Fecha operacion</th>
+                <th>Fecha cierre</th>
+                <th>Usuario</th>
+                <th class="text-right">Total sistema</th>
+                <th class="text-right">Total declarado</th>
+                <th class="text-right">Diferencia</th>
+              </tr>
+            </thead>
+            <tbody id="cuadre-cierres-mes-body"></tbody>
+          </table>
         </div>
       </section>
 

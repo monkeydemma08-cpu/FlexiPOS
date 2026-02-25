@@ -255,6 +255,7 @@ const cierresDesdeInput = document.getElementById('cierres-desde');
 const cierresHastaInput = document.getElementById('cierres-hasta');
 const cierresBuscarBtn = document.getElementById('cierres-buscar');
 const cierresExportarBtn = document.getElementById('cierres-exportar');
+const cierresCuadreMesBtn = document.getElementById('cierres-cuadre-mes');
 const cierresMensaje = document.getElementById('cierres-mensaje');
 const cierresTabla = document.getElementById('cierres-tabla');
 const cierresDetalleWrapper = document.getElementById('cierres-detalle-wrapper');
@@ -5375,13 +5376,6 @@ const renderCierresCaja = () => {
       acciones.appendChild(botonImprimir);
     }
 
-    const botonEliminar = document.createElement('button');
-    botonEliminar.type = 'button';
-    botonEliminar.className = 'kanm-button ghost-danger';
-    botonEliminar.textContent = 'Eliminar';
-    botonEliminar.dataset.eliminarCierre = cierre.id;
-    acciones.appendChild(botonEliminar);
-
     celdaAcciones.appendChild(acciones);
     fila.appendChild(celdaAcciones);
 
@@ -5400,7 +5394,7 @@ const renderDetalleCierre = (pedidos, cierreId) => {
   if (!pedidos.length) {
     const fila = document.createElement('tr');
     const celda = document.createElement('td');
-    celda.colSpan = 4;
+    celda.colSpan = 5;
     celda.textContent = 'El cierre no tiene pedidos asociados.';
     fila.appendChild(celda);
     cierresDetalleTabla.appendChild(fila);
@@ -5427,6 +5421,20 @@ const renderDetalleCierre = (pedidos, cierreId) => {
     const celdaFecha = document.createElement('td');
     celdaFecha.textContent = formatDateTime(pedido.fecha_cierre || pedido.fecha_listo);
     fila.appendChild(celdaFecha);
+
+    const celdaFactura = document.createElement('td');
+    const facturaId = Number(pedido.id);
+    const botonFactura = document.createElement('button');
+    botonFactura.type = 'button';
+    botonFactura.className = 'kanm-button ghost';
+    botonFactura.textContent = 'Ver factura';
+    if (Number.isInteger(facturaId) && facturaId > 0) {
+      botonFactura.dataset.verFacturaPedido = String(facturaId);
+    } else {
+      botonFactura.disabled = true;
+    }
+    celdaFactura.appendChild(botonFactura);
+    fila.appendChild(celdaFactura);
 
     fragment.appendChild(fila);
   });
@@ -5565,6 +5573,31 @@ const exportarCierresCajaCSV = async () => {
       'error'
     );
   }
+};
+
+const abrirCuadreDelMes = () => {
+  const fechaReferencia = cierresHastaInput?.value || cierresDesdeInput?.value || getLocalDateISO();
+  const match = String(fechaReferencia || '').trim().match(/^(\d{4})-(\d{2})-\d{2}$/);
+
+  if (!match) {
+    setMessage(cierresMensaje, 'Selecciona una fecha valida para generar el cuadre del mes.', 'error');
+    return;
+  }
+
+  const anio = Number(match[1]);
+  const mes = Number(match[2]);
+  if (!Number.isInteger(anio) || !Number.isInteger(mes) || mes < 1 || mes > 12) {
+    setMessage(cierresMensaje, 'No se pudo identificar el mes del cuadre.', 'error');
+    return;
+  }
+
+  const desde = `${anio}-${String(mes).padStart(2, '0')}-01`;
+  const finMes = new Date(anio, mes, 0);
+  const hasta = getLocalDateISO(finMes);
+  const url = `/cuadre-imprimir.html?modo=mes&desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`;
+
+  setMessage(cierresMensaje, '', 'info');
+  window.open(url, '_blank', 'noopener');
 };
 
 const renderHistorialCocina = (items = []) => {
@@ -7346,6 +7379,11 @@ cierresExportarBtn?.addEventListener('click', (event) => {
   exportarCierresCajaCSV();
 });
 
+cierresCuadreMesBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  abrirCuadreDelMes();
+});
+
 cierresTabla?.addEventListener('click', (event) => {
   const botonDetalle = event.target.closest('[data-detalle-cierre]');
   if (botonDetalle) {
@@ -7367,33 +7405,21 @@ cierresTabla?.addEventListener('click', (event) => {
     }
     return;
   }
+});
 
-  const botonEliminar = event.target.closest('[data-eliminar-cierre]');
-  if (!botonEliminar) {
-    return;
-  }
+cierresDetalleTabla?.addEventListener('click', (event) => {
+  const botonFactura = event.target.closest('[data-ver-factura-pedido]');
+  if (!botonFactura) return;
 
   event.preventDefault();
-
-  const id = Number(botonEliminar.dataset.eliminarCierre);
-  if (!Number.isInteger(id) || id <= 0) {
+  const pedidoId = Number(botonFactura.dataset.verFacturaPedido);
+  if (!Number.isInteger(pedidoId) || pedidoId <= 0) {
+    setMessage(cierresMensaje, 'No se encontro la factura para este pedido.', 'error');
     return;
   }
 
-  abrirModalEliminar({
-    titulo: 'Eliminar cuadre de caja',
-    descripcion:
-      'Esta acci?n es irreversible. Confirma que deseas eliminar el registro de cuadre de caja seleccionado.',
-    endpoint: `/api/admin/eliminar/cierre-caja/${id}`,
-    onSuccess: () => {
-      cierresCaja = cierresCaja.filter((item) => item.id !== id);
-      renderCierresCaja();
-      setMessage(cierresMensaje, 'Registro eliminado correctamente.', 'info');
-      if (detalleCierreActivo === id) {
-        limpiarDetalleCierre();
-      }
-    },
-  });
+  const url = `/factura.html?id=${encodeURIComponent(pedidoId)}`;
+  window.open(url, '_blank', 'noopener');
 });
 
 modalEliminarCancelar?.addEventListener('click', (event) => {

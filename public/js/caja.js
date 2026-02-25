@@ -30,7 +30,7 @@ const inputNcfManual = document.getElementById('caja-ncf-manual');
 
 const inputComentarios = document.getElementById('caja-comentarios');
 
-const botonRecalcular = document.getElementById('caja-recalcular');
+const botonVistaPrevia = document.getElementById('caja-vista-previa');
 
 const botonCobrar = document.getElementById('caja-cobrar');
 
@@ -1535,7 +1535,7 @@ const mostrarDetalleCuadre = async (fila, cuadreId) => {
   const filaDetalle = document.createElement('tr');
   filaDetalle.className = 'cuadre-detalle-expand';
   const celda = document.createElement('td');
-  celda.colSpan = 5;
+  celda.colSpan = 6;
   celda.textContent = 'Cargando productos...';
   filaDetalle.appendChild(celda);
   fila.parentNode?.insertBefore(filaDetalle, fila.nextSibling);
@@ -2982,7 +2982,7 @@ const renderDetalleCuadreActual = () => {
 
     const celda = document.createElement('td');
 
-    celda.colSpan = 5;
+    celda.colSpan = 6;
 
     celda.textContent = 'No hay pedidos pendientes de cuadre en este turno.';
 
@@ -2997,10 +2997,22 @@ const renderDetalleCuadreActual = () => {
 
 
   const fragment = document.createDocumentFragment();
+  const pedidosOrdenados = [...resumenCuadre.pedidos].sort((a, b) => {
+    const fechaA = parseFechaLocal(a.fecha_cierre || a.pedidos?.[0]?.fecha_cierre);
+    const fechaB = parseFechaLocal(b.fecha_cierre || b.pedidos?.[0]?.fecha_cierre);
+    const timeA = fechaA ? fechaA.getTime() : 0;
+    const timeB = fechaB ? fechaB.getTime() : 0;
+    if (timeA !== timeB) {
+      return timeA - timeB;
+    }
+    const idA = Number(a.cuenta_id || a.id) || 0;
+    const idB = Number(b.cuenta_id || b.id) || 0;
+    return idA - idB;
+  });
 
 
 
-  resumenCuadre.pedidos.forEach((pedido) => {
+  pedidosOrdenados.forEach((pedido) => {
 
     const fila = document.createElement('tr');
 
@@ -3025,6 +3037,17 @@ const renderDetalleCuadreActual = () => {
 
 
     const metodoLabel = obtenerMetodoPagoLabel(pedido);
+    const pedidoFacturaId = Number(
+      pedido.pedidos?.find((pedidoRelacionado) => {
+        const id = Number(pedidoRelacionado?.id);
+        return Number.isFinite(id) && id > 0;
+      })?.id
+    );
+    const facturaId =
+      Number.isFinite(pedidoFacturaId) && pedidoFacturaId > 0
+        ? pedidoFacturaId
+        : Number(pedido.id);
+    const facturaDisponible = Number.isFinite(facturaId) && facturaId > 0;
 
 
 
@@ -3043,6 +3066,17 @@ const renderDetalleCuadreActual = () => {
       <td>${metodoLabel}</td>
 
       <td>${formatCurrency(total)}</td>
+
+      <td>
+        <button
+          type="button"
+          class="kanm-button ghost"
+          data-ver-factura="1"
+          ${facturaDisponible ? `data-pedido-id="${facturaId}"` : 'disabled'}
+        >
+          Ver factura
+        </button>
+      </td>
 
     `;
 
@@ -3861,6 +3895,22 @@ const cerrarCuenta = async () => {
 
 };
 
+const abrirFacturaCuentaSeleccionada = (mensajeSinCuenta) => {
+  if (!cuentaSeleccionada) {
+    setMensajeDetalle(mensajeSinCuenta, 'error');
+    return;
+  }
+
+  const primera = cuentaSeleccionada.pedidos?.[0];
+  const facturaId = Number(primera?.id);
+  if (!Number.isFinite(facturaId) || facturaId <= 0) {
+    setMensajeDetalle('No se encontro un pedido para abrir la factura.', 'error');
+    return;
+  }
+
+  window.open(`/factura.html?id=${facturaId}`, '_blank');
+};
+
 
 
 const inicializarEventos = () => {
@@ -3945,21 +3995,12 @@ const inicializarEventos = () => {
     renderMergeModalContenido();
   });
 
-  botonRecalcular?.addEventListener('click', (event) => {
+  botonVistaPrevia?.addEventListener('click', (event) => {
 
     event.preventDefault();
 
-    if (!cuentaSeleccionada) {
-
-      setMensajeDetalle('Selecciona una cuenta para recalcular montos.', 'error');
-
-      return;
-
-    }
-
     setMensajeDetalle('');
-
-    actualizarResumenUI();
+    abrirFacturaCuentaSeleccionada('Selecciona una cuenta para ver la vista previa de la factura.');
 
   });
 
@@ -4092,22 +4133,7 @@ const inicializarEventos = () => {
 
 
   botonImprimir?.addEventListener('click', () => {
-
-    if (!cuentaSeleccionada) {
-
-      setMensajeDetalle('Selecciona una cuenta para imprimir la factura.', 'error');
-
-      return;
-
-    }
-
-    const primera = cuentaSeleccionada.pedidos?.[0];
-
-    if (primera?.id) {
-
-      window.open(`/factura.html?id=${primera.id}`, '_blank');
-
-    }
+    abrirFacturaCuentaSeleccionada('Selecciona una cuenta para imprimir la factura.');
 
   });
 
@@ -4394,6 +4420,20 @@ const inicializarCuadre = () => {
   });
 
   cuadreDetalleBody?.addEventListener('click', (event) => {
+    const botonVerFactura = event.target.closest('[data-ver-factura]');
+    if (botonVerFactura) {
+      event.preventDefault();
+      event.stopPropagation();
+      const pedidoId = Number(botonVerFactura.dataset.pedidoId);
+      if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+        setCuadreMensaje('No se encontro la factura de esta cuenta.', 'error');
+        return;
+      }
+      setCuadreMensaje('');
+      window.open(`/factura.html?id=${pedidoId}`, '_blank');
+      return;
+    }
+
     const fila = event.target.closest('tr');
     if (!fila || fila.classList.contains('cuadre-detalle-expand')) return;
     const cuadreId = Number(fila.dataset.cuadreId);

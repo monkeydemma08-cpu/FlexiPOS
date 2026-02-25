@@ -1,6 +1,11 @@
 const params = new URLSearchParams(window.location.search);
 const cierreId = params.get('id');
+const modo = String(params.get('modo') || '').trim().toLowerCase();
+const desdeParam = params.get('desde');
+const hastaParam = params.get('hasta');
+const esModoMensual = modo === 'mes' || (!cierreId && Boolean(desdeParam && hastaParam));
 
+const tituloSpan = document.getElementById('cuadre-titulo');
 const cierreIdSpan = document.getElementById('cuadre-id');
 const fechaOperacionSpan = document.getElementById('cuadre-fecha-operacion');
 const fechaCierreSpan = document.getElementById('cuadre-fecha-cierre');
@@ -19,6 +24,8 @@ const salidasPanel = document.getElementById('cuadre-salidas-panel');
 const salidasBody = document.getElementById('cuadre-salidas-body');
 const gastosPanel = document.getElementById('cuadre-gastos-panel');
 const gastosBody = document.getElementById('cuadre-gastos-body');
+const cierresMesPanel = document.getElementById('cuadre-cierres-mes-panel');
+const cierresMesBody = document.getElementById('cuadre-cierres-mes-body');
 const imprimirBtn = document.getElementById('cuadre-imprimir-btn');
 
 const authApi = window.kanmAuth;
@@ -94,26 +101,76 @@ const formatDate = (valor) => {
 
 const renderDetalle = (data) => {
   if (!data) return;
+  const esMensual = data?.tipo === 'mes';
   const cierre = data.cierre || {};
+  const rango = data.rango || {};
   const productos = Array.isArray(data.productos) ? data.productos : [];
+  const cierresMes = Array.isArray(data.cierres) ? data.cierres : [];
   const totales = data.totales || {};
   const salidas = Array.isArray(data.salidas) ? data.salidas : [];
   const gastos = Array.isArray(data.gastos) ? data.gastos : [];
 
-  if (cierreIdSpan) cierreIdSpan.textContent = cierre.id ? `#${cierre.id}` : '--';
+  if (tituloSpan) {
+    tituloSpan.textContent = esMensual ? 'Detalle de cuadre de caja del mes' : 'Detalle de cuadre de caja';
+  }
+
+  if (cierreIdSpan) {
+    if (esMensual) {
+      const periodo = rango?.desde && rango?.hasta ? `${rango.desde} a ${rango.hasta}` : '--';
+      cierreIdSpan.textContent = periodo;
+    } else {
+      cierreIdSpan.textContent = cierre.id ? `#${cierre.id}` : '--';
+    }
+  }
   if (fechaOperacionSpan) {
-    fechaOperacionSpan.textContent = `Fecha operacion: ${formatDate(cierre.fecha_operacion || data.fecha_operacion)}`;
+    if (esMensual) {
+      fechaOperacionSpan.textContent = `Periodo: ${formatDate(rango.desde)} - ${formatDate(rango.hasta)}`;
+    } else {
+      fechaOperacionSpan.textContent = `Fecha operacion: ${formatDate(cierre.fecha_operacion || data.fecha_operacion)}`;
+    }
   }
   if (fechaCierreSpan) {
     fechaCierreSpan.textContent = formatDateTime(cierre.fecha_cierre);
   }
   if (usuarioSpan) {
-    const rol = cierre.usuario_rol ? ` (${cierre.usuario_rol})` : '';
-    usuarioSpan.textContent = `Usuario: ${cierre.usuario || '--'}${rol}`;
+    if (esMensual) {
+      const cantidadDesdeCierre = Number(cierre.cantidad_cierres);
+      const cantidadDesdeLista = cierresMes.length;
+      const cantidadCierres =
+        Number.isFinite(cantidadDesdeCierre) && cantidadDesdeCierre > 0
+          ? cantidadDesdeCierre
+          : cantidadDesdeLista;
+      usuarioSpan.textContent = `Usuario: ${cierre.usuario || 'Consolidado'} (${cantidadCierres} cierres)`;
+    } else {
+      const rol = cierre.usuario_rol ? ` (${cierre.usuario_rol})` : '';
+      usuarioSpan.textContent = `Usuario: ${cierre.usuario || '--'}${rol}`;
+    }
   }
   if (totalSistemaSpan) totalSistemaSpan.textContent = formatCurrency(cierre.total_sistema);
   if (totalDeclaradoSpan) totalDeclaradoSpan.textContent = formatCurrency(cierre.total_declarado);
   if (diferenciaSpan) diferenciaSpan.textContent = formatCurrency(cierre.diferencia);
+
+  if (cierresMesPanel && cierresMesBody) {
+    cierresMesBody.innerHTML = '';
+    if (esMensual && cierresMes.length) {
+      cierresMesPanel.hidden = false;
+      cierresMes.forEach((cierreMes) => {
+        const fila = document.createElement('tr');
+        fila.innerHTML = `
+          <td>#${cierreMes.id ?? '--'}</td>
+          <td>${formatDate(cierreMes.fecha_operacion)}</td>
+          <td>${formatDateTime(cierreMes.fecha_cierre)}</td>
+          <td>${cierreMes.usuario || 'N/D'}</td>
+          <td class="text-right">${formatCurrency(cierreMes.total_sistema)}</td>
+          <td class="text-right">${formatCurrency(cierreMes.total_declarado)}</td>
+          <td class="text-right">${formatCurrency(cierreMes.diferencia)}</td>
+        `;
+        cierresMesBody.appendChild(fila);
+      });
+    } else {
+      cierresMesPanel.hidden = true;
+    }
+  }
 
   if (itemsBody) {
     itemsBody.innerHTML = '';
@@ -121,7 +178,9 @@ const renderDetalle = (data) => {
       const fila = document.createElement('tr');
       const celda = document.createElement('td');
       celda.colSpan = 7;
-      celda.textContent = 'No hay productos para este cierre.';
+      celda.textContent = esMensual
+        ? 'No hay productos para el periodo seleccionado.'
+        : 'No hay productos para este cierre.';
       fila.appendChild(celda);
       itemsBody.appendChild(fila);
     } else {
@@ -206,11 +265,11 @@ const renderDetalle = (data) => {
 
   const totalSalidas = totales.total_salidas || 0;
   if (totalSalidasSpan) totalSalidasSpan.textContent = formatCurrency(totalSalidas);
-  if (totalSalidasLinea && !totalSalidas) totalSalidasLinea.hidden = true;
+  if (totalSalidasLinea) totalSalidasLinea.hidden = !Number(totalSalidas);
 
   const totalGastos = totales.total_gastos || 0;
   if (totalGastosSpan) totalGastosSpan.textContent = formatCurrency(totalGastos);
-  if (totalGastosLinea && !totalGastos) totalGastosLinea.hidden = true;
+  if (totalGastosLinea) totalGastosLinea.hidden = !Number(totalGastos);
 
   if (salidasPanel && salidasBody) {
     salidasBody.innerHTML = '';
@@ -252,13 +311,25 @@ const renderDetalle = (data) => {
 };
 
 const cargarDetalle = async () => {
-  if (!cierreId) {
+  let endpoint = null;
+  if (esModoMensual) {
+    if (!desdeParam || !hastaParam) {
+      alert('No se encontro el rango del mes solicitado.');
+      return;
+    }
+    const parametros = new URLSearchParams({ desde: desdeParam, hasta: hastaParam });
+    endpoint = `/api/caja/cierres/hoja-detalle-mes?${parametros.toString()}`;
+  } else if (cierreId) {
+    endpoint = `/api/caja/cierres/${encodeURIComponent(cierreId)}/hoja-detalle`;
+  }
+
+  if (!endpoint) {
     alert('No se encontro el cierre solicitado.');
     return;
   }
 
   try {
-    const respuesta = await fetch(`/api/caja/cierres/${cierreId}/hoja-detalle`, {
+    const respuesta = await fetch(endpoint, {
       headers: {
         ...obtenerAuthHeaders(),
       },

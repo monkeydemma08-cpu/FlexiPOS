@@ -20,7 +20,7 @@ const runMultiNegocioMigrations = require('./migrations/mysql-multi-negocio');
 const runChatMigrations = require('./migrations/mysql-chat');
 const dgiiRoutes = require('./dgii.routes');
 const createDgiiPaso2Router = require('./dgii-paso2.routes');
-console.log('server.js cargÃ³ correctamente');
+console.log('server.js carga correctamente');
 
 const app = express();
 let io = null;
@@ -4775,7 +4775,8 @@ const obtenerPedidosPendientesDeCierre = (fecha, negocioId, opcionesOrCallback, 
       SUM(COALESCE(pago_cambio, 0)) AS pago_cambio
     FROM pedidos
     WHERE ${filtros.join('\n      AND ')}
-    GROUP BY id
+    GROUP BY COALESCE(cuenta_id, id)
+    ORDER BY MIN(${FECHA_BASE_PEDIDOS_SQL}) ASC, COALESCE(cuenta_id, id) ASC
   `;
 
   db.all(sql, params, (err, rows) => {
@@ -5539,11 +5540,241 @@ app.get('/api/caja/cierres/export', (req, res) => {
   });
 });
 
+app.get('/api/caja/cierres/hoja-detalle-mes', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
+    const rango = normalizarRangoCierres(req.query?.desde, req.query?.hasta);
+
+    const normalizarClaveCompra = (valor) => {
+      if (!valor) return '';
+      return String(valor).trim().toLowerCase().replace(/\s+/g, ' ');
+    };
+
+    try {
+      const cierres = await new Promise((resolve, reject) => {
+        obtenerCierresCaja(rango.desde, rango.hasta, negocioId, origenCaja, (err, rows) => {
+          if (err) return reject(err);
+          resolve(rows || []);
+        });
+      });
+
+      if (!cierres.length) {
+        return res.status(404).json({ ok: false, error: 'No hay cierres para el periodo seleccionado.' });
+      }
+
+      const cierreIds = cierres
+        .map((item) => Number(item.id))
+        .filter((id) => Number.isInteger(id) && id > 0);
+
+      if (!cierreIds.length) {
+        return res.status(404).json({ ok: false, error: 'No hay cierres validos para el periodo seleccionado.' });
+      }
+
+      const placeholdersCierres = cierreIds.map(() => '?').join(', ');
+      const paramsVentas = [negocioId, ...cierreIds];
+      const filtroOrigenPedidos = construirFiltroOrigenCaja(origenCaja, paramsVentas, 'p.origen_caja');
+      const fechaDesdeTs = `${rango.desde} 00:00:00`;
+      const fechaHastaTs = `${rango.hasta} 23:59:59`;
+
+      const [productos, ventasRows, comprasRows, salidasData] = await Promise.all([
+        db.all(
+          `SELECT id, nombre, precio, precios, stock, stock_indefinido
+             FROM productos
+            WHERE negocio_id = ?
+            ORDER BY nombre ASC`,
+          [negocioId]
+        ),
+        db.all(
+          `SELECT dp.producto_id,
+                  dp.precio_unitario,
+                  SUM(dp.cantidad) AS venta_cantidad,
+                  SUM(dp.cantidad * dp.precio_unitario) AS venta_bruta,
+                  SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS venta_neta,
+                  SUM(COALESCE(dp.descuento_monto, 0)) AS descuento_total
+             FROM detalle_pedido dp
+             JOIN pedidos p ON p.id = dp.pedido_id
+            WHERE p.negocio_id = ?
+              AND p.cierre_id IN (${placeholdersCierres})
+              AND p.estado = 'pagado'
+              AND ${filtroOrigenPedidos}
+            GROUP BY dp.producto_id, dp.precio_unitario`,
+          paramsVentas
+        ),
+        db.all(
+          `SELECT dc.descripcion, dc.cantidad
+             FROM detalle_compra dc
+             JOIN compras c ON c.id = dc.compra_id
+            WHERE c.negocio_id = ?
+              AND DATE(c.fecha) BETWEEN ? AND ?`,
+          [negocioId, rango.desde, rango.hasta]
+        ),
+        new Promise((resolve, reject) => {
+          obtenerSalidasPorFecha(
+            null,
+            negocioId,
+            { ignorarFecha: true, desde: fechaDesdeTs, hasta: fechaHastaTs, origen_caja: origenCaja },
+            (err, data) => {
+              if (err) return reject(err);
+              resolve(data || {});
+            }
+          );
+        }),
+      ]);
+
+      let gastos = [];
+      let totalGastos = 0;
+      if (tienePermisoAdmin(usuarioSesion)) {
+        gastos = await db.all(
+          `SELECT id, fecha, monto, moneda, categoria, metodo_pago, proveedor, descripcion
+             FROM gastos
+            WHERE negocio_id = ?
+              AND DATE(fecha) BETWEEN ? AND ?
+            ORDER BY fecha ASC, id ASC`,
+          [negocioId, rango.desde, rango.hasta]
+        );
+        totalGastos = (gastos || []).reduce((acc, gasto) => acc + (Number(gasto.monto) || 0), 0);
+      }
+
+      const ventasMap = new Map();
+      (ventasRows || []).forEach((row) => {
+        const productoId = Number(row.producto_id);
+        if (!productoId) return;
+        const ventaCantidad = Number(row.venta_cantidad) || 0;
+        const ventaBruta = Number(row.venta_bruta) || 0;
+        const ventaNeta = Number(row.venta_neta) || 0;
+        const precioUnitario = normalizarNumero(row.precio_unitario, 0);
+        const existente = ventasMap.get(productoId) || {
+          ventaCantidad: 0,
+          ventaBruta: 0,
+          ventaNeta: 0,
+          descuentoTotal: 0,
+          precios: [],
+        };
+
+        existente.ventaCantidad += ventaCantidad;
+        existente.ventaBruta += ventaBruta;
+        existente.ventaNeta += ventaNeta;
+        existente.descuentoTotal += Number(row.descuento_total) || 0;
+        if (ventaCantidad > 0) {
+          existente.precios.push({
+            precio_unitario: Number(precioUnitario.toFixed(2)),
+            cantidad: ventaCantidad,
+            venta_bruta: Number(ventaBruta.toFixed(2)),
+            venta_neta: Number(ventaNeta.toFixed(2)),
+          });
+        }
+        ventasMap.set(productoId, existente);
+      });
+
+      ventasMap.forEach((venta) => {
+        if (Array.isArray(venta.precios)) {
+          venta.precios.sort((a, b) => a.precio_unitario - b.precio_unitario);
+        }
+      });
+
+      const comprasMap = new Map();
+      (comprasRows || []).forEach((row) => {
+        const key = normalizarClaveCompra(row?.descripcion);
+        if (!key) return;
+        const cantidad = Number(row.cantidad) || 0;
+        if (!cantidad) return;
+        comprasMap.set(key, (comprasMap.get(key) || 0) + cantidad);
+      });
+
+      const detalleProductos = (productos || []).map((producto) => {
+        const stockIndefinido = Number(producto.stock_indefinido) === 1;
+        const venta = ventasMap.get(Number(producto.id)) || {};
+        const compraCantidad = stockIndefinido
+          ? null
+          : comprasMap.get(normalizarClaveCompra(producto.nombre)) || 0;
+        const ventaCantidad = Number(venta.ventaCantidad) || 0;
+        const ventaValor = Number(venta.ventaNeta) || 0;
+        const precioUnitario =
+          ventaCantidad > 0 ? Number(venta.ventaBruta || 0) / ventaCantidad : Number(producto.precio) || 0;
+        const stockFinal = stockIndefinido ? null : Number(producto.stock) || 0;
+        const stockInicial =
+          stockIndefinido || stockFinal === null
+            ? null
+            : Number((stockFinal + ventaCantidad - (compraCantidad || 0)).toFixed(2));
+        const preciosConfigurados = construirOpcionesPrecioProducto(producto);
+        const preciosVendidos = Array.isArray(venta.precios) ? venta.precios : [];
+
+        return {
+          producto_id: producto.id,
+          nombre: producto.nombre,
+          precio: Number(producto.precio) || 0,
+          precios_configurados: preciosConfigurados,
+          precios_vendidos: preciosVendidos,
+          stock: stockFinal,
+          stock_indefinido: stockIndefinido ? 1 : 0,
+          inv_inicial: stockInicial,
+          compra: compraCantidad,
+          inv_final: stockFinal,
+          venta: ventaCantidad,
+          precio_unitario: Number(precioUnitario) || 0,
+          valor_venta: Number(ventaValor.toFixed(2)),
+        };
+      });
+
+      const totalValorVenta = detalleProductos.reduce((acc, item) => acc + (Number(item.valor_venta) || 0), 0);
+      const totalSistema = cierres.reduce((acc, item) => acc + (Number(item.total_sistema) || 0), 0);
+      const totalDeclarado = cierres.reduce((acc, item) => acc + (Number(item.total_declarado) || 0), 0);
+      const totalDiferencia = cierres.reduce((acc, item) => acc + (Number(item.diferencia) || 0), 0);
+
+      const ultimoCierre = cierres.reduce((actual, item) => {
+        const fechaActual = new Date(actual?.fecha_cierre || 0).getTime();
+        const fechaNueva = new Date(item?.fecha_cierre || 0).getTime();
+        return fechaNueva > fechaActual ? item : actual;
+      }, null);
+
+      res.json({
+        ok: true,
+        tipo: 'mes',
+        rango,
+        cierre: {
+          id: `${rango.desde} a ${rango.hasta}`,
+          fecha_operacion: rango.desde,
+          fecha_cierre: ultimoCierre?.fecha_cierre || null,
+          usuario: 'Consolidado mensual',
+          usuario_rol: null,
+          total_sistema: Number(totalSistema.toFixed(2)),
+          total_declarado: Number(totalDeclarado.toFixed(2)),
+          diferencia: Number(totalDiferencia.toFixed(2)),
+          cantidad_cierres: cierres.length,
+        },
+        cierres: cierres.map((cierre) => ({
+          id: cierre.id,
+          fecha_operacion: cierre.fecha_operacion,
+          fecha_cierre: cierre.fecha_cierre,
+          usuario: cierre.usuario,
+          total_sistema: cierre.total_sistema,
+          total_declarado: cierre.total_declarado,
+          diferencia: cierre.diferencia,
+          observaciones: cierre.observaciones || '',
+        })),
+        fecha_operacion: rango.desde,
+        productos: detalleProductos,
+        totales: {
+          total_venta: Number(totalValorVenta.toFixed(2)),
+          total_salidas: Number((salidasData?.total || 0).toFixed(2)),
+          total_gastos: Number(totalGastos.toFixed(2)),
+        },
+        salidas: salidasData?.salidas || [],
+        gastos,
+      });
+    } catch (error) {
+      console.error('Error al generar hoja de detalle mensual de cierres:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo generar el cuadre mensual.' });
+    }
+  });
+});
+
 app.get('/api/caja/cierres/:id/detalle', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const corteId = Number(req.params.id);
     if (!Number.isInteger(corteId) || corteId <= 0) {
-      return res.status(400).json({ ok: false, error: 'ID de cierre invÃ¡lido' });
+      return res.status(400).json({ ok: false, error: 'ID de cierre invalido' });
     }
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
     const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
@@ -5582,12 +5813,12 @@ app.delete('/api/admin/eliminar/cierre-caja/:id', (req, res) => {
 
     const contrasenia = req.body?.password;
     if (!contrasenia || contrasenia !== ADMIN_PASSWORD) {
-      return res.status(403).json({ ok: false, error: 'Credenciales invÃ¡lidas' });
+      return res.status(403).json({ ok: false, error: 'Credenciales invalidas' });
     }
 
     const cierreId = Number(req.params.id);
     if (!Number.isInteger(cierreId) || cierreId <= 0) {
-      return res.status(400).json({ ok: false, error: 'ID de cierre invÃ¡lido' });
+      return res.status(400).json({ ok: false, error: 'ID de cierre invalido' });
     }
 
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -5626,6 +5857,7 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
     }
 
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
 
     const normalizarClaveCompra = (valor) => {
       if (!valor) return '';
@@ -5863,7 +6095,7 @@ app.put('/api/configuracion/impuesto', (req, res) => {
     if (!Number.isFinite(valor) || valor < 0) {
       return res.status(400).json({
         ok: false,
-        error: 'El valor del impuesto debe ser un nÃºmero mayor o igual a 0',
+        error: 'El valor del impuesto debe ser un numero mayor o igual a 0',
       });
     }
 
@@ -5959,8 +6191,8 @@ app.get('/api/configuracion/factura', (req, res) => {
       const configuracion = await obtenerConfiguracionFacturacion(negocioId);
       res.json({ ok: true, configuracion });
     } catch (error) {
-      console.error('Error al obtener la configuraciÃ³n de factura:', error?.message || error);
-      res.status(500).json({ ok: false, error: 'No se pudo obtener la configuraciÃ³n de factura' });
+      console.error('Error al obtener la configuracion de factura:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener la configuracion de factura' });
     }
   });
 });
@@ -5991,8 +6223,8 @@ app.put('/api/configuracion/factura', (req, res) => {
       const configuracion = await obtenerConfiguracionFacturacion(negocioId);
       res.json({ ok: true, configuracion });
     } catch (error) {
-      console.error('Error al guardar la configuraciÃ³n de factura:', error?.message || error);
-      res.status(500).json({ ok: false, error: 'No se pudo guardar la configuraciÃ³n de factura' });
+      console.error('Error al guardar la configuracion de factura:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo guardar la configuracion de factura' });
     }
   });
 });
@@ -6710,7 +6942,7 @@ app.get('/api/pedidos', (req, res) => {
     }
 
     if (!estadosValidos.includes(estadoSolicitud)) {
-      return res.status(400).json({ error: 'Estado de pedido no vÃ¡lido.' });
+      return res.status(400).json({ error: 'Estado de pedido no valido.' });
     }
 
     try {
@@ -6737,7 +6969,7 @@ app.get('/api/pedidos/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const pedidoId = Number(req.params.id);
     if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
-      return res.status(400).json({ error: 'Pedido no vÃ¡lido.' });
+      return res.status(400).json({ error: 'Pedido no valido.' });
     }
 
     try {
@@ -6757,7 +6989,7 @@ app.get('/api/cuentas/:id/detalle', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const cuentaId = Number(req.params.id);
     if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
-      return res.status(400).json({ ok: false, error: 'Cuenta invÃ¡lida.' });
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -6809,7 +7041,7 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const cuentaId = Number(req.params.id);
     if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
-      return res.status(400).json({ ok: false, error: 'Cuenta invÃ¡lida.' });
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
     }
 
     const detallesEntrada =
@@ -6831,7 +7063,7 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
     );
 
     if (!detalleIds.length) {
-      return res.status(400).json({ ok: false, error: 'No se identificaron productos vÃ¡lidos para separar.' });
+      return res.status(400).json({ ok: false, error: 'No se identificaron productos validos para separar.' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -7067,7 +7299,7 @@ app.post('/api/cuentas/juntar', (req, res) => {
 
     const cuentaDestino = Number(cuentaDestinoRaw ?? cuentaIds[0]);
     if (!Number.isFinite(cuentaDestino) || cuentaDestino <= 0) {
-      return res.status(400).json({ ok: false, error: 'Cuenta destino invÃ¡lida.' });
+      return res.status(400).json({ ok: false, error: 'Cuenta destino invalida.' });
     }
 
     if (!cuentaIds.includes(cuentaDestino)) {
@@ -7075,7 +7307,7 @@ app.post('/api/cuentas/juntar', (req, res) => {
     }
 
     if (cuentaIds.length < 2) {
-      return res.status(400).json({ ok: false, error: 'Debes seleccionar al menos dos cuentas vÃ¡lidas.' });
+      return res.status(400).json({ ok: false, error: 'Debes seleccionar al menos dos cuentas validas.' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -7105,7 +7337,7 @@ app.post('/api/cuentas/juntar', (req, res) => {
       const faltantes = cuentaIds.filter((id) => !cuentasEncontradas.has(id));
       if (faltantes.length) {
         await db.run('ROLLBACK');
-        return res.status(404).json({ ok: false, error: 'Una o mÃ¡s cuentas no existen o no pertenecen a tu negocio.' });
+        return res.status(404).json({ ok: false, error: 'Una o mas cuentas no existen o no pertenecen a tu negocio.' });
       }
 
       const tienePagados = pedidos.some((pedido) => pedido.estado === 'pagado');
@@ -7165,7 +7397,7 @@ app.put('/api/cuentas/:id/cerrar', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const cuentaId = Number(req.params.id);
     if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
-      return res.status(400).json({ ok: false, error: 'Cuenta invÃ¡lida.' });
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -7269,7 +7501,7 @@ app.post('/api/pedidos', (req, res) => {
         const productoId = Number(item?.producto_id);
         const cantidad = Number(item?.cantidad);
         if (!Number.isFinite(productoId) || productoId <= 0) {
-          return res.status(400).json({ error: 'Hay un producto invÃ¡lido en el pedido.' });
+          return res.status(400).json({ error: 'Hay un producto invalido en el pedido.' });
         }
         if (!Number.isFinite(cantidad) || cantidad <= 0) {
           return res.status(400).json({ error: 'Todas las cantidades deben ser mayores a cero.' });
@@ -7586,7 +7818,7 @@ app.put('/api/pedidos/:id/estado', (req, res) => {
     requireUsuarioSesion(req, res, async (usuarioSesion) => {
       const pedidoId = Number(req.params.id);
     if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
-      return res.status(400).json({ error: 'Pedido no vÃ¡lido.' });
+      return res.status(400).json({ error: 'Pedido no valido.' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -7600,7 +7832,7 @@ app.put('/api/pedidos/:id/estado', (req, res) => {
     }
 
     if (pedido.estado === 'cancelado') {
-      return res.status(400).json({ error: 'El pedido ya estÃ¡ cancelado.' });
+      return res.status(400).json({ error: 'El pedido ya esta cancelado.' });
     }
 
     try {
@@ -7626,7 +7858,7 @@ app.get('/api/pedidos/:id/factura', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const pedidoId = Number(req.params.id);
     if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
-      return res.status(400).json({ error: 'Pedido no vÃ¡lido.' });
+      return res.status(400).json({ error: 'Pedido no valido.' });
     }
 
     try {
@@ -7903,7 +8135,7 @@ app.post('/api/bar/marcar-listo', (req, res) => {
     });
 });
 
-// GestiÃ³n de negocios (solo super admin)
+// Gestion de negocios (solo super admin)
 app.get('/api/negocios', (req, res) => {
   requireSuperAdmin(req, res, () => {
     const sql = `
@@ -8315,7 +8547,7 @@ app.put('/api/negocios/:id', (req, res) => {
   requireSuperAdmin(req, res, async () => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({ ok: false, error: 'ID de negocio invÃ¡lido' });
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
     }
 
     const payload = req.body || {};
@@ -8350,7 +8582,7 @@ app.put('/api/negocios/:id', (req, res) => {
       const nombre =
         normalizarCampoTexto(payload.nombre, null) || normalizarCampoTexto(payload.titulo_sistema ?? payload.tituloSistema, null);
       if (!nombre) {
-        return res.status(400).json({ ok: false, error: 'El nombre del negocio no puede ser vacÃ­o' });
+        return res.status(400).json({ ok: false, error: 'El nombre del negocio no puede ser vaci­o' });
       }
       fields.push('nombre = ?');
       params.push(nombre);
@@ -8505,7 +8737,7 @@ app.patch('/api/negocios/:id/estado', (req, res) => {
     const id = Number(req.params.id);
     const { activo = 1 } = req.body || {};
     if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({ ok: false, error: 'ID de negocio invÃ¡lido' });
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
     }
 
     const valor = activo === 0 || activo === false ? 0 : 1;
@@ -8538,7 +8770,7 @@ app.get('/api/negocios/mi-tema', (req, res) => {
           return res.status(500).json({ ok: false, error: 'No se pudo obtener el tema del negocio' });
         }
         if (!row) {
-          return res.status(404).json({ ok: false, error: 'Negocio no encontrado para la sesiÃ³n actual' });
+          return res.status(404).json({ ok: false, error: 'Negocio no encontrado para la sesion actual' });
         }
 
           const negocioTema = mapNegocioWithDefaults(row);
@@ -9822,7 +10054,7 @@ app.put('/api/delivery/pedidos/:id/aceptar', (req, res) => {
 
     const pedidoId = Number(req.params.id);
     if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
-      return res.status(400).json({ error: 'Pedido no vÃ¡lido.' });
+      return res.status(400).json({ error: 'Pedido no valido.' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -9844,7 +10076,7 @@ app.put('/api/delivery/pedidos/:id/aceptar', (req, res) => {
 
       const estadoActual = (pedido.delivery_estado || 'pendiente').toString().toLowerCase();
       if (estadoActual !== 'disponible') {
-        return res.status(400).json({ error: 'El pedido no estÃ¡ disponible para delivery.' });
+        return res.status(400).json({ error: 'El pedido no esta disponible para delivery.' });
       }
 
       await db.run(
@@ -9870,7 +10102,7 @@ app.put('/api/delivery/pedidos/:id/entregar', (req, res) => {
 
     const pedidoId = Number(req.params.id);
     if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
-      return res.status(400).json({ error: 'Pedido no vÃ¡lido.' });
+      return res.status(400).json({ error: 'Pedido no valido.' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -9892,7 +10124,7 @@ app.put('/api/delivery/pedidos/:id/entregar', (req, res) => {
 
       const estadoActual = (pedido.delivery_estado || 'pendiente').toString().toLowerCase();
       if (estadoActual !== 'asignado') {
-        return res.status(400).json({ error: 'El pedido no estÃ¡ asignado para entrega.' });
+        return res.status(400).json({ error: 'El pedido no esta asignado para entrega.' });
       }
 
       if (esUsuarioDelivery(usuarioSesion) && pedido.delivery_usuario_id !== usuarioSesion.id) {
@@ -12139,7 +12371,7 @@ const guardarAdjuntosGasto = async (gastoId, adjuntos = [], limpiarPrevios = fal
     const contenido = normalizarCampoTexto(item.contenido_base64 ?? item.base64 ?? item.contenido, null);
     if (!nombre || !contenido) continue;
     if (contenido.length > MAX_GASTO_ADJUNTO_BYTES * 1.4) {
-      throw new Error('El adjunto supera el tamaÃ±o permitido.');
+      throw new Error('El adjunto supera el tamaño permitido.');
     }
     await db.run(
       `INSERT INTO gastos_adjuntos (gasto_id, nombre, mime, contenido_base64) VALUES (?, ?, ?, ?)`,
@@ -15379,7 +15611,7 @@ app.post('/api/admin/empresas/:id/usuarios', (req, res) => {
     const { nombre, usuario, password, negocio_id } = req.body || {};
     const usuarioNormalizado = (usuario || '').trim();
     if (!nombre || !usuarioNormalizado || !password) {
-      return res.status(400).json({ ok: false, error: 'Nombre, usuario y contraseÃ±a son obligatorios' });
+      return res.status(400).json({ ok: false, error: 'Nombre, usuario y contraseña son obligatorios' });
     }
 
     try {
@@ -15460,7 +15692,7 @@ const construirResumenDeudaProductos = (items = []) => {
     .filter(Boolean);
   if (!partes.length) return null;
   const resumen = partes.slice(0, 3).join(', ');
-  return partes.length > 3 ? `${resumen} y ${partes.length - 3} mÃ¡s` : resumen;
+  return partes.length > 3 ? `${resumen} y ${partes.length - 3} mas` : resumen;
 };
 
 const calcularConsumoInsumosPorProductos = async (itemsPorProducto, negocioId) => {
@@ -15539,7 +15771,7 @@ const prepararItemsDeuda = async (
   );
 
   if (!ids.length) {
-    const error = new Error('Selecciona productos vÃ¡lidos.');
+    const error = new Error('Selecciona productos validos.');
     error.status = 400;
     throw error;
   }
@@ -15555,7 +15787,7 @@ const prepararItemsDeuda = async (
   const productosMap = new Map((productos || []).map((producto) => [Number(producto.id), producto]));
 
   if (productosMap.size !== ids.length) {
-    const error = new Error('Hay productos invÃ¡lidos en la deuda.');
+    const error = new Error('Hay productos invalidos en la deuda.');
     error.status = 400;
     throw error;
   }
@@ -15566,7 +15798,7 @@ const prepararItemsDeuda = async (
     const productoId = Number(item?.producto_id ?? item?.productoId ?? item?.id);
     const cantidad = normalizarNumero(item?.cantidad, 0);
     if (!Number.isFinite(productoId) || productoId <= 0) {
-      const error = new Error('Hay un producto invÃ¡lido en la deuda.');
+      const error = new Error('Hay un producto invalido en la deuda.');
       error.status = 400;
       throw error;
     }
@@ -15672,7 +15904,7 @@ app.get('/api/clientes/:id/deudas', (req, res) => {
 
     const clienteId = Number(req.params.id);
     if (!Number.isInteger(clienteId) || clienteId <= 0) {
-      return res.status(400).json({ ok: false, error: 'ID de cliente invÃ¡lido' });
+      return res.status(400).json({ ok: false, error: 'ID de cliente invalido' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -15748,7 +15980,7 @@ app.get('/api/clientes/:id/deudas/:deudaId/detalle', (req, res) => {
     const clienteId = Number(req.params.id);
     const deudaId = Number(req.params.deudaId);
     if (!Number.isInteger(clienteId) || clienteId <= 0 || !Number.isInteger(deudaId) || deudaId <= 0) {
-      return res.status(400).json({ ok: false, error: 'IDs invÃ¡lidos' });
+      return res.status(400).json({ ok: false, error: 'IDs invalidos' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -15785,7 +16017,7 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
 
     const clienteId = Number(req.params.id);
     if (!Number.isInteger(clienteId) || clienteId <= 0) {
-      return res.status(400).json({ ok: false, error: 'ID de cliente invÃ¡lido' });
+      return res.status(400).json({ ok: false, error: 'ID de cliente invalido' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -15932,7 +16164,7 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
     const clienteId = Number(req.params.id);
     const deudaId = Number(req.params.deudaId);
     if (!Number.isInteger(clienteId) || clienteId <= 0 || !Number.isInteger(deudaId) || deudaId <= 0) {
-      return res.status(400).json({ ok: false, error: 'IDs invÃ¡lidos' });
+      return res.status(400).json({ ok: false, error: 'IDs invalidos' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -16034,7 +16266,7 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
         new Set([...prevItemsPorProducto.keys(), ...itemsPorProducto.keys()])
       );
       if (idsUnion.length === 0) {
-        return res.status(400).json({ ok: false, error: 'Selecciona productos vÃ¡lidos.' });
+        return res.status(400).json({ ok: false, error: 'Selecciona productos validos.' });
       }
 
       const placeholders = idsUnion.map(() => '?').join(', ');
@@ -16049,7 +16281,7 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
       );
 
       if (productosUnionMap.size !== idsUnion.length) {
-        return res.status(400).json({ ok: false, error: 'Hay productos invÃ¡lidos en la deuda.' });
+        return res.status(400).json({ ok: false, error: 'Hay productos invalidos en la deuda.' });
       }
 
       const consumoAnteriorResultado = usaRecetas
@@ -16215,7 +16447,7 @@ app.get('/api/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
     const clienteId = Number(req.params.id);
     const deudaId = Number(req.params.deudaId);
     if (!Number.isInteger(clienteId) || clienteId <= 0 || !Number.isInteger(deudaId) || deudaId <= 0) {
-      return res.status(400).json({ ok: false, error: 'IDs invÃ¡lidos' });
+      return res.status(400).json({ ok: false, error: 'IDs invalidos' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -16254,7 +16486,7 @@ app.post('/api/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
     const clienteId = Number(req.params.id);
     const deudaId = Number(req.params.deudaId);
     if (!Number.isInteger(clienteId) || clienteId <= 0 || !Number.isInteger(deudaId) || deudaId <= 0) {
-      return res.status(400).json({ ok: false, error: 'IDs invÃ¡lidos' });
+      return res.status(400).json({ ok: false, error: 'IDs invalidos' });
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
@@ -16708,7 +16940,7 @@ app.put('/api/productos/:id', (req, res) => {
         if (esUsuarioSupervisor(usuarioSesion) && cambioStock) {
           const okPassword = await validarPasswordUsuario(usuarioSesion.id, req.body?.password);
           if (!okPassword) {
-            return res.status(403).json({ error: 'Credenciales invÃ¡lidas' });
+            return res.status(403).json({ error: 'Credenciales invalidas' });
           }
         }
 
@@ -17066,7 +17298,7 @@ app.put('/api/productos/:id/stock', (req, res) => {
       if (esUsuarioSupervisor(usuarioSesion)) {
         const okPassword = await validarPasswordUsuario(usuarioSesion.id, req.body?.password);
         if (!okPassword) {
-          return res.status(403).json({ error: 'Credenciales invÃ¡lidas' });
+          return res.status(403).json({ error: 'Credenciales invalidas' });
         }
       }
 
@@ -22014,7 +22246,7 @@ app.post('/api/logout', (req, res) => {
     cerrarSesionesActivasDeUsuario(usuarioId, (cerrarErr) => {
       if (cerrarErr) {
         console.error('Error al cerrar sesiones por usuario:', cerrarErr.message);
-        return res.status(500).json({ ok: false, error: 'No se pudo cerrar la sesiÃ³n' });
+        return res.status(500).json({ ok: false, error: 'No se pudo cerrar la sesion' });
       }
       finalizar();
     });
@@ -22026,8 +22258,8 @@ app.post('/api/logout', (req, res) => {
 
   cerrarSesionPorToken(token, (err, cambios) => {
     if (err) {
-      console.error('Error al cerrar sesiÃ³n:', err.message);
-      return res.status(500).json({ ok: false, error: 'No se pudo cerrar la sesiÃ³n' });
+      console.error('Error al cerrar sesion:', err.message);
+      return res.status(500).json({ ok: false, error: 'No se pudo cerrar la sesion' });
     }
 
     if (cambios === 0) {
