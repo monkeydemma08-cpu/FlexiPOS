@@ -2582,6 +2582,34 @@ const registrarHistorialBar = (pedidoId, negocioId, callback = () => {}) => {
 };
 
 const IMPUESTO_POR_DEFECTO = 18;
+const IMPUESTO_CONFIG_CLAVE = 'impuesto_porcentaje';
+const PRODUCTOS_CON_IMPUESTO_CONFIG_CLAVE = 'productos_con_impuesto';
+const IMPUESTO_INCLUIDO_CONFIG_CLAVE = 'impuesto_incluido_porcentaje';
+
+const obtenerConfiguracionImpuestoNegocio = async (negocioId) => {
+  const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const valores = await leerConfiguracionNegocio(negocio, [
+    IMPUESTO_CONFIG_CLAVE,
+    PRODUCTOS_CON_IMPUESTO_CONFIG_CLAVE,
+    IMPUESTO_INCLUIDO_CONFIG_CLAVE,
+  ]);
+  const porcentajeRaw = Number.parseFloat(valores?.[IMPUESTO_CONFIG_CLAVE]);
+  const porcentajeBase =
+    Number.isFinite(porcentajeRaw) && porcentajeRaw >= 0 ? porcentajeRaw : IMPUESTO_POR_DEFECTO;
+  const productosConImpuesto = normalizarFlag(valores?.[PRODUCTOS_CON_IMPUESTO_CONFIG_CLAVE], 0) === 1;
+  const porcentajeIncluidoRaw = Number.parseFloat(valores?.[IMPUESTO_INCLUIDO_CONFIG_CLAVE]);
+  const impuestoIncluidoValor =
+    Number.isFinite(porcentajeIncluidoRaw) && porcentajeIncluidoRaw >= 0
+      ? porcentajeIncluidoRaw
+      : porcentajeBase;
+
+  return {
+    valorBase: porcentajeBase,
+    valor: productosConImpuesto ? 0 : porcentajeBase,
+    productosConImpuesto,
+    impuestoIncluidoValor,
+  };
+};
 
 const obtenerImpuestoConfigurado = (negocioId, callback) => {
   if (typeof negocioId === 'function') {
@@ -2589,18 +2617,9 @@ const obtenerImpuestoConfigurado = (negocioId, callback) => {
     negocioId = 1;
   }
 
-  db.get(
-    "SELECT valor FROM configuracion WHERE clave = 'impuesto_porcentaje' AND negocio_id = ? LIMIT 1",
-    [negocioId || 1],
-    (err, row) => {
-      if (err) {
-        return callback(err);
-      }
-      const porcentaje = row ? parseFloat(row.valor) : IMPUESTO_POR_DEFECTO;
-      const valor = Number.isNaN(porcentaje) ? IMPUESTO_POR_DEFECTO : porcentaje;
-      callback(null, valor);
-    }
-  );
+  obtenerConfiguracionImpuestoNegocio(negocioId || 1)
+    .then((config) => callback(null, config.valor))
+    .catch((err) => callback(err));
 };
 
 const padNumber = (valor, digitos) => {
@@ -2960,6 +2979,45 @@ const obtenerImpuestoConfiguradoAsync = (negocioId) =>
       resolve(valor);
     });
   });
+
+const redondearMoneda = (valor) => Number((Number(valor) || 0).toFixed(2));
+
+const calcularTotalesConImpuestoConfigurado = (montoBase, configuracion = {}) => {
+  const base = Math.max(Number(montoBase) || 0, 0);
+  const productosConImpuesto = normalizarFlag(
+    configuracion.productosConImpuesto ?? configuracion.productos_con_impuesto,
+    0
+  ) === 1;
+  const tasaNormal = Math.max(Number(configuracion.valor) || 0, 0);
+  const tasaIncluida = Math.max(
+    Number(configuracion.impuestoIncluidoValor ?? configuracion.impuesto_incluido_valor) || 0,
+    0
+  );
+
+  if (productosConImpuesto) {
+    if (tasaIncluida > 0) {
+      const subtotal = base / (1 + tasaIncluida / 100);
+      const impuesto = base - subtotal;
+      return {
+        subtotal: redondearMoneda(subtotal),
+        impuesto: redondearMoneda(impuesto),
+        total: redondearMoneda(base),
+      };
+    }
+    return {
+      subtotal: redondearMoneda(base),
+      impuesto: 0,
+      total: redondearMoneda(base),
+    };
+  }
+
+  const impuesto = base * (tasaNormal / 100);
+  return {
+    subtotal: redondearMoneda(base),
+    impuesto: redondearMoneda(impuesto),
+    total: redondearMoneda(base + impuesto),
+  };
+};
 
 const construirCSV = (headers, rows) => {
   const escapeValor = (valor) => {
@@ -6078,8 +6136,13 @@ app.get('/api/configuracion/impuesto', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
     try {
-      const valor = await obtenerImpuestoConfiguradoAsync(negocioId);
-      res.json({ ok: true, valor });
+      const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+      res.json({
+        ok: true,
+        valor: configImpuesto.valor,
+        productos_con_impuesto: configImpuesto.productosConImpuesto ? 1 : 0,
+        impuesto_incluido_valor: configImpuesto.impuestoIncluidoValor,
+      });
     } catch (error) {
       console.error('Error al obtener el impuesto configurado:', error?.message || error);
       res.status(500).json({ ok: false, error: 'No se pudo consultar el impuesto configurado' });
@@ -6091,7 +6154,10 @@ app.put('/api/configuracion/impuesto', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
     const rawValor = req.body?.valor;
+    const rawProductosConImpuesto = req.body?.productos_con_impuesto ?? req.body?.productosConImpuesto;
+    const rawImpuestoIncluido = req.body?.impuesto_incluido_valor ?? req.body?.impuestoIncluidoValor;
     const valor = Number(rawValor);
+    const productosConImpuesto = normalizarFlag(rawProductosConImpuesto, 0) === 1;
     if (!Number.isFinite(valor) || valor < 0) {
       return res.status(400).json({
         ok: false,
@@ -6099,11 +6165,30 @@ app.put('/api/configuracion/impuesto', (req, res) => {
       });
     }
 
+    const impuestoIncluidoValor = rawImpuestoIncluido === undefined || rawImpuestoIncluido === null || rawImpuestoIncluido === ''
+      ? valor
+      : Number(rawImpuestoIncluido);
+    if (!Number.isFinite(impuestoIncluidoValor) || impuestoIncluidoValor < 0) {
+      return res.status(400).json({
+        ok: false,
+        error: 'El impuesto incluido debe ser un numero mayor o igual a 0',
+      });
+    }
+
+    const valorFinal = productosConImpuesto ? 0 : valor;
+
     try {
       await guardarConfiguracionNegocio(negocioId, {
-        impuesto_porcentaje: valor,
+        [IMPUESTO_CONFIG_CLAVE]: valorFinal,
+        [PRODUCTOS_CON_IMPUESTO_CONFIG_CLAVE]: productosConImpuesto ? 1 : 0,
+        [IMPUESTO_INCLUIDO_CONFIG_CLAVE]: impuestoIncluidoValor,
       });
-      res.json({ ok: true, valor });
+      res.json({
+        ok: true,
+        valor: valorFinal,
+        productos_con_impuesto: productosConImpuesto ? 1 : 0,
+        impuesto_incluido_valor: impuestoIncluidoValor,
+      });
     } catch (error) {
       console.error('Error al guardar el impuesto configurado:', error?.message || error);
       res.status(500).json({ ok: false, error: 'No se pudo actualizar el impuesto' });
@@ -7634,13 +7719,15 @@ app.post('/api/pedidos', (req, res) => {
       const tienePreparacion = itemsProcesados.some(
         (item) => item.area_preparacion === 'cocina' || item.area_preparacion === 'bar'
       );
-      const subtotal = itemsProcesados.reduce(
+      const subtotalBruto = itemsProcesados.reduce(
         (acc, item) => acc + (Number(item.precio_unitario) || 0) * item.cantidad,
         0
       );
-      const impuestoPorcentaje = Number(await obtenerImpuestoConfiguradoAsync(negocioId)) || 0;
-      const impuesto = Number((subtotal * (impuestoPorcentaje / 100)).toFixed(2));
-      const total = Number((subtotal + impuesto).toFixed(2));
+      const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+      const totalesPedido = calcularTotalesConImpuestoConfigurado(subtotalBruto, configImpuesto);
+      const subtotal = totalesPedido.subtotal;
+      const impuesto = totalesPedido.impuesto;
+      const total = totalesPedido.total;
         const omitirPreparacionEntrega = esDelivery && omitirPreparacion;
         const marcarListo = esParaCaja || omitirPreparacionEntrega || !tienePreparacion;
         const estadoInicial = marcarListo ? 'listo' : 'pendiente';
@@ -13472,8 +13559,14 @@ app.get('/api/empresa/negocios/:id/productos', (req, res) => {
         selector_id: `e-${item.id}`,
       }));
       const productosFinal = [...productosMaster];
-      const impuestoPorcentaje = Number(await obtenerImpuestoConfiguradoAsync(negocioId)) || 0;
-      res.json({ ok: true, productos: productosFinal, impuesto_porcentaje: impuestoPorcentaje });
+      const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+      res.json({
+        ok: true,
+        productos: productosFinal,
+        impuesto_porcentaje: configImpuesto.valor,
+        productos_con_impuesto: configImpuesto.productosConImpuesto ? 1 : 0,
+        impuesto_incluido_valor: configImpuesto.impuestoIncluidoValor,
+      });
     } catch (error) {
       console.error('Error al listar productos de sucursal:', error?.message || error);
       res.status(500).json({ ok: false, error: 'No se pudieron cargar los productos.' });
@@ -15006,11 +15099,10 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
         return res.status(400).json({ ok: false, error: 'El monto total debe ser mayor a 0.' });
       }
 
-      const impuestoPorcentaje = Number(await obtenerImpuestoConfiguradoAsync(negocioId)) || 0;
-      const itbis = impuestoPorcentaje > 0
-        ? Number((subtotalBase * (impuestoPorcentaje / 100)).toFixed(2))
-        : 0;
-      const montoTotal = Number((subtotalBase + itbis).toFixed(2));
+      const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+      const totalesDeuda = calcularTotalesConImpuestoConfigurado(subtotalBase, configImpuesto);
+      const itbis = totalesDeuda.impuesto;
+      const montoTotal = totalesDeuda.total;
 
       let deudaId = null;
       try {
@@ -15380,7 +15472,7 @@ app.get('/api/empresa/clientes/deudas/:deudaId/factura', (req, res) => {
       }
 
       const config = await obtenerConfiguracionFacturacion(deuda.negocio_id);
-      const impuestoPorcentaje = Number(await obtenerImpuestoConfiguradoAsync(deuda.negocio_id)) || 0;
+      const configImpuesto = await obtenerConfiguracionImpuestoNegocio(deuda.negocio_id);
       const items = await db.all(
         `SELECT producto_id, nombre_producto, cantidad, precio_unitario, total_linea
            FROM clientes_deudas_detalle
@@ -15405,9 +15497,19 @@ app.get('/api/empresa/clientes/deudas/:deudaId/factura', (req, res) => {
       const subtotalItems = Number(
         itemsFinal.reduce((acc, item) => acc + (Number(item.total_linea) || 0), 0).toFixed(2)
       );
+      let subtotalFactura = subtotalItems;
       let total = Number(deuda.monto_total) || subtotalItems;
       let itbis = 0;
-      if (impuestoPorcentaje > 0) {
+      const impuestoPorcentaje = configImpuesto.productosConImpuesto
+        ? Number(configImpuesto.impuestoIncluidoValor) || 0
+        : Number(configImpuesto.valor) || 0;
+      if (configImpuesto.productosConImpuesto) {
+        const baseBruta = total > 0 ? total : subtotalItems;
+        const totalesFactura = calcularTotalesConImpuestoConfigurado(baseBruta, configImpuesto);
+        subtotalFactura = totalesFactura.subtotal;
+        itbis = totalesFactura.impuesto;
+        total = totalesFactura.total;
+      } else if (impuestoPorcentaje > 0) {
         itbis = Number((total - subtotalItems).toFixed(2));
         if (itbis <= 0) {
           itbis = Number((subtotalItems * (impuestoPorcentaje / 100)).toFixed(2));
@@ -15435,7 +15537,7 @@ app.get('/api/empresa/clientes/deudas/:deudaId/factura', (req, res) => {
             email: deuda.cliente_email || '',
           },
           items: itemsFinal,
-          subtotal: subtotalItems,
+          subtotal: subtotalFactura,
           itbis,
           itbis_porcentaje: impuestoPorcentaje,
           total,
@@ -16572,7 +16674,7 @@ app.get('/api/clientes/deudas/:deudaId/factura', (req, res) => {
       }
 
       const config = await obtenerConfiguracionFacturacion(deuda.negocio_id);
-      const impuestoPorcentaje = Number(await obtenerImpuestoConfiguradoAsync(deuda.negocio_id)) || 0;
+      const configImpuesto = await obtenerConfiguracionImpuestoNegocio(deuda.negocio_id);
       const items = await db.all(
         `SELECT producto_id, nombre_producto, cantidad, precio_unitario, total_linea
            FROM clientes_deudas_detalle
@@ -16597,9 +16699,19 @@ app.get('/api/clientes/deudas/:deudaId/factura', (req, res) => {
       const subtotalItems = Number(
         itemsFinal.reduce((acc, item) => acc + (Number(item.total_linea) || 0), 0).toFixed(2)
       );
+      let subtotalFactura = subtotalItems;
       let total = Number(deuda.monto_total) || subtotalItems;
       let itbis = 0;
-      if (impuestoPorcentaje > 0) {
+      const impuestoPorcentaje = configImpuesto.productosConImpuesto
+        ? Number(configImpuesto.impuestoIncluidoValor) || 0
+        : Number(configImpuesto.valor) || 0;
+      if (configImpuesto.productosConImpuesto) {
+        const baseBruta = total > 0 ? total : subtotalItems;
+        const totalesFactura = calcularTotalesConImpuestoConfigurado(baseBruta, configImpuesto);
+        subtotalFactura = totalesFactura.subtotal;
+        itbis = totalesFactura.impuesto;
+        total = totalesFactura.total;
+      } else if (impuestoPorcentaje > 0) {
         itbis = Number((total - subtotalItems).toFixed(2));
         if (itbis <= 0) {
           itbis = Number((subtotalItems * (impuestoPorcentaje / 100)).toFixed(2));
@@ -16627,7 +16739,7 @@ app.get('/api/clientes/deudas/:deudaId/factura', (req, res) => {
             email: deuda.cliente_email || '',
           },
           items: itemsFinal,
-          subtotal: subtotalItems,
+          subtotal: subtotalFactura,
           itbis,
           itbis_porcentaje: impuestoPorcentaje,
           total,

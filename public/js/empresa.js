@@ -59,6 +59,8 @@
   let clienteFacturaItems = [];
   let clienteFacturaProductos = [];
   let clienteFacturaImpuestoPorcentaje = 0;
+  let clienteFacturaProductosConImpuesto = false;
+  let clienteFacturaImpuestoIncluidoPorcentaje = 0;
   let clienteFacturaNegocioId = null;
   let facturasEmpresa = [];
   let contaAsientosLineas = [];
@@ -66,6 +68,8 @@
   let facturaEmpresaProductos = [];
   let facturaEmpresaClientes = [];
   let facturaEmpresaImpuestoPorcentaje = 0;
+  let facturaEmpresaProductosConImpuesto = false;
+  let facturaEmpresaImpuestoIncluidoPorcentaje = 0;
   let facturaEmpresaNegocioId = null;
   let facturaEmpresaDestinos = new Map();
 
@@ -3558,6 +3562,39 @@
     URL.revokeObjectURL(url);
   };
 
+  const calcularTotalesFactura = (
+    subtotalBase,
+    impuestoPorcentaje,
+    productosConImpuesto = false,
+    impuestoIncluidoPorcentaje = 0
+  ) => {
+    const base = Number(subtotalBase) || 0;
+    if (productosConImpuesto) {
+      const tasaIncluida = Math.max(Number(impuestoIncluidoPorcentaje) || 0, 0);
+      if (tasaIncluida > 0) {
+        const subtotal = base / (1 + tasaIncluida / 100);
+        const itbis = base - subtotal;
+        return {
+          subtotal: Number(subtotal.toFixed(2)),
+          itbis: Number(itbis.toFixed(2)),
+          total: Number(base.toFixed(2)),
+        };
+      }
+      return {
+        subtotal: Number(base.toFixed(2)),
+        itbis: 0,
+        total: Number(base.toFixed(2)),
+      };
+    }
+    const tasa = Math.max(Number(impuestoPorcentaje) || 0, 0);
+    const itbis = base * (tasa / 100);
+    return {
+      subtotal: Number(base.toFixed(2)),
+      itbis: Number(itbis.toFixed(2)),
+      total: Number((base + itbis).toFixed(2)),
+    };
+  };
+
   const renderFacturaItems = () => {
     if (!clienteFacturaItemsBody) return;
     if (!clienteFacturaItems.length) {
@@ -3586,11 +3623,15 @@
         `;
       })
       .join('');
-    const itbis = Number((subtotal * (clienteFacturaImpuestoPorcentaje / 100)).toFixed(2));
-    const total = Number((subtotal + itbis).toFixed(2));
-    if (clienteFacturaSubtotalInput) clienteFacturaSubtotalInput.value = subtotal.toFixed(2);
-    if (clienteFacturaItbisInput) clienteFacturaItbisInput.value = itbis.toFixed(2);
-    if (clienteFacturaTotalInput) clienteFacturaTotalInput.value = total.toFixed(2);
+    const totales = calcularTotalesFactura(
+      subtotal,
+      clienteFacturaImpuestoPorcentaje,
+      clienteFacturaProductosConImpuesto,
+      clienteFacturaImpuestoIncluidoPorcentaje
+    );
+    if (clienteFacturaSubtotalInput) clienteFacturaSubtotalInput.value = totales.subtotal.toFixed(2);
+    if (clienteFacturaItbisInput) clienteFacturaItbisInput.value = totales.itbis.toFixed(2);
+    if (clienteFacturaTotalInput) clienteFacturaTotalInput.value = totales.total.toFixed(2);
   };
 
   const cargarProductosFactura = async (negocioId) => {
@@ -3599,6 +3640,8 @@
       clienteFacturaProductos = [];
       clienteFacturaProductoSelect.innerHTML = '<option value="">Selecciona producto</option>';
       clienteFacturaImpuestoPorcentaje = 0;
+      clienteFacturaProductosConImpuesto = false;
+      clienteFacturaImpuestoIncluidoPorcentaje = 0;
       if (clienteFacturaItbisLabel) clienteFacturaItbisLabel.textContent = 'ITBIS';
       renderFacturaItems();
       return;
@@ -3611,11 +3654,15 @@
       }
       clienteFacturaProductos = Array.isArray(data.productos) ? data.productos : [];
       clienteFacturaImpuestoPorcentaje = Number(data.impuesto_porcentaje || 0) || 0;
+      clienteFacturaProductosConImpuesto =
+        data.productos_con_impuesto === true || Number(data.productos_con_impuesto) === 1;
+      clienteFacturaImpuestoIncluidoPorcentaje = Number(data.impuesto_incluido_valor || 0) || 0;
       if (clienteFacturaItbisLabel) {
-        const label =
-          clienteFacturaImpuestoPorcentaje > 0
-            ? `ITBIS ${clienteFacturaImpuestoPorcentaje}%`
-            : 'ITBIS';
+        const label = clienteFacturaProductosConImpuesto
+          ? `ITBIS incluido ${clienteFacturaImpuestoIncluidoPorcentaje}%`
+          : (clienteFacturaImpuestoPorcentaje > 0
+              ? `ITBIS ${clienteFacturaImpuestoPorcentaje}%`
+              : 'ITBIS');
         clienteFacturaItbisLabel.textContent = label;
       }
     const opciones = clienteFacturaProductos
@@ -3635,6 +3682,8 @@
       console.error('Error cargando productos factura:', error);
       clienteFacturaProductoSelect.innerHTML = '<option value="">No hay productos</option>';
       clienteFacturaImpuestoPorcentaje = 0;
+      clienteFacturaProductosConImpuesto = false;
+      clienteFacturaImpuestoIncluidoPorcentaje = 0;
       if (clienteFacturaItbisLabel) clienteFacturaItbisLabel.textContent = 'ITBIS';
       renderFacturaItems();
     }
@@ -3649,6 +3698,8 @@
     if (clienteFacturaDescripcionInput) clienteFacturaDescripcionInput.value = '';
     if (clienteFacturaNotasInput) clienteFacturaNotasInput.value = '';
     clienteFacturaImpuestoPorcentaje = 0;
+    clienteFacturaProductosConImpuesto = false;
+    clienteFacturaImpuestoIncluidoPorcentaje = 0;
     if (clienteFacturaSubtotalInput) clienteFacturaSubtotalInput.value = '';
     if (clienteFacturaItbisInput) clienteFacturaItbisInput.value = '';
     if (clienteFacturaItbisLabel) clienteFacturaItbisLabel.textContent = 'ITBIS';
@@ -3952,11 +4003,15 @@
         `;
       })
       .join('');
-    const itbis = Number((subtotal * (facturaEmpresaImpuestoPorcentaje / 100)).toFixed(2));
-    const total = Number((subtotal + itbis).toFixed(2));
-    if (facturaEmpresaSubtotalInput) facturaEmpresaSubtotalInput.value = subtotal.toFixed(2);
-    if (facturaEmpresaItbisInput) facturaEmpresaItbisInput.value = itbis.toFixed(2);
-    if (facturaEmpresaTotalInput) facturaEmpresaTotalInput.value = total.toFixed(2);
+    const totales = calcularTotalesFactura(
+      subtotal,
+      facturaEmpresaImpuestoPorcentaje,
+      facturaEmpresaProductosConImpuesto,
+      facturaEmpresaImpuestoIncluidoPorcentaje
+    );
+    if (facturaEmpresaSubtotalInput) facturaEmpresaSubtotalInput.value = totales.subtotal.toFixed(2);
+    if (facturaEmpresaItbisInput) facturaEmpresaItbisInput.value = totales.itbis.toFixed(2);
+    if (facturaEmpresaTotalInput) facturaEmpresaTotalInput.value = totales.total.toFixed(2);
   };
 
   const actualizarDestinoFacturaEmpresa = () => {
@@ -3989,6 +4044,8 @@
       facturaEmpresaProductos = [];
       facturaEmpresaProductoSelect.innerHTML = '<option value="">Selecciona producto</option>';
       facturaEmpresaImpuestoPorcentaje = 0;
+      facturaEmpresaProductosConImpuesto = false;
+      facturaEmpresaImpuestoIncluidoPorcentaje = 0;
       if (facturaEmpresaItbisLabel) facturaEmpresaItbisLabel.textContent = 'ITBIS';
       renderFacturaEmpresaItems();
       return;
@@ -4001,11 +4058,15 @@
       }
       facturaEmpresaProductos = Array.isArray(data.productos) ? data.productos : [];
       facturaEmpresaImpuestoPorcentaje = Number(data.impuesto_porcentaje || 0) || 0;
+      facturaEmpresaProductosConImpuesto =
+        data.productos_con_impuesto === true || Number(data.productos_con_impuesto) === 1;
+      facturaEmpresaImpuestoIncluidoPorcentaje = Number(data.impuesto_incluido_valor || 0) || 0;
       if (facturaEmpresaItbisLabel) {
-        const label =
-          facturaEmpresaImpuestoPorcentaje > 0
-            ? `ITBIS ${facturaEmpresaImpuestoPorcentaje}%`
-            : 'ITBIS';
+        const label = facturaEmpresaProductosConImpuesto
+          ? `ITBIS incluido ${facturaEmpresaImpuestoIncluidoPorcentaje}%`
+          : (facturaEmpresaImpuestoPorcentaje > 0
+              ? `ITBIS ${facturaEmpresaImpuestoPorcentaje}%`
+              : 'ITBIS');
         facturaEmpresaItbisLabel.textContent = label;
       }
     const opciones = facturaEmpresaProductos
@@ -4025,6 +4086,8 @@
       console.error('Error cargando productos factura empresa:', error);
       facturaEmpresaProductoSelect.innerHTML = '<option value="">No hay productos</option>';
       facturaEmpresaImpuestoPorcentaje = 0;
+      facturaEmpresaProductosConImpuesto = false;
+      facturaEmpresaImpuestoIncluidoPorcentaje = 0;
       if (facturaEmpresaItbisLabel) facturaEmpresaItbisLabel.textContent = 'ITBIS';
       renderFacturaEmpresaItems();
     }
@@ -4041,6 +4104,8 @@
     if (facturaEmpresaClienteSelect) facturaEmpresaClienteSelect.value = '';
     if (facturaEmpresaProductoSelect) facturaEmpresaProductoSelect.innerHTML = '<option value="">Selecciona producto</option>';
     facturaEmpresaImpuestoPorcentaje = 0;
+    facturaEmpresaProductosConImpuesto = false;
+    facturaEmpresaImpuestoIncluidoPorcentaje = 0;
     if (facturaEmpresaSubtotalInput) facturaEmpresaSubtotalInput.value = '';
     if (facturaEmpresaItbisInput) facturaEmpresaItbisInput.value = '';
     if (facturaEmpresaItbisLabel) facturaEmpresaItbisLabel.textContent = 'ITBIS';

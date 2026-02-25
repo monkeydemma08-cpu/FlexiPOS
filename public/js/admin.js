@@ -61,6 +61,8 @@ const productosVistaBackdrop = productosVistaModal?.querySelector('.kanm-modal-b
 
 const impuestoForm = document.getElementById('impuesto-form');
 const impuestoValorInput = document.getElementById('impuesto-valor');
+const impuestoProductosIncluidoInput = document.getElementById('impuesto-productos-incluido');
+const impuestoIncluidoValorInput = document.getElementById('impuesto-incluido-valor');
 const impuestoGuardarBtn = document.getElementById('impuesto-guardar');
 const impuestoMensaje = document.getElementById('impuesto-mensaje');
 const itbisAcreditaInput = document.getElementById('itbis-acredita');
@@ -2666,6 +2668,19 @@ const actualizarProducto = async (
 /* =====================
  * Configuracion de impuesto
  * ===================== */
+const actualizarEstadoFormularioImpuesto = () => {
+  const productosConImpuesto = Boolean(impuestoProductosIncluidoInput?.checked);
+  if (impuestoValorInput) {
+    impuestoValorInput.disabled = productosConImpuesto;
+    if (productosConImpuesto) {
+      impuestoValorInput.value = '0';
+    }
+  }
+  if (impuestoIncluidoValorInput) {
+    impuestoIncluidoValorInput.disabled = !productosConImpuesto;
+  }
+};
+
 const cargarImpuesto = async () => {
   if (!impuestoValorInput) return;
   try {
@@ -2677,7 +2692,20 @@ const cargarImpuesto = async () => {
     const data = await respuesta.json();
     if (data.ok) {
       const valorNumerico = Number(data.valor);
+      const impuestoIncluidoNumerico = Number(data.impuesto_incluido_valor);
+      const productosConImpuesto =
+        data.productos_con_impuesto === true || Number(data.productos_con_impuesto) === 1;
       impuestoValorInput.value = Number.isNaN(valorNumerico) ? '' : valorNumerico;
+      if (impuestoProductosIncluidoInput) {
+        impuestoProductosIncluidoInput.checked = productosConImpuesto;
+      }
+      if (impuestoIncluidoValorInput) {
+        const valorIncluido = Number.isNaN(impuestoIncluidoNumerico)
+          ? (Number.isNaN(valorNumerico) ? '' : valorNumerico)
+          : impuestoIncluidoNumerico;
+        impuestoIncluidoValorInput.value = valorIncluido;
+      }
+      actualizarEstadoFormularioImpuesto();
       setMessage(impuestoMensaje, '', 'info');
     } else {
       setMessage(
@@ -2694,12 +2722,28 @@ const cargarImpuesto = async () => {
 
 const guardarImpuesto = async () => {
   if (!impuestoValorInput) return;
+  const productosConImpuesto = Boolean(impuestoProductosIncluidoInput?.checked);
   const valorTexto = impuestoValorInput.value.trim();
-  const valorNumerico = parseFloat(valorTexto);
-  if (valorTexto === '' || Number.isNaN(valorNumerico) || valorNumerico < 0) {
+  const valorNumericoOriginal = parseFloat(valorTexto);
+  const valorNumerico = productosConImpuesto ? 0 : valorNumericoOriginal;
+  if (!productosConImpuesto && (valorTexto === '' || Number.isNaN(valorNumerico) || valorNumerico < 0)) {
     setMessage(
       impuestoMensaje,
-      'El valor del impuesto es obligatorio y debe ser un n?mero mayor o igual a 0.',
+      'El valor del impuesto es obligatorio y debe ser un numero mayor o igual a 0.',
+      'error'
+    );
+    return;
+  }
+
+  const impuestoIncluidoTexto = impuestoIncluidoValorInput?.value?.trim() || '';
+  let impuestoIncluidoNumerico = Number.parseFloat(impuestoIncluidoTexto);
+  if (impuestoIncluidoTexto === '') {
+    impuestoIncluidoNumerico = productosConImpuesto ? Number.NaN : valorNumerico;
+  }
+  if (Number.isNaN(impuestoIncluidoNumerico) || impuestoIncluidoNumerico < 0) {
+    setMessage(
+      impuestoMensaje,
+      'El impuesto incluido es obligatorio y debe ser un numero mayor o igual a 0.',
       'error'
     );
     return;
@@ -2714,7 +2758,11 @@ const guardarImpuesto = async () => {
 
     const respuesta = await fetchJsonAutorizado('/api/configuracion/impuesto', {
       method: 'PUT',
-      body: JSON.stringify({ valor: valorNumerico }),
+      body: JSON.stringify({
+        valor: valorNumerico,
+        productos_con_impuesto: productosConImpuesto ? 1 : 0,
+        impuesto_incluido_valor: productosConImpuesto ? impuestoIncluidoNumerico : valorNumerico,
+      }),
     });
 
     const data = await respuesta.json().catch(() => ({ ok: false }));
@@ -2725,6 +2773,15 @@ const guardarImpuesto = async () => {
     }
 
     impuestoValorInput.value = Number(data.valor);
+    if (impuestoProductosIncluidoInput) {
+      impuestoProductosIncluidoInput.checked =
+        data.productos_con_impuesto === true || Number(data.productos_con_impuesto) === 1;
+    }
+    if (impuestoIncluidoValorInput) {
+      const valorIncluido = Number(data.impuesto_incluido_valor);
+      impuestoIncluidoValorInput.value = Number.isNaN(valorIncluido) ? impuestoIncluidoNumerico : valorIncluido;
+    }
+    actualizarEstadoFormularioImpuesto();
     setMessage(impuestoMensaje, 'Impuesto actualizado correctamente.', 'info');
   } catch (error) {
     console.error('Error al guardar el impuesto:', error);
@@ -6980,6 +7037,21 @@ impuestoGuardarBtn?.addEventListener('click', (event) => {
   guardarImpuesto();
 });
 
+impuestoProductosIncluidoInput?.addEventListener('change', () => {
+  if (impuestoProductosIncluidoInput?.checked && impuestoIncluidoValorInput && !impuestoIncluidoValorInput.value) {
+    impuestoIncluidoValorInput.value = impuestoValorInput?.value || '';
+  }
+  if (
+    !impuestoProductosIncluidoInput?.checked &&
+    impuestoValorInput &&
+    impuestoIncluidoValorInput &&
+    (!impuestoValorInput.value || Number(impuestoValorInput.value) === 0)
+  ) {
+    impuestoValorInput.value = impuestoIncluidoValorInput.value || impuestoValorInput.value;
+  }
+  actualizarEstadoFormularioImpuesto();
+});
+
 itbisAcreditaGuardarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   guardarConfiguracionItbisAcredita();
@@ -7653,6 +7725,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   registrarListenersFactura();
   actualizarDatalistGastos();
   limpiarFormularioGasto();
+  actualizarEstadoFormularioImpuesto();
 
   await Promise.all([
     cargarProductos(),

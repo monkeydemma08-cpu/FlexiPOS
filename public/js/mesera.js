@@ -46,6 +46,8 @@ const estado = {
   carrito: new Map(),
   cargando: false,
   impuestoPorcentaje: 0,
+  productosConImpuesto: false,
+  impuestoIncluidoPorcentaje: 0,
   pedidoEditandoId: null,
   cuentaReferenciaId: null,
   pedidosActivos: [],
@@ -632,14 +634,35 @@ const actualizarContador = () => {
 };
 
 const calcularResumen = () => {
-  let subtotal = 0;
+  let subtotalBase = 0;
   estado.carrito.forEach((item) => {
     const precio = Number(item.precio_unitario) || 0;
-    subtotal += precio * item.cantidad;
+    subtotalBase += precio * item.cantidad;
   });
-  const impuesto = subtotal * (estado.impuestoPorcentaje / 100);
-  const total = subtotal + impuesto;
-  return { subtotal, impuesto, total };
+  if (estado.productosConImpuesto) {
+    const tasaIncluida = Math.max(Number(estado.impuestoIncluidoPorcentaje) || 0, 0);
+    if (tasaIncluida > 0) {
+      const subtotalNeto = subtotalBase / (1 + tasaIncluida / 100);
+      const impuestoEstimado = subtotalBase - subtotalNeto;
+      return {
+        subtotal: Number(subtotalNeto.toFixed(2)),
+        impuesto: Number(impuestoEstimado.toFixed(2)),
+        total: Number(subtotalBase.toFixed(2)),
+      };
+    }
+    return {
+      subtotal: Number(subtotalBase.toFixed(2)),
+      impuesto: 0,
+      total: Number(subtotalBase.toFixed(2)),
+    };
+  }
+  const impuesto = subtotalBase * (estado.impuestoPorcentaje / 100);
+  const total = subtotalBase + impuesto;
+  return {
+    subtotal: Number(subtotalBase.toFixed(2)),
+    impuesto: Number(impuesto.toFixed(2)),
+    total: Number(total.toFixed(2)),
+  };
 };
 
 const actualizarResumenUI = () => {
@@ -1526,11 +1549,18 @@ const cargarImpuesto = async () => {
     const data = await respuesta.json();
     if (data.ok) {
       const valor = Number(data.valor);
+      const productosConImpuesto =
+        data.productos_con_impuesto === true || Number(data.productos_con_impuesto) === 1;
+      const impuestoIncluido = Number(data.impuesto_incluido_valor);
       estado.impuestoPorcentaje = Number.isNaN(valor) ? 0 : valor;
+      estado.productosConImpuesto = productosConImpuesto;
+      estado.impuestoIncluidoPorcentaje = Number.isNaN(impuestoIncluido) ? 0 : impuestoIncluido;
     }
   } catch (error) {
     console.error('Error al obtener impuesto:', error);
     estado.impuestoPorcentaje = 0;
+    estado.productosConImpuesto = false;
+    estado.impuestoIncluidoPorcentaje = 0;
   } finally {
     actualizarResumenUI();
   }
