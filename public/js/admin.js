@@ -430,6 +430,13 @@ const fetchJsonAutorizado = async (url, options = {}) => {
 };
 
 const leerRespuestaApi = async (response) => {
+  if (response?.status === 413) {
+    return {
+      ok: false,
+      error:
+        'La solicitud es demasiado grande (413). Revisa el campo logo: usa URL http/https y no base64.',
+    };
+  }
   const contentType = response?.headers?.get?.('content-type') || '';
   if (contentType.includes('application/json')) {
     return response.json().catch(() => ({}));
@@ -448,6 +455,34 @@ const leerRespuestaApi = async (response) => {
     error: raw || `Respuesta inesperada del servidor (${response?.status || 'sin estado'})`,
     raw,
   };
+};
+
+const validarLogoUrlNegocio = (valorEntrada) => {
+  const valor = String(valorEntrada || '').trim();
+  if (!valor) {
+    return { ok: true, valor: null };
+  }
+  if (/^data:/i.test(valor)) {
+    return {
+      ok: false,
+      error: 'El logo debe ser una URL (http/https). No pegues imagen en base64/data URI.',
+    };
+  }
+  if (valor.length > 2048) {
+    return {
+      ok: false,
+      error: 'La URL del logo es demasiado larga. Usa una URL publica corta (http/https).',
+    };
+  }
+  try {
+    const parsed = new URL(valor);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return { ok: false, error: 'La URL del logo debe iniciar con http:// o https://.' };
+    }
+  } catch (_) {
+    return { ok: false, error: 'La URL del logo no es valida.' };
+  }
+  return { ok: true, valor };
 };
 
 const DGII_FLOW_LABELS = {
@@ -6796,8 +6831,13 @@ const guardarNegocio = async (event) => {
 
   const passwordEditable = dom.chkCambiarPassword?.checked === true;
   const adminPassword = passwordEditable ? dom.inputAdminPassword?.value || null : null;
+  const validacionLogo = validarLogoUrlNegocio(dom.inputLogoUrl?.value);
   if (esEdicion && passwordEditable && !adminPassword) {
     setMessage(dom.mensajeForm, 'Ingresa la nueva contrasena del admin principal.', 'warning');
+    return;
+  }
+  if (!validacionLogo.ok) {
+    setMessage(dom.mensajeForm, validacionLogo.error, 'warning');
     return;
   }
   // El usuario empresa puede existir previamente; el backend valida si es obligatorio.
@@ -6817,7 +6857,7 @@ const guardarNegocio = async (event) => {
     adminPrincipalCorreo: dom.inputAdminCorreo?.value?.trim() || null,
     adminPrincipalUsuario: dom.inputAdminUsuario?.value?.trim() || null,
     adminPrincipalPassword: adminPassword,
-    logo_url: dom.inputLogoUrl?.value?.trim() || null,
+    logo_url: validacionLogo.valor,
     empresa_nombre: dom.inputEmpresaNombre?.value?.trim() || null,
     tiene_sucursales: tieneSucursales ? 1 : 0,
   };
