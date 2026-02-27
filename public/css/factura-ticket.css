@@ -1,4 +1,4 @@
-/* Estilos de impresión tipo ticket 80mm */
+/* Estilos de impresion tipo ticket 80mm */
 @media print {
   @page {
     size: 80mm auto;
@@ -8,8 +8,14 @@
 
 .factura-body {
   background: #fff;
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: 10px;
+  line-height: 1.3;
+  color: #000;
+}
+
+.factura-body * {
+  color: #000 !important;
+  text-shadow: none !important;
 }
 
 .factura-container {
@@ -26,12 +32,12 @@
   box-shadow: none;
   border: none;
   padding: 0;
-  margin: 0 0 6px 0;
+  margin: 0 0 5px 0;
 }
 
 .factura-header {
   text-align: center;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 
 .factura-logo img {
@@ -40,8 +46,8 @@
 }
 
 .factura-info-negocio h1 {
-  font-size: 14px;
-  margin-bottom: 2px;
+  font-size: 12px;
+  margin-bottom: 1px;
 }
 
 .factura-info-negocio p,
@@ -49,7 +55,7 @@
 .factura-resumen-linea span,
 .factura-resumen-total span,
 .factura-footer p {
-  font-size: 11px;
+  font-size: 9px;
   margin: 1px 0;
 }
 
@@ -60,28 +66,28 @@
 .factura-datos {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 4px;
+  gap: 3px;
 }
 
 .factura-col h2 {
-  font-size: 13px;
-  margin-bottom: 4px;
+  font-size: 10px;
+  margin-bottom: 2px;
 }
 
 .factura-tabla {
-  margin: 4px 0;
+  margin: 3px 0;
   width: 100%;
 }
 
 .factura-tabla th,
 .factura-tabla td {
-  padding: 3px 0;
-  font-size: 11px;
+  padding: 2px 0;
+  font-size: 8.5px;
 }
 
 .factura-resumen {
   padding-top: 4px;
-  border-top: 1px dashed #ccc;
+  border-top: 1px dashed #000;
 }
 
 .factura-resumen-linea,
@@ -91,18 +97,18 @@
 }
 
 .factura-resumen-total {
-  font-size: 13px;
+  font-size: 10px;
   font-weight: 700;
-  margin-top: 6px;
+  margin-top: 5px;
 }
 
 .factura-footer {
   text-align: center;
-  margin-top: 8px;
+  margin-top: 7px;
 }
 
 .factura-footer p {
-  font-size: 11px;
+  font-size: 9px;
 }
 
 @media print {
@@ -111,23 +117,22 @@
   }
 }
 
-/* Rediseño del detalle para ticket */
+/* Detalle optimizado para ticket pequeno */
 .factura-body .kanm-card {
   border: none;
   box-shadow: none;
-  padding: 4px 0;
-  margin: 0 0 4px 0;
+  padding: 3px 0;
+  margin: 0 0 3px 0;
 }
 
 .factura-body .kanm-card h2 {
-  font-size: 12px;
-  margin: 0 0 3px 0;
-  color: #111;
+  font-size: 9px;
+  margin: 0 0 2px 0;
 }
 
 .factura-body .kanm-table-wrapper {
-  border: 1px dashed #ccc;
-  border-radius: 6px;
+  border: 1px solid #000;
+  border-radius: 0;
   padding: 0;
   overflow: hidden;
   background: #fff;
@@ -141,21 +146,20 @@
 
 .factura-body .kanm-table th,
 .factura-body .kanm-table td {
-  padding: 2px 2px 1px 2px;
-  font-size: 9.5px;
-  line-height: 1.3;
-  border-bottom: 1px dotted #e2e2e2;
+  padding: 2px 1px;
+  font-size: 8px;
+  line-height: 1.2;
+  border-bottom: 1px dotted #000;
   background: #fff;
   word-break: break-word;
   vertical-align: top;
 }
 
 .factura-body .kanm-table th {
-  background: #f7f7f7;
   font-weight: 700;
-  white-space: nowrap;
-  font-size: 9px;
-  letter-spacing: 0.2px;
+  white-space: normal;
+  font-size: 7px;
+  letter-spacing: 0;
 }
 
 .factura-body .kanm-table tr:last-child td {
@@ -164,13 +168,13 @@
 
 .factura-body .kanm-table th:nth-child(1),
 .factura-body .kanm-table td:nth-child(1) {
-  width: 32%;
+  width: 36%;
   text-align: left;
 }
 
 .factura-body .kanm-table th:nth-child(2),
 .factura-body .kanm-table td:nth-child(2) {
-  width: 10%;
+  width: 14%;
   text-align: center;
 }
 
@@ -178,13 +182,13 @@
 .factura-body .kanm-table td:nth-child(3),
 .factura-body .kanm-table th:nth-child(4),
 .factura-body .kanm-table td:nth-child(4) {
-  width: 29%;
+  width: 25%;
   text-align: right;
   white-space: nowrap;
 }
 
 .factura-body .kanm-table td:nth-child(2) {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .factura-body .kanm-table td.factura-prod-cell,
@@ -202,20 +206,15 @@
 .factura-body .kanm-table td.factura-price-cell,
 .factura-body .kanm-table td.factura-subtotal-cell {
   font-variant-numeric: tabular-nums;
-  font-size: 9.5px;
-  letter-spacing: 0.1px;
-}
-
-.factura-body .kanm-table td.factura-qty-cell {
-  font-weight: 700;
-  color: #111;
+  font-size: 8px;
+  letter-spacing: 0;
 }
 
 .factura-prod-name {
   display: block;
-  line-height: 1.1;
+  line-height: 1.05;
   word-break: break-word;
-  font-size: 9.5px;
+  font-size: 7px;
   font-weight: 600;
 }
 
@@ -223,36 +222,34 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 1px;
+  gap: 0;
   width: 100%;
   text-align: right;
 }
 
 .factura-price-final {
   font-weight: 600;
-  font-size: 9.5px;
-  color: #111;
+  font-size: 8px;
 }
 
 .factura-desc-note {
-  margin-top: 1px;
-  font-size: 9px;
-  color: #6b6b6b;
-  line-height: 1.1;
+  margin-top: 0;
+  font-size: 7px;
+  line-height: 1.05;
   text-align: right;
   width: 100%;
   word-break: break-word;
 }
 
 .factura-body .factura-resumen {
-  margin-top: 6px;
-  padding-top: 6px;
+  margin-top: 5px;
+  padding-top: 5px;
 }
 
 .factura-body .factura-resumen-linea {
-  font-size: 12px;
+  font-size: 9px;
 }
 
 .factura-body .factura-resumen-total {
-  font-size: 13px;
+  font-size: 10px;
 }

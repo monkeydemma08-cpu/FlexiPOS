@@ -5508,7 +5508,7 @@ const renderDetalleCierre = (pedidos, cierreId) => {
     const fila = document.createElement('tr');
     const celda = document.createElement('td');
     celda.colSpan = 5;
-    celda.textContent = 'El cierre no tiene pedidos asociados.';
+    celda.textContent = 'El cierre no tiene ventas o facturas asociadas.';
     fila.appendChild(celda);
     cierresDetalleTabla.appendChild(fila);
     cierresDetalleWrapper.hidden = false;
@@ -5518,9 +5518,11 @@ const renderDetalleCierre = (pedidos, cierreId) => {
   const fragment = document.createDocumentFragment();
   pedidos.forEach((pedido) => {
     const fila = document.createElement('tr');
+    const esFacturaCliente = String(pedido?.tipo_registro || '').toLowerCase() === 'factura_cliente';
+    const idFacturaCliente = Number(pedido?.factura_deuda_id || pedido?.id);
 
     const celdaId = document.createElement('td');
-    celdaId.textContent = pedido.id;
+    celdaId.textContent = esFacturaCliente ? `F-${idFacturaCliente || '--'}` : pedido.id;
     fila.appendChild(celdaId);
 
     const celdaMesa = document.createElement('td');
@@ -5536,13 +5538,17 @@ const renderDetalleCierre = (pedidos, cierreId) => {
     fila.appendChild(celdaFecha);
 
     const celdaFactura = document.createElement('td');
-    const facturaId = Number(pedido.id);
+    const facturaId = esFacturaCliente ? idFacturaCliente : Number(pedido.id);
     const botonFactura = document.createElement('button');
     botonFactura.type = 'button';
     botonFactura.className = 'kanm-button ghost';
-    botonFactura.textContent = 'Ver factura';
+    botonFactura.textContent = esFacturaCliente ? 'Ver factura cliente' : 'Ver factura';
     if (Number.isInteger(facturaId) && facturaId > 0) {
-      botonFactura.dataset.verFacturaPedido = String(facturaId);
+      if (esFacturaCliente) {
+        botonFactura.dataset.verFacturaDeuda = String(facturaId);
+      } else {
+        botonFactura.dataset.verFacturaPedido = String(facturaId);
+      }
     } else {
       botonFactura.disabled = true;
     }
@@ -7542,15 +7548,26 @@ cierresTabla?.addEventListener('click', (event) => {
 
 cierresDetalleTabla?.addEventListener('click', (event) => {
   const botonFactura = event.target.closest('[data-ver-factura-pedido]');
-  if (!botonFactura) return;
+  const botonFacturaDeuda = event.target.closest('[data-ver-factura-deuda]');
+  if (!botonFactura && !botonFacturaDeuda) return;
 
   event.preventDefault();
+  if (botonFacturaDeuda) {
+    const deudaId = Number(botonFacturaDeuda.dataset.verFacturaDeuda);
+    if (!Number.isInteger(deudaId) || deudaId <= 0) {
+      setMessage(cierresMensaje, 'No se encontro la factura de cliente.', 'error');
+      return;
+    }
+    const urlDeuda = `/cliente-factura.html?deudaId=${encodeURIComponent(deudaId)}&scope=admin`;
+    window.open(urlDeuda, '_blank', 'noopener');
+    return;
+  }
+
   const pedidoId = Number(botonFactura.dataset.verFacturaPedido);
   if (!Number.isInteger(pedidoId) || pedidoId <= 0) {
     setMessage(cierresMensaje, 'No se encontro la factura para este pedido.', 'error');
     return;
   }
-
   const url = `/factura.html?id=${encodeURIComponent(pedidoId)}`;
   window.open(url, '_blank', 'noopener');
 });

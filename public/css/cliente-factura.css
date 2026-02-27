@@ -1,8 +1,13 @@
 .cliente-factura-body {
   margin: 0;
   font-family: 'Poppins', sans-serif;
-  background: #f2f4f7;
-  color: #1f2933;
+  background: #fff;
+  color: #000;
+}
+
+.cliente-factura-body * {
+  color: #000 !important;
+  text-shadow: none !important;
 }
 
 .cliente-factura-page {
@@ -149,6 +154,14 @@
 .cliente-factura-actions {
   display: flex;
   justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cliente-factura-actions .kanm-button {
+  background: #fff !important;
+  color: #000 !important;
+  border: 1px solid #000 !important;
 }
 
 .text-right {

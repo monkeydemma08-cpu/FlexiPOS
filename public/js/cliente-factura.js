@@ -24,6 +24,7 @@
     total: document.getElementById('cliente-factura-total'),
     notas: document.getElementById('cliente-factura-notas'),
     imprimir: document.getElementById('cliente-factura-imprimir'),
+    descargarPdf: document.getElementById('cliente-factura-descargar-pdf'),
   };
 
   const formatCurrency = (value) => {
@@ -40,6 +41,32 @@
     const fecha = new Date(value);
     if (Number.isNaN(fecha.getTime())) return value;
     return fecha.toLocaleDateString('es-DO');
+  };
+
+  const normalizarNombreArchivo = (value) =>
+    String(value || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+
+  const obtenerNombreArchivoPdf = () => {
+    const numero = normalizarNombreArchivo(dom.numero?.textContent || 'factura');
+    const cliente = normalizarNombreArchivo(dom.clienteNombre?.textContent || 'cliente');
+    const base = [numero, cliente].filter(Boolean).join('_') || 'factura_cliente';
+    return `${base}.pdf`;
+  };
+
+  const abrirDialogoGuardarPdf = () => {
+    const tituloOriginal = document.title;
+    const nombrePdf = obtenerNombreArchivoPdf().replace(/\.pdf$/i, '');
+    document.title = nombrePdf || 'factura_cliente';
+    window.print();
+    window.setTimeout(() => {
+      document.title = tituloOriginal;
+    }, 600);
   };
 
   const renderFactura = (data) => {
@@ -147,6 +174,10 @@
 
   dom.imprimir?.addEventListener('click', () => {
     window.print();
+  });
+
+  dom.descargarPdf?.addEventListener('click', () => {
+    abrirDialogoGuardarPdf();
   });
 
   cargarFactura();

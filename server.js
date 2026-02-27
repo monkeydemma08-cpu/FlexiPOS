@@ -5447,6 +5447,71 @@ const obtenerPedidosDetalleCierre = (cierreId, negocioId, origen, callback) => {
   });
 };
 
+const obtenerFacturasClientesDetalleCierre = (
+  cierreId,
+  negocioId,
+  origen,
+  fechaOperacionOrCallback,
+  maybeCallback
+) => {
+  let callback = maybeCallback;
+  let fechaOperacion = fechaOperacionOrCallback;
+  if (typeof fechaOperacionOrCallback === 'function') {
+    callback = fechaOperacionOrCallback;
+    fechaOperacion = null;
+  }
+
+  const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const cierreNumero = Number(cierreId);
+  const fechaBase = esFechaISOValida(fechaOperacion) ? fechaOperacion : null;
+  const params = [negocio];
+  let filtroCierreFecha = '1 = 0';
+
+  if (Number.isInteger(cierreNumero) && cierreNumero > 0 && fechaBase) {
+    filtroCierreFecha = '(d.cierre_id = ? OR (d.cierre_id IS NULL AND DATE(d.fecha) = ?))';
+    params.push(cierreNumero, fechaBase);
+  } else if (Number.isInteger(cierreNumero) && cierreNumero > 0) {
+    filtroCierreFecha = 'd.cierre_id = ?';
+    params.push(cierreNumero);
+  } else if (fechaBase) {
+    filtroCierreFecha = 'DATE(d.fecha) = ?';
+    params.push(fechaBase);
+  }
+
+  const filtroOrigen = construirFiltroOrigenCaja(origen, params, 'd.origen_caja');
+  const sql = `
+    SELECT
+      d.id,
+      d.id AS factura_deuda_id,
+      c.nombre AS cliente,
+      d.monto_total AS total,
+      COALESCE(d.updated_at, d.created_at, CONCAT(d.fecha, ' 00:00:00')) AS fecha_cierre
+    FROM clientes_deudas d
+    LEFT JOIN clientes c ON c.id = d.cliente_id
+    WHERE d.negocio_id = ?
+      AND ${filtroCierreFecha}
+      AND ${filtroOrigen}
+    ORDER BY fecha_cierre DESC, d.id ASC
+  `;
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      return callback(err);
+    }
+    const facturas = (rows || []).map((row) => ({
+      id: Number(row.id) || null,
+      factura_deuda_id: Number(row.factura_deuda_id) || Number(row.id) || null,
+      cuenta_id: null,
+      mesa: null,
+      cliente: row.cliente || 'Cliente',
+      total: Number(row.total) || 0,
+      fecha_cierre: row.fecha_cierre || null,
+      fecha_listo: null,
+      tipo_registro: 'factura_cliente',
+    }));
+    callback(null, facturas);
+  });
+};
+
 const registrarCierreCaja = async (payload, negocioId) => {
   const negocio = negocioId || NEGOCIO_ID_DEFAULT;
   const fechaOperacion = normalizarFechaOperacion(payload?.fecha_operacion);
@@ -5522,8 +5587,20 @@ const registrarCierreCaja = async (payload, negocioId) => {
        WHERE estado = 'pagado'
          AND (cierre_id IS NULL)
          AND negocio_id = ?
-         AND ${filtroOrigen}`,
+        AND ${filtroOrigen}`,
       params
+    );
+
+    const paramsFacturas = [cierreId, origenCaja, negocio];
+    const filtroOrigenFacturas = construirFiltroOrigenCaja(origenCaja, paramsFacturas, 'origen_caja');
+    await db.run(
+      `UPDATE clientes_deudas
+         SET cierre_id = ?,
+             origen_caja = COALESCE(origen_caja, ?)
+       WHERE cierre_id IS NULL
+         AND negocio_id = ?
+         AND ${filtroOrigenFacturas}`,
+      paramsFacturas
     );
   }
 
@@ -5617,25 +5694,37 @@ app.get('/api/caja/cierres/hoja-detalle-mes', (req, res) => {
         });
       });
 
-      if (!cierres.length) {
-        return res.status(404).json({ ok: false, error: 'No hay cierres para el periodo seleccionado.' });
-      }
-
       const cierreIds = cierres
         .map((item) => Number(item.id))
         .filter((id) => Number.isInteger(id) && id > 0);
 
-      if (!cierreIds.length) {
-        return res.status(404).json({ ok: false, error: 'No hay cierres validos para el periodo seleccionado.' });
-      }
-
       const placeholdersCierres = cierreIds.map(() => '?').join(', ');
       const paramsVentas = [negocioId, ...cierreIds];
       const filtroOrigenPedidos = construirFiltroOrigenCaja(origenCaja, paramsVentas, 'p.origen_caja');
+      const paramsVentasFacturas = [negocioId, rango.desde, rango.hasta];
+      const filtroOrigenFacturas = construirFiltroOrigenCaja(origenCaja, paramsVentasFacturas, 'd.origen_caja');
       const fechaDesdeTs = `${rango.desde} 00:00:00`;
       const fechaHastaTs = `${rango.hasta} 23:59:59`;
+      const ventasPedidosPromise = cierreIds.length
+        ? db.all(
+            `SELECT dp.producto_id,
+                    dp.precio_unitario,
+                    SUM(dp.cantidad) AS venta_cantidad,
+                    SUM(dp.cantidad * dp.precio_unitario) AS venta_bruta,
+                    SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS venta_neta,
+                    SUM(COALESCE(dp.descuento_monto, 0)) AS descuento_total
+               FROM detalle_pedido dp
+               JOIN pedidos p ON p.id = dp.pedido_id
+              WHERE p.negocio_id = ?
+                AND p.cierre_id IN (${placeholdersCierres})
+                AND p.estado = 'pagado'
+                AND ${filtroOrigenPedidos}
+              GROUP BY dp.producto_id, dp.precio_unitario`,
+            paramsVentas
+          )
+        : Promise.resolve([]);
 
-      const [productos, ventasRows, comprasRows, salidasData] = await Promise.all([
+      const [productos, ventasRows, ventasFacturasRows, comprasRows, salidasData] = await Promise.all([
         db.all(
           `SELECT id, nombre, precio, precios, stock, stock_indefinido
              FROM productos
@@ -5643,21 +5732,21 @@ app.get('/api/caja/cierres/hoja-detalle-mes', (req, res) => {
             ORDER BY nombre ASC`,
           [negocioId]
         ),
+        ventasPedidosPromise,
         db.all(
-          `SELECT dp.producto_id,
-                  dp.precio_unitario,
-                  SUM(dp.cantidad) AS venta_cantidad,
-                  SUM(dp.cantidad * dp.precio_unitario) AS venta_bruta,
-                  SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS venta_neta,
-                  SUM(COALESCE(dp.descuento_monto, 0)) AS descuento_total
-             FROM detalle_pedido dp
-             JOIN pedidos p ON p.id = dp.pedido_id
-            WHERE p.negocio_id = ?
-              AND p.cierre_id IN (${placeholdersCierres})
-              AND p.estado = 'pagado'
-              AND ${filtroOrigenPedidos}
-            GROUP BY dp.producto_id, dp.precio_unitario`,
-          paramsVentas
+          `SELECT dd.producto_id,
+                  dd.precio_unitario,
+                  SUM(dd.cantidad) AS venta_cantidad,
+                  SUM(dd.total_linea) AS venta_bruta,
+                  SUM(dd.total_linea) AS venta_neta,
+                  0 AS descuento_total
+             FROM clientes_deudas_detalle dd
+             JOIN clientes_deudas d ON d.id = dd.deuda_id
+            WHERE d.negocio_id = ?
+              AND DATE(d.fecha) BETWEEN ? AND ?
+              AND ${filtroOrigenFacturas}
+            GROUP BY dd.producto_id, dd.precio_unitario`,
+          paramsVentasFacturas
         ),
         db.all(
           `SELECT dc.descripcion, dc.cantidad
@@ -5695,7 +5784,8 @@ app.get('/api/caja/cierres/hoja-detalle-mes', (req, res) => {
       }
 
       const ventasMap = new Map();
-      (ventasRows || []).forEach((row) => {
+      const ventasCombinadas = [...(ventasRows || []), ...(ventasFacturasRows || [])];
+      ventasCombinadas.forEach((row) => {
         const productoId = Number(row.producto_id);
         if (!productoId) return;
         const ventaCantidad = Number(row.venta_cantidad) || 0;
@@ -5840,7 +5930,9 @@ app.get('/api/caja/cierres/:id/detalle', (req, res) => {
     const params = [corteId, negocioId];
     const filtroOrigen = construirFiltroOrigenCaja(origenCaja, params, 'origen_caja');
     db.get(
-      `SELECT id FROM cierres_caja WHERE id = ? AND negocio_id = ? AND ${filtroOrigen}`,
+      `SELECT id, fecha_operacion, fecha_cierre
+         FROM cierres_caja
+        WHERE id = ? AND negocio_id = ? AND ${filtroOrigen}`,
       params,
       (cierreErr, cierreRow) => {
         if (cierreErr) {
@@ -5856,7 +5948,40 @@ app.get('/api/caja/cierres/:id/detalle', (req, res) => {
             console.error('Error al obtener detalle del cierre:', detalleErr?.message || detalleErr);
             return res.status(500).json({ ok: false, error: 'Error al obtener el detalle del cierre' });
           }
-          res.json({ ok: true, pedidos: pedidos || [] });
+
+          const fechaOperacionCierre = normalizarFechaOperacion(
+            cierreRow?.fecha_operacion || cierreRow?.fecha_cierre || new Date()
+          );
+          obtenerFacturasClientesDetalleCierre(
+            corteId,
+            negocioId,
+            origenCaja,
+            fechaOperacionCierre,
+            (facturaErr, facturas) => {
+              if (facturaErr) {
+                console.error(
+                  'Error al obtener facturas de clientes del cierre:',
+                  facturaErr?.message || facturaErr
+                );
+                return res.status(500).json({ ok: false, error: 'Error al obtener el detalle del cierre' });
+              }
+
+              const pedidosNormalizados = (pedidos || []).map((pedido) => ({
+                ...pedido,
+                tipo_registro: 'pedido',
+              }));
+              const detalle = [...pedidosNormalizados, ...(facturas || [])].sort((a, b) => {
+                const fechaA = new Date(a?.fecha_cierre || a?.fecha_listo || 0).getTime();
+                const fechaB = new Date(b?.fecha_cierre || b?.fecha_listo || 0).getTime();
+                if (fechaA !== fechaB) {
+                  return fechaB - fechaA;
+                }
+                return (Number(b?.id) || 0) - (Number(a?.id) || 0);
+              });
+
+              res.json({ ok: true, pedidos: detalle });
+            }
+          );
         });
       }
     );
@@ -5900,7 +6025,19 @@ app.delete('/api/admin/eliminar/cierre-caja/:id', (req, res) => {
               updateErr?.message || updateErr
             );
           }
-          res.json({ ok: true });
+          db.run(
+            'UPDATE clientes_deudas SET cierre_id = NULL WHERE cierre_id = ? AND negocio_id = ?',
+            [cierreId, negocioId],
+            (updateFactErr) => {
+              if (updateFactErr) {
+                console.error(
+                  'Error al desasociar facturas de clientes del cierre eliminado:',
+                  updateFactErr?.message || updateFactErr
+                );
+              }
+              res.json({ ok: true });
+            }
+          );
         }
       );
     });
@@ -5955,7 +6092,9 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
 
       const paramsVentas = [negocioId, cierreId];
       const filtroOrigenPedidos = construirFiltroOrigenCaja(origenCaja, paramsVentas, 'p.origen_caja');
-      const [productos, ventasRows, comprasRows] = await Promise.all([
+      const paramsVentasFacturas = [negocioId, cierreId, fechaOperacion];
+      const filtroOrigenFacturas = construirFiltroOrigenCaja(origenCaja, paramsVentasFacturas, 'd.origen_caja');
+      const [productos, ventasRows, ventasFacturasRows, comprasRows] = await Promise.all([
         db.all(
           `SELECT id, nombre, precio, precios, stock, stock_indefinido
            FROM productos
@@ -5980,6 +6119,21 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
           paramsVentas
         ),
         db.all(
+          `SELECT dd.producto_id,
+                  dd.precio_unitario,
+                  SUM(dd.cantidad) AS venta_cantidad,
+                  SUM(dd.total_linea) AS venta_bruta,
+                  SUM(dd.total_linea) AS venta_neta,
+                  0 AS descuento_total
+            FROM clientes_deudas_detalle dd
+            JOIN clientes_deudas d ON d.id = dd.deuda_id
+            WHERE d.negocio_id = ?
+              AND (d.cierre_id = ? OR (d.cierre_id IS NULL AND DATE(d.fecha) = ?))
+              AND ${filtroOrigenFacturas}
+            GROUP BY dd.producto_id, dd.precio_unitario`,
+          paramsVentasFacturas
+        ),
+        db.all(
           `SELECT dc.descripcion, dc.cantidad
              FROM detalle_compra dc
              JOIN compras c ON c.id = dc.compra_id
@@ -5990,7 +6144,8 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
       ]);
 
       const ventasMap = new Map();
-      (ventasRows || []).forEach((row) => {
+      const ventasCombinadas = [...(ventasRows || []), ...(ventasFacturasRows || [])];
+      ventasCombinadas.forEach((row) => {
         const productoId = Number(row.producto_id);
         if (!productoId) return;
         const ventaCantidad = Number(row.venta_cantidad) || 0;
@@ -14934,6 +15089,7 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
     const notas = normalizarCampoTexto(req.body?.notas, null);
     const fechaEntrada = normalizarCampoTexto(req.body?.fecha, null);
     const fecha = esFechaISOValida(fechaEntrada) ? fechaEntrada : obtenerFechaLocalISO(new Date());
+    const origenCaja = normalizarOrigenCaja(req.body?.origen_caja ?? req.body?.origen, 'caja');
     const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
     const montoEntrada = normalizarNumero(req.body?.monto_total ?? req.body?.montoTotal, null);
 
@@ -15113,9 +15269,9 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
       try {
         await db.run('BEGIN');
         const result = await db.run(
-          `INSERT INTO clientes_deudas (cliente_id, negocio_id, fecha, descripcion, monto_total, notas)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [clienteId, negocioId, fecha, descripcion, montoTotal, notas]
+          `INSERT INTO clientes_deudas (cliente_id, negocio_id, fecha, descripcion, monto_total, origen_caja, notas)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [clienteId, negocioId, fecha, descripcion, montoTotal, origenCaja, notas]
         );
 
         deudaId = result?.id;
@@ -16128,6 +16284,8 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
     }
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const origenFallback = usuarioSesion?.rol === 'vendedor' ? 'mostrador' : 'caja';
+    const origenCaja = normalizarOrigenCaja(req.body?.origen_caja ?? req.body?.origen, origenFallback);
     const descripcionEntrada = normalizarCampoTexto(req.body?.descripcion, null);
     const notas = normalizarCampoTexto(req.body?.notas, null);
     const fechaEntrada = normalizarCampoTexto(req.body?.fecha, null);
@@ -16179,9 +16337,9 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
       await db.run('BEGIN');
 
       const insert = await db.run(
-        `INSERT INTO clientes_deudas (cliente_id, negocio_id, fecha, descripcion, monto_total, notas)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [clienteId, negocioId, fecha, descripcion, montoTotal, notas]
+        `INSERT INTO clientes_deudas (cliente_id, negocio_id, fecha, descripcion, monto_total, origen_caja, notas)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [clienteId, negocioId, fecha, descripcion, montoTotal, origenCaja, notas]
       );
 
       const deudaId = insert.lastID;

@@ -46,35 +46,6 @@
 
   const limpiarTextoFactura = (texto) => String(texto || '').replace(/\s+/g, ' ').trim();
 
-  const recortarTexto = (texto, maxLen) => {
-    if (!texto) return '';
-    if (maxLen <= 0) return '';
-    if (texto.length <= maxLen) return texto;
-    if (maxLen <= 3) return texto.slice(0, maxLen);
-    return `${texto.slice(0, maxLen - 3)}...`;
-  };
-
-  const abreviarNombreProducto = (nombre, maxLen = 18) => {
-    const limpio = limpiarTextoFactura(nombre);
-    if (!limpio) return '';
-    if (limpio.length <= maxLen) return limpio;
-    const palabras = limpio.split(' ');
-    if (palabras.length === 1) return recortarTexto(limpio, maxLen);
-    const abreviadas = palabras.map((palabra, idx) => {
-      if (idx === palabras.length - 1) return palabra;
-      if (palabra.length <= 1) return palabra;
-      return `${palabra.charAt(0)}.`;
-    });
-    let resultado = abreviadas.join(' ');
-    if (resultado.length <= maxLen) return resultado;
-    const ultima = abreviadas.length - 1;
-    const prefijo = abreviadas.slice(0, ultima).join(' ');
-    const espacio = prefijo ? 1 : 0;
-    const maxUltima = maxLen - prefijo.length - espacio;
-    const ultimaRecortada = recortarTexto(abreviadas[ultima], maxUltima);
-    return prefijo ? `${prefijo} ${ultimaRecortada}` : ultimaRecortada;
-  };
-
   const escaparHtml = (texto) =>
     String(texto ?? '')
       .replace(/&/g, '&amp;')
@@ -325,11 +296,8 @@
             <span class="factura-price-final">${formatCurrency(subtotalFinal)}</span>
           </div>
         `;
-        const nombreCompleto = limpiarTextoFactura(
-          item.nombre || `Producto ${item.producto_id || ''}`
-        );
-        const nombreAbreviado = abreviarNombreProducto(nombreCompleto, 16);
-        const nombreSeguro = escaparHtml(nombreAbreviado || nombreCompleto);
+        const nombreCompleto = limpiarTextoFactura(item.nombre || `Producto ${item.producto_id || ''}`);
+        const nombreSeguro = escaparHtml(nombreCompleto || '--');
         const tituloSeguro = escaparHtml(nombreCompleto);
         fila.innerHTML = `
         <td class="factura-prod-cell"><span class="factura-prod-name" title="${tituloSeguro}">${nombreSeguro}</span></td>

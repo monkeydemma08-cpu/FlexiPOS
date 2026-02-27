@@ -186,9 +186,9 @@ const renderDetalle = (data) => {
     } else {
       productos.forEach((item) => {
         const fila = document.createElement('tr');
-        const invInicial = item.stock_indefinido ? 'N/A' : formatNumber(item.inv_inicial);
-        const compra = item.stock_indefinido ? 'N/A' : formatNumber(item.compra);
-        const invFinal = item.stock_indefinido ? 'N/A' : formatNumber(item.inv_final);
+        const invInicial = item.stock_indefinido ? formatNumber(0) : formatNumber(item.inv_inicial);
+        const compra = item.stock_indefinido ? formatNumber(0) : formatNumber(item.compra);
+        const invFinal = item.stock_indefinido ? formatNumber(0) : formatNumber(item.inv_final);
         const venta = formatNumber(item.venta);
         const preciosConfigurados = Array.isArray(item.precios_configurados)
           ? item.precios_configurados

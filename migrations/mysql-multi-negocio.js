@@ -1062,6 +1062,8 @@ async function ensureTableClientesDeudas() {
       fecha DATE NOT NULL,
       descripcion TEXT,
       monto_total DECIMAL(12,2) NOT NULL,
+      origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja',
+      cierre_id INT NULL,
       notas TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1756,6 +1758,10 @@ async function runMigrations() {
   await ensureTableClientesDeudas();
   await ensureTableClientesDeudasDetalle();
   await ensureTableClientesAbonos();
+  await ensureColumn('clientes_deudas', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
+  await ensureColumn('clientes_deudas', 'cierre_id INT NULL');
+  await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_cierre', '(cierre_id)');
+  await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_origen', '(origen_caja)');
   await modifyColumn('configuracion', 'valor LONGTEXT NOT NULL');
   await ensureColumn('salidas_caja', 'usuario_id INT NULL');
   await ensureColumn('negocios', 'slug VARCHAR(120) UNIQUE');

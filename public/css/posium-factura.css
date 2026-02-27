@@ -1,10 +1,10 @@
 ﻿:root {
-  --pf-bg: #f5f6fa;
+  --pf-bg: #fff;
   --pf-card: #ffffff;
-  --pf-text: #1f2937;
-  --pf-muted: #6b7280;
-  --pf-accent: #0a4c9a;
-  --pf-border: #e5e7eb;
+  --pf-text: #000;
+  --pf-muted: #000;
+  --pf-accent: #000;
+  --pf-border: #000;
 }
 
 * {
@@ -16,6 +16,11 @@
   font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
   background: var(--pf-bg);
   color: var(--pf-text);
+}
+
+.posium-factura-body * {
+  color: #000 !important;
+  text-shadow: none !important;
 }
 
 .posium-factura {
@@ -118,9 +123,9 @@
 }
 
 .pf-btn {
-  background: var(--pf-accent);
-  color: #fff;
-  border: none;
+  background: #fff;
+  color: #000;
+  border: 1px solid #000;
   padding: 10px 16px;
   border-radius: 10px;
   cursor: pointer;
