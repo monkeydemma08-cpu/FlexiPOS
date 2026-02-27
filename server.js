@@ -10512,6 +10512,18 @@ app.get('/api/empresa/analytics/overview', (req, res) => {
         `,
         paramsBase
       );
+      const ventasDeudasRows = await db.all(
+        `
+          SELECT negocio_id,
+                 COUNT(DISTINCT id) AS total_ventas,
+                 SUM(monto_total) AS total
+            FROM clientes_deudas
+           WHERE negocio_id IN (${placeholders})
+             AND DATE(fecha) BETWEEN ? AND ?
+           GROUP BY negocio_id
+        `,
+        paramsBase
+      );
 
       const gastosRows = await db.all(
         `
@@ -10572,7 +10584,15 @@ app.get('/api/empresa/analytics/overview', (req, res) => {
         [empresaId]
       );
 
-      const ventasMap = new Map((ventasRows || []).map((row) => [Number(row.negocio_id), row]));
+      const ventasMap = new Map();
+      [...(ventasRows || []), ...(ventasDeudasRows || [])].forEach((row) => {
+        const negocioIdRow = Number(row?.negocio_id);
+        if (!Number.isFinite(negocioIdRow)) return;
+        const actual = ventasMap.get(negocioIdRow) || { total_ventas: 0, total: 0 };
+        actual.total_ventas += Number(row?.total_ventas) || 0;
+        actual.total += Number(row?.total) || 0;
+        ventasMap.set(negocioIdRow, actual);
+      });
       const gastosMap = new Map((gastosRows || []).map((row) => [Number(row.negocio_id), row]));
       let totalVentas = 0;
       let totalGastos = 0;
@@ -15385,6 +15405,7 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
         throw error;
       }
 
+      limpiarCacheAnalitica(negocioId);
       res.status(201).json({ ok: true, deuda_id: deudaId });
     } catch (error) {
       console.error('Error al crear deuda empresa:', error?.message || error);
@@ -16398,6 +16419,7 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
       }
 
       await db.run('COMMIT');
+      limpiarCacheAnalitica(negocioId);
 
       res.status(201).json({
         ok: true,
@@ -16511,6 +16533,7 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
           return res.status(404).json({ ok: false, error: 'Deuda no encontrada' });
         }
 
+        limpiarCacheAnalitica(negocioId);
         return res.json({ ok: true });
       }
 
@@ -16692,6 +16715,7 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
       }
 
       await db.run('COMMIT');
+      limpiarCacheAnalitica(negocioId);
 
       res.json({ ok: true, advertencias: advertenciasInsumos.length ? advertenciasInsumos : undefined });
     } catch (error) {
@@ -18986,7 +19010,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
     const paramsBase = [negocioId, rango.desde, rango.hasta];
 
     try {
-      const ventasResumen = await db.get(
+      const ventasPedidosResumen = await db.get(
         `
           SELECT COUNT(DISTINCT COALESCE(cuenta_id, id)) AS total_ventas,
                  SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
@@ -18997,12 +19021,24 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         `,
         paramsBase
       );
+      const ventasDeudasResumen = await db.get(
+        `
+          SELECT COUNT(DISTINCT id) AS total_ventas,
+                 SUM(monto_total) AS total
+          FROM clientes_deudas
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
 
-      const ingresosTotal = Number(ventasResumen?.total) || 0;
-      const ventasCount = Number(ventasResumen?.total_ventas) || 0;
+      const ingresosTotal =
+        (Number(ventasPedidosResumen?.total) || 0) + (Number(ventasDeudasResumen?.total) || 0);
+      const ventasCount =
+        (Number(ventasPedidosResumen?.total_ventas) || 0) +
+        (Number(ventasDeudasResumen?.total_ventas) || 0);
       const ticketPromedio = ventasCount > 0 ? Number((ingresosTotal / ventasCount).toFixed(2)) : 0;
-
-      const ventasSerie = await db.all(
+      const ventasSeriePedidos = await db.all(
         `
           SELECT ${fechaBase} AS fecha,
                  SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total,
@@ -19012,12 +19048,36 @@ app.get('/api/admin/analytics/overview', (req, res) => {
             AND negocio_id = ?
             AND ${fechaBase} BETWEEN ? AND ?
           GROUP BY fecha
-          ORDER BY fecha ASC
         `,
         paramsBase
       );
+      const ventasSerieDeudas = await db.all(
+        `
+          SELECT DATE(fecha) AS fecha,
+                 SUM(monto_total) AS total,
+                 COUNT(DISTINCT id) AS ventas
+          FROM clientes_deudas
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+          GROUP BY fecha
+        `,
+        paramsBase
+      );
+      const ventasSerieMap = new Map();
+      [...(ventasSeriePedidos || []), ...(ventasSerieDeudas || [])].forEach((row) => {
+        const fecha = row?.fecha;
+        if (!fecha) return;
+        const key = String(fecha);
+        const actual = ventasSerieMap.get(key) || { fecha, total: 0, ventas: 0 };
+        actual.total += Number(row?.total) || 0;
+        actual.ventas += Number(row?.ventas) || 0;
+        ventasSerieMap.set(key, actual);
+      });
+      const ventasSerie = Array.from(ventasSerieMap.values()).sort((a, b) =>
+        String(a.fecha).localeCompare(String(b.fecha))
+      );
 
-      const ventasPorDiaSemana = await db.all(
+      const ventasPorDiaSemanaPedidos = await db.all(
         `
           SELECT DAYOFWEEK(${fechaBaseRaw}) AS dia_semana,
                  SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total,
@@ -19027,12 +19087,37 @@ app.get('/api/admin/analytics/overview', (req, res) => {
             AND negocio_id = ?
             AND ${fechaBase} BETWEEN ? AND ?
           GROUP BY dia_semana
-          ORDER BY total DESC
         `,
         paramsBase
       );
+      const ventasPorDiaSemanaDeudas = await db.all(
+        `
+          SELECT DAYOFWEEK(fecha) AS dia_semana,
+                 SUM(monto_total) AS total,
+                 COUNT(DISTINCT id) AS ventas
+          FROM clientes_deudas
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+          GROUP BY dia_semana
+        `,
+        paramsBase
+      );
+      const ventasPorDiaSemanaMap = new Map();
+      [...(ventasPorDiaSemanaPedidos || []), ...(ventasPorDiaSemanaDeudas || [])].forEach((row) => {
+        const diaSemana = Number(row?.dia_semana) || 0;
+        if (!diaSemana) return;
+        const actual = ventasPorDiaSemanaMap.get(diaSemana) || { dia_semana: diaSemana, total: 0, ventas: 0 };
+        actual.total += Number(row?.total) || 0;
+        actual.ventas += Number(row?.ventas) || 0;
+        ventasPorDiaSemanaMap.set(diaSemana, actual);
+      });
+      const ventasPorDiaSemana = Array.from(ventasPorDiaSemanaMap.values()).sort((a, b) => {
+        const totalDiff = (Number(b?.total) || 0) - (Number(a?.total) || 0);
+        if (totalDiff !== 0) return totalDiff;
+        return (Number(a?.dia_semana) || 0) - (Number(b?.dia_semana) || 0);
+      });
 
-      const ventasPorHora = await db.all(
+      const ventasPorHoraPedidos = await db.all(
         `
           SELECT HOUR(${fechaBaseRaw}) AS hora,
                  SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total,
@@ -19042,91 +19127,175 @@ app.get('/api/admin/analytics/overview', (req, res) => {
             AND negocio_id = ?
             AND ${fechaBase} BETWEEN ? AND ?
           GROUP BY hora
-          ORDER BY total DESC
         `,
         paramsBase
       );
-
-      const topProductosCantidad = await db.all(
+      const ventasPorHoraDeudas = await db.all(
         `
-          SELECT p.id, p.nombre,
+          SELECT HOUR(COALESCE(updated_at, created_at, CONCAT(fecha, ' 00:00:00'))) AS hora,
+                 SUM(monto_total) AS total,
+                 COUNT(DISTINCT id) AS ventas
+          FROM clientes_deudas
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+          GROUP BY hora
+        `,
+        paramsBase
+      );
+      const ventasPorHoraMap = new Map();
+      [...(ventasPorHoraPedidos || []), ...(ventasPorHoraDeudas || [])].forEach((row) => {
+        const hora = Number(row?.hora);
+        if (!Number.isInteger(hora) || hora < 0 || hora > 23) return;
+        const actual = ventasPorHoraMap.get(hora) || { hora, total: 0, ventas: 0 };
+        actual.total += Number(row?.total) || 0;
+        actual.ventas += Number(row?.ventas) || 0;
+        ventasPorHoraMap.set(hora, actual);
+      });
+      const ventasPorHora = Array.from(ventasPorHoraMap.values()).sort((a, b) => {
+        const totalDiff = (Number(b?.total) || 0) - (Number(a?.total) || 0);
+        if (totalDiff !== 0) return totalDiff;
+        return (Number(a?.hora) || 0) - (Number(b?.hora) || 0);
+      });
+
+      const ventasProductosPedidos = await db.all(
+        `
+          SELECT p.id,
+                 p.nombre,
+                 COALESCE(c.nombre, 'Sin categoria') AS categoria,
                  SUM(dp.cantidad) AS cantidad,
                  SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos
           FROM detalle_pedido dp
           JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
-          JOIN productos p ON p.id = dp.producto_id
-          WHERE dp.negocio_id = ?
-            AND pe.estado = 'pagado'
-            AND ${fechaBase} BETWEEN ? AND ?
-          GROUP BY p.id, p.nombre
-          ORDER BY cantidad DESC
-          LIMIT 10
-        `,
-        [negocioId, negocioId, rango.desde, rango.hasta]
-      );
-
-      const topProductosIngresos = await db.all(
-        `
-          SELECT p.id, p.nombre,
-                 SUM(dp.cantidad) AS cantidad,
-                 SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos
-          FROM detalle_pedido dp
-          JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
-          JOIN productos p ON p.id = dp.producto_id
-          WHERE dp.negocio_id = ?
-            AND pe.estado = 'pagado'
-            AND ${fechaBase} BETWEEN ? AND ?
-          GROUP BY p.id, p.nombre
-          ORDER BY ingresos DESC
-          LIMIT 10
-        `,
-        [negocioId, negocioId, rango.desde, rango.hasta]
-      );
-
-      const bottomProductos = await db.all(
-        `
-          SELECT p.id, p.nombre,
-                 COALESCE(s.cantidad, 0) AS cantidad,
-                 COALESCE(s.ingresos, 0) AS ingresos
-          FROM productos p
-          LEFT JOIN (
-            SELECT dp.producto_id,
-                   SUM(dp.cantidad) AS cantidad,
-                   SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos
-            FROM detalle_pedido dp
-            JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
-            WHERE dp.negocio_id = ?
-              AND pe.estado = 'pagado'
-              AND ${fechaBase} BETWEEN ? AND ?
-            GROUP BY dp.producto_id
-          ) s ON s.producto_id = p.id
-          WHERE p.negocio_id = ?
-          ORDER BY cantidad ASC, ingresos ASC
-          LIMIT 10
-        `,
-        [negocioId, negocioId, rango.desde, rango.hasta, negocioId]
-      );
-
-      const topCategoriasVentas = await db.all(
-        `
-          SELECT COALESCE(c.nombre, 'Sin categoria') AS categoria,
-                 SUM(dp.cantidad) AS cantidad,
-                 SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos
-          FROM detalle_pedido dp
-          JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
-          JOIN productos p ON p.id = dp.producto_id
+          JOIN productos p ON p.id = dp.producto_id AND p.negocio_id = ?
           LEFT JOIN categorias c ON c.id = p.categoria_id AND c.negocio_id = ?
           WHERE dp.negocio_id = ?
             AND pe.estado = 'pagado'
             AND ${fechaBase} BETWEEN ? AND ?
-          GROUP BY categoria
-          ORDER BY ingresos DESC
-          LIMIT 5
+          GROUP BY p.id, p.nombre, categoria
         `,
-        [negocioId, negocioId, negocioId, rango.desde, rango.hasta]
+        [negocioId, negocioId, negocioId, negocioId, rango.desde, rango.hasta]
+      );
+      const ventasProductosDeudas = await db.all(
+        `
+          SELECT p.id,
+                 p.nombre,
+                 COALESCE(c.nombre, 'Sin categoria') AS categoria,
+                 SUM(dd.cantidad) AS cantidad,
+                 SUM(dd.total_linea) AS ingresos
+          FROM clientes_deudas_detalle dd
+          JOIN clientes_deudas d ON d.id = dd.deuda_id AND d.negocio_id = ?
+          JOIN productos p ON p.id = dd.producto_id AND p.negocio_id = ?
+          LEFT JOIN categorias c ON c.id = p.categoria_id AND c.negocio_id = ?
+          WHERE dd.negocio_id = ?
+            AND DATE(d.fecha) BETWEEN ? AND ?
+          GROUP BY p.id, p.nombre, categoria
+        `,
+        [negocioId, negocioId, negocioId, negocioId, rango.desde, rango.hasta]
+      );
+      const catalogoProductos = await db.all(
+        `
+          SELECT p.id,
+                 p.nombre,
+                 COALESCE(c.nombre, 'Sin categoria') AS categoria
+          FROM productos p
+          LEFT JOIN categorias c ON c.id = p.categoria_id AND c.negocio_id = p.negocio_id
+          WHERE p.negocio_id = ?
+        `,
+        [negocioId]
       );
 
-      const ventasPorDiaMes = await db.all(
+      const productosVentasMap = new Map();
+      [...(ventasProductosPedidos || []), ...(ventasProductosDeudas || [])].forEach((row) => {
+        const productoId = Number(row?.id);
+        if (!productoId) return;
+        const actual = productosVentasMap.get(productoId) || {
+          id: productoId,
+          nombre: row?.nombre || `Producto ${productoId}`,
+          categoria: row?.categoria || 'Sin categoria',
+          cantidad: 0,
+          ingresos: 0,
+        };
+        actual.cantidad += Number(row?.cantidad) || 0;
+        actual.ingresos += Number(row?.ingresos) || 0;
+        if (!actual.nombre && row?.nombre) {
+          actual.nombre = row.nombre;
+        }
+        if ((!actual.categoria || actual.categoria === 'Sin categoria') && row?.categoria) {
+          actual.categoria = row.categoria;
+        }
+        productosVentasMap.set(productoId, actual);
+      });
+
+      const ventasProductosLista = Array.from(productosVentasMap.values()).map((item) => ({
+        id: Number(item.id) || null,
+        nombre: item.nombre || 'Producto',
+        categoria: item.categoria || 'Sin categoria',
+        cantidad: Number((Number(item.cantidad) || 0).toFixed(2)),
+        ingresos: Number((Number(item.ingresos) || 0).toFixed(2)),
+      }));
+
+      const topProductosCantidad = [...ventasProductosLista]
+        .sort((a, b) => {
+          const cantidadDiff = (Number(b.cantidad) || 0) - (Number(a.cantidad) || 0);
+          if (cantidadDiff !== 0) return cantidadDiff;
+          const ingresosDiff = (Number(b.ingresos) || 0) - (Number(a.ingresos) || 0);
+          if (ingresosDiff !== 0) return ingresosDiff;
+          return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+        })
+        .slice(0, 10);
+
+      const topProductosIngresos = [...ventasProductosLista]
+        .sort((a, b) => {
+          const ingresosDiff = (Number(b.ingresos) || 0) - (Number(a.ingresos) || 0);
+          if (ingresosDiff !== 0) return ingresosDiff;
+          const cantidadDiff = (Number(b.cantidad) || 0) - (Number(a.cantidad) || 0);
+          if (cantidadDiff !== 0) return cantidadDiff;
+          return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+        })
+        .slice(0, 10);
+
+      const bottomProductos = (catalogoProductos || [])
+        .map((producto) => {
+          const venta = productosVentasMap.get(Number(producto.id)) || {};
+          return {
+            id: Number(producto.id) || null,
+            nombre: producto.nombre || `Producto ${producto.id || ''}`,
+            categoria: producto.categoria || 'Sin categoria',
+            cantidad: Number((Number(venta.cantidad) || 0).toFixed(2)),
+            ingresos: Number((Number(venta.ingresos) || 0).toFixed(2)),
+          };
+        })
+        .sort((a, b) => {
+          const cantidadDiff = (Number(a.cantidad) || 0) - (Number(b.cantidad) || 0);
+          if (cantidadDiff !== 0) return cantidadDiff;
+          const ingresosDiff = (Number(a.ingresos) || 0) - (Number(b.ingresos) || 0);
+          if (ingresosDiff !== 0) return ingresosDiff;
+          return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+        })
+        .slice(0, 10);
+
+      const categoriasVentasMap = new Map();
+      ventasProductosLista.forEach((item) => {
+        const categoria = item?.categoria || 'Sin categoria';
+        const actual = categoriasVentasMap.get(categoria) || { categoria, cantidad: 0, ingresos: 0 };
+        actual.cantidad += Number(item?.cantidad) || 0;
+        actual.ingresos += Number(item?.ingresos) || 0;
+        categoriasVentasMap.set(categoria, actual);
+      });
+      const topCategoriasVentas = Array.from(categoriasVentasMap.values())
+        .map((item) => ({
+          categoria: item.categoria,
+          cantidad: Number((Number(item.cantidad) || 0).toFixed(2)),
+          ingresos: Number((Number(item.ingresos) || 0).toFixed(2)),
+        }))
+        .sort((a, b) => {
+          const ingresosDiff = (Number(b.ingresos) || 0) - (Number(a.ingresos) || 0);
+          if (ingresosDiff !== 0) return ingresosDiff;
+          return String(a.categoria || '').localeCompare(String(b.categoria || ''));
+        })
+        .slice(0, 5);
+
+      const ventasPorDiaMesPedidos = await db.all(
         `
           SELECT DAY(${fechaBaseRaw}) AS dia_mes,
                  SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
@@ -19135,10 +19304,36 @@ app.get('/api/admin/analytics/overview', (req, res) => {
             AND negocio_id = ?
             AND ${fechaBase} BETWEEN ? AND ?
           GROUP BY dia_mes
-          ORDER BY total DESC
         `,
         paramsBase
       );
+      const ventasPorDiaMesDeudas = await db.all(
+        `
+          SELECT DAY(fecha) AS dia_mes,
+                 SUM(monto_total) AS total
+          FROM clientes_deudas
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+          GROUP BY dia_mes
+        `,
+        paramsBase
+      );
+      const ventasPorDiaMesMap = new Map();
+      [...(ventasPorDiaMesPedidos || []), ...(ventasPorDiaMesDeudas || [])].forEach((row) => {
+        const diaMes = Number(row?.dia_mes) || 0;
+        if (!diaMes) return;
+        ventasPorDiaMesMap.set(diaMes, (ventasPorDiaMesMap.get(diaMes) || 0) + (Number(row?.total) || 0));
+      });
+      const ventasPorDiaMes = Array.from(ventasPorDiaMesMap.entries())
+        .map(([diaMes, total]) => ({
+          dia_mes: Number(diaMes),
+          total: Number(total) || 0,
+        }))
+        .sort((a, b) => {
+          const totalDiff = (Number(b?.total) || 0) - (Number(a?.total) || 0);
+          if (totalDiff !== 0) return totalDiff;
+          return (Number(a?.dia_mes) || 0) - (Number(b?.dia_mes) || 0);
+        });
 
       const metodosPago = await db.get(
         `
@@ -19219,7 +19414,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         paramsBase
       );
 
-      const cogsResumen = await db.get(
+      const cogsPedidosResumen = await db.get(
         `
           SELECT SUM(cogs_total) AS total
           FROM pedidos
@@ -19229,7 +19424,26 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         `,
         paramsBase
       );
-      const cogsTotal = Number(cogsResumen?.total) || 0;
+      const cogsDeudasResumen = await db.get(
+        `
+          SELECT SUM(
+                   COALESCE(dd.cantidad, 0) * COALESCE(
+                     NULLIF(p.costo_unitario_real, 0),
+                     NULLIF(p.costo_promedio_actual, 0),
+                     NULLIF(p.costo_base_sin_itbis, 0),
+                     NULLIF(p.ultimo_costo_sin_itbis, 0),
+                     0
+                   )
+                 ) AS total
+          FROM clientes_deudas_detalle dd
+          JOIN clientes_deudas d ON d.id = dd.deuda_id
+          LEFT JOIN productos p ON p.id = dd.producto_id AND p.negocio_id = d.negocio_id
+          WHERE d.negocio_id = ?
+            AND DATE(d.fecha) BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+      const cogsTotal = (Number(cogsPedidosResumen?.total) || 0) + (Number(cogsDeudasResumen?.total) || 0);
 
       const costosConfiguradosRow = await db.get(
         `
@@ -19254,7 +19468,8 @@ app.get('/api/admin/analytics/overview', (req, res) => {
       const utilidadReal = Number((utilidadBruta - gastosOperativosTotal).toFixed(2));
 
       const rangoAnterior = obtenerRangoAnterior(rango.desde, rango.dias);
-      const ventasAnterior = await db.get(
+      const paramsAnterior = [negocioId, rangoAnterior.desde, rangoAnterior.hasta];
+      const ventasAnteriorPedidos = await db.get(
         `
           SELECT COUNT(DISTINCT COALESCE(cuenta_id, id)) AS total_ventas,
                  SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
@@ -19263,7 +19478,17 @@ app.get('/api/admin/analytics/overview', (req, res) => {
             AND negocio_id = ?
             AND ${fechaBase} BETWEEN ? AND ?
         `,
-        [negocioId, rangoAnterior.desde, rangoAnterior.hasta]
+        paramsAnterior
+      );
+      const ventasAnteriorDeudas = await db.get(
+        `
+          SELECT COUNT(DISTINCT id) AS total_ventas,
+                 SUM(monto_total) AS total
+          FROM clientes_deudas
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+        `,
+        paramsAnterior
       );
       const gastosAnterior = await db.get(
         `
@@ -19275,8 +19500,11 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         [negocioId, rangoAnterior.desde, rangoAnterior.hasta]
       );
 
-      const ventasTotalAnterior = Number(ventasAnterior?.total) || 0;
-      const ventasCountAnterior = Number(ventasAnterior?.total_ventas) || 0;
+      const ventasTotalAnterior =
+        (Number(ventasAnteriorPedidos?.total) || 0) + (Number(ventasAnteriorDeudas?.total) || 0);
+      const ventasCountAnterior =
+        (Number(ventasAnteriorPedidos?.total_ventas) || 0) +
+        (Number(ventasAnteriorDeudas?.total_ventas) || 0);
       const ticketPromedioAnterior =
         ventasCountAnterior > 0 ? Number((ventasTotalAnterior / ventasCountAnterior).toFixed(2)) : 0;
       const gastosTotalAnterior = Number(gastosAnterior?.total) || 0;
@@ -19358,35 +19586,16 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         }
       }
 
-      const conteoProductos = await db.get(
-        `
-          SELECT COUNT(DISTINCT dp.producto_id) AS total
-          FROM detalle_pedido dp
-          JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
-          WHERE dp.negocio_id = ?
-            AND pe.estado = 'pagado'
-            AND ${fechaBase} BETWEEN ? AND ?
-        `,
-        [negocioId, negocioId, rango.desde, rango.hasta]
-      );
-      const totalProductosConVentas = Number(conteoProductos?.total) || 0;
+      const totalProductosConVentas = (ventasProductosLista || []).filter((item) => {
+        const cantidad = Number(item?.cantidad) || 0;
+        const ingresos = Number(item?.ingresos) || 0;
+        return cantidad > 0 || ingresos > 0;
+      }).length;
       if (totalProductosConVentas > 0 && ingresosTotal > 0) {
         const topN = Math.max(1, Math.ceil(totalProductosConVentas * 0.2));
-        const paretoRows = await db.all(
-          `
-            SELECT dp.producto_id,
-                   SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos
-            FROM detalle_pedido dp
-            JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
-            WHERE dp.negocio_id = ?
-              AND pe.estado = 'pagado'
-              AND ${fechaBase} BETWEEN ? AND ?
-            GROUP BY dp.producto_id
-            ORDER BY ingresos DESC
-            LIMIT ${topN}
-          `,
-          [negocioId, negocioId, rango.desde, rango.hasta]
-        );
+        const paretoRows = [...(ventasProductosLista || [])]
+          .sort((a, b) => (Number(b?.ingresos) || 0) - (Number(a?.ingresos) || 0))
+          .slice(0, topN);
         const ingresosTop = paretoRows.reduce((acc, row) => acc + (Number(row.ingresos) || 0), 0);
         if (ingresosTop / ingresosTotal >= 0.8) {
           alertas.push({
@@ -19516,7 +19725,7 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
 
       const capitalInicial = await obtenerCapitalInicialPeriodo(negocioId, rango.desde, rango.hasta);
       const costoEstimadoCogs = await obtenerCostoEstimadoCogs(negocioId);
-      const ventasResumen = await db.get(
+      const ventasPedidosResumen = await db.get(
         `
           SELECT SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
           FROM pedidos
@@ -19526,9 +19735,19 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
         `,
         paramsBase
       );
-      const ventasTotal = Number(ventasResumen?.total) || 0;
+      const ventasDeudasResumen = await db.get(
+        `
+          SELECT SUM(monto_total) AS total
+          FROM clientes_deudas
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+      const ventasTotal =
+        (Number(ventasPedidosResumen?.total) || 0) + (Number(ventasDeudasResumen?.total) || 0);
 
-      const cogsResumen = await db.get(
+      const cogsPedidosResumen = await db.get(
         `
           SELECT SUM(cogs_total) AS total
           FROM pedidos
@@ -19538,7 +19757,26 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
         `,
         paramsBase
       );
-      const cogsTotal = Number(cogsResumen?.total) || 0;
+      const cogsDeudasResumen = await db.get(
+        `
+          SELECT SUM(
+                   COALESCE(dd.cantidad, 0) * COALESCE(
+                     NULLIF(p.costo_unitario_real, 0),
+                     NULLIF(p.costo_promedio_actual, 0),
+                     NULLIF(p.costo_base_sin_itbis, 0),
+                     NULLIF(p.ultimo_costo_sin_itbis, 0),
+                     0
+                   )
+                 ) AS total
+          FROM clientes_deudas_detalle dd
+          JOIN clientes_deudas d ON d.id = dd.deuda_id
+          LEFT JOIN productos p ON p.id = dd.producto_id AND p.negocio_id = d.negocio_id
+          WHERE d.negocio_id = ?
+            AND DATE(d.fecha) BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+      const cogsTotal = (Number(cogsPedidosResumen?.total) || 0) + (Number(cogsDeudasResumen?.total) || 0);
 
       const costosConfiguradosRow = await db.get(
         `
