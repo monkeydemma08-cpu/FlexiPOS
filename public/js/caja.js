@@ -398,11 +398,149 @@ const renderOpcionesClientes = (lista = []) => {
 
 
 
+const normalizarDocumentoFiscal = (valor = '') => String(valor || '').replace(/\D+/g, '').trim();
+
+const reiniciarLookupDgii = () => {
+  if (consultaDgiiTimer) {
+    clearTimeout(consultaDgiiTimer);
+    consultaDgiiTimer = null;
+  }
+  if (consultaDgiiController) {
+    consultaDgiiController.abort();
+    consultaDgiiController = null;
+  }
+  ultimoDocumentoConsultadoDgii = '';
+  ultimoDocumentoSincronizadoCliente = '';
+  ultimoNombreAutocompletadoDgii = '';
+};
+
+const inyectarClienteSugerido = (cliente) => {
+  if (!cliente || !cliente.id) return;
+  const id = Number(cliente.id);
+  if (!Number.isFinite(id) || id <= 0) return;
+  const idx = clientesSugeridos.findIndex((item) => Number(item.id) === id);
+  if (idx >= 0) {
+    clientesSugeridos[idx] = { ...clientesSugeridos[idx], ...cliente };
+  } else {
+    clientesSugeridos.unshift(cliente);
+  }
+  clientesSugeridos = clientesSugeridos.slice(0, 50);
+  renderOpcionesClientes(clientesSugeridos);
+};
+
+const aplicarContribuyenteDesdeDgii = (contribuyente, documentoConsultado) => {
+  if (!contribuyente) return;
+  const nombre = (contribuyente.nombre || '').trim();
+  const documento = (contribuyente.documento || '').trim();
+
+  if (inputClienteDocumento && documento) {
+    inputClienteDocumento.value = documento;
+  } else if (inputClienteDocumento && documentoConsultado) {
+    inputClienteDocumento.value = documentoConsultado;
+  }
+
+  if (!inputClienteNombre || !nombre) return;
+  const nombreActual = inputClienteNombre.value.trim();
+  const puedeSobrescribir =
+    !nombreActual || (ultimoNombreAutocompletadoDgii && nombreActual === ultimoNombreAutocompletadoDgii);
+  if (!puedeSobrescribir) return;
+
+  inputClienteNombre.value = nombre;
+  ultimoNombreAutocompletadoDgii = nombre;
+};
+
+const buscarContribuyenteDgiiPorDocumento = async (documento, { autoguardar = false } = {}) => {
+  if (!documento || documento.length < 9) return;
+
+  if (consultaDgiiController) {
+    consultaDgiiController.abort();
+  }
+  const controller = new AbortController();
+  consultaDgiiController = controller;
+  ultimoDocumentoConsultadoDgii = documento;
+
+  try {
+    const params = new URLSearchParams();
+    params.set('documento', documento);
+    if (autoguardar) {
+      params.set('autoguardar', '1');
+      const nombreActual = (inputClienteNombre?.value || '').trim();
+      if (nombreActual) {
+        params.set('nombre', nombreActual);
+      }
+    }
+
+    const resp = await fetchAutorizadoCaja(`/api/dgii/rnc-cache/lookup?${params.toString()}`, {
+      signal: controller.signal,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.error) {
+      throw new Error(data?.error || 'No se pudo consultar DGII local.');
+    }
+
+    if (data?.cliente && typeof data.cliente === 'object') {
+      inyectarClienteSugerido(data.cliente);
+      if (data.cliente.nombre || data.cliente.documento) {
+        aplicarClienteSeleccionado(data.cliente);
+      }
+    }
+
+    if (data?.ok && data?.encontrado && data?.contribuyente) {
+      aplicarContribuyenteDesdeDgii(data.contribuyente, documento);
+    }
+
+    if (autoguardar && data?.cliente_sincronizado) {
+      ultimoDocumentoSincronizadoCliente = documento;
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    console.warn('No se pudo autocompletar desde DGII local (caja):', error?.message || error);
+  } finally {
+    if (consultaDgiiController === controller) {
+      consultaDgiiController = null;
+    }
+  }
+};
+
+const programarLookupDgiiPorDocumento = ({ immediate = false } = {}) => {
+  const documento = normalizarDocumentoFiscal(inputClienteDocumento?.value || '');
+  if (!documento || ![9, 11].includes(documento.length)) {
+    if (consultaDgiiTimer) {
+      clearTimeout(consultaDgiiTimer);
+      consultaDgiiTimer = null;
+    }
+    if (consultaDgiiController) {
+      consultaDgiiController.abort();
+      consultaDgiiController = null;
+    }
+    ultimoDocumentoConsultadoDgii = '';
+    ultimoDocumentoSincronizadoCliente = '';
+    return;
+  }
+  if (!immediate && documento === ultimoDocumentoConsultadoDgii) return;
+  if (immediate && documento === ultimoDocumentoSincronizadoCliente) return;
+
+  if (consultaDgiiTimer) {
+    clearTimeout(consultaDgiiTimer);
+    consultaDgiiTimer = null;
+  }
+
+  if (immediate) {
+    buscarContribuyenteDgiiPorDocumento(documento, { autoguardar: true });
+    return;
+  }
+
+  consultaDgiiTimer = setTimeout(() => {
+    buscarContribuyenteDgiiPorDocumento(documento, { autoguardar: false });
+    consultaDgiiTimer = null;
+  }, 280);
+};
+
 const buscarClientes = async (term = '') => {
 
   try {
 
-    const resp = await fetch(`/api/clientes?search=${encodeURIComponent(term)}`);
+    const resp = await fetchAutorizadoCaja(`/api/clientes?search=${encodeURIComponent(term)}`);
 
     const data = await resp.json();
 
@@ -527,6 +665,11 @@ let totalSalidas = 0;
 let descuentosPorItem = [];
 
 let clientesSugeridos = [];
+let ultimoNombreAutocompletadoDgii = '';
+let ultimoDocumentoConsultadoDgii = '';
+let ultimoDocumentoSincronizadoCliente = '';
+let consultaDgiiTimer = null;
+let consultaDgiiController = null;
 
 const detalleCuadreCache = new Map();
 let detalleCuadreIdActivo = null;
@@ -1697,6 +1840,9 @@ const limpiarSeleccion = () => {
 
   if (inputClienteDocumento) inputClienteDocumento.value = '';
 
+  if (inputClienteBuscar) inputClienteBuscar.value = '';
+  reiniciarLookupDgii();
+
   resetPagosFormulario(0);
 
   seleccionarTipoComprobantePermitido('B02');
@@ -2325,6 +2471,7 @@ const renderDetallePedido = () => {
   const pedidosCuenta = cuentaSeleccionada.pedidos || [];
 
   const encabezado = pedidosCuenta[0];
+  reiniciarLookupDgii();
 
 
 
@@ -4083,6 +4230,18 @@ const inicializarEventos = () => {
   inputClienteBuscar?.addEventListener('focus', () => {
 
     if (!clientesSugeridos.length) buscarClientes('');
+
+  });
+
+  inputClienteDocumento?.addEventListener('input', () => {
+
+    programarLookupDgiiPorDocumento();
+
+  });
+
+  inputClienteDocumento?.addEventListener('blur', () => {
+
+    programarLookupDgiiPorDocumento({ immediate: true });
 
   });
 

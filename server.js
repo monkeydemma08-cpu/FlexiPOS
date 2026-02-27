@@ -90,6 +90,7 @@ const REGISTRO_MODULOS_CATALOGO = Object.freeze([
   { key: 'facturacion_electronica', label: 'Facturacion electronica', disponible: false },
 ]);
 const REGISTRO_MODULOS_MAP = new Map(REGISTRO_MODULOS_CATALOGO.map((item) => [item.key, item]));
+const DGII_CONSULTA_RNC_URL = 'https://dgii.gov.do/app/WebApps/ConsultasWeb2/ConsultasWeb/consultas/rnc.aspx';
 
 let registroMailTransporter = null;
 let registroMailTransporterIntentado = false;
@@ -281,6 +282,168 @@ function normalizarCampoTexto(valor) {
   const limpio = valor.trim();
   return limpio === '' ? null : limpio;
 }
+
+function normalizarDocumentoFiscal(valor) {
+  const clean = normalizarCampoTexto(valor);
+  if (!clean) return null;
+  const digits = clean.replace(/\D+/g, '');
+  if (!digits) return null;
+  return digits.slice(0, 20);
+}
+
+function inferirTipoDocumentoFiscal(documento, tipoRaw = null) {
+  const tipo = normalizarCampoTexto(tipoRaw);
+  if (tipo) {
+    const normalized = tipo.toUpperCase();
+    if (normalized.includes('CEDULA')) return 'CEDULA';
+    if (normalized.includes('RNC')) return 'RNC';
+  }
+  const clean = normalizarDocumentoFiscal(documento) || '';
+  if (clean.length === 11) return 'CEDULA';
+  if (clean.length === 9) return 'RNC';
+  return 'OTRO';
+}
+
+const SQL_CLIENTE_DOCUMENTO_NORMALIZADO =
+  "REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(documento, ''), '-', ''), ' ', ''), '.', ''), '/', '')";
+
+const obtenerClientePorDocumentoNormalizado = async (negocioId, documentoNormalizado) => {
+  if (!negocioId || !documentoNormalizado) return null;
+  return db.get(
+    `
+      SELECT id, nombre, documento, tipo_documento, telefono, email, direccion, notas, activo, negocio_id
+      FROM clientes
+      WHERE negocio_id = ?
+        AND ${SQL_CLIENTE_DOCUMENTO_NORMALIZADO} = ?
+      ORDER BY activo DESC, COALESCE(actualizado_en, creado_en) DESC, id DESC
+      LIMIT 1
+    `,
+    [negocioId, documentoNormalizado]
+  );
+};
+
+const obtenerContribuyenteDesdeCacheDgii = async (documentoNormalizado) => {
+  if (!documentoNormalizado) return null;
+  try {
+    return await db.get(
+      `
+        SELECT documento,
+               documento_formateado,
+               tipo_documento,
+               nombre_o_razon_social,
+               nombre_comercial,
+               estado,
+               actividad_economica,
+               updated_at
+          FROM dgii_rnc_cache
+         WHERE documento = ?
+         LIMIT 1
+      `,
+      [documentoNormalizado]
+    );
+  } catch (error) {
+    const mensaje = String(error?.message || '');
+    const noExisteTabla =
+      mensaje.includes("doesn't exist") ||
+      mensaje.includes('no such table') ||
+      mensaje.includes('Table');
+    if (noExisteTabla) return null;
+    throw error;
+  }
+};
+
+const sincronizarClientePorDocumento = async ({ negocioId, documento, nombre }) => {
+  const documentoNormalizado = normalizarDocumentoFiscal(documento);
+  if (!negocioId || !documentoNormalizado || ![9, 11].includes(documentoNormalizado.length)) {
+    return { ok: false, motivo: 'documento_invalido' };
+  }
+
+  const contribuyente = await obtenerContribuyenteDesdeCacheDgii(documentoNormalizado);
+  const nombreFinal =
+    normalizarCampoTexto(nombre) ||
+    normalizarCampoTexto(contribuyente?.nombre_o_razon_social) ||
+    normalizarCampoTexto(contribuyente?.nombre_comercial);
+  if (!nombreFinal) {
+    return { ok: false, motivo: 'nombre_no_disponible', contribuyente: contribuyente || null };
+  }
+
+  const documentoGuardado =
+    normalizarCampoTexto(documento) ||
+    normalizarCampoTexto(contribuyente?.documento_formateado) ||
+    documentoNormalizado;
+  const tipoDocumento = inferirTipoDocumentoFiscal(
+    documentoNormalizado,
+    contribuyente?.tipo_documento || null
+  );
+
+  const existente = await obtenerClientePorDocumentoNormalizado(negocioId, documentoNormalizado);
+  if (existente) {
+    await db.run(
+      `
+        UPDATE clientes
+           SET nombre = ?,
+               documento = ?,
+               tipo_documento = ?,
+               activo = 1,
+               actualizado_en = CURRENT_TIMESTAMP
+         WHERE id = ?
+           AND negocio_id = ?
+      `,
+      [nombreFinal, documentoGuardado, tipoDocumento, existente.id, negocioId]
+    );
+
+    return {
+      ok: true,
+      creado: false,
+      actualizado: true,
+      cliente: {
+        ...existente,
+        nombre: nombreFinal,
+        documento: documentoGuardado,
+        tipo_documento: tipoDocumento,
+        activo: 1,
+      },
+      contribuyente: contribuyente || null,
+    };
+  }
+
+  const insert = await db.run(
+    `
+      INSERT INTO clientes (nombre, documento, tipo_documento, telefono, email, direccion, notas, activo, negocio_id)
+      VALUES (?, ?, ?, NULL, NULL, NULL, NULL, 1, ?)
+    `,
+    [nombreFinal, documentoGuardado, tipoDocumento, negocioId]
+  );
+
+  const nuevoId = insert?.lastID || null;
+  const clienteCreado = nuevoId
+    ? await db.get(
+        `
+          SELECT id, nombre, documento, tipo_documento, telefono, email, direccion, notas, activo, negocio_id
+            FROM clientes
+           WHERE id = ?
+             AND negocio_id = ?
+           LIMIT 1
+        `,
+        [nuevoId, negocioId]
+      )
+    : null;
+
+  return {
+    ok: true,
+    creado: true,
+    actualizado: false,
+    cliente: clienteCreado || {
+      id: nuevoId,
+      nombre: nombreFinal,
+      documento: documentoGuardado,
+      tipo_documento: tipoDocumento,
+      activo: 1,
+      negocio_id: negocioId,
+    },
+    contribuyente: contribuyente || null,
+  };
+};
 
 function normalizarMonto(valor) {
   if (valor === undefined || valor === null) {
@@ -4574,7 +4737,7 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
           const pedidoIds = pedidosActivos.map((pedido) => pedido.id);
           return actualizarCogsPedidos(pedidoIds, negocioIdOperacion)
             .then(() =>
-              db.run('COMMIT', (commitErr) => {
+              db.run('COMMIT', async (commitErr) => {
                 if (commitErr) {
                   console.error('Error al confirmar cierre de cuenta:', commitErr.message);
                   return callback({ status: 500, message: 'No se pudo cerrar la cuenta' });
@@ -4599,8 +4762,25 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
                   total_cobrado: totalAPagar,
                 };
 
+                let clienteSincronizado = null;
+                try {
+                  const sync = await sincronizarClientePorDocumento({
+                    negocioId: negocioIdOperacion,
+                    documento: factura.cliente_documento,
+                    nombre: factura.cliente,
+                  });
+                  if (sync?.ok) {
+                    clienteSincronizado = sync.cliente || null;
+                  }
+                } catch (syncError) {
+                  console.warn(
+                    'No se pudo sincronizar cliente automaticamente al cerrar cuenta:',
+                    syncError?.message || syncError
+                  );
+                }
+
                 limpiarCacheAnalitica(negocioIdOperacion);
-                return callback(null, { factura, totales });
+                return callback(null, { factura, totales, cliente: clienteSincronizado });
               })
             )
             .catch((cogsErr) => {
@@ -7678,6 +7858,7 @@ app.put('/api/cuentas/:id/cerrar', (req, res) => {
           ok: true,
           factura: resultado?.factura || null,
           totales: resultado?.totales || null,
+          cliente: resultado?.cliente || null,
         });
       });
     } catch (error) {
@@ -10082,6 +10263,68 @@ app.post('/api/usuarios/:id/cerrar-sesiones', (req, res) => {
     } catch (error) {
       console.error('Error al cerrar sesiones de usuario:', error?.message || error);
       res.status(500).json({ ok: false, error: 'No se pudieron cerrar las sesiones' });
+    }
+  });
+});
+
+app.get('/api/dgii/rnc-cache/lookup', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const documento = normalizarDocumentoFiscal(req.query?.documento);
+    if (!documento) {
+      return res.status(400).json({ ok: false, error: 'Documento invalido.' });
+    }
+
+    try {
+      const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+      const autoguardar = normalizarFlag(req.query?.autoguardar ?? req.query?.guardar_cliente, 0) === 1;
+      const clienteExistente = await obtenerClientePorDocumentoNormalizado(negocioId, documento);
+      const row = await obtenerContribuyenteDesdeCacheDgii(documento);
+      let sync = null;
+
+      if (autoguardar) {
+        const nombrePreferido = normalizarCampoTexto(req.query?.nombre, null) || row?.nombre_o_razon_social || '';
+        sync = await sincronizarClientePorDocumento({
+          negocioId,
+          documento,
+          nombre: nombrePreferido,
+        });
+      }
+
+      if (!row) {
+        return res.json({
+          ok: true,
+          encontrado: false,
+          contribuyente: null,
+          cliente: sync?.ok ? sync.cliente : clienteExistente || null,
+          cliente_sincronizado: Boolean(sync?.ok),
+          cliente_creado: Boolean(sync?.ok && sync?.creado),
+          cliente_actualizado: Boolean(sync?.ok && sync?.actualizado),
+          consulta_web_url: DGII_CONSULTA_RNC_URL,
+        });
+      }
+
+      return res.json({
+        ok: true,
+        encontrado: true,
+        consulta_web_url: DGII_CONSULTA_RNC_URL,
+        cliente: sync?.ok ? sync.cliente : clienteExistente || null,
+        cliente_sincronizado: Boolean(sync?.ok),
+        cliente_creado: Boolean(sync?.ok && sync?.creado),
+        cliente_actualizado: Boolean(sync?.ok && sync?.actualizado),
+        contribuyente: {
+          documento: row.documento_formateado || row.documento,
+          documento_limpio: row.documento,
+          tipo_documento: inferirTipoDocumentoFiscal(row.documento, row.tipo_documento),
+          nombre: row.nombre_o_razon_social || '',
+          nombre_comercial: row.nombre_comercial || '',
+          estado: row.estado || '',
+          actividad_economica: row.actividad_economica || '',
+          actualizado_en: row.updated_at || null,
+        },
+      });
+    } catch (error) {
+      console.error('Error al buscar documento en dgii_rnc_cache:', error?.message || error);
+      return res.status(500).json({ ok: false, error: 'No se pudo consultar el cache DGII.' });
     }
   });
 });

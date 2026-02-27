@@ -648,6 +648,94 @@ async function ensureTableDgiiPaso2Intentos() {
   `);
 }
 
+async function ensureTableDgiiRncCache() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS dgii_rnc_cache (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      documento VARCHAR(20) NOT NULL,
+      documento_formateado VARCHAR(25) NULL,
+      tipo_documento VARCHAR(12) NOT NULL DEFAULT 'OTRO',
+      nombre_o_razon_social VARCHAR(255) NOT NULL,
+      nombre_comercial VARCHAR(255) NULL,
+      estado VARCHAR(120) NULL,
+      actividad_economica VARCHAR(255) NULL,
+      fuente VARCHAR(60) NOT NULL DEFAULT 'DGII',
+      fecha_fuente DATE NULL,
+      lote_importacion VARCHAR(64) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uk_dgii_rnc_cache_documento (documento),
+      KEY idx_dgii_rnc_cache_documento_formateado (documento_formateado),
+      KEY idx_dgii_rnc_cache_tipo_documento (tipo_documento),
+      KEY idx_dgii_rnc_cache_nombre (nombre_o_razon_social)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureColumn('dgii_rnc_cache', 'documento VARCHAR(20) NOT NULL');
+  await ensureColumn('dgii_rnc_cache', 'documento_formateado VARCHAR(25) NULL');
+  await ensureColumn('dgii_rnc_cache', "tipo_documento VARCHAR(12) NOT NULL DEFAULT 'OTRO'");
+  await ensureColumn('dgii_rnc_cache', 'nombre_o_razon_social VARCHAR(255) NOT NULL');
+  await ensureColumn('dgii_rnc_cache', 'nombre_comercial VARCHAR(255) NULL');
+  await ensureColumn('dgii_rnc_cache', 'estado VARCHAR(120) NULL');
+  await ensureColumn('dgii_rnc_cache', 'actividad_economica VARCHAR(255) NULL');
+  await ensureColumn('dgii_rnc_cache', "fuente VARCHAR(60) NOT NULL DEFAULT 'DGII'");
+  await ensureColumn('dgii_rnc_cache', 'fecha_fuente DATE NULL');
+  await ensureColumn('dgii_rnc_cache', 'lote_importacion VARCHAR(64) NULL');
+  await ensureColumn('dgii_rnc_cache', 'updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+  await ensureColumn('dgii_rnc_cache', 'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
+  await ensureIndexByName('dgii_rnc_cache', 'idx_dgii_rnc_cache_documento_formateado', '(documento_formateado)');
+  await ensureIndexByName('dgii_rnc_cache', 'idx_dgii_rnc_cache_tipo_documento', '(tipo_documento)');
+  await ensureIndexByName('dgii_rnc_cache', 'idx_dgii_rnc_cache_nombre', '(nombre_o_razon_social)');
+  if (!(await indexNameExists('dgii_rnc_cache', 'uk_dgii_rnc_cache_documento'))) {
+    try {
+      await query('CREATE UNIQUE INDEX uk_dgii_rnc_cache_documento ON dgii_rnc_cache (documento)');
+    } catch (error) {
+      console.warn('No se pudo crear indice unico uk_dgii_rnc_cache_documento:', error?.message || error);
+    }
+  }
+}
+
+async function ensureTableDgiiRncCacheImports() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS dgii_rnc_cache_imports (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      lote_importacion VARCHAR(64) NOT NULL,
+      fuente VARCHAR(60) NOT NULL DEFAULT 'DGII',
+      origen VARCHAR(255) NULL,
+      estado VARCHAR(20) NOT NULL DEFAULT 'iniciado',
+      lineas_total INT NOT NULL DEFAULT 0,
+      registros_validos INT NOT NULL DEFAULT 0,
+      descartados INT NOT NULL DEFAULT 0,
+      mensaje TEXT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      finished_at DATETIME NULL,
+      UNIQUE KEY uk_dgii_rnc_cache_imports_lote (lote_importacion),
+      KEY idx_dgii_rnc_cache_imports_estado (estado),
+      KEY idx_dgii_rnc_cache_imports_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureColumn('dgii_rnc_cache_imports', 'lote_importacion VARCHAR(64) NOT NULL');
+  await ensureColumn('dgii_rnc_cache_imports', "fuente VARCHAR(60) NOT NULL DEFAULT 'DGII'");
+  await ensureColumn('dgii_rnc_cache_imports', 'origen VARCHAR(255) NULL');
+  await ensureColumn('dgii_rnc_cache_imports', "estado VARCHAR(20) NOT NULL DEFAULT 'iniciado'");
+  await ensureColumn('dgii_rnc_cache_imports', 'lineas_total INT NOT NULL DEFAULT 0');
+  await ensureColumn('dgii_rnc_cache_imports', 'registros_validos INT NOT NULL DEFAULT 0');
+  await ensureColumn('dgii_rnc_cache_imports', 'descartados INT NOT NULL DEFAULT 0');
+  await ensureColumn('dgii_rnc_cache_imports', 'mensaje TEXT NULL');
+  await ensureColumn('dgii_rnc_cache_imports', 'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
+  await ensureColumn('dgii_rnc_cache_imports', 'finished_at DATETIME NULL');
+  await ensureIndexByName('dgii_rnc_cache_imports', 'idx_dgii_rnc_cache_imports_estado', '(estado)');
+  await ensureIndexByName('dgii_rnc_cache_imports', 'idx_dgii_rnc_cache_imports_created', '(created_at)');
+  if (!(await indexNameExists('dgii_rnc_cache_imports', 'uk_dgii_rnc_cache_imports_lote'))) {
+    try {
+      await query('CREATE UNIQUE INDEX uk_dgii_rnc_cache_imports_lote ON dgii_rnc_cache_imports (lote_importacion)');
+    } catch (error) {
+      console.warn('No se pudo crear indice unico uk_dgii_rnc_cache_imports_lote:', error?.message || error);
+    }
+  }
+}
+
 async function ensureTableGastos() {
   await query(`
     CREATE TABLE IF NOT EXISTS gastos (
@@ -1743,6 +1831,8 @@ async function runMigrations() {
   await ensureTableDgiiPaso2Sets();
   await ensureTableDgiiPaso2Casos();
   await ensureTableDgiiPaso2Intentos();
+  await ensureTableDgiiRncCache();
+  await ensureTableDgiiRncCacheImports();
   await ensureTableGastos();
   await ensureTableGastosPagos();
   await ensureTableGastosAdjuntos();
