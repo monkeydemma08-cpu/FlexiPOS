@@ -2833,7 +2833,11 @@ const renderDetallePedido = () => {
 
   const baseConDescuento = Math.max(baseConItems - descuentoGeneralMonto, 0);
 
-  const propinaMonto = baseConDescuento * (propinaPorcentaje / 100);
+  const factorDescuentoGeneral = baseConItems > 0 ? baseConDescuento / baseConItems : 1;
+
+  const subtotalConDescuentoFinal = subtotalConDescuento * factorDescuentoGeneral;
+
+  const propinaMonto = subtotalConDescuentoFinal * (propinaPorcentaje / 100);
 
   const total = baseConDescuento + propinaMonto;
 

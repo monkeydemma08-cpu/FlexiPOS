@@ -857,7 +857,9 @@ const calcularTotalesCobro = () => {
   const baseConItems = subtotalConDescuento + impuestoAjustado;
   const descuentoGeneralMonto = Math.min(baseConItems * (descuentoPorcentaje / 100), baseConItems);
   const baseConDescuento = Math.max(baseConItems - descuentoGeneralMonto, 0);
-  const propinaMonto = baseConDescuento * (propinaPorcentaje / 100);
+  const factorDescuentoGeneral = baseConItems > 0 ? baseConDescuento / baseConItems : 1;
+  const subtotalConDescuentoFinal = subtotalConDescuento * factorDescuentoGeneral;
+  const propinaMonto = subtotalConDescuentoFinal * (propinaPorcentaje / 100);
   const total = baseConDescuento + propinaMonto;
   const descuentoTotal = Math.min(descuentoItemsMonto + descuentoGeneralMonto, base);
   const descuentoPorcentajeEfectivo = base > 0 ? ((base - baseConDescuento) / base) * 100 : 0;

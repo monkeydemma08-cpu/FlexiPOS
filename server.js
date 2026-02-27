@@ -4653,7 +4653,9 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     const base = subtotalTotal + impuestoTotal;
     const descuentoMonto = Math.min(base * (descuentoValor / 100), base);
     const baseConDescuento = Math.max(base - descuentoMonto, 0);
-    const propinaMonto = baseConDescuento * (propinaValor / 100);
+    const factorDescuento = base > 0 ? baseConDescuento / base : 1;
+    const subtotalConDescuento = subtotalTotal * factorDescuento;
+    const propinaMonto = subtotalConDescuento * (propinaValor / 100);
     const totalAPagar = baseConDescuento + propinaMonto;
 
     const tarjeta = normalizarNumero(pagos.tarjeta, 0);
