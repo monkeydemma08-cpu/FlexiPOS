@@ -49,6 +49,7 @@ const estado = {
   productosConImpuesto: false,
   impuestoIncluidoPorcentaje: 0,
   pedidoEditandoId: null,
+  modoEdicion: null,
   cuentaReferenciaId: null,
   pedidosActivos: [],
   modoServicio: 'en_local',
@@ -1035,6 +1036,7 @@ const validarPedido = () => {
 
 const cancelarEdicion = () => {
   estado.pedidoEditandoId = null;
+  estado.modoEdicion = null;
   estado.cuentaReferenciaId = null;
   estado.carrito.clear();
   if (botonEnviar) botonEnviar.textContent = 'Enviar a preparar orden';
@@ -1054,6 +1056,7 @@ const iniciarEdicion = (pedido) => {
   limpiarMensaje();
   estado.carrito.clear();
   estado.pedidoEditandoId = pedido.id;
+  estado.modoEdicion = 'cuenta';
   estado.cuentaReferenciaId = pedido.cuenta_id || pedido.id;
   if (campoMesa) {
     campoMesa.value = pedido.mesa || '';
@@ -1071,6 +1074,83 @@ const iniciarEdicion = (pedido) => {
     `Agrega una nueva orden para la cuenta #${estado.cuentaReferenciaId} (pedido #${pedido.id}).`,
     'info'
   );
+  actualizarCarritoUI();
+};
+
+const resolverLabelPrecioPorValor = (producto, precioUnitario) => {
+  const opciones = normalizarOpcionesPrecioProducto(producto);
+  const encontrado = opciones.find(
+    (opcion) => Number(opcion.valor).toFixed(2) === Number(precioUnitario || 0).toFixed(2)
+  );
+  return encontrado?.label || 'Base';
+};
+
+const cargarPedidoEnCarrito = (pedido) => {
+  estado.carrito.clear();
+  const items = Array.isArray(pedido?.items) ? pedido.items : [];
+  items.forEach((item) => {
+    const productoId = Number(item?.producto_id);
+    const cantidad = Number(item?.cantidad) || 0;
+    const precioUnitario = Number(item?.precio_unitario) || 0;
+    if (!Number.isFinite(productoId) || productoId <= 0 || cantidad <= 0) return;
+
+    const producto = estado.productos.find((p) => Number(p.id) === productoId) || null;
+    const precioLabel = resolverLabelPrecioPorValor(producto, precioUnitario);
+    const itemKey = construirClaveCarrito(productoId, precioLabel, precioUnitario);
+    const existente = estado.carrito.get(itemKey);
+    if (existente) {
+      existente.cantidad += cantidad;
+    } else {
+      estado.carrito.set(itemKey, {
+        producto_id: productoId,
+        cantidad,
+        precio_unitario: precioUnitario,
+        precio_label: precioLabel,
+      });
+    }
+  });
+};
+
+const iniciarEdicionPedidoPendiente = (pedido, cuenta = {}) => {
+  limpiarMensaje();
+  estado.pedidoEditandoId = Number(pedido?.id) || null;
+  estado.modoEdicion = 'pedido_pendiente';
+  estado.cuentaReferenciaId = pedido?.cuenta_id || cuenta?.cuenta_id || pedido?.id || null;
+
+  if (campoMesa) {
+    campoMesa.value = pedido?.mesa || cuenta?.mesa || '';
+  }
+
+  const modoServicio = pedido?.modo_servicio || cuenta?.modo_servicio || 'en_local';
+  if (selectServicio) {
+    selectServicio.value = modoServicio;
+  }
+
+  if (notaInput) {
+    notaInput.value = pedido?.nota || '';
+  }
+
+  if (deliveryClienteInput) {
+    deliveryClienteInput.value = pedido?.cliente || cuenta?.cliente || '';
+  }
+  if (deliveryTelefonoInput) {
+    deliveryTelefonoInput.value = pedido?.delivery_telefono || '';
+  }
+  if (deliveryDireccionInput) {
+    deliveryDireccionInput.value = pedido?.delivery_direccion || '';
+  }
+  if (deliveryReferenciaInput) {
+    deliveryReferenciaInput.value = pedido?.delivery_referencia || '';
+  }
+  if (deliveryNotaInput) {
+    deliveryNotaInput.value = pedido?.delivery_notas || '';
+  }
+
+  cargarPedidoEnCarrito(pedido);
+  if (botonEnviar) botonEnviar.textContent = 'Guardar cambios del pedido';
+  if (botonCancelarEdicion) botonCancelarEdicion.hidden = false;
+
+  mostrarMensaje(`Editando pedido pendiente #${pedido?.id}.`, 'info');
   actualizarCarritoUI();
 };
 
@@ -1236,6 +1316,16 @@ const crearCardCuenta = (cuenta) => {
     accionesPedido.className = 'pedido-activo-acciones';
 
     if (pedido.estado === 'pendiente') {
+      const botonEditarPedido = document.createElement('button');
+      botonEditarPedido.type = 'button';
+      botonEditarPedido.className = 'kanm-button secondary';
+      botonEditarPedido.textContent = 'Editar pedido';
+      botonEditarPedido.addEventListener('click', () => {
+        iniciarEdicionPedidoPendiente(pedido, cuenta);
+        activarTab(pedido.modo_servicio === 'delivery' ? 'delivery' : 'tomar');
+      });
+      accionesPedido.appendChild(botonEditarPedido);
+
       const botonCancelarPedido = document.createElement('button');
       botonCancelarPedido.type = 'button';
       botonCancelarPedido.className = 'kanm-button ghost';
@@ -1357,10 +1447,10 @@ const cargarPedidosActivos = async (mostrarCarga = true) => {
             const detalleResp = await fetchAutorizadoMesera(`/api/pedidos/${pedido.id}`);
             if (!detalleResp.ok) throw new Error();
             const detalle = await detalleResp.json();
-            return [pedido.id, detalle.items || []];
+            return [pedido.id, detalle || {}];
           } catch (error) {
             console.error(`Error al obtener detalle del pedido ${pedido.id}:`, error);
-            return [pedido.id, []];
+            return [pedido.id, { items: [] }];
           }
         })
       )
@@ -1375,7 +1465,8 @@ const cargarPedidosActivos = async (mostrarCarga = true) => {
 
       cuenta.pedidos = pedidosOrdenados.map((pedido) => ({
         ...pedido,
-        items: detallesPorId.get(pedido.id) || [],
+        ...(detallesPorId.get(pedido.id) || {}),
+        items: detallesPorId.get(pedido.id)?.items || [],
       }));
     });
 
@@ -1437,9 +1528,17 @@ const enviarPedido = async (destino = 'cocina') => {
   }
 
   const payload = obtenerPayloadPedido(destino);
-  const esEdicion = Boolean(estado.pedidoEditandoId);
-  const url = '/api/pedidos';
-  const metodo = 'POST';
+  const esEdicion = Boolean(estado.modoEdicion);
+  const editandoPedidoPendiente =
+    estado.modoEdicion === 'pedido_pendiente' && Number.isFinite(Number(estado.pedidoEditandoId));
+  const url = editandoPedidoPendiente
+    ? `/api/pedidos/${estado.pedidoEditandoId}`
+    : '/api/pedidos';
+  const metodo = editandoPedidoPendiente ? 'PUT' : 'POST';
+  if (editandoPedidoPendiente) {
+    delete payload.destino;
+    delete payload.cuenta_id;
+  }
   let botonActivo = botonEnviar;
   if (destino === 'caja') botonActivo = botonEnviarCaja;
   if (destino === 'delivery-prep') botonActivo = botonDeliveryPrep;
@@ -1476,8 +1575,10 @@ const enviarPedido = async (destino = 'cocina') => {
       mostrarMensaje(data.advertencias.join(' '), 'warning');
     }
 
-    const mensajeExito = esEdicion
-      ? 'Nueva orden agregada a la cuenta correctamente.'
+    const mensajeExito = editandoPedidoPendiente
+      ? 'Pedido actualizado correctamente.'
+      : esEdicion
+        ? 'Nueva orden agregada a la cuenta correctamente.'
       : destino === 'caja'
         ? 'Pedido enviado a caja correctamente.'
         : destino === 'delivery-prep'

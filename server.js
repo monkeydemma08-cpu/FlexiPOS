@@ -7597,6 +7597,384 @@ app.get('/api/pedidos/:id', (req, res) => {
   });
 });
 
+app.put('/api/pedidos/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const pedidoId = Number(req.params.id);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Pedido no valido.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const payload = req.body || {};
+    const itemsEntrada = Array.isArray(payload.items) ? payload.items : [];
+
+    if (!itemsEntrada.length) {
+      return res.status(400).json({ ok: false, error: 'Agrega al menos un producto al pedido.' });
+    }
+
+    const pedidoActual = await db.get(
+      `SELECT id, cuenta_id, estado, mesa, cliente, modo_servicio, nota,
+              delivery_estado, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas
+         FROM pedidos
+        WHERE id = ? AND negocio_id = ?`,
+      [pedidoId, negocioId]
+    );
+
+    if (!pedidoActual) {
+      return res.status(404).json({ ok: false, error: 'Pedido no encontrado.' });
+    }
+
+    if ((pedidoActual.estado || '').toLowerCase() !== 'pendiente') {
+      return res.status(400).json({ ok: false, error: 'Solo se pueden editar pedidos en estado pendiente.' });
+    }
+
+    const modoInventario = await obtenerModoInventarioCostos(negocioId);
+    const usaRecetas = modoInventario === 'PREPARACION';
+    const bloquearInsumosSinStock = usaRecetas ? await obtenerConfigBloqueoInsumos(negocioId) : false;
+    const advertenciasInsumos = [];
+
+    const modoServicio = limpiarTextoGeneral(payload.modo_servicio) || pedidoActual.modo_servicio || 'en_local';
+    const esDelivery = modoServicio === 'delivery';
+
+    const mesaEntrada = limpiarTextoGeneral(payload.mesa);
+    const clienteEntrada = limpiarTextoGeneral(payload.cliente);
+    const notaEntrada = limpiarTextoGeneral(payload.nota);
+
+    const deliveryPayload = payload.delivery && typeof payload.delivery === 'object' ? payload.delivery : {};
+    const deliveryTelefonoEntrada = limpiarTextoGeneral(
+      deliveryPayload.telefono ?? payload.delivery_telefono ?? payload.deliveryTelefono ?? payload.telefono_delivery
+    );
+    const deliveryDireccionEntrada = limpiarTextoGeneral(
+      deliveryPayload.direccion ?? payload.delivery_direccion ?? payload.deliveryDireccion
+    );
+    const deliveryReferenciaEntrada = limpiarTextoGeneral(
+      deliveryPayload.referencia ?? payload.delivery_referencia ?? payload.deliveryReferencia
+    );
+    const deliveryNotasEntrada = limpiarTextoGeneral(
+      deliveryPayload.notas ?? deliveryPayload.nota ?? payload.delivery_notas ?? payload.deliveryNotas
+    );
+
+    const mesaFinal = esDelivery ? null : mesaEntrada !== null ? mesaEntrada : pedidoActual.mesa;
+    const clienteFinal = clienteEntrada !== null ? clienteEntrada : pedidoActual.cliente;
+    const notaFinal = esDelivery ? null : notaEntrada !== null ? notaEntrada : pedidoActual.nota;
+    const deliveryTelefonoFinal = esDelivery
+      ? deliveryTelefonoEntrada !== null
+        ? deliveryTelefonoEntrada
+        : pedidoActual.delivery_telefono
+      : null;
+    const deliveryDireccionFinal = esDelivery
+      ? deliveryDireccionEntrada !== null
+        ? deliveryDireccionEntrada
+        : pedidoActual.delivery_direccion
+      : null;
+    const deliveryReferenciaFinal = esDelivery
+      ? deliveryReferenciaEntrada !== null
+        ? deliveryReferenciaEntrada
+        : pedidoActual.delivery_referencia
+      : null;
+    const deliveryNotasFinal = esDelivery
+      ? deliveryNotasEntrada !== null
+        ? deliveryNotasEntrada
+        : pedidoActual.delivery_notas
+      : null;
+    const deliveryEstadoFinal = esDelivery ? 'pendiente' : null;
+
+    if (esDelivery) {
+      if (!clienteFinal) {
+        return res.status(400).json({ ok: false, error: 'Ingresa el nombre del cliente para delivery.' });
+      }
+      if (!deliveryTelefonoFinal) {
+        return res.status(400).json({ ok: false, error: 'Ingresa el telefono de contacto para delivery.' });
+      }
+      if (!deliveryDireccionFinal) {
+        return res.status(400).json({ ok: false, error: 'Ingresa la direccion de entrega.' });
+      }
+      if (deliveryNotasFinal && deliveryNotasFinal.length > 200) {
+        return res
+          .status(400)
+          .json({ ok: false, error: 'La nota de entrega no puede superar 200 caracteres.' });
+      }
+    } else if (notaFinal && notaFinal.length > 200) {
+      return res.status(400).json({ ok: false, error: 'La nota no puede superar 200 caracteres.' });
+    }
+
+    const errorEstado = (status, message) => {
+      const error = new Error(message);
+      error.status = status;
+      return error;
+    };
+
+    const itemsProcesados = [];
+    let transaccionIniciada = false;
+
+    try {
+      await db.run('BEGIN');
+      transaccionIniciada = true;
+
+      // Restituimos la reserva actual para recalcular stock con el pedido editado.
+      await ajustarStockPorPedido(pedidoId, negocioId, 1);
+      await revertirConsumoInsumosPorPedido(pedidoId, negocioId);
+      await db.run('DELETE FROM detalle_pedido WHERE pedido_id = ? AND negocio_id = ?', [pedidoId, negocioId]);
+
+      for (const item of itemsEntrada) {
+        const productoId = Number(item?.producto_id);
+        const cantidad = Number(item?.cantidad);
+        if (!Number.isFinite(productoId) || productoId <= 0) {
+          throw errorEstado(400, 'Hay un producto invalido en el pedido.');
+        }
+        if (!Number.isFinite(cantidad) || cantidad <= 0) {
+          throw errorEstado(400, 'Todas las cantidades deben ser mayores a cero.');
+        }
+
+        const producto = await db.get(
+          `SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido,
+                  p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad,
+                  COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
+             FROM productos p
+             LEFT JOIN categorias c ON c.id = p.categoria_id
+            WHERE p.id = ? AND p.negocio_id = ?`,
+          [productoId, negocioId]
+        );
+
+        if (!producto) {
+          throw errorEstado(404, `Producto ${productoId} no encontrado.`);
+        }
+
+        const tipoProducto = normalizarTipoProducto(producto.tipo_producto, 'FINAL');
+        const esInsumo = tipoProducto === 'INSUMO';
+        const insumoVendible = normalizarFlag(producto.insumo_vendible, 0) === 1;
+        if (usaRecetas && esInsumo && !insumoVendible) {
+          throw errorEstado(
+            400,
+            `El producto ${producto.nombre || productoId} es un insumo no vendible.`
+          );
+        }
+
+        const stockIndefinido = esStockIndefinido(producto);
+        if (!stockIndefinido) {
+          const stockDisponible = Number(producto.stock) || 0;
+          if (cantidad > stockDisponible) {
+            throw errorEstado(
+              400,
+              `Stock insuficiente para ${producto.nombre || `el producto ${productoId}`}.`
+            );
+          }
+        }
+
+        const opcionesPrecio = construirOpcionesPrecioProducto(producto);
+        const precioSolicitadoRaw = item?.precio_unitario ?? item?.precioUnitario ?? null;
+        let precioUnitario = opcionesPrecio.length ? opcionesPrecio[0].valor : 0;
+        if (precioSolicitadoRaw !== null && precioSolicitadoRaw !== undefined && precioSolicitadoRaw !== '') {
+          const precioSolicitado = normalizarNumero(precioSolicitadoRaw, null);
+          if (precioSolicitado === null || precioSolicitado < 0) {
+            throw errorEstado(400, `Precio invalido para ${producto.nombre || productoId}.`);
+          }
+          const precioRedondeado = Number(precioSolicitado.toFixed(2));
+          const permitido = opcionesPrecio.some(
+            (opcion) => Number(opcion.valor).toFixed(2) === precioRedondeado.toFixed(2)
+          );
+          if (!permitido) {
+            throw errorEstado(400, `Precio no permitido para ${producto.nombre || productoId}.`);
+          }
+          precioUnitario = precioRedondeado;
+        }
+
+        itemsProcesados.push({
+          producto_id: producto.id,
+          cantidad,
+          precio_unitario: precioUnitario,
+          nombre: producto.nombre,
+          stock_indefinido: stockIndefinido ? 1 : 0,
+          area_preparacion: normalizarAreaPreparacion(producto.area_preparacion),
+          tipo_producto: tipoProducto,
+          insumo_vendible: insumoVendible ? 1 : 0,
+          unidad_base: normalizarUnidadBase(producto.unidad_base, 'UND'),
+          contenido_por_unidad: normalizarContenidoPorUnidad(producto.contenido_por_unidad, 1),
+        });
+      }
+
+      const productoIds = itemsProcesados
+        .map((item) => Number(item.producto_id))
+        .filter((id) => Number.isFinite(id) && id > 0);
+      const recetasMap = usaRecetas
+        ? await obtenerRecetasPorProductos(productoIds, negocioId)
+        : new Map();
+      const insumosMap = new Map();
+      const consumoPorInsumo = new Map();
+
+      if (usaRecetas && recetasMap.size > 0) {
+        for (const item of itemsProcesados) {
+          const receta = recetasMap.get(Number(item.producto_id));
+          if (!Array.isArray(receta) || receta.length === 0) {
+            continue;
+          }
+          item.consumos = [];
+          for (const detalle of receta) {
+            if (detalle.tipo_producto !== 'INSUMO') {
+              throw errorEstado(
+                400,
+                `La receta de ${item.nombre || item.producto_id} tiene insumos invalidos.`
+              );
+            }
+            const cantidadBase = Number((item.cantidad * (Number(detalle.cantidad) || 0)).toFixed(4));
+            if (!cantidadBase) {
+              continue;
+            }
+            const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
+            const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
+            item.consumos.push({
+              insumo_id: Number(detalle.insumo_id),
+              cantidad_base: cantidadBase,
+              cantidad_unidades: cantidadUnidades,
+              unidad_base: detalle.unidad_base,
+            });
+            const acumulado = consumoPorInsumo.get(detalle.insumo_id) || 0;
+            consumoPorInsumo.set(detalle.insumo_id, Number((acumulado + cantidadUnidades).toFixed(4)));
+            if (!insumosMap.has(detalle.insumo_id)) {
+              insumosMap.set(detalle.insumo_id, detalle);
+            }
+          }
+        }
+
+        for (const [insumoId, cantidadRequerida] of consumoPorInsumo.entries()) {
+          if (!cantidadRequerida) continue;
+          const insumo = insumosMap.get(insumoId);
+          if (!insumo || esStockIndefinido(insumo)) {
+            continue;
+          }
+          const stockDisponible = Number(insumo.stock) || 0;
+          if (cantidadRequerida > stockDisponible) {
+            const mensaje = `Stock insuficiente para insumo ${insumo.insumo_nombre || insumoId}.`;
+            if (bloquearInsumosSinStock) {
+              throw errorEstado(400, mensaje);
+            }
+            advertenciasInsumos.push(mensaje);
+          }
+        }
+      }
+
+      const subtotalBruto = itemsProcesados.reduce(
+        (acc, item) => acc + (Number(item.precio_unitario) || 0) * item.cantidad,
+        0
+      );
+      const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+      const totalesPedido = calcularTotalesConImpuestoConfigurado(subtotalBruto, configImpuesto);
+      const subtotal = totalesPedido.subtotal;
+      const impuesto = totalesPedido.impuesto;
+      const total = totalesPedido.total;
+
+      const consumoRegistros = [];
+
+      for (const item of itemsProcesados) {
+        const detalleResult = await db.run(
+          'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id) VALUES (?, ?, ?, ?, ?)',
+          [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId]
+        );
+        const detalleId = detalleResult?.lastID;
+        if (detalleId && Array.isArray(item.consumos) && item.consumos.length) {
+          item.consumos.forEach((consumo) => {
+            consumoRegistros.push({
+              detalle_pedido_id: detalleId,
+              producto_final_id: item.producto_id,
+              insumo_id: consumo.insumo_id,
+              cantidad_base: consumo.cantidad_base,
+              unidad_base: consumo.unidad_base,
+            });
+          });
+        }
+
+        if (!item.stock_indefinido) {
+          const stockResult = await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+            [item.cantidad, item.producto_id, negocioId, item.cantidad]
+          );
+          if (stockResult.changes === 0) {
+            throw errorEstado(400, `No se pudo actualizar el stock del producto ${item.producto_id}.`);
+          }
+        }
+      }
+
+      if (usaRecetas && consumoPorInsumo.size > 0) {
+        for (const [insumoId, cantidadUnidades] of consumoPorInsumo.entries()) {
+          if (!cantidadUnidades) continue;
+          const insumo = insumosMap.get(insumoId);
+          if (!insumo || esStockIndefinido(insumo)) {
+            continue;
+          }
+          const stockResult = await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+            [cantidadUnidades, insumoId, negocioId, cantidadUnidades]
+          );
+          if (stockResult.changes === 0) {
+            throw errorEstado(400, `No se pudo actualizar el stock del insumo ${insumoId}.`);
+          }
+        }
+
+        for (const consumo of consumoRegistros) {
+          await db.run(
+            `INSERT INTO consumo_insumos
+              (pedido_id, detalle_pedido_id, producto_final_id, insumo_id, cantidad_base, unidad_base, negocio_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              pedidoId,
+              consumo.detalle_pedido_id,
+              consumo.producto_final_id,
+              consumo.insumo_id,
+              consumo.cantidad_base,
+              consumo.unidad_base,
+              negocioId,
+            ]
+          );
+        }
+      }
+
+      await db.run(
+        `UPDATE pedidos
+            SET mesa = ?, cliente = ?, modo_servicio = ?, nota = ?,
+                subtotal = ?, impuesto = ?, total = ?,
+                delivery_estado = ?, delivery_telefono = ?, delivery_direccion = ?,
+                delivery_referencia = ?, delivery_notas = ?
+          WHERE id = ? AND negocio_id = ?`,
+        [
+          mesaFinal,
+          clienteFinal,
+          modoServicio,
+          notaFinal,
+          subtotal,
+          impuesto,
+          total,
+          deliveryEstadoFinal,
+          deliveryTelefonoFinal,
+          deliveryDireccionFinal,
+          deliveryReferenciaFinal,
+          deliveryNotasFinal,
+          pedidoId,
+          negocioId,
+        ]
+      );
+
+      await db.run('COMMIT');
+      transaccionIniciada = false;
+
+      const pedidoActualizado = await obtenerPedidoConDetalle(pedidoId, negocioId);
+      return res.json({
+        ok: true,
+        pedido: pedidoActualizado,
+        advertencias: advertenciasInsumos.length ? advertenciasInsumos : undefined,
+      });
+    } catch (error) {
+      if (transaccionIniciada) {
+        await db.run('ROLLBACK').catch(() => {});
+      }
+      console.error('Error al editar pedido pendiente:', error?.message || error);
+      const status = Number(error?.status) || (error?.message?.toLowerCase().includes('stock') ? 400 : 500);
+      return res
+        .status(status)
+        .json({ ok: false, error: error?.message || 'No se pudo editar el pedido pendiente.' });
+    }
+  });
+});
+
 app.get('/api/cuentas/:id/detalle', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const cuentaId = Number(req.params.id);
