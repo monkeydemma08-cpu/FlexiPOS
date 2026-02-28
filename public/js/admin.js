@@ -5895,6 +5895,14 @@ const recargarEstadoAdmin = async (mostrarCarga = false) => {
       tareas.push(cargarHistorialCocina(paginaHistorialCocina));
     }
 
+    // Mantiene al dia los rangos NCF cuando se emiten comprobantes desde caja/mostrador.
+    if (ncfB02InicioInput || ncfB01InicioInput) {
+      tareas.push(cargarConfiguracionFactura());
+    }
+    if (permitirB01Input || permitirB02Input || permitirB14Input) {
+      tareas.push(cargarConfigSecuencias());
+    }
+
     const dgiiSectionActiva = !document.getElementById('admin-section-dgii-paso2')?.classList.contains('hidden');
     if (dgiiSetSelect && dgiiSectionActiva) {
       tareas.push(cargarSetsDgii({ mantenerSeleccion: true }));

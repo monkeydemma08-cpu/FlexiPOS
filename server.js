@@ -2828,6 +2828,29 @@ const obtenerLimiteNCF = (tipo, negocioId, callback) => {
   );
 };
 
+const obtenerInicioNCF = (tipo, negocioId, callback) => {
+  if (typeof negocioId === 'function') {
+    callback = negocioId;
+    negocioId = 1;
+  }
+
+  const clave = tipo === 'B01' ? 'ncf_b01_inicio' : 'ncf_b02_inicio';
+  db.get(
+    'SELECT valor FROM configuracion WHERE clave = ? AND negocio_id = ? LIMIT 1',
+    [clave, negocioId || 1],
+    (err, row) => {
+      if (err) {
+        return callback(err, null);
+      }
+      if (!row || row.valor === null || row.valor === undefined || row.valor === '') {
+        return callback(null, null);
+      }
+      const inicio = Number(row.valor);
+      callback(null, Number.isNaN(inicio) ? null : inicio);
+    }
+  );
+};
+
 const generarNCF = (tipoSolicitado, negocioId, callback) => {
   if (typeof negocioId === 'function') {
     callback = negocioId;
@@ -2843,52 +2866,63 @@ const generarNCF = (tipoSolicitado, negocioId, callback) => {
         return callback(err);
       }
 
-      obtenerLimiteNCF(tipo, negocioId || 1, (limiteErr, fin) => {
-        if (limiteErr) {
-          return callback(limiteErr);
+      obtenerInicioNCF(tipo, negocioId || 1, (inicioErr, inicioConfig) => {
+        if (inicioErr) {
+          return callback(inicioErr);
         }
 
-        const prefijo = row ? row.prefijo : tipo;
-        const digitos = row ? Number(row.digitos) || 8 : 8;
-        const correlativo = row ? Number(row.correlativo) || 1 : 1;
+        obtenerLimiteNCF(tipo, negocioId || 1, (limiteErr, fin) => {
+          if (limiteErr) {
+            return callback(limiteErr);
+          }
 
-        if (fin && correlativo > fin) {
-          return callback(new Error('No hay comprobantes disponibles en la secuencia configurada'));
-        }
+          const prefijo = row ? row.prefijo : tipo;
+          const digitos = row ? Number(row.digitos) || 8 : 8;
+          const correlativoPersistido = row ? Number(row.correlativo) || 1 : 1;
+          const inicioNormalizado =
+            Number.isFinite(Number(inicioConfig)) && Number(inicioConfig) >= 1
+              ? Math.floor(Number(inicioConfig))
+              : 1;
+          const correlativo = Math.max(correlativoPersistido, inicioNormalizado);
 
-        const ncf = `${prefijo}${padNumber(correlativo, digitos)}`;
-        const siguiente = correlativo + 1;
+          if (fin && correlativo > fin) {
+            return callback(new Error('No hay comprobantes disponibles en la secuencia configurada'));
+          }
+
+          const ncf = `${prefijo}${padNumber(correlativo, digitos)}`;
+          const siguiente = correlativo + 1;
           const actualizarCorrelativo = () => {
             if (row) {
               db.run(
-              'UPDATE secuencias_ncf SET correlativo = ?, actualizado_en = CURRENT_TIMESTAMP WHERE tipo = ? AND negocio_id = ?',
-              [siguiente, tipo, negocioId || 1],
-              (updateErr) => {
-                if (updateErr) {
-                  return callback(updateErr);
+                'UPDATE secuencias_ncf SET correlativo = ?, actualizado_en = CURRENT_TIMESTAMP WHERE tipo = ? AND negocio_id = ?',
+                [siguiente, tipo, negocioId || 1],
+                (updateErr) => {
+                  if (updateErr) {
+                    return callback(updateErr);
+                  }
+                  callback(null, ncf);
                 }
-                callback(null, ncf);
-              }
-            );
-          } else {
-            db.run(
-              'INSERT INTO secuencias_ncf (tipo, prefijo, digitos, correlativo, negocio_id) VALUES (?, ?, ?, ?, ?)',
-              [tipo, prefijo, digitos, siguiente, negocioId || 1],
-              (insertErr) => {
-                if (insertErr) {
-                  return callback(insertErr);
+              );
+            } else {
+              db.run(
+                'INSERT INTO secuencias_ncf (tipo, prefijo, digitos, correlativo, negocio_id) VALUES (?, ?, ?, ?, ?)',
+                [tipo, prefijo, digitos, siguiente, negocioId || 1],
+                (insertErr) => {
+                  if (insertErr) {
+                    return callback(insertErr);
+                  }
+                  callback(null, ncf);
                 }
-                callback(null, ncf);
-              }
-            );
+              );
+            }
+          };
+
+          if (fin && siguiente > fin + 1) {
+            return callback(new Error('Secuencia de NCF agotada'));
           }
-        };
 
-        if (fin && siguiente > fin + 1) {
-          return callback(new Error('Secuencia de NCF agotada'));
-        }
-
-        actualizarCorrelativo();
+          actualizarCorrelativo();
+        });
       });
     }
   );
@@ -3027,13 +3061,19 @@ const leerSecuenciaCorrelativo = (tipo, negocioId) =>
 
 const construirRangoNCF = async (tipo, inicioValor, finValor, negocioId, umbral = 0) => {
   const negocio = negocioId || NEGOCIO_ID_DEFAULT;
-  const inicioNumero = Number(inicioValor);
+  const inicioNumeroRaw = Number(inicioValor);
+  const inicioNumero =
+    Number.isFinite(inicioNumeroRaw) && inicioNumeroRaw >= 1
+      ? Math.floor(inicioNumeroRaw)
+      : null;
   const finNumero = Number(finValor);
   const correlativo = await leerSecuenciaCorrelativo(tipo, negocio);
   const limite = Number.isFinite(finNumero) ? finNumero : null;
+  const inicioEfectivo = inicioNumero || 1;
   let restante = null;
   if (limite !== null) {
-    const siguiente = Number.isFinite(correlativo) ? correlativo : 1;
+    const siguienteBase = Number.isFinite(correlativo) ? Math.max(1, Math.floor(correlativo)) : 1;
+    const siguiente = Math.max(siguienteBase, inicioEfectivo);
     restante = Math.max(limite - siguiente + 1, 0);
     if (restante < 0) {
       restante = 0;
@@ -4464,7 +4504,9 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
   const impuestoTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.impuesto) || 0), 0);
   const descuentoTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.descuento_monto) || 0), 0);
   const propinaTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.propina_monto) || 0), 0);
-  const totalFinal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.total) || 0), 0);
+  const totalFinal = Number(
+    Math.max(subtotalTotal + impuestoTotal - descuentoTotal + propinaTotal, 0).toFixed(2)
+  );
 
   const pedidoReferencia =
     pedidosRelacionados.find((p) => Number(p.id) === Number(pedido.id)) ||
@@ -4554,6 +4596,29 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     return callback({ status: 500, message: 'No se pudo validar la secuencia fiscal' });
   }
 
+  let configImpuestoOperacion = null;
+  try {
+    configImpuestoOperacion = await obtenerConfiguracionImpuestoNegocio(negocioIdOperacion);
+  } catch (error) {
+    console.warn(
+      'No se pudo obtener configuracion de impuesto al cerrar cuenta:',
+      error?.message || error
+    );
+  }
+  const usaImpuestoIncluidoOperacion =
+    normalizarFlag(
+      configImpuestoOperacion?.productosConImpuesto ??
+        configImpuestoOperacion?.productos_con_impuesto,
+      0
+    ) === 1 &&
+    Math.max(
+      Number(
+        configImpuestoOperacion?.impuestoIncluidoValor ??
+          configImpuestoOperacion?.impuesto_incluido_valor
+      ) || 0,
+      0
+    ) > 0;
+
   const descuentosPorDetalle = new Map();
   if (Array.isArray(detalle_descuentos)) {
     detalle_descuentos.forEach((d) => {
@@ -4568,12 +4633,39 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
   }
 
   const actualizarPedidosConDescuentos = (done) => {
+    const calcularDescuentoLinea = (
+      detalle,
+      porcentajeEntrada,
+      montoEntrada,
+      cantidadDescuentoEntrada
+    ) => {
+      const cantidad = Math.max(Number(detalle?.cantidad) || 0, 0);
+      const precioUnitario = Math.max(Number(detalle?.precio_unitario) || 0, 0);
+      const subtotalLinea = cantidad * precioUnitario;
+      if (subtotalLinea <= 0 || cantidad <= 0) {
+        return 0;
+      }
+
+      const porcentaje = Math.max(normalizarNumero(porcentajeEntrada, 0), 0);
+      const montoExtra = Math.max(normalizarNumero(montoEntrada, 0), 0);
+      const cantidadDescuento = Number(cantidadDescuentoEntrada);
+      const cantidadAplicada = Number.isFinite(cantidadDescuento)
+        ? Math.min(cantidad, Math.max(cantidadDescuento, 0))
+        : cantidad;
+      const proporcional = cantidad > 0 ? cantidadAplicada / cantidad : 1;
+      const montoPorcentaje = subtotalLinea * (porcentaje / 100) * proporcional;
+      return Math.min(montoPorcentaje + montoExtra, subtotalLinea);
+    };
+
     const procesar = (idx) => {
       if (idx >= pedidosActivos.length) return done();
       const pedido = pedidosActivos[idx];
 
       db.all(
-        `SELECT id, cantidad, precio_unitario, COALESCE(descuento_porcentaje, 0) AS descuento_porcentaje, COALESCE(descuento_monto, 0) AS descuento_monto
+        `SELECT id, cantidad, precio_unitario,
+                COALESCE(descuento_porcentaje, 0) AS descuento_porcentaje,
+                COALESCE(descuento_monto, 0) AS descuento_monto,
+                COALESCE(cantidad_descuento, cantidad) AS cantidad_descuento
          FROM detalle_pedido
          WHERE pedido_id = ?
            AND negocio_id = ?`,
@@ -4584,27 +4676,42 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
             return done(detErr);
           }
 
-          let subtotalOriginal = 0;
-          let descuentoLineaTotal = 0;
+          let subtotalBrutoDetalles = 0;
+          let descuentoActualTotal = 0;
+          let descuentoNuevoTotal = 0;
 
           (detalles || []).forEach((det) => {
             const subtotalLinea = Number(det.precio_unitario || 0) * Number(det.cantidad || 0);
-            subtotalOriginal += subtotalLinea;
+            subtotalBrutoDetalles += subtotalLinea;
             const desc = descuentosPorDetalle.get(det.id);
-            const pct = desc ? desc.porcentaje : det.descuento_porcentaje || 0;
-            const montoExtra = desc ? desc.monto : det.descuento_monto || 0;
-            const cantDesc = desc && Number.isFinite(desc.cantidad_descuento) ? desc.cantidad_descuento : det.cantidad;
-            const cantidadAplicada = Math.min(Number(det.cantidad) || 0, Math.max(cantDesc || 0, 0));
-            const baseCantidad = cantidadAplicada > 0 ? cantidadAplicada : Number(det.cantidad) || 0;
-            const proporcional = baseCantidad > 0 ? baseCantidad / (Number(det.cantidad) || 1) : 1;
-            const montoPct = subtotalLinea * (pct / 100) * proporcional;
-            const descuentoLinea = Math.min(montoPct + montoExtra, subtotalLinea);
-            descuentoLineaTotal += descuentoLinea;
+            const porcentajeActual = Number(det.descuento_porcentaje) || 0;
+            const montoActual = Number(det.descuento_monto) || 0;
+            const cantidadDescuentoActual = Number(det.cantidad_descuento);
+
+            const porcentajeNuevo = desc ? desc.porcentaje : porcentajeActual;
+            const montoNuevo = desc ? desc.monto : montoActual;
+            const cantidadDescuentoNuevo =
+              desc && Number.isFinite(desc.cantidad_descuento)
+                ? desc.cantidad_descuento
+                : cantidadDescuentoActual;
+
+            descuentoActualTotal += calcularDescuentoLinea(
+              det,
+              porcentajeActual,
+              montoActual,
+              cantidadDescuentoActual
+            );
+            descuentoNuevoTotal += calcularDescuentoLinea(
+              det,
+              porcentajeNuevo,
+              montoNuevo,
+              cantidadDescuentoNuevo
+            );
 
             if (desc) {
               db.run(
                 'UPDATE detalle_pedido SET descuento_porcentaje = ?, descuento_monto = ? WHERE id = ? AND negocio_id = ?',
-                [pct, montoExtra, det.id, negocioIdOperacion],
+                [porcentajeNuevo, montoNuevo, det.id, negocioIdOperacion],
                 (updErr) => {
                   if (updErr) {
                     console.warn('No se pudo actualizar descuento del detalle:', updErr.message);
@@ -4614,15 +4721,51 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
             }
           });
 
-          const subtotalNuevo = Math.max(subtotalOriginal - descuentoLineaTotal, 0);
-          const subtotalPedido = Number(pedido.subtotal) || subtotalOriginal || 0;
-          const impuestoPedido = Number(pedido.impuesto) || 0;
-          const factor = subtotalPedido > 0 ? subtotalNuevo / subtotalPedido : 1;
-          const impuestoNuevo = impuestoPedido * factor;
+          const subtotalReferenciaActual = Math.max(subtotalBrutoDetalles - descuentoActualTotal, 0);
+          const subtotalReferenciaNuevo = Math.max(subtotalBrutoDetalles - descuentoNuevoTotal, 0);
+
+          let subtotalNuevo = 0;
+          let impuestoNuevo = 0;
+          let totalNuevo = 0;
+
+          if (usaImpuestoIncluidoOperacion) {
+            const totalesConfig = calcularTotalesConImpuestoConfigurado(
+              subtotalReferenciaNuevo,
+              configImpuestoOperacion || {}
+            );
+            subtotalNuevo = Number(totalesConfig.subtotal) || 0;
+            impuestoNuevo = Number(totalesConfig.impuesto) || 0;
+            totalNuevo =
+              Number(totalesConfig.total) ||
+              Number((Math.max(subtotalNuevo + impuestoNuevo, 0)).toFixed(2));
+          } else {
+            const subtotalPedidoActual = Number(pedido.subtotal) || 0;
+            const impuestoPedidoActual = Number(pedido.impuesto) || 0;
+            const factorNormalizacionSubtotal =
+              subtotalReferenciaActual > 0 && subtotalPedidoActual >= 0
+                ? subtotalPedidoActual / subtotalReferenciaActual
+                : 1;
+            const factorSeguro = Number.isFinite(factorNormalizacionSubtotal)
+              ? factorNormalizacionSubtotal
+              : 1;
+            const tasaImpuestoPedido =
+              subtotalPedidoActual > 0 ? impuestoPedidoActual / subtotalPedidoActual : 0;
+
+            subtotalNuevo = Number(
+              Math.max(subtotalReferenciaNuevo * factorSeguro, 0).toFixed(2)
+            );
+            impuestoNuevo = Number(
+              Math.max(
+                subtotalNuevo * (Number.isFinite(tasaImpuestoPedido) ? tasaImpuestoPedido : 0),
+                0
+              ).toFixed(2)
+            );
+            totalNuevo = Number((subtotalNuevo + impuestoNuevo).toFixed(2));
+          }
 
           db.run(
-            'UPDATE pedidos SET subtotal = ?, impuesto = ? WHERE id = ? AND negocio_id = ?',
-            [subtotalNuevo, impuestoNuevo, pedido.id, negocioIdOperacion],
+            'UPDATE pedidos SET subtotal = ?, impuesto = ?, total = ? WHERE id = ? AND negocio_id = ?',
+            [subtotalNuevo, impuestoNuevo, totalNuevo, pedido.id, negocioIdOperacion],
             (updErr) => {
               if (updErr) {
                 console.error('Error al actualizar pedido con descuento:', updErr.message);
@@ -4630,6 +4773,7 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
               }
               pedido.subtotal = subtotalNuevo;
               pedido.impuesto = impuestoNuevo;
+              pedido.total = totalNuevo;
               procesar(idx + 1);
             }
           );
@@ -4796,6 +4940,13 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
         const p = pedidosActivos[indice];
         const esReferencia = p.id === pedidoReferencia.id;
         const estadoComprobante = ncfAsignado && esReferencia ? 'emitido' : 'sin_emitir';
+        const descuentoPedido = descuentosDistribuidos[indice] || 0;
+        const propinaPedido = propinasDistribuidas[indice] || 0;
+        const subtotalPedido = Number(p.subtotal) || 0;
+        const impuestoPedido = Number(p.impuesto) || 0;
+        const totalPedidoFinal = Number(
+          Math.max(subtotalPedido + impuestoPedido - descuentoPedido + propinaPedido, 0).toFixed(2)
+        );
         const sql = esReferencia
           ? `
           UPDATE pedidos
@@ -4811,6 +4962,7 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
               descuento_monto = ?,
               propina_porcentaje = ?,
               propina_monto = ?,
+              total = ?,
               comentarios = COALESCE(?, comentarios),
               cobrado_por = COALESCE(cobrado_por, ?),
               origen_caja = ?,
@@ -4836,6 +4988,7 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
               descuento_monto = ?,
               propina_porcentaje = ?,
               propina_monto = ?,
+              total = ?,
               comentarios = COALESCE(?, comentarios),
               cobrado_por = COALESCE(cobrado_por, ?),
               origen_caja = ?,
@@ -4855,9 +5008,10 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
           esReferencia ? ncfAsignado || p.ncf || null : p.ncf || null,
           estadoComprobante,
           descuentoValor,
-          descuentosDistribuidos[indice] || 0,
+          descuentoPedido,
           propinaValor,
-          propinasDistribuidas[indice] || 0,
+          propinaPedido,
+          totalPedidoFinal,
           comentariosFinal,
           usuario_id || null,
           origenCaja,
@@ -6639,6 +6793,42 @@ app.put('/api/configuracion/factura', (req, res) => {
       [FACTURACION_CLAVES.b01_inicio]: normalizarNumeroConfiguracion(payload.b01_inicio),
       [FACTURACION_CLAVES.b01_fin]: normalizarNumeroConfiguracion(payload.b01_fin),
     };
+
+    const validarRango = (inicioRaw, finRaw, etiqueta) => {
+      const inicioDefinido = inicioRaw !== '';
+      const finDefinido = finRaw !== '';
+      const inicio = inicioDefinido ? Number(inicioRaw) : null;
+      const fin = finDefinido ? Number(finRaw) : null;
+
+      if (inicioDefinido && (!Number.isFinite(inicio) || inicio < 1)) {
+        return `${etiqueta}: el inicio debe ser un numero mayor o igual a 1.`;
+      }
+      if (finDefinido && (!Number.isFinite(fin) || fin < 1)) {
+        return `${etiqueta}: el fin debe ser un numero mayor o igual a 1.`;
+      }
+      if (inicioDefinido && finDefinido && fin < inicio) {
+        return `${etiqueta}: el fin no puede ser menor que el inicio.`;
+      }
+      return null;
+    };
+
+    const errorB02 = validarRango(
+      datosActualizar[FACTURACION_CLAVES.b02_inicio],
+      datosActualizar[FACTURACION_CLAVES.b02_fin],
+      'Secuencia B02'
+    );
+    if (errorB02) {
+      return res.status(400).json({ ok: false, error: errorB02 });
+    }
+
+    const errorB01 = validarRango(
+      datosActualizar[FACTURACION_CLAVES.b01_inicio],
+      datosActualizar[FACTURACION_CLAVES.b01_fin],
+      'Secuencia B01'
+    );
+    if (errorB01) {
+      return res.status(400).json({ ok: false, error: errorB01 });
+    }
 
     try {
       await guardarConfiguracionNegocio(negocioId, datosActualizar);
