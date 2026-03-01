@@ -5,6 +5,20 @@
 
   const params = new URLSearchParams(window.location.search);
   const pedidoId = params.get('id');
+  const parsePreviewMoney = (key) => {
+    const raw = params.get(key);
+    if (raw === null || raw === undefined || raw === '') return null;
+    const numero = Number(raw);
+    return Number.isFinite(numero) ? numero : null;
+  };
+  const vistaPreviaFactura = {
+    activa: params.get('preview') === '1',
+    subtotal: parsePreviewMoney('preview_subtotal'),
+    impuesto: parsePreviewMoney('preview_impuesto'),
+    descuento: parsePreviewMoney('preview_descuento'),
+    propina: parsePreviewMoney('preview_propina'),
+    total: parsePreviewMoney('preview_total'),
+  };
 
   const ncfSpan = document.getElementById('factura-ncf');
   const fechaSpan = document.getElementById('factura-fecha');
@@ -240,7 +254,9 @@
 
     if (ncfSpan) ncfSpan.textContent = pedido.ncf || '-';
     if (fechaSpan) fechaSpan.textContent = formatDateTime(pedido.fecha_cierre || pedido.fecha_factura);
-    if (pedidoSpan) pedidoSpan.textContent = `#${pedido.id}`;
+    if (pedidoSpan) {
+      pedidoSpan.textContent = vistaPreviaFactura.activa ? `#${pedido.id} (Vista previa)` : `#${pedido.id}`;
+    }
     if (clienteSpan) clienteSpan.textContent = pedido.cliente || 'Consumidor final';
     if (documentoSpan) documentoSpan.textContent = pedido.cliente_documento || '00000000000';
     if (tipoSpan) {
@@ -261,19 +277,40 @@
       0
     );
 
-    if (subtotalSpan) subtotalSpan.textContent = formatCurrency(pedido.subtotal);
-    if (impuestoSpan) impuestoSpan.textContent = formatCurrency(pedido.impuesto);
+    const subtotalMostrar =
+      vistaPreviaFactura.activa && Number.isFinite(vistaPreviaFactura.subtotal)
+        ? vistaPreviaFactura.subtotal
+        : Number(pedido.subtotal) || 0;
+    const impuestoMostrar =
+      vistaPreviaFactura.activa && Number.isFinite(vistaPreviaFactura.impuesto)
+        ? vistaPreviaFactura.impuesto
+        : Number(pedido.impuesto) || 0;
+    const descuentoGeneralMostrar =
+      vistaPreviaFactura.activa && Number.isFinite(vistaPreviaFactura.descuento)
+        ? vistaPreviaFactura.descuento
+        : descuentoGeneral;
+    const propinaMostrar =
+      vistaPreviaFactura.activa && Number.isFinite(vistaPreviaFactura.propina)
+        ? vistaPreviaFactura.propina
+        : Number(pedido.propina_monto) || 0;
+    const totalMostrar =
+      vistaPreviaFactura.activa && Number.isFinite(vistaPreviaFactura.total)
+        ? vistaPreviaFactura.total
+        : Number(pedido.total_final ?? pedido.total) || 0;
+
+    if (subtotalSpan) subtotalSpan.textContent = formatCurrency(subtotalMostrar);
+    if (impuestoSpan) impuestoSpan.textContent = formatCurrency(impuestoMostrar);
     if (descuentoSpan) {
-      if (descuentoGeneral > 0) {
-        descuentoSpan.textContent = `- ${formatCurrency(descuentoGeneral)}`;
+      if (descuentoGeneralMostrar > 0) {
+        descuentoSpan.textContent = `- ${formatCurrency(descuentoGeneralMostrar)}`;
       } else if (descuentoItems > 0) {
         descuentoSpan.textContent = `- ${formatCurrency(descuentoItems)} (productos, incluido)`;
       } else {
         descuentoSpan.textContent = `- ${formatCurrency(0)}`;
       }
     }
-    if (propinaSpan) propinaSpan.textContent = formatCurrency(pedido.propina_monto);
-    if (totalSpan) totalSpan.textContent = formatCurrency(pedido.total_final);
+    if (propinaSpan) propinaSpan.textContent = formatCurrency(propinaMostrar);
+    if (totalSpan) totalSpan.textContent = formatCurrency(totalMostrar);
 
     if (itemsBody) {
       itemsBody.innerHTML = '';
@@ -313,7 +350,6 @@
           <div class="factura-price-block">
             ${tieneDescuento ? `<span class="factura-price-old">${subtotalOriginal}</span>` : ''}
             <span class="factura-price-final">${formatCurrency(subtotalFinal)}</span>
-            ${tieneDescuento ? `<span class="factura-desc-note">Desc. producto: -${formatCurrency(descuentoTotal)}</span>` : ''}
           </div>
         `;
         const nombreCompleto = limpiarTextoFactura(item.nombre || `Producto ${item.producto_id || ''}`);

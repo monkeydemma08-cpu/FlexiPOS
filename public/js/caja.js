@@ -155,6 +155,12 @@ let secuenciasConfig = {
   permitir_b14: 1,
 };
 
+const METODOS_PAGO_CUADRE = [
+  { value: 'efectivo', label: 'Efectivo' },
+  { value: 'tarjeta', label: 'Tarjeta' },
+  { value: 'transferencia', label: 'Transferencia/Deposito' },
+];
+
 
 
 const obtenerUsuarioActual = () => {
@@ -1653,6 +1659,24 @@ const obtenerMetodoPagoLabel = (pedido = {}) => {
 
   return partes.length ? partes.join(' + ') : 'Sin registrar';
 
+};
+
+const obtenerMetodoPagoValorCuadre = (pedido = {}) => {
+  const efectivoRegistrado = Number(pedido.pago_efectivo) || 0;
+  const cambioRegistrado = Number(pedido.pago_cambio) || 0;
+  const efectivoAplicado = Math.max(efectivoRegistrado - cambioRegistrado, 0);
+  const tarjeta = Number(pedido.pago_tarjeta) || 0;
+  const transferencia = Number(pedido.pago_transferencia) || 0;
+
+  const activos = [
+    efectivoAplicado > 0 ? 'efectivo' : null,
+    tarjeta > 0 ? 'tarjeta' : null,
+    transferencia > 0 ? 'transferencia' : null,
+  ].filter(Boolean);
+
+  if (!activos.length) return 'sin_registrar';
+  if (activos.length > 1) return 'mixto';
+  return activos[0];
 };
 
 const limpiarDetalleCuadreExpandido = () => {
@@ -3491,6 +3515,32 @@ const renderDetalleCuadreActual = () => {
 
 
     const metodoLabel = obtenerMetodoPagoLabel(pedido);
+    const metodoValor = obtenerMetodoPagoValorCuadre(pedido);
+    const opcionActual =
+      metodoValor === 'mixto'
+        ? '<option value="" selected disabled>Mixto</option>'
+        : metodoValor === 'sin_registrar'
+          ? '<option value="" selected disabled>Sin registrar</option>'
+          : '';
+    const opcionesMetodo = METODOS_PAGO_CUADRE.map(
+      (metodo) =>
+        `<option value="${metodo.value}" ${metodo.value === metodoValor ? 'selected' : ''}>${metodo.label}</option>`
+    ).join('');
+    const metodoControl = `
+      <div class="cuadre-metodo-cell">
+        <select
+          class="cuadre-metodo-select"
+          data-cambiar-metodo="1"
+          data-cuenta-id="${pedido.id}"
+          data-metodo-actual="${metodoValor}"
+          aria-label="Metodo de pago para cuenta #${pedido.id}"
+          title="Metodo de pago actual: ${metodoLabel}"
+        >
+          ${opcionActual}
+          ${opcionesMetodo}
+        </select>
+      </div>
+    `;
     const pedidoFacturaId = Number(
       pedido.pedidos?.find((pedidoRelacionado) => {
         const id = Number(pedidoRelacionado?.id);
@@ -3517,7 +3567,7 @@ const renderDetalleCuadreActual = () => {
 
       <td>${formatDateTime(pedido.fecha_cierre || pedido.pedidos?.[0]?.fecha_cierre)}</td>
 
-      <td>${metodoLabel}</td>
+      <td>${metodoControl}</td>
 
       <td>${formatCurrency(total)}</td>
 
@@ -3542,6 +3592,63 @@ const renderDetalleCuadreActual = () => {
 
   cuadreDetalleBody.appendChild(fragment);
 
+};
+
+const actualizarMetodoPagoCuadre = async (cuentaId, metodo, control = null) => {
+  if (!Number.isFinite(Number(cuentaId)) || Number(cuentaId) <= 0) {
+    setCuadreMensaje('Cuenta invalida para actualizar metodo de pago.', 'error');
+    return;
+  }
+
+  const metodoNormalizado = (metodo || '').toString().trim().toLowerCase();
+  if (!METODOS_PAGO_CUADRE.some((item) => item.value === metodoNormalizado)) {
+    setCuadreMensaje('Selecciona un metodo de pago valido.', 'error');
+    return;
+  }
+
+  const metodoAnterior = control?.dataset?.metodoActual || '';
+  const fechaSeleccionada = cuadreFechaInput?.value || resumenCuadre.fecha || obtenerFechaLocalHoy();
+
+  if (control) {
+    control.disabled = true;
+  }
+
+  try {
+    setCuadreMensaje('Actualizando metodo de pago...', 'info');
+
+    const respuesta = await fetchAutorizadoCaja(`/api/caja/cuadre/${Number(cuentaId)}/metodo-pago`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        metodo_pago: metodoNormalizado,
+        fecha: fechaSeleccionada,
+        origen_caja: 'caja',
+      }),
+    });
+
+    const data = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok || !data?.ok) {
+      throw new Error(data?.error || 'No se pudo actualizar el metodo de pago.');
+    }
+
+    if (control) {
+      control.dataset.metodoActual = metodoNormalizado;
+    }
+
+    await cargarResumenCuadre(false);
+    setCuadreMensaje('Metodo de pago actualizado correctamente.', 'info');
+  } catch (error) {
+    if (control) {
+      control.value = metodoAnterior && metodoAnterior !== 'mixto' && metodoAnterior !== 'sin_registrar' ? metodoAnterior : '';
+    }
+    setCuadreMensaje(error?.message || 'No se pudo actualizar el metodo de pago.', 'error');
+  } finally {
+    if (control) {
+      control.disabled = false;
+    }
+  }
 };
 
 
@@ -4366,7 +4473,7 @@ const cerrarCuenta = async () => {
 
 };
 
-const abrirFacturaCuentaSeleccionada = (mensajeSinCuenta) => {
+const abrirFacturaCuentaSeleccionada = (mensajeSinCuenta, { vistaPrevia = false } = {}) => {
   if (!cuentaSeleccionada) {
     setMensajeDetalle(mensajeSinCuenta, 'error');
     return;
@@ -4379,7 +4486,20 @@ const abrirFacturaCuentaSeleccionada = (mensajeSinCuenta) => {
     return;
   }
 
-  window.open(`/factura.html?id=${facturaId}`, '_blank');
+  const url = new URL(`/factura.html?id=${facturaId}`, window.location.origin);
+  if (vistaPrevia) {
+    calcularTotales();
+    const descuentoVistaPrevia =
+      Number(calculo.descuentoGeneralMonto || 0) + Number(calculo.descuentoItemsMonto || 0);
+    url.searchParams.set('preview', '1');
+    url.searchParams.set('preview_subtotal', String(Number(calculo.subtotal || 0).toFixed(2)));
+    url.searchParams.set('preview_impuesto', String(Number(calculo.impuesto || 0).toFixed(2)));
+    url.searchParams.set('preview_descuento', String(Number(descuentoVistaPrevia || 0).toFixed(2)));
+    url.searchParams.set('preview_propina', String(Number(calculo.propinaMonto || 0).toFixed(2)));
+    url.searchParams.set('preview_total', String(Number(calculo.total || 0).toFixed(2)));
+  }
+
+  window.open(url.toString(), '_blank');
 };
 
 const obtenerDetalleIdsItemCuenta = (item) =>
@@ -4776,7 +4896,9 @@ const inicializarEventos = () => {
     event.preventDefault();
 
     setMensajeDetalle('');
-    abrirFacturaCuentaSeleccionada('Selecciona una cuenta para ver la vista previa de la factura.');
+    abrirFacturaCuentaSeleccionada('Selecciona una cuenta para ver la vista previa de la factura.', {
+      vistaPrevia: true,
+    });
 
   });
 
@@ -5227,6 +5349,12 @@ const inicializarCuadre = () => {
   });
 
   cuadreDetalleBody?.addEventListener('click', (event) => {
+    const selectorMetodo = event.target.closest('[data-cambiar-metodo]');
+    if (selectorMetodo) {
+      event.stopPropagation();
+      return;
+    }
+
     const botonVerFactura = event.target.closest('[data-ver-factura]');
     if (botonVerFactura) {
       event.preventDefault();
@@ -5246,6 +5374,14 @@ const inicializarCuadre = () => {
     const cuadreId = Number(fila.dataset.cuadreId);
     if (!Number.isFinite(cuadreId) || cuadreId <= 0) return;
     mostrarDetalleCuadre(fila, cuadreId);
+  });
+
+  cuadreDetalleBody?.addEventListener('change', (event) => {
+    const selectorMetodo = event.target.closest('[data-cambiar-metodo]');
+    if (!selectorMetodo) return;
+    const cuentaId = Number(selectorMetodo.dataset.cuentaId);
+    const metodo = selectorMetodo.value;
+    actualizarMetodoPagoCuadre(cuentaId, metodo, selectorMetodo);
   });
 
 

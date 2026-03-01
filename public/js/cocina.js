@@ -16,6 +16,9 @@ const btnFocusListo = document.getElementById('focus-listo');
 const btnFocusCancelar = document.getElementById('focus-cancelar');
 
 const REFRESH_INTERVAL = 5000;
+const COCINA_ALARMA_TONO_MS = 1400;
+const COCINA_ALARMA_TITULO_MS = 900;
+const COCINA_ALARMA_FRECUENCIA = 920;
 let refreshTimer = null;
 let cargando = false;
 let cuentasActivas = [];
@@ -23,6 +26,18 @@ let cuentasFinalizadas = [];
 let focoPedido = null;
 let focoCuenta = null;
 let sesionExpiradaNotificada = false;
+let audioContextAlarma = null;
+let alarmaActiva = false;
+let alarmaTimer = null;
+let alarmaTituloTimer = null;
+let alarmaNuevasOrdenes = 0;
+let audioAlarmaDisponible = false;
+let listenersDesbloqueoAudioRegistrados = false;
+let monitoreoOrdenesInicializado = false;
+let idsPendientesPrevios = new Set();
+let alarmaParpadeoTitulo = false;
+let alarmaBanner = null;
+let alarmaTexto = null;
 const LOCAL_STORAGE_TRABAJO = 'kanm_cocina_pedido_en_trabajo';
 const SYNC_STORAGE_KEY = 'kanm:last-update';
 const EVENTOS_SYNC_RELEVANTES = new Set([
@@ -36,6 +51,7 @@ let recargaSyncProgramada = null;
 const scrollActivos = new Map();
 const sessionApi = window.KANMSession;
 const authApi = window.kanmAuth;
+const tituloOriginalPagina = document.title;
 
 const obtenerUsuarioActual = () => sessionApi?.getUser?.() || null;
 
@@ -45,6 +61,242 @@ const obtenerAuthHeaders = () => {
   } catch (error) {
     console.warn('No se pudieron obtener los encabezados de autenticacion', error);
     return {};
+  }
+};
+
+const obtenerAudioContextAlarma = () => {
+  if (audioContextAlarma) return audioContextAlarma;
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  audioContextAlarma = new AudioCtx();
+  return audioContextAlarma;
+};
+
+const intentarHabilitarAudioAlarma = async () => {
+  const ctx = obtenerAudioContextAlarma();
+  if (!ctx) return false;
+  if (ctx.state === 'running') {
+    audioAlarmaDisponible = true;
+    return true;
+  }
+  try {
+    await ctx.resume();
+    audioAlarmaDisponible = ctx.state === 'running';
+    return audioAlarmaDisponible;
+  } catch (error) {
+    return false;
+  }
+};
+
+const reproducirBeepAlarma = () => {
+  const ctx = obtenerAudioContextAlarma();
+  if (!ctx || ctx.state !== 'running') {
+    return false;
+  }
+
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'square';
+  osc.frequency.value = COCINA_ALARMA_FRECUENCIA;
+
+  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.24);
+
+  audioAlarmaDisponible = true;
+  return true;
+};
+
+const reproducirPatronAlarma = () => {
+  const primerBeep = reproducirBeepAlarma();
+  if (!primerBeep) return false;
+  setTimeout(() => {
+    if (!alarmaActiva) return;
+    reproducirBeepAlarma();
+  }, 220);
+  return true;
+};
+
+const actualizarTituloAlarma = () => {
+  if (!alarmaActiva) {
+    document.title = tituloOriginalPagina;
+    return;
+  }
+
+  alarmaParpadeoTitulo = !alarmaParpadeoTitulo;
+  document.title = alarmaParpadeoTitulo ? 'ALERTA NUEVA ORDEN - Cocina' : tituloOriginalPagina;
+};
+
+const detenerAlarmaNuevaOrden = () => {
+  alarmaNuevasOrdenes = 0;
+  alarmaActiva = false;
+
+  if (alarmaTimer) {
+    clearInterval(alarmaTimer);
+    alarmaTimer = null;
+  }
+  if (alarmaTituloTimer) {
+    clearInterval(alarmaTituloTimer);
+    alarmaTituloTimer = null;
+  }
+
+  alarmaParpadeoTitulo = false;
+  document.title = tituloOriginalPagina;
+
+  if (alarmaBanner) {
+    alarmaBanner.classList.remove('is-active');
+  }
+  if (alarmaTexto) {
+    alarmaTexto.textContent = '';
+  }
+};
+
+const actualizarBannerAlarma = () => {
+  if (!alarmaBanner || !alarmaTexto) return;
+
+  if (!alarmaActiva || alarmaNuevasOrdenes <= 0) {
+    alarmaBanner.classList.remove('is-active');
+    alarmaTexto.textContent = '';
+    return;
+  }
+
+  const ordenes = alarmaNuevasOrdenes === 1 ? 'Nueva orden en cocina.' : `${alarmaNuevasOrdenes} nuevas ordenes en cocina.`;
+  const ayudaAudio = audioAlarmaDisponible ? '' : ' Si no escuchas sonido, toca la pantalla para habilitar audio.';
+  alarmaTexto.textContent = `${ordenes} Presiona OK para detener la alarma.${ayudaAudio}`;
+  alarmaBanner.classList.add('is-active');
+};
+
+const iniciarAlarmaNuevaOrden = async (cantidad = 1) => {
+  const incremento = Number(cantidad);
+  alarmaNuevasOrdenes += Number.isFinite(incremento) && incremento > 0 ? incremento : 1;
+
+  if (!alarmaActiva) {
+    alarmaActiva = true;
+    if (navigator.vibrate) {
+      navigator.vibrate([150, 80, 150]);
+    }
+  }
+
+  actualizarBannerAlarma();
+  actualizarTituloAlarma();
+
+  await intentarHabilitarAudioAlarma();
+  reproducirPatronAlarma();
+
+  if (!alarmaTimer) {
+    alarmaTimer = setInterval(() => {
+      if (!alarmaActiva) return;
+      const reprodujo = reproducirPatronAlarma();
+      if (!reprodujo) {
+        intentarHabilitarAudioAlarma().then((ok) => {
+          if (ok) {
+            actualizarBannerAlarma();
+          }
+        });
+      }
+    }, COCINA_ALARMA_TONO_MS);
+  }
+
+  if (!alarmaTituloTimer) {
+    alarmaTituloTimer = setInterval(() => {
+      actualizarTituloAlarma();
+    }, COCINA_ALARMA_TITULO_MS);
+  }
+};
+
+const registrarDesbloqueoAudioAlarma = () => {
+  if (listenersDesbloqueoAudioRegistrados) return;
+  listenersDesbloqueoAudioRegistrados = true;
+
+  const eventos = ['click', 'touchstart', 'keydown'];
+  const handler = () => {
+    intentarHabilitarAudioAlarma().then((ok) => {
+      if (!ok) return;
+      eventos.forEach((evento) => {
+        document.removeEventListener(evento, handler, true);
+      });
+      listenersDesbloqueoAudioRegistrados = false;
+      actualizarBannerAlarma();
+      if (alarmaActiva) {
+        reproducirPatronAlarma();
+      }
+    });
+  };
+
+  eventos.forEach((evento) => {
+    document.addEventListener(evento, handler, { capture: true });
+  });
+};
+
+const crearBannerAlarma = () => {
+  if (alarmaBanner) return alarmaBanner;
+  const main = document.querySelector('.cocina-main');
+  if (!main) return null;
+
+  const banner = document.createElement('div');
+  banner.className = 'cocina-alarma-banner';
+  banner.setAttribute('role', 'alert');
+  banner.setAttribute('aria-live', 'assertive');
+
+  const texto = document.createElement('span');
+  texto.className = 'cocina-alarma-banner__texto';
+  banner.appendChild(texto);
+
+  const botonOk = document.createElement('button');
+  botonOk.type = 'button';
+  botonOk.className = 'kanm-button primary cocina-alarma-banner__ok';
+  botonOk.textContent = 'OK';
+  botonOk.addEventListener('click', () => {
+    detenerAlarmaNuevaOrden();
+  });
+  banner.appendChild(botonOk);
+
+  main.insertBefore(banner, main.firstChild);
+  alarmaBanner = banner;
+  alarmaTexto = texto;
+  return banner;
+};
+
+const obtenerIdsPendientes = (cuentas = []) => {
+  const ids = new Set();
+  cuentas.forEach((cuenta) => {
+    (cuenta.pedidos || []).forEach((pedido) => {
+      const estadoCocina = (pedido.estadoCocina || pedido.estado || '').toString().toLowerCase();
+      if (estadoCocina !== 'pendiente') return;
+      if (pedido.id == null) return;
+      ids.add(String(pedido.id));
+    });
+  });
+  return ids;
+};
+
+const detectarNuevasOrdenesPendientes = (cuentas = []) => {
+  const idsActuales = obtenerIdsPendientes(cuentas);
+
+  if (!monitoreoOrdenesInicializado) {
+    idsPendientesPrevios = idsActuales;
+    monitoreoOrdenesInicializado = true;
+    return;
+  }
+
+  let nuevas = 0;
+  idsActuales.forEach((id) => {
+    if (!idsPendientesPrevios.has(id)) {
+      nuevas += 1;
+    }
+  });
+
+  idsPendientesPrevios = idsActuales;
+
+  if (nuevas > 0) {
+    iniciarAlarmaNuevaOrden(nuevas).then(() => {
+      actualizarBannerAlarma();
+    });
   }
 };
 
@@ -133,6 +385,7 @@ const manejarSesionVencida = (res) => {
   if (res.status === 401) {
     if (sesionExpiradaNotificada) return true;
     sesionExpiradaNotificada = true;
+    detenerAlarmaNuevaOrden();
     alert('Tu sesion expiró. Ingresa nuevamente.');
     if (typeof window.logout === 'function') {
       window.logout();
@@ -768,6 +1021,7 @@ const cargarPedidos = async (mostrarCarga = true) => {
     ]);
     cuentasActivas = activos;
     cuentasFinalizadas = finalizados;
+    detectarNuevasOrdenesPendientes(cuentasActivas);
     sincronizarPedidoEnTrabajo();
     renderActivos(cuentasActivas);
     renderFinalizados(cuentasFinalizadas);
@@ -898,6 +1152,9 @@ const iniciarAutoRefresco = () => {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+  crearBannerAlarma();
+  registrarDesbloqueoAudioAlarma();
+
   tabs.forEach((btn) =>
     btn.addEventListener('click', () => cambiarTab(btn.dataset.tab || 'activos'))
   );
@@ -933,6 +1190,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.addEventListener('beforeunload', () => {
+  detenerAlarmaNuevaOrden();
   if (refreshTimer) clearInterval(refreshTimer);
   if (recargaSyncProgramada) {
     clearTimeout(recargaSyncProgramada);

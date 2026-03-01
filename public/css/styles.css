@@ -847,16 +847,16 @@ img {
 }
 
 body[data-role='mesera'] .kanm-main {
-  padding-bottom: 140px;
+  padding-bottom: 0;
 }
 
 #mesera-footer {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 30;
-  box-shadow: 0 -12px 30px rgba(15, 42, 68, 0.08);
+  position: static;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  box-shadow: none;
 }
 
 #mesera-footer .flex-between {
@@ -2113,6 +2113,20 @@ body[data-role='mesera'] .kanm-main {
 
 .cuadre-detalle-empty {
   color: var(--kanm-gray-600);
+}
+
+.cuadre-metodo-cell {
+  min-width: 170px;
+}
+
+.cuadre-metodo-select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--tone-20);
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: #fff;
+  color: var(--kanm-gray-900);
 }
 
 .caja-items {
@@ -4647,11 +4661,87 @@ body[data-role='mesera'] .kanm-main {
   padding-right: 4px;
 }
 
+.mesera-alarma-banner {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(185, 28, 28, 0.45);
+  background: linear-gradient(120deg, #b91c1c, #dc2626);
+  color: #fff;
+  font-weight: 600;
+  position: sticky;
+  top: 10px;
+  z-index: 35;
+  box-shadow: 0 10px 24px rgba(185, 28, 28, 0.35);
+}
+
+.mesera-alarma-banner.is-active {
+  display: flex;
+  animation: cocinaAlarmaPulso 1s ease-in-out infinite;
+}
+
+.mesera-alarma-banner__texto {
+  flex: 1;
+  min-width: 0;
+}
+
+.mesera-alarma-banner__ok {
+  flex-shrink: 0;
+  min-width: 86px;
+}
+
 /* --- Cocina rediseño --- */
 .cocina-main {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.cocina-alarma-banner {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(185, 28, 28, 0.45);
+  background: linear-gradient(120deg, #b91c1c, #dc2626);
+  color: #fff;
+  font-weight: 600;
+  position: sticky;
+  top: 10px;
+  z-index: 35;
+  box-shadow: 0 10px 24px rgba(185, 28, 28, 0.35);
+}
+
+.cocina-alarma-banner.is-active {
+  display: flex;
+  animation: cocinaAlarmaPulso 1s ease-in-out infinite;
+}
+
+.cocina-alarma-banner__texto {
+  flex: 1;
+  min-width: 0;
+}
+
+.cocina-alarma-banner__ok {
+  flex-shrink: 0;
+  min-width: 86px;
+}
+
+@keyframes cocinaAlarmaPulso {
+  0%,
+  100% {
+    transform: translateY(0);
+    box-shadow: 0 10px 24px rgba(185, 28, 28, 0.35);
+  }
+  50% {
+    transform: translateY(-1px);
+    box-shadow: 0 14px 26px rgba(185, 28, 28, 0.45);
+  }
 }
 
 .cocina-tabs {
@@ -5433,8 +5523,26 @@ body[data-role='mesera'] .kanm-main {
 }
 
 @media (max-width: 768px) {
+  .mesera-alarma-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .mesera-alarma-banner__ok {
+    width: 100%;
+  }
+
   .cocina-grid {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+
+  .cocina-alarma-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cocina-alarma-banner__ok {
+    width: 100%;
   }
 
   .cocina-focus-card {

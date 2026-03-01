@@ -7622,6 +7622,118 @@ app.get('/api/caja/cuadre/:id/detalle', (req, res) => {
   });
 });
 
+app.put('/api/caja/cuadre/:id/metodo-pago', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const cuentaId = Number(req.params.id);
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
+    }
+
+    const metodoRaw = (req.body?.metodo_pago ?? req.body?.metodo ?? '').toString().trim().toLowerCase();
+    const metodo =
+      metodoRaw === 'efectivo' || metodoRaw === 'tarjeta' || metodoRaw === 'transferencia'
+        ? metodoRaw
+        : null;
+    if (!metodo) {
+      return res.status(400).json({ ok: false, error: 'Metodo de pago invalido.' });
+    }
+
+    const fecha = req.body?.fecha ?? req.query?.fecha;
+    if (fecha && !esFechaISOValida(fecha)) {
+      return res.status(400).json({ ok: false, error: 'Fecha invalida.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const origenCaja = normalizarOrigenCaja(
+      req.body?.origen_caja ?? req.body?.origen ?? req.query?.origen ?? req.query?.origen_caja,
+      'caja'
+    );
+
+    const params = [cuentaId, cuentaId, negocioId];
+    const filtroOrigen = construirFiltroOrigenCaja(origenCaja, params, 'origen_caja');
+    const filtroFechaSql = fecha ? ` AND DATE(${FECHA_BASE_PEDIDOS_SQL}) = ?` : '';
+    if (fecha) params.push(fecha);
+
+    try {
+      const pedidos = await db.all(
+        `
+          SELECT id, subtotal, impuesto, descuento_monto, propina_monto
+          FROM pedidos
+          WHERE (cuenta_id = ? OR id = ?)
+            AND estado = 'pagado'
+            AND cierre_id IS NULL
+            AND negocio_id = ?
+            AND ${filtroOrigen}${filtroFechaSql}
+          ORDER BY fecha_creacion ASC
+        `,
+        params
+      );
+
+      if (!pedidos.length) {
+        return res.status(404).json({
+          ok: false,
+          error: 'No se encontraron ventas pendientes de cuadre para esa cuenta.',
+        });
+      }
+
+      await db.run('BEGIN');
+      for (const pedido of pedidos) {
+        const subtotal = Number(pedido.subtotal) || 0;
+        const impuesto = Number(pedido.impuesto) || 0;
+        const descuento = Number(pedido.descuento_monto) || 0;
+        const propina = Number(pedido.propina_monto) || 0;
+        const totalPedido = Math.max(subtotal + impuesto - descuento + propina, 0);
+
+        let pagoEfectivo = 0;
+        let pagoEfectivoEntregado = 0;
+        let pagoTarjeta = 0;
+        let pagoTransferencia = 0;
+        const pagoCambio = 0;
+
+        if (metodo === 'efectivo') {
+          pagoEfectivo = totalPedido;
+          pagoEfectivoEntregado = totalPedido;
+        } else if (metodo === 'tarjeta') {
+          pagoTarjeta = totalPedido;
+        } else if (metodo === 'transferencia') {
+          pagoTransferencia = totalPedido;
+        }
+
+        await db.run(
+          `UPDATE pedidos
+              SET pago_efectivo = ?,
+                  pago_efectivo_entregado = ?,
+                  pago_tarjeta = ?,
+                  pago_transferencia = ?,
+                  pago_cambio = ?
+            WHERE id = ? AND negocio_id = ?`,
+          [
+            Number(pagoEfectivo.toFixed(2)),
+            Number(pagoEfectivoEntregado.toFixed(2)),
+            Number(pagoTarjeta.toFixed(2)),
+            Number(pagoTransferencia.toFixed(2)),
+            pagoCambio,
+            Number(pedido.id),
+            negocioId,
+          ]
+        );
+      }
+      await db.run('COMMIT');
+
+      return res.json({
+        ok: true,
+        cuenta_id: cuentaId,
+        metodo_pago: metodo,
+        pedidos_actualizados: pedidos.length,
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al actualizar metodo de pago del cuadre:', error?.message || error);
+      return res.status(500).json({ ok: false, error: 'No se pudo actualizar el metodo de pago.' });
+    }
+  });
+});
+
 const asegurarEstadoPedidoEditable = (estado) => {
   const permitidos = ['preparando', 'listo', 'pagado'];
   return permitidos.includes(estado);

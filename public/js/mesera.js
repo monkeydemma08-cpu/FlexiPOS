@@ -38,6 +38,10 @@ const listasPorEstado = {
   listo: document.getElementById('lista-pedidos-listos'),
 };
 const REFRESCO_PEDIDOS_MS = 20000;
+const MESERA_ALARMA_TONO_MS = 1400;
+const MESERA_ALARMA_TITULO_MS = 900;
+const MESERA_ALARMA_FRECUENCIA = 980;
+const MESERA_SILENCIO_CAJA_MS = 20000;
 let temporizadorPedidos = null;
 
 const estado = {
@@ -66,9 +70,19 @@ const obtenerStockDisponible = (producto) => {
 const obtenerEtiquetaStock = (producto) =>
   esProductoStockIndefinido(producto) ? 'Indefinido' : obtenerStockDisponible(producto);
 
-let notificationSound;
-let notificationSoundReady = false;
-let notificationSoundUnlocking = null;
+let meseraAudioContextAlarma = null;
+let meseraAlarmaActiva = false;
+let meseraAlarmaTimer = null;
+let meseraAlarmaTituloTimer = null;
+let meseraAlarmasPendientes = 0;
+let meseraAlarmaAudioDisponible = false;
+let meseraAlarmaUnlockRegistrado = false;
+let meseraAlarmaParpadeoTitulo = false;
+let meseraAlarmaUltimoMensaje = '';
+let meseraAlarmaBanner = null;
+let meseraAlarmaTexto = null;
+const tituloOriginalMesera = document.title;
+const silenciosNotificacionCaja = new Map();
 const areaNotificationState = new Map();
 const AREA_STATE_STORAGE_KEY = 'kanm:area-notifications';
 let areaNotificationInitialized = false;
@@ -223,65 +237,227 @@ const agruparCuentas = (...listas) => {
   return resultado;
 };
 
-const ensureNotificationSound = () => {
-  if (!notificationSound) {
-    notificationSound = new Audio('/sounds/notify.mp3');
-    notificationSound.preload = 'auto';
+const obtenerAudioContextAlarmaMesera = () => {
+  if (meseraAudioContextAlarma) return meseraAudioContextAlarma;
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  meseraAudioContextAlarma = new AudioCtx();
+  return meseraAudioContextAlarma;
+};
+
+const intentarHabilitarAudioAlarmaMesera = async () => {
+  const ctx = obtenerAudioContextAlarmaMesera();
+  if (!ctx) return false;
+  if (ctx.state === 'running') {
+    meseraAlarmaAudioDisponible = true;
+    return true;
   }
-  return notificationSound;
+  try {
+    await ctx.resume();
+    meseraAlarmaAudioDisponible = ctx.state === 'running';
+    return meseraAlarmaAudioDisponible;
+  } catch (error) {
+    return false;
+  }
 };
 
-const primeNotificationSound = () => {
-  if (notificationSoundReady) return Promise.resolve(true);
-  const audio = ensureNotificationSound();
-  const intento = audio
-    .play()
-    .then(() => {
-      audio.pause();
-      audio.currentTime = 0;
-      notificationSoundReady = true;
-      return true;
-    })
-    .catch(() => false)
-    .finally(() => {
-      notificationSoundUnlocking = null;
-    });
-  notificationSoundUnlocking = intento;
-  return intento;
+const reproducirBeepAlarmaMesera = () => {
+  const ctx = obtenerAudioContextAlarmaMesera();
+  if (!ctx || ctx.state !== 'running') return false;
+
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'square';
+  osc.frequency.value = MESERA_ALARMA_FRECUENCIA;
+
+  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.2);
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.22);
+
+  meseraAlarmaAudioDisponible = true;
+  return true;
 };
 
-const registerSoundUnlockOnInteraction = () => {
+const reproducirPatronAlarmaMesera = () => {
+  const primerBeep = reproducirBeepAlarmaMesera();
+  if (!primerBeep) return false;
+  setTimeout(() => {
+    if (!meseraAlarmaActiva) return;
+    reproducirBeepAlarmaMesera();
+  }, 220);
+  return true;
+};
+
+const actualizarTituloAlarmaMesera = () => {
+  if (!meseraAlarmaActiva) {
+    document.title = tituloOriginalMesera;
+    return;
+  }
+  meseraAlarmaParpadeoTitulo = !meseraAlarmaParpadeoTitulo;
+  document.title = meseraAlarmaParpadeoTitulo ? 'ALERTA PEDIDO LISTO - Mesera' : tituloOriginalMesera;
+};
+
+const detenerAlarmaMesera = () => {
+  meseraAlarmasPendientes = 0;
+  meseraAlarmaActiva = false;
+  meseraAlarmaUltimoMensaje = '';
+  meseraAlarmaParpadeoTitulo = false;
+  document.title = tituloOriginalMesera;
+
+  if (meseraAlarmaTimer) {
+    clearInterval(meseraAlarmaTimer);
+    meseraAlarmaTimer = null;
+  }
+  if (meseraAlarmaTituloTimer) {
+    clearInterval(meseraAlarmaTituloTimer);
+    meseraAlarmaTituloTimer = null;
+  }
+
+  if (meseraAlarmaBanner) {
+    meseraAlarmaBanner.classList.remove('is-active');
+  }
+  if (meseraAlarmaTexto) {
+    meseraAlarmaTexto.textContent = '';
+  }
+};
+
+const actualizarBannerAlarmaMesera = () => {
+  if (!meseraAlarmaBanner || !meseraAlarmaTexto) return;
+  if (!meseraAlarmaActiva || meseraAlarmasPendientes <= 0) {
+    meseraAlarmaBanner.classList.remove('is-active');
+    meseraAlarmaTexto.textContent = '';
+    return;
+  }
+
+  const resumen =
+    meseraAlarmasPendientes === 1
+      ? 'Hay 1 pedido listo para entregar.'
+      : `Hay ${meseraAlarmasPendientes} pedidos listos para entregar.`;
+  const detalle = meseraAlarmaUltimoMensaje ? ` Ultimo aviso: ${meseraAlarmaUltimoMensaje}.` : '';
+  const ayudaAudio = meseraAlarmaAudioDisponible ? '' : ' Si no escuchas sonido, toca la pantalla para habilitar audio.';
+  meseraAlarmaTexto.textContent = `${resumen} Presiona OK para detener la alarma.${detalle}${ayudaAudio}`;
+  meseraAlarmaBanner.classList.add('is-active');
+};
+
+const iniciarAlarmaMesera = async (cantidad = 1, mensaje = '') => {
+  const incremento = Number(cantidad);
+  meseraAlarmasPendientes += Number.isFinite(incremento) && incremento > 0 ? incremento : 1;
+  if (mensaje) {
+    meseraAlarmaUltimoMensaje = mensaje;
+  }
+
+  if (!meseraAlarmaActiva) {
+    meseraAlarmaActiva = true;
+    if (navigator.vibrate) {
+      navigator.vibrate([120, 60, 120]);
+    }
+  }
+
+  actualizarBannerAlarmaMesera();
+  actualizarTituloAlarmaMesera();
+
+  await intentarHabilitarAudioAlarmaMesera();
+  reproducirPatronAlarmaMesera();
+
+  if (!meseraAlarmaTimer) {
+    meseraAlarmaTimer = setInterval(() => {
+      if (!meseraAlarmaActiva) return;
+      const reprodujo = reproducirPatronAlarmaMesera();
+      if (!reprodujo) {
+        intentarHabilitarAudioAlarmaMesera().then((ok) => {
+          if (ok) {
+            actualizarBannerAlarmaMesera();
+          }
+        });
+      }
+    }, MESERA_ALARMA_TONO_MS);
+  }
+
+  if (!meseraAlarmaTituloTimer) {
+    meseraAlarmaTituloTimer = setInterval(() => {
+      actualizarTituloAlarmaMesera();
+    }, MESERA_ALARMA_TITULO_MS);
+  }
+};
+
+const registrarDesbloqueoAudioAlarmaMesera = () => {
+  if (meseraAlarmaUnlockRegistrado) return;
+  meseraAlarmaUnlockRegistrado = true;
+
+  const eventos = ['click', 'touchstart', 'keydown'];
   const handler = () => {
-    primeNotificationSound();
-    ['click', 'touchstart', 'keydown'].forEach((evento) => {
-      document.removeEventListener(evento, handler, true);
+    intentarHabilitarAudioAlarmaMesera().then((ok) => {
+      if (!ok) return;
+      eventos.forEach((evento) => {
+        document.removeEventListener(evento, handler, true);
+      });
+      meseraAlarmaUnlockRegistrado = false;
+      actualizarBannerAlarmaMesera();
+      if (meseraAlarmaActiva) {
+        reproducirPatronAlarmaMesera();
+      }
     });
   };
-  ['click', 'touchstart', 'keydown'].forEach((evento) => {
+
+  eventos.forEach((evento) => {
     document.addEventListener(evento, handler, { capture: true });
   });
 };
 
-const playNotificationSound = () => {
-  ensureNotificationSound();
-  const intentarReproducir = () => {
-    notificationSound.currentTime = 0;
-    notificationSound.play().catch(() => {});
-  };
+const crearBannerAlarmaMesera = () => {
+  if (meseraAlarmaBanner) return meseraAlarmaBanner;
+  const main = document.querySelector('body[data-role="mesera"] .kanm-main');
+  if (!main) return null;
 
-  if (notificationSoundReady) {
-    intentarReproducir();
-    return;
-  }
+  const banner = document.createElement('div');
+  banner.className = 'mesera-alarma-banner';
+  banner.setAttribute('role', 'alert');
+  banner.setAttribute('aria-live', 'assertive');
 
-  const promesa = notificationSoundUnlocking || primeNotificationSound();
-  Promise.resolve(promesa)
-    .then(() => {
-      intentarReproducir();
-    })
-    .catch(() => {
-      intentarReproducir();
-    });
+  const texto = document.createElement('span');
+  texto.className = 'mesera-alarma-banner__texto';
+  banner.appendChild(texto);
+
+  const botonOk = document.createElement('button');
+  botonOk.type = 'button';
+  botonOk.className = 'kanm-button primary mesera-alarma-banner__ok';
+  botonOk.textContent = 'OK';
+  botonOk.addEventListener('click', () => {
+    detenerAlarmaMesera();
+  });
+  banner.appendChild(botonOk);
+
+  main.insertBefore(banner, main.firstChild);
+  meseraAlarmaBanner = banner;
+  meseraAlarmaTexto = texto;
+  return banner;
+};
+
+const limpiarSilenciosCajaExpirados = () => {
+  const ahora = Date.now();
+  silenciosNotificacionCaja.forEach((venceEn, cuentaId) => {
+    if (!Number.isFinite(venceEn) || venceEn <= ahora) {
+      silenciosNotificacionCaja.delete(cuentaId);
+    }
+  });
+};
+
+const programarSilencioNotificacionCaja = (cuentaId) => {
+  if (cuentaId == null || cuentaId === '') return;
+  limpiarSilenciosCajaExpirados();
+  silenciosNotificacionCaja.set(String(cuentaId), Date.now() + MESERA_SILENCIO_CAJA_MS);
+};
+
+const estaSilenciadaNotificacionCaja = (cuentaId) => {
+  if (cuentaId == null || cuentaId === '') return false;
+  limpiarSilenciosCajaExpirados();
+  const venceEn = silenciosNotificacionCaja.get(String(cuentaId));
+  return Number.isFinite(venceEn) && venceEn > Date.now();
 };
 
 const showToast = (message, timeoutMs = 4000) => {
@@ -305,29 +481,13 @@ const showToast = (message, timeoutMs = 4000) => {
   }, timeoutMs);
 };
 
-const speakNotification = (message) => {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-  try {
-    const utterance = new SpeechSynthesisUtterance(message);
-    utterance.lang = 'es-ES';
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-  } catch (error) {
-    console.warn('No se pudo reproducir la voz de la notificación:', error);
-  }
-};
-
 const notifyAreaReady = (cuenta, areaLabel) => {
-  playNotificationSound();
-  if (navigator.vibrate) {
-    navigator.vibrate([120, 60, 120]);
-  }
   const mesaTexto = cuenta.mesa || cuenta.mesaNumero || cuenta.mesa_nombre || cuenta.mesa_id || '';
   const mensaje = mesaTexto ? `Mesa ${mesaTexto} - ${areaLabel} lista` : `${areaLabel} lista`;
   showToast(mensaje);
-  speakNotification(mensaje);
+  iniciarAlarmaMesera(1, mensaje).then(() => {
+    actualizarBannerAlarmaMesera();
+  });
 };
 
 const checkAreaNotifications = (cuenta) => {
@@ -357,6 +517,9 @@ const checkAreaNotifications = (cuenta) => {
     }
 
     if (estadoNormalizado === 'listo' && previo !== 'listo') {
+      if (estaSilenciadaNotificacionCaja(cuentaId)) {
+        return;
+      }
       notifyAreaReady(cuenta, label);
       if (estado.tabActiva !== 'listos') {
         incrementarBadgeListos(1);
@@ -521,6 +684,7 @@ const fetchAutorizadoMesera = async (url, options = {}) => {
   const headers = { ...obtenerAuthHeadersMesera(), ...(options.headers || {}) };
   const response = await fetch(url, { ...options, headers });
   if (response.status === 401) {
+    detenerAlarmaMesera();
     authApi?.handleUnauthorized?.();
   }
   return response;
@@ -1578,6 +1742,17 @@ const enviarPedido = async (destino = 'cocina') => {
       mostrarMensaje(data.advertencias.join(' '), 'warning');
     }
 
+    if (destino === 'caja') {
+      const cuentaSilenciada =
+        data?.pedido?.cuenta_id ??
+        data?.pedido?.id ??
+        payload?.cuenta_id ??
+        payload?.cuentaId ??
+        estado.cuentaReferenciaId ??
+        null;
+      programarSilencioNotificacionCaja(cuentaSilenciada);
+    }
+
     const mensajeExito = editandoPedidoPendiente
       ? 'Pedido actualizado correctamente.'
       : esEdicion
@@ -1589,7 +1764,11 @@ const enviarPedido = async (destino = 'cocina') => {
           : destino === 'delivery-directo'
             ? 'Pedido enviado directo a delivery correctamente.'
             : 'Pedido enviado a preparación correctamente.';
-    mostrarMensaje(mensajeExito, 'info');
+    if (destino !== 'caja') {
+      mostrarMensaje(mensajeExito, 'info');
+    } else {
+      limpiarMensaje();
+    }
     notificarActualizacionGlobal('stock-actualizado', { tipo: esEdicion ? 'actualizado' : 'creado' });
     estado.carrito.clear();
     if (notaInput) notaInput.value = '';
@@ -1694,7 +1873,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   cargarEstadoAreasDesdeStorage();
   cargarBadgeListosDesdeStorage();
   actualizarBadgeListos();
-  registerSoundUnlockOnInteraction();
+  crearBannerAlarmaMesera();
+  registrarDesbloqueoAudioAlarmaMesera();
   const usuario = obtenerUsuarioActual();
   if (identidadMesera && usuario?.nombre) {
     identidadMesera.textContent = `Mesera: ${usuario.nombre}`;
@@ -1708,4 +1888,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   iniciarRefrescoPedidos();
 });
 
-window.addEventListener('beforeunload', detenerRefrescoPedidos);
+window.addEventListener('beforeunload', () => {
+  detenerRefrescoPedidos();
+  detenerAlarmaMesera();
+});
