@@ -254,15 +254,29 @@
       }
     }
 
+    const itemsAgregados = agruparItemsFactura(items || []);
+    const descuentoGeneral = Number(pedido.descuento_monto) || 0;
+    const descuentoItems = itemsAgregados.reduce(
+      (acc, item) => acc + (Number(item.descuento_total) || 0),
+      0
+    );
+
     if (subtotalSpan) subtotalSpan.textContent = formatCurrency(pedido.subtotal);
     if (impuestoSpan) impuestoSpan.textContent = formatCurrency(pedido.impuesto);
-    if (descuentoSpan) descuentoSpan.textContent = `- ${formatCurrency(pedido.descuento_monto)}`;
+    if (descuentoSpan) {
+      if (descuentoGeneral > 0) {
+        descuentoSpan.textContent = `- ${formatCurrency(descuentoGeneral)}`;
+      } else if (descuentoItems > 0) {
+        descuentoSpan.textContent = `- ${formatCurrency(descuentoItems)} (productos, incluido)`;
+      } else {
+        descuentoSpan.textContent = `- ${formatCurrency(0)}`;
+      }
+    }
     if (propinaSpan) propinaSpan.textContent = formatCurrency(pedido.propina_monto);
     if (totalSpan) totalSpan.textContent = formatCurrency(pedido.total_final);
 
     if (itemsBody) {
       itemsBody.innerHTML = '';
-      const itemsAgregados = agruparItemsFactura(items || []);
 
       if (!itemsAgregados.length) {
         const fila = document.createElement('tr');
@@ -286,14 +300,20 @@
         const descuentoTotal = descuentoBase > 0 ? Math.min(descuentoBase, subtotalBruto) : descuentoCalculado;
         const subtotalFinal = Math.max(subtotalBruto - descuentoTotal, 0);
         const precioFinal = cantidad > 0 ? subtotalFinal / cantidad : precio;
+        const tieneDescuento = descuentoTotal > 0.009;
+        const precioOriginal = formatCurrency(precio);
+        const subtotalOriginal = formatCurrency(subtotalBruto);
         const precioHtml = `
           <div class="factura-price-block">
+            ${tieneDescuento ? `<span class="factura-price-old">${precioOriginal}</span>` : ''}
             <span class="factura-price-final">${formatCurrency(precioFinal)}</span>
           </div>
         `;
         const subtotalHtml = `
           <div class="factura-price-block">
+            ${tieneDescuento ? `<span class="factura-price-old">${subtotalOriginal}</span>` : ''}
             <span class="factura-price-final">${formatCurrency(subtotalFinal)}</span>
+            ${tieneDescuento ? `<span class="factura-desc-note">Desc. producto: -${formatCurrency(descuentoTotal)}</span>` : ''}
           </div>
         `;
         const nombreCompleto = limpiarTextoFactura(item.nombre || `Producto ${item.producto_id || ''}`);

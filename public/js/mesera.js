@@ -1494,6 +1494,9 @@ const cargarPedidosActivos = async (mostrarCarga = true) => {
     renderPedidosPorEstado(['listo'], listasPorEstado.listo, mensajesPorEstado.listo, 'No hay pedidos listos.');
   } catch (error) {
     console.error('Error al cargar pedidos activos:', error);
+    if (!mostrarCarga && Array.isArray(estado.pedidosActivos) && estado.pedidosActivos.length) {
+      return;
+    }
     ['pendiente', 'preparando', 'listo'].forEach((clave) => {
       mostrarMensajeTab(mensajesPorEstado[clave], 'Error al cargar los pedidos en curso.', 'error');
       const cont = listasPorEstado[clave];

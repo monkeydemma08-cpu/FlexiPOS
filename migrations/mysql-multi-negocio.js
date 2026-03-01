@@ -1893,6 +1893,36 @@ async function runMigrations() {
   await ensureColumn('salidas_caja', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
   await ensureColumn('detalle_pedido', 'costo_unitario_snapshot DECIMAL(12,2) NOT NULL DEFAULT 0');
   await ensureColumn('detalle_pedido', 'cogs_linea DECIMAL(12,2) NOT NULL DEFAULT 0');
+  await ensureColumn(
+    'detalle_pedido',
+    "estado_preparacion ENUM('pendiente', 'preparando', 'listo') NOT NULL DEFAULT 'pendiente'"
+  );
+  await ensureColumn('detalle_pedido', 'cantidad_lista DECIMAL(12,4) NOT NULL DEFAULT 0');
+  try {
+    await query(
+      `UPDATE detalle_pedido dp
+          JOIN pedidos p ON p.id = dp.pedido_id AND p.negocio_id = dp.negocio_id
+          SET dp.estado_preparacion = 'listo'
+        WHERE p.estado IN ('listo', 'pagado')
+          AND COALESCE(dp.estado_preparacion, '') <> 'listo'`
+    );
+    await query(
+      `UPDATE detalle_pedido
+          SET estado_preparacion = 'pendiente'
+        WHERE estado_preparacion IS NULL
+           OR estado_preparacion NOT IN ('pendiente', 'preparando', 'listo')`
+    );
+    await query(
+      `UPDATE detalle_pedido
+          SET cantidad_lista = CASE
+            WHEN estado_preparacion = 'listo' THEN cantidad
+            WHEN estado_preparacion = 'pendiente' THEN 0
+            ELSE LEAST(GREATEST(COALESCE(cantidad_lista, 0), 0), cantidad)
+          END`
+    );
+  } catch (error) {
+    console.warn('No se pudo normalizar estado_preparacion en detalle_pedido:', error?.message || error);
+  }
   await ensureNegocioThemeAndModulesColumns();
   await ensureDefaultEmpresa();
   await ensureDefaultPlanCuentas();

@@ -1775,6 +1775,10 @@ body[data-role='mesera'] .kanm-main {
   max-width: 980px;
 }
 
+.caja-admin-password-modal {
+  max-width: 460px;
+}
+
 .caja-split-header {
   display: flex;
   justify-content: space-between;
@@ -1836,6 +1840,29 @@ body[data-role='mesera'] .kanm-main {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.caja-split-cantidad {
+  display: grid;
+  gap: 4px;
+  min-width: 110px;
+}
+
+.caja-split-cantidad span {
+  font-size: 0.72rem;
+  color: var(--kanm-gray-600);
+  font-weight: 600;
+}
+
+.caja-split-cantidad input {
+  width: 100%;
+  border: 1px solid var(--kanm-gray-300);
+  border-radius: 10px;
+  padding: 6px 8px;
+  background: #fff;
+  color: var(--kanm-gray-900);
 }
 
 .caja-split-item--selected {
@@ -2112,6 +2139,30 @@ body[data-role='mesera'] .kanm-main {
   padding: 8px 10px;
   border-radius: 10px;
   background: var(--kanm-gray-100);
+}
+
+.caja-item-tools {
+  display: grid;
+  gap: 8px;
+  align-items: end;
+}
+
+@media (min-width: 760px) {
+  .caja-item-tools {
+    grid-template-columns: minmax(180px, 260px) 1fr;
+  }
+}
+
+.caja-item-precio-group {
+  margin-bottom: 0;
+}
+
+.caja-item-precio-input {
+  width: 100%;
+}
+
+.caja-item-tools-actions {
+  justify-content: flex-end;
 }
 
 .caja-empty {
@@ -5299,9 +5350,79 @@ body[data-role='mesera'] .kanm-main {
   color: #c54274;
 }
 
-.cocina-focus-items ul {
+.cocina-focus-items ul:not(.cocina-focus-item-list) {
   margin: 0;
   padding-left: 16px;
+}
+
+.cocina-focus-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.cocina-focus-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.cocina-focus-item-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cocina-focus-item-title {
+  color: #2f2f2f;
+  font-weight: 600;
+}
+
+.cocina-focus-item-subinfo {
+  color: #6b7280;
+  font-size: 0.82rem;
+}
+
+.cocina-focus-item-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cocina-item-estado {
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.cocina-item-estado[data-estado='pendiente'] {
+  background: rgba(245, 158, 11, 0.15);
+  color: #92400e;
+}
+
+.cocina-item-estado[data-estado='preparando'] {
+  background: rgba(59, 130, 246, 0.14);
+  color: #1e40af;
+}
+
+.cocina-item-estado[data-estado='listo'] {
+  background: rgba(16, 185, 129, 0.16);
+  color: #065f46;
+}
+
+.cocina-item-action {
+  padding: 6px 10px;
+  min-height: auto;
 }
 
 .cocina-focus-actions {
@@ -5318,6 +5439,16 @@ body[data-role='mesera'] .kanm-main {
 
   .cocina-focus-card {
     width: 100%;
+  }
+
+  .cocina-focus-item-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .cocina-focus-item-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 .caja-cuenta-seleccionada {

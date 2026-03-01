@@ -52,6 +52,7 @@ const botonImprimir = document.getElementById('caja-imprimir');
 
 const botonSepararCuenta = document.getElementById('caja-separar');
 const botonJuntarCuentas = document.getElementById('caja-juntar');
+const botonEliminarCuenta = document.getElementById('caja-eliminar-cuenta');
 const splitModal = document.getElementById('caja-split-modal');
 const splitModalCerrar = document.getElementById('caja-split-cerrar');
 const splitModalConfirmar = document.getElementById('caja-split-confirmar');
@@ -69,6 +70,13 @@ const mergeModalLista = document.getElementById('caja-merge-lista');
 const mergeModalMensaje = document.getElementById('caja-merge-mensaje');
 const mergeModalResumen = document.getElementById('caja-merge-resumen');
 const mergeModalSubtitle = document.getElementById('caja-merge-subtitle');
+const adminPasswordModal = document.getElementById('caja-admin-password-modal');
+const adminPasswordModalCerrar = document.getElementById('caja-admin-password-cerrar');
+const adminPasswordModalCancelar = document.getElementById('caja-admin-password-cancelar');
+const adminPasswordModalConfirmar = document.getElementById('caja-admin-password-confirmar');
+const adminPasswordModalInput = document.getElementById('caja-admin-password-input');
+const adminPasswordModalMensaje = document.getElementById('caja-admin-password-mensaje');
+const adminPasswordModalContext = document.getElementById('caja-admin-password-context');
 
 
 const cuadreFechaInput = document.getElementById('cuadre-fecha');
@@ -603,6 +611,7 @@ let splitItems = [];
 let splitItemsMap = new Map();
 const splitSeleccion = new Map();
 const mergeSeleccion = new Set();
+let resolverPasswordAdminPendiente = null;
 
 let calculo = {
 
@@ -1329,13 +1338,45 @@ const totalesBaseCuenta = (cuenta) => {
 
 };
 
-const obtenerTasaImpuestoCuenta = (cuenta) => {
-  const lista = cuenta?.pedidos || [];
-  const subtotal = lista.reduce((acc, p) => acc + (Number(p.subtotal) || 0), 0);
-  const impuesto = lista.reduce((acc, p) => acc + (Number(p.impuesto) || 0), 0);
-  if (!subtotal) return 0;
-  const tasa = impuesto / subtotal;
-  return Number.isFinite(tasa) && tasa >= 0 ? tasa : 0;
+const redondearMonedaCaja = (valor) => Number((Number(valor) || 0).toFixed(2));
+
+const esCuentaConImpuestoIncluidoEnSplit = (subtotalItems, totalesCuenta) => {
+  const subtotalCuenta = Math.max(Number(totalesCuenta?.subtotal) || 0, 0);
+  const impuestoCuenta = Math.max(Number(totalesCuenta?.impuesto) || 0, 0);
+  const totalCuenta = Math.max(Number(totalesCuenta?.total) || subtotalCuenta + impuestoCuenta, 0);
+
+  if (impuestoCuenta <= 0) return false;
+
+  const deltaContraTotal = Math.abs(subtotalItems - totalCuenta);
+  const deltaContraSubtotal = Math.abs(subtotalItems - subtotalCuenta);
+  return deltaContraTotal <= deltaContraSubtotal;
+};
+
+const calcularResumenSegmentoSplit = (montoSegmento, montoTotalSegmentos, totalesCuenta, impuestoIncluido) => {
+  const baseSegmento = Math.max(Number(montoSegmento) || 0, 0);
+  const baseTotal = Math.max(Number(montoTotalSegmentos) || 0, 0);
+  const impuestoCuenta = Math.max(Number(totalesCuenta?.impuesto) || 0, 0);
+
+  if (impuestoIncluido) {
+    const subtotalCuenta = Math.max(Number(totalesCuenta?.subtotal) || 0, 0);
+    const proporcion = baseTotal > 0 ? baseSegmento / baseTotal : 0;
+    const subtotal = redondearMonedaCaja(subtotalCuenta * proporcion);
+    const impuesto = redondearMonedaCaja(impuestoCuenta * proporcion);
+    return {
+      subtotal,
+      impuesto,
+      total: redondearMonedaCaja(baseSegmento),
+    };
+  }
+
+  const subtotal = redondearMonedaCaja(baseSegmento);
+  const proporcion = baseTotal > 0 ? baseSegmento / baseTotal : 0;
+  const impuesto = redondearMonedaCaja(impuestoCuenta * proporcion);
+  return {
+    subtotal,
+    impuesto,
+    total: redondearMonedaCaja(subtotal + impuesto),
+  };
 };
 
 const obtenerTotalCuenta = (cuenta) => {
@@ -1355,8 +1396,17 @@ const construirItemsSeparar = () => {
       seen.add(detalleId);
       const cantidad = Number(item.cantidad) || 0;
       const precio = Number(item.precio_unitario) || 0;
-      const descuento = Number(item.descuento_monto) || 0;
-      const totalLinea = Math.max(cantidad * precio - descuento, 0);
+      const subtotalLinea = Math.max(cantidad * precio, 0);
+      const descuentoPorcentaje = Math.max(Number(item.descuento_porcentaje) || 0, 0);
+      const descuentoMonto = Math.max(Number(item.descuento_monto) || 0, 0);
+      const cantidadDescuentoRaw = Number(item.cantidad_descuento);
+      const cantidadDescuento = Number.isFinite(cantidadDescuentoRaw)
+        ? Math.min(Math.max(cantidadDescuentoRaw, 0), cantidad)
+        : cantidad;
+      const proporcional = cantidad > 0 ? cantidadDescuento / cantidad : 1;
+      const descuentoPorcentajeMonto = subtotalLinea * (descuentoPorcentaje / 100) * proporcional;
+      const descuentoTotal = Math.min(descuentoPorcentajeMonto + descuentoMonto, subtotalLinea);
+      const totalLinea = Math.max(subtotalLinea - descuentoTotal, 0);
       items.push({
         detalle_id: detalleId,
         pedido_id: Number(item.pedido_id ?? pedido.id) || null,
@@ -1364,7 +1414,9 @@ const construirItemsSeparar = () => {
         nombre: item.nombre || `Producto ${item.producto_id || ''}`,
         cantidad,
         precio_unitario: precio,
-        descuento_monto: descuento,
+        descuento_monto: descuentoMonto,
+        descuento_porcentaje: descuentoPorcentaje,
+        cantidad_descuento: cantidadDescuento,
         total_linea: Number(totalLinea.toFixed(2)),
       });
     });
@@ -1730,6 +1782,12 @@ const setMensajeMerge = (texto, tipo = 'info') => {
   mergeModalMensaje.dataset.type = texto ? tipo : '';
 };
 
+const setMensajePasswordAdmin = (texto, tipo = 'info') => {
+  if (!adminPasswordModalMensaje) return;
+  adminPasswordModalMensaje.textContent = texto;
+  adminPasswordModalMensaje.dataset.type = texto ? tipo : '';
+};
+
 const mostrarModal = (overlay) => {
   if (!overlay) return;
   overlay.hidden = false;
@@ -1744,6 +1802,29 @@ const ocultarModal = (overlay) => {
   setTimeout(() => {
     overlay.hidden = true;
   }, 200);
+};
+
+const cerrarModalPasswordAdmin = (valor = null) => {
+  ocultarModal(adminPasswordModal);
+  if (adminPasswordModalInput) {
+    adminPasswordModalInput.value = '';
+  }
+  setMensajePasswordAdmin('');
+  const resolver = resolverPasswordAdminPendiente;
+  resolverPasswordAdminPendiente = null;
+  if (resolver) {
+    resolver(valor);
+  }
+};
+
+const confirmarModalPasswordAdmin = () => {
+  const password = (adminPasswordModalInput?.value || '').trim();
+  if (!password) {
+    setMensajePasswordAdmin('Ingresa la contrasena de admin.', 'error');
+    adminPasswordModalInput?.focus();
+    return;
+  }
+  cerrarModalPasswordAdmin(password);
 };
 
 
@@ -1870,6 +1951,7 @@ const limpiarSeleccion = () => {
   }
   if (botonSepararCuenta) botonSepararCuenta.disabled = true;
   if (botonJuntarCuentas) botonJuntarCuentas.disabled = true;
+  if (botonEliminarCuenta) botonEliminarCuenta.disabled = true;
 
   calculo = {
 
@@ -1910,12 +1992,72 @@ const prepararSplitItems = () => {
   splitItemsMap = new Map(splitItems.map((item) => [item.detalle_id, item]));
 };
 
+const TOLERANCIA_CANTIDAD_SPLIT = 0.0001;
+
+const redondearCantidadSplit = (valor) => {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) return 0;
+  return Number(Math.max(numero, 0).toFixed(4));
+};
+
+const formatearCantidadSplit = (valor) => {
+  const numero = redondearCantidadSplit(valor);
+  if (numero <= 0) return '0';
+  if (Number.isInteger(numero)) return String(numero);
+  return String(numero).replace(/\.?0+$/, '');
+};
+
+const obtenerCantidadMaximaSplit = (item) => redondearCantidadSplit(Number(item?.cantidad) || 0);
+
+const calcularTotalLineaProporcionalSplit = (item, cantidadSeleccionada) => {
+  const cantidadTotal = obtenerCantidadMaximaSplit(item);
+  if (cantidadTotal <= 0) return 0;
+  const cantidad = Math.min(redondearCantidadSplit(cantidadSeleccionada), cantidadTotal);
+  const proporcion = cantidadTotal > 0 ? cantidad / cantidadTotal : 0;
+  const totalLinea = Math.max(Number(item?.total_linea) || 0, 0);
+  return redondearMonedaCaja(totalLinea * proporcion);
+};
+
+const obtenerCantidadSeleccionadaSplit = (detalleId) => {
+  const seleccion = splitSeleccion.get(detalleId);
+  if (!seleccion) return 0;
+  return redondearCantidadSplit(seleccion.cantidad);
+};
+
+const establecerCantidadSeleccionSplit = (detalleId, cantidadEntrada) => {
+  const item = splitItemsMap.get(detalleId);
+  if (!item) return false;
+  const maximo = obtenerCantidadMaximaSplit(item);
+  if (maximo <= TOLERANCIA_CANTIDAD_SPLIT) {
+    splitSeleccion.delete(detalleId);
+    return false;
+  }
+
+  const cantidad =
+    typeof cantidadEntrada === 'string'
+      ? redondearCantidadSplit(Number(cantidadEntrada.replace(',', '.')))
+      : redondearCantidadSplit(cantidadEntrada);
+  const cantidadFinal = Math.min(Math.max(cantidad, 0), maximo);
+
+  if (!Number.isFinite(cantidadFinal) || cantidadFinal <= TOLERANCIA_CANTIDAD_SPLIT) {
+    splitSeleccion.delete(detalleId);
+    return false;
+  }
+
+  splitSeleccion.set(detalleId, {
+    detalle_id: detalleId,
+    cantidad: cantidadFinal,
+  });
+  return true;
+};
+
 const calcularTotalesSplit = () => {
   const subtotalTotal = splitItems.reduce((acc, item) => acc + (Number(item.total_linea) || 0), 0);
-  const subtotalSeleccion = Array.from(splitSeleccion.values()).reduce(
-    (acc, item) => acc + (Number(item.total_linea) || 0),
-    0
-  );
+  const subtotalSeleccion = Array.from(splitSeleccion.entries()).reduce((acc, [detalleId, seleccion]) => {
+    const item = splitItemsMap.get(Number(detalleId));
+    if (!item) return acc;
+    return acc + calcularTotalLineaProporcionalSplit(item, seleccion?.cantidad);
+  }, 0);
   const subtotalRestante = Math.max(subtotalTotal - subtotalSeleccion, 0);
   return { subtotalTotal, subtotalSeleccion, subtotalRestante };
 };
@@ -1931,7 +2073,15 @@ const renderSplitModalContenido = () => {
   }
 
   splitItems.forEach((item) => {
-    const seleccionado = splitSeleccion.has(item.detalle_id);
+    const cantidadMaxima = obtenerCantidadMaximaSplit(item);
+    const cantidadSeleccionada = Math.min(
+      Math.max(obtenerCantidadSeleccionadaSplit(item.detalle_id), 0),
+      cantidadMaxima
+    );
+    const seleccionado = cantidadSeleccionada > TOLERANCIA_CANTIDAD_SPLIT;
+    if (splitSeleccion.has(item.detalle_id) && !seleccionado) {
+      splitSeleccion.delete(item.detalle_id);
+    }
     const row = document.createElement('div');
     row.className = `caja-split-item${seleccionado ? ' caja-split-item--selected' : ''}`;
 
@@ -1948,7 +2098,9 @@ const renderSplitModalContenido = () => {
     const meta = document.createElement('div');
     meta.className = 'caja-split-item-meta';
     const pedidoLabel = item.pedido_id ? `Pedido #${item.pedido_id}` : 'Pedido';
-    meta.textContent = `${pedidoLabel} • ${item.cantidad} x ${formatCurrency(item.precio_unitario)}`;
+    meta.textContent = `${pedidoLabel} • ${formatearCantidadSplit(cantidadMaxima)} x ${formatCurrency(
+      item.precio_unitario
+    )}`;
     info.appendChild(nombre);
     info.appendChild(meta);
     label.appendChild(info);
@@ -1958,18 +2110,50 @@ const renderSplitModalContenido = () => {
     acciones.className = 'caja-split-item-actions';
     const total = document.createElement('div');
     total.className = 'caja-split-item-total';
-    total.textContent = formatCurrency(item.total_linea);
+    total.textContent = formatCurrency(
+      seleccionado ? calcularTotalLineaProporcionalSplit(item, cantidadSeleccionada) : item.total_linea
+    );
     acciones.appendChild(total);
+
+    if (seleccionado) {
+      const cantidadWrap = document.createElement('label');
+      cantidadWrap.className = 'caja-split-cantidad';
+      const cantidadTitulo = document.createElement('span');
+      cantidadTitulo.textContent = 'Mover';
+      const cantidadInput = document.createElement('input');
+      cantidadInput.type = 'number';
+      cantidadInput.min = '0';
+      cantidadInput.max = String(cantidadMaxima);
+      cantidadInput.step = Number.isInteger(cantidadMaxima) ? '1' : '0.01';
+      cantidadInput.value = formatearCantidadSplit(cantidadSeleccionada);
+      cantidadInput.dataset.detalleId = item.detalle_id;
+      cantidadInput.dataset.accion = 'cantidad';
+      cantidadWrap.appendChild(cantidadTitulo);
+      cantidadWrap.appendChild(cantidadInput);
+      acciones.appendChild(cantidadWrap);
+    }
+
     row.appendChild(acciones);
 
     splitModalOrigen.appendChild(row);
   });
 
-  const seleccionados = Array.from(splitSeleccion.values());
+  const seleccionados = Array.from(splitSeleccion.entries())
+    .map(([detalleId, seleccion]) => {
+      const item = splitItemsMap.get(Number(detalleId));
+      if (!item) return null;
+      const cantidad = Math.min(
+        Math.max(redondearCantidadSplit(seleccion?.cantidad), 0),
+        obtenerCantidadMaximaSplit(item)
+      );
+      if (cantidad <= TOLERANCIA_CANTIDAD_SPLIT) return null;
+      return { item, cantidad };
+    })
+    .filter(Boolean);
   if (!seleccionados.length) {
     splitModalDestino.innerHTML = '<div class="caja-merge-lista-vacia">Selecciona productos para mover.</div>';
   } else {
-    seleccionados.forEach((item) => {
+    seleccionados.forEach(({ item, cantidad }) => {
       const row = document.createElement('div');
       row.className = 'caja-split-item caja-split-item--selected';
       const info = document.createElement('div');
@@ -1978,7 +2162,9 @@ const renderSplitModalContenido = () => {
       const meta = document.createElement('div');
       meta.className = 'caja-split-item-meta';
       const pedidoLabel = item.pedido_id ? `Pedido #${item.pedido_id}` : 'Pedido';
-      meta.textContent = `${pedidoLabel} • ${item.cantidad} x ${formatCurrency(item.precio_unitario)}`;
+      meta.textContent = `${pedidoLabel} • ${formatearCantidadSplit(cantidad)} de ${formatearCantidadSplit(
+        item.cantidad
+      )} x ${formatCurrency(item.precio_unitario)}`;
       info.appendChild(nombre);
       info.appendChild(meta);
       row.appendChild(info);
@@ -1987,8 +2173,24 @@ const renderSplitModalContenido = () => {
       acciones.className = 'caja-split-item-actions';
       const total = document.createElement('div');
       total.className = 'caja-split-item-total';
-      total.textContent = formatCurrency(item.total_linea);
+      total.textContent = formatCurrency(calcularTotalLineaProporcionalSplit(item, cantidad));
       acciones.appendChild(total);
+
+      const cantidadWrap = document.createElement('label');
+      cantidadWrap.className = 'caja-split-cantidad';
+      const cantidadTitulo = document.createElement('span');
+      cantidadTitulo.textContent = 'Mover';
+      const cantidadInput = document.createElement('input');
+      cantidadInput.type = 'number';
+      cantidadInput.min = '0';
+      cantidadInput.max = String(obtenerCantidadMaximaSplit(item));
+      cantidadInput.step = Number.isInteger(Number(item.cantidad) || 0) ? '1' : '0.01';
+      cantidadInput.value = formatearCantidadSplit(cantidad);
+      cantidadInput.dataset.detalleId = item.detalle_id;
+      cantidadInput.dataset.accion = 'cantidad';
+      cantidadWrap.appendChild(cantidadTitulo);
+      cantidadWrap.appendChild(cantidadInput);
+      acciones.appendChild(cantidadWrap);
 
       const quitar = document.createElement('button');
       quitar.type = 'button';
@@ -2003,24 +2205,40 @@ const renderSplitModalContenido = () => {
     });
   }
 
-  const tasa = obtenerTasaImpuestoCuenta(cuentaSeleccionada);
-  const { subtotalSeleccion, subtotalRestante } = calcularTotalesSplit();
-  const impuestoSeleccion = Number((subtotalSeleccion * tasa).toFixed(2));
-  const impuestoRestante = Number((subtotalRestante * tasa).toFixed(2));
+  const { subtotalTotal, subtotalSeleccion } = calcularTotalesSplit();
+  const totalesCuenta = totalesBaseCuenta(cuentaSeleccionada);
+  const impuestoIncluido = esCuentaConImpuestoIncluidoEnSplit(subtotalTotal, totalesCuenta);
+  const totalesSeleccion = calcularResumenSegmentoSplit(
+    subtotalSeleccion,
+    subtotalTotal,
+    totalesCuenta,
+    impuestoIncluido
+  );
+  const totalesRestantes = {
+    subtotal: redondearMonedaCaja(
+      Math.max((Number(totalesCuenta.subtotal) || 0) - (Number(totalesSeleccion.subtotal) || 0), 0)
+    ),
+    impuesto: redondearMonedaCaja(
+      Math.max((Number(totalesCuenta.impuesto) || 0) - (Number(totalesSeleccion.impuesto) || 0), 0)
+    ),
+    total: redondearMonedaCaja(
+      Math.max((Number(totalesCuenta.total) || 0) - (Number(totalesSeleccion.total) || 0), 0)
+    ),
+  };
 
   if (splitModalTotalesOrigen) {
     splitModalTotalesOrigen.innerHTML = `
-      <div class="flex-between"><span>Subtotal</span><strong>${formatCurrency(subtotalRestante)}</strong></div>
-      <div class="flex-between"><span>ITBIS</span><strong>${formatCurrency(impuestoRestante)}</strong></div>
-      <div class="flex-between total"><span>Total</span><strong>${formatCurrency(subtotalRestante + impuestoRestante)}</strong></div>
+      <div class="flex-between"><span>Subtotal</span><strong>${formatCurrency(totalesRestantes.subtotal)}</strong></div>
+      <div class="flex-between"><span>ITBIS</span><strong>${formatCurrency(totalesRestantes.impuesto)}</strong></div>
+      <div class="flex-between total"><span>Total</span><strong>${formatCurrency(totalesRestantes.total)}</strong></div>
     `;
   }
 
   if (splitModalTotalesDestino) {
     splitModalTotalesDestino.innerHTML = `
-      <div class="flex-between"><span>Subtotal</span><strong>${formatCurrency(subtotalSeleccion)}</strong></div>
-      <div class="flex-between"><span>ITBIS</span><strong>${formatCurrency(impuestoSeleccion)}</strong></div>
-      <div class="flex-between total"><span>Total</span><strong>${formatCurrency(subtotalSeleccion + impuestoSeleccion)}</strong></div>
+      <div class="flex-between"><span>Subtotal</span><strong>${formatCurrency(totalesSeleccion.subtotal)}</strong></div>
+      <div class="flex-between"><span>ITBIS</span><strong>${formatCurrency(totalesSeleccion.impuesto)}</strong></div>
+      <div class="flex-between total"><span>Total</span><strong>${formatCurrency(totalesSeleccion.total)}</strong></div>
     `;
   }
 
@@ -2060,10 +2278,24 @@ const cerrarSplitModal = () => {
 
 const confirmarSeparacion = async () => {
   if (!cuentaSeleccionada) return;
-  const ids = Array.from(splitSeleccion.keys());
+  const solicitudes = Array.from(splitSeleccion.entries())
+    .map(([detalleId, seleccion]) => {
+      const item = splitItemsMap.get(Number(detalleId));
+      if (!item) return null;
+      const cantidad = Math.min(
+        Math.max(redondearCantidadSplit(seleccion?.cantidad), 0),
+        obtenerCantidadMaximaSplit(item)
+      );
+      if (cantidad <= TOLERANCIA_CANTIDAD_SPLIT) return null;
+      return {
+        detalle_id: Number(detalleId),
+        cantidad,
+      };
+    })
+    .filter(Boolean);
   const cuentaOriginal = cuentaSeleccionada.cuenta_id;
-  if (!ids.length) {
-    setMensajeSplit('Selecciona productos para separar.', 'error');
+  if (!solicitudes.length) {
+    setMensajeSplit('Selecciona productos y cantidades para separar.', 'error');
     return;
   }
 
@@ -2079,7 +2311,7 @@ const confirmarSeparacion = async () => {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ detalle_ids: ids }),
+      body: JSON.stringify({ detalle_ids: solicitudes }),
     });
 
     const { data, esJson, contentType } = await leerRespuestaJsonCaja(respuesta);
@@ -2276,6 +2508,9 @@ const actualizarAccionesCuenta = () => {
   if (botonJuntarCuentas) {
     const disponibles = obtenerCuentasDisponiblesMerge();
     botonJuntarCuentas.disabled = !cuentaSeleccionada || disponibles.length === 0;
+  }
+  if (botonEliminarCuenta) {
+    botonEliminarCuenta.disabled = !cuentaSeleccionada;
   }
 };
 
@@ -2644,6 +2879,37 @@ const renderDetallePedido = () => {
 
       </div>
 
+      <div class="caja-item-tools">
+        <div class="kanm-input-group caja-item-precio-group">
+          <label>Precio unitario</label>
+          <input
+            type="number"
+            class="caja-item-precio-input"
+            data-item-index="${itemIndex}"
+            min="0"
+            step="0.01"
+            value="${Number(precioLinea).toFixed(2)}"
+          />
+        </div>
+        <div class="caja-acciones caja-item-tools-actions">
+          <button
+            type="button"
+            class="kanm-button ghost caja-item-actualizar-precio"
+            data-item-index="${itemIndex}"
+          >
+            Guardar precio
+          </button>
+          <button
+            type="button"
+            class="kanm-button ghost-danger caja-item-eliminar"
+            data-item-index="${itemIndex}"
+            data-nombre="${nombreSeguro}"
+          >
+            Eliminar producto
+          </button>
+        </div>
+      </div>
+
       <div class="caja-item-descuento-panel" data-panel-key="${key}" ${descuentoActual ? '' : 'hidden'}>
 
         <div class="flex-between" style="align-items: center; gap: 8px; margin: 4px 0;">
@@ -2761,7 +3027,31 @@ const renderDetallePedido = () => {
   itemsContainer.appendChild(lista);
 
 
-};const calcularTotales = () => {
+};
+
+const obtenerBaseItemsCuentaDetalle = (cuenta = null) => {
+  const cuentaObjetivo = cuenta || cuentaSeleccionada;
+  const items = Array.isArray(cuentaObjetivo?.items_agregados) ? cuentaObjetivo.items_agregados : [];
+  return items.reduce((acc, item) => {
+    const cantidad = Number(item?.cantidad) || 0;
+    const precio = Number(item?.precio_unitario) || 0;
+    const fallback = cantidad * precio;
+    const baseLinea = Number(item?.total_linea ?? item?.subtotal_sin_descuento);
+    const valor = Number.isFinite(baseLinea) ? baseLinea : fallback;
+    return acc + Math.max(valor, 0);
+  }, 0);
+};
+
+const esCuentaConImpuestoIncluidoParaDescuentos = (cuenta = null) => {
+  const cuentaObjetivo = cuenta || cuentaSeleccionada;
+  if (!cuentaObjetivo) return false;
+  const totales = totalesBaseCuenta(cuentaObjetivo);
+  const subtotalItems = obtenerBaseItemsCuentaDetalle(cuentaObjetivo);
+  if (subtotalItems <= 0) return false;
+  return esCuentaConImpuestoIncluidoEnSplit(subtotalItems, totales);
+};
+
+const calcularTotales = () => {
 
   if (!cuentaSeleccionada) {
 
@@ -2810,6 +3100,7 @@ const renderDetallePedido = () => {
   const descuentoPorcentaje = Math.max(Number(inputDescuento?.value) || 0, 0);
 
   const propinaPorcentaje = Math.max(Number(inputPropina?.value) || 0, 0);
+  const usaImpuestoIncluido = esCuentaConImpuestoIncluidoParaDescuentos(cuentaSeleccionada);
 
 
 
@@ -2820,14 +3111,25 @@ const renderDetallePedido = () => {
     0
 
   );
+  const topeItems = usaImpuestoIncluido ? base : subtotal;
+  const descuentoItemsMonto = Math.min(Math.max(descuentoItemsBruto, 0), Math.max(topeItems, 0));
 
-  const descuentoItemsMonto = Math.min(descuentoItemsBruto, subtotal);
+  let subtotalConItems = subtotal;
+  let impuestoConItems = impuestoBase;
+  let baseConItems = base;
 
-  const subtotalConDescuento = Math.max(subtotal - descuentoItemsMonto, 0);
-
-  const impuestoAjustado = subtotal > 0 ? impuestoBase * (subtotalConDescuento / subtotal) : impuestoBase;
-
-  const baseConItems = subtotalConDescuento + impuestoAjustado;
+  if (usaImpuestoIncluido) {
+    const baseTrasItems = Math.max(base - descuentoItemsMonto, 0);
+    const factorItems = base > 0 ? baseTrasItems / base : 1;
+    subtotalConItems = subtotal * factorItems;
+    impuestoConItems = impuestoBase * factorItems;
+    baseConItems = subtotalConItems + impuestoConItems;
+  } else {
+    subtotalConItems = Math.max(subtotal - descuentoItemsMonto, 0);
+    const factorItems = subtotal > 0 ? subtotalConItems / subtotal : 1;
+    impuestoConItems = impuestoBase * factorItems;
+    baseConItems = subtotalConItems + impuestoConItems;
+  }
 
   const descuentoGeneralMonto = Math.min(baseConItems * (descuentoPorcentaje / 100), baseConItems);
 
@@ -2835,23 +3137,24 @@ const renderDetallePedido = () => {
 
   const factorDescuentoGeneral = baseConItems > 0 ? baseConDescuento / baseConItems : 1;
 
-  const subtotalConDescuentoFinal = subtotalConDescuento * factorDescuentoGeneral;
+  const subtotalConDescuentoFinal = subtotalConItems * factorDescuentoGeneral;
+  const impuestoAjustado = impuestoConItems * factorDescuentoGeneral;
 
   const propinaMonto = subtotalConDescuentoFinal * (propinaPorcentaje / 100);
 
   const total = baseConDescuento + propinaMonto;
+  const descuentoMontoMostrado = descuentoGeneralMonto;
 
-  const descuentoTotal = Math.min(descuentoItemsMonto + descuentoGeneralMonto, base);
-
-  const descuentoPorcentajeEfectivo = base > 0 ? ((base - baseConDescuento) / base) * 100 : 0;
+  const descuentoPorcentajeEfectivo =
+    baseConItems > 0 ? (descuentoGeneralMonto / baseConItems) * 100 : 0;
 
 
 
   calculo = {
 
-    subtotal,
+    subtotal: subtotalConItems,
 
-    impuesto: impuestoAjustado,
+    impuesto: impuestoConItems,
 
     descuentoPorcentaje,
 
@@ -2863,13 +3166,13 @@ const renderDetallePedido = () => {
 
     descuentoItemsMonto,
 
-    descuentoMonto: descuentoTotal,
+    descuentoMonto: descuentoMontoMostrado,
 
     propinaMonto,
 
     baseConDescuento,
 
-    baseSinDescuento: base,
+    baseSinDescuento: baseConItems,
 
     total,
 
@@ -3367,6 +3670,18 @@ const cargarResumenCuadre = async (mostrarCarga = true) => {
   } catch (error) {
 
     console.error('Error al cargar el resumen del cuadre:', error);
+    const esRefrescoSilencioso = mostrarCarga === false;
+    const hayDatosPrevios =
+      Number(resumenCuadre?.cantidadPedidos) > 0 ||
+      Number(resumenCuadre?.totalSistema) > 0 ||
+      Number(resumenCuadre?.totalGeneral) > 0 ||
+      (Array.isArray(resumenCuadre?.pedidos) && resumenCuadre.pedidos.length > 0) ||
+      (Array.isArray(salidasDia) && salidasDia.length > 0);
+
+    if (esRefrescoSilencioso && hayDatosPrevios) {
+      setCuadreMensaje('Conexion inestable. Mostrando el ultimo resumen disponible.', 'warning');
+      return;
+    }
 
     setCuadreMensaje(
 
@@ -3801,6 +4116,11 @@ const cargarPedidos = async (mostrarCarga = true) => {
   } catch (error) {
 
     console.error('Error al cargar pedidos para caja:', error);
+    const esRefrescoSilencioso = mostrarCarga === false;
+    if (esRefrescoSilencioso) {
+      setMensajeLista('Conexion inestable. Mostrando datos anteriores, reintentando...', 'warning');
+      return;
+    }
 
     setMensajeLista('Error al cargar los pedidos listos. Intenta nuevamente.', 'error');
 
@@ -3936,7 +4256,7 @@ const cerrarCuenta = async () => {
 
       body: JSON.stringify({
 
-        descuento_porcentaje: calculo.descuentoPorcentajeEfectivo ?? calculo.descuentoPorcentaje,
+        descuento_porcentaje: calculo.descuentoPorcentaje,
 
         descuento_monto: calculo.descuentoMonto,
 
@@ -4062,6 +4382,257 @@ const abrirFacturaCuentaSeleccionada = (mensajeSinCuenta) => {
   window.open(`/factura.html?id=${facturaId}`, '_blank');
 };
 
+const obtenerDetalleIdsItemCuenta = (item) =>
+  Array.from(
+    new Set(
+      (Array.isArray(item?.detalles) ? item.detalles : [])
+        .map((detalle) => Number(detalle?.detalle_id ?? detalle?.detalleId ?? detalle?.id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    )
+  );
+
+const solicitarPasswordAdmin = (accion = 'esta accion') =>
+  new Promise((resolve) => {
+    if (!adminPasswordModal || !adminPasswordModalInput) {
+      const fallback = window.prompt(`Ingresa la contrasena de admin para ${accion}:`);
+      const limpia = fallback === null ? null : String(fallback || '').trim();
+      resolve(limpia || null);
+      return;
+    }
+
+    resolverPasswordAdminPendiente = resolve;
+    if (adminPasswordModalContext) {
+      adminPasswordModalContext.textContent = `Confirma para ${accion}.`;
+    }
+    adminPasswordModalInput.value = '';
+    setMensajePasswordAdmin('');
+    mostrarModal(adminPasswordModal);
+    setTimeout(() => {
+      adminPasswordModalInput.focus();
+    }, 0);
+  });
+
+const eliminarCuentaSeleccionada = async () => {
+  if (!cuentaSeleccionada) {
+    setMensajeDetalle('Selecciona una cuenta para eliminar.', 'error');
+    return;
+  }
+
+  const cuentaId = Number(cuentaSeleccionada.cuenta_id);
+  if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+    setMensajeDetalle('Cuenta invalida.', 'error');
+    return;
+  }
+
+  const confirmar = window.confirm(
+    `Esta accion eliminara la cuenta #${cuentaId} del flujo de cobro. Deseas continuar?`
+  );
+  if (!confirmar) return;
+
+  const passwordAdmin = await solicitarPasswordAdmin(`eliminar la cuenta #${cuentaId}`);
+  if (!passwordAdmin) {
+    setMensajeDetalle('Debes ingresar la contrasena de admin.', 'error');
+    return;
+  }
+
+  try {
+    if (botonEliminarCuenta) {
+      botonEliminarCuenta.disabled = true;
+      botonEliminarCuenta.classList.add('is-loading');
+    }
+    setMensajeDetalle('Eliminando cuenta...', 'info');
+
+    const respuesta = await fetchAutorizadoCaja(`/api/cuentas/${cuentaId}/eliminar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ password: passwordAdmin }),
+    });
+
+    const { data, esJson, contentType } = await leerRespuestaJsonCaja(respuesta);
+    if (!esJson) {
+      throw construirErrorNoJsonCaja(respuesta, data, contentType);
+    }
+    if (!respuesta.ok || !data?.ok) {
+      throw new Error(data?.error || 'No se pudo eliminar la cuenta.');
+    }
+
+    limpiarDescuentosItems();
+    await recargarEstadoCaja(false);
+    limpiarSeleccion();
+    setMensajeLista(`Cuenta #${cuentaId} eliminada correctamente.`, 'info');
+    notificarActualizacionGlobal('pedido-actualizado', { cuentaId });
+  } catch (error) {
+    console.error('Error al eliminar cuenta:', error);
+    setMensajeDetalle(error.message || 'No se pudo eliminar la cuenta.', 'error');
+  } finally {
+    if (botonEliminarCuenta) {
+      botonEliminarCuenta.disabled = !cuentaSeleccionada;
+      botonEliminarCuenta.classList.remove('is-loading');
+    }
+  }
+};
+
+const actualizarPrecioProductoCuenta = async (itemIndex, boton = null) => {
+  if (!cuentaSeleccionada) {
+    setMensajeDetalle('Selecciona una cuenta.', 'error');
+    return;
+  }
+
+  const item = cuentaSeleccionada?.items_agregados?.[itemIndex];
+  if (!item) {
+    setMensajeDetalle('No se encontro el producto seleccionado.', 'error');
+    return;
+  }
+
+  const detalleIds = obtenerDetalleIdsItemCuenta(item);
+  if (!detalleIds.length) {
+    setMensajeDetalle('No se encontraron detalles validos del producto.', 'error');
+    return;
+  }
+
+  const inputPrecio = itemsContainer?.querySelector(`.caja-item-precio-input[data-item-index="${itemIndex}"]`);
+  const precio = Number(inputPrecio?.value);
+  if (!Number.isFinite(precio) || precio < 0) {
+    setMensajeDetalle('Ingresa un precio valido mayor o igual a 0.', 'error');
+    return;
+  }
+
+  const cuentaId = Number(cuentaSeleccionada.cuenta_id);
+  if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+    setMensajeDetalle('Cuenta invalida.', 'error');
+    return;
+  }
+
+  try {
+    if (boton) {
+      boton.disabled = true;
+      boton.classList.add('is-loading');
+    }
+    setMensajeDetalle('Actualizando precio del producto...', 'info');
+
+    const respuesta = await fetchAutorizadoCaja(`/api/cuentas/${cuentaId}/detalles/precio`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        detalle_ids: detalleIds,
+        precio_unitario: Number(precio.toFixed(2)),
+      }),
+    });
+
+    const { data, esJson, contentType } = await leerRespuestaJsonCaja(respuesta);
+    if (!esJson) {
+      throw construirErrorNoJsonCaja(respuesta, data, contentType);
+    }
+    if (!respuesta.ok || !data?.ok) {
+      throw new Error(data?.error || 'No se pudo actualizar el precio del producto.');
+    }
+
+    limpiarDescuentosItems();
+    await recargarEstadoCaja(false);
+    if (cuentas.some((cuenta) => cuenta.cuenta_id === cuentaId)) {
+      await seleccionarCuenta(cuentaId);
+      setMensajeDetalle('Precio actualizado correctamente.', 'info');
+    } else {
+      limpiarSeleccion();
+      setMensajeLista('La cuenta ya no esta disponible para cobrar.', 'info');
+    }
+    notificarActualizacionGlobal('pedido-actualizado', { cuentaId });
+  } catch (error) {
+    console.error('Error al actualizar precio del producto:', error);
+    setMensajeDetalle(error.message || 'No se pudo actualizar el precio del producto.', 'error');
+  } finally {
+    if (boton) {
+      boton.disabled = false;
+      boton.classList.remove('is-loading');
+    }
+  }
+};
+
+const eliminarProductoCuenta = async (itemIndex, nombreProducto, boton = null) => {
+  if (!cuentaSeleccionada) {
+    setMensajeDetalle('Selecciona una cuenta.', 'error');
+    return;
+  }
+
+  const item = cuentaSeleccionada?.items_agregados?.[itemIndex];
+  if (!item) {
+    setMensajeDetalle('No se encontro el producto seleccionado.', 'error');
+    return;
+  }
+
+  const detalleIds = obtenerDetalleIdsItemCuenta(item);
+  if (!detalleIds.length) {
+    setMensajeDetalle('No se encontraron detalles validos del producto.', 'error');
+    return;
+  }
+
+  const nombre = (nombreProducto || item.nombre || 'el producto').toString();
+  const confirmar = window.confirm(`Deseas eliminar ${nombre} de la cuenta?`);
+  if (!confirmar) return;
+
+  const passwordAdmin = await solicitarPasswordAdmin(`eliminar ${nombre} de la cuenta`);
+  if (!passwordAdmin) {
+    setMensajeDetalle('Debes ingresar la contrasena de admin.', 'error');
+    return;
+  }
+
+  const cuentaId = Number(cuentaSeleccionada.cuenta_id);
+  if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+    setMensajeDetalle('Cuenta invalida.', 'error');
+    return;
+  }
+
+  try {
+    if (boton) {
+      boton.disabled = true;
+      boton.classList.add('is-loading');
+    }
+    setMensajeDetalle('Eliminando producto de la cuenta...', 'info');
+
+    const respuesta = await fetchAutorizadoCaja(`/api/cuentas/${cuentaId}/detalles/eliminar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        detalle_ids: detalleIds,
+        password: passwordAdmin,
+      }),
+    });
+
+    const { data, esJson, contentType } = await leerRespuestaJsonCaja(respuesta);
+    if (!esJson) {
+      throw construirErrorNoJsonCaja(respuesta, data, contentType);
+    }
+    if (!respuesta.ok || !data?.ok) {
+      throw new Error(data?.error || 'No se pudo eliminar el producto de la cuenta.');
+    }
+
+    limpiarDescuentosItems();
+    await recargarEstadoCaja(false);
+    if (cuentas.some((cuenta) => cuenta.cuenta_id === cuentaId)) {
+      await seleccionarCuenta(cuentaId);
+      setMensajeDetalle('Producto eliminado correctamente.', 'info');
+    } else {
+      limpiarSeleccion();
+      setMensajeLista('La cuenta ya no tiene productos disponibles para cobrar.', 'info');
+    }
+    notificarActualizacionGlobal('pedido-actualizado', { cuentaId });
+  } catch (error) {
+    console.error('Error al eliminar producto de cuenta:', error);
+    setMensajeDetalle(error.message || 'No se pudo eliminar el producto de la cuenta.', 'error');
+  } finally {
+    if (boton) {
+      boton.disabled = false;
+      boton.classList.remove('is-loading');
+    }
+  }
+};
+
 
 
 const inicializarEventos = () => {
@@ -4074,6 +4645,11 @@ const inicializarEventos = () => {
   botonJuntarCuentas?.addEventListener('click', (event) => {
     event.preventDefault();
     abrirMergeModal();
+  });
+
+  botonEliminarCuenta?.addEventListener('click', (event) => {
+    event.preventDefault();
+    eliminarCuentaSeleccionada();
   });
 
   splitModalCerrar?.addEventListener('click', (event) => {
@@ -4098,15 +4674,33 @@ const inicializarEventos = () => {
 
   splitModalOrigen?.addEventListener('change', (event) => {
     const checkbox = event.target.closest('input[data-detalle-id]');
-    if (!checkbox) return;
-    const detalleId = Number(checkbox.dataset.detalleId);
-    if (!Number.isFinite(detalleId)) return;
-    const item = splitItemsMap.get(detalleId);
-    if (checkbox.checked && item) {
-      splitSeleccion.set(detalleId, item);
-    } else {
-      splitSeleccion.delete(detalleId);
+    if (checkbox && checkbox.type === 'checkbox') {
+      const detalleId = Number(checkbox.dataset.detalleId);
+      if (!Number.isFinite(detalleId)) return;
+      const item = splitItemsMap.get(detalleId);
+      if (checkbox.checked && item) {
+        establecerCantidadSeleccionSplit(detalleId, item.cantidad);
+      } else {
+        splitSeleccion.delete(detalleId);
+      }
+      renderSplitModalContenido();
+      return;
     }
+
+    const cantidadInput = event.target.closest('input[data-accion="cantidad"][data-detalle-id]');
+    if (!cantidadInput) return;
+    const detalleId = Number(cantidadInput.dataset.detalleId);
+    if (!Number.isFinite(detalleId)) return;
+    establecerCantidadSeleccionSplit(detalleId, cantidadInput.value);
+    renderSplitModalContenido();
+  });
+
+  splitModalDestino?.addEventListener('change', (event) => {
+    const cantidadInput = event.target.closest('input[data-accion="cantidad"][data-detalle-id]');
+    if (!cantidadInput) return;
+    const detalleId = Number(cantidadInput.dataset.detalleId);
+    if (!Number.isFinite(detalleId)) return;
+    establecerCantidadSeleccionSplit(detalleId, cantidadInput.value);
     renderSplitModalContenido();
   });
 
@@ -4131,6 +4725,37 @@ const inicializarEventos = () => {
 
   mergeModal?.addEventListener('click', (event) => {
     if (event.target === mergeModal) cerrarMergeModal();
+  });
+
+  adminPasswordModalCerrar?.addEventListener('click', (event) => {
+    event.preventDefault();
+    cerrarModalPasswordAdmin(null);
+  });
+
+  adminPasswordModalCancelar?.addEventListener('click', (event) => {
+    event.preventDefault();
+    cerrarModalPasswordAdmin(null);
+  });
+
+  adminPasswordModalConfirmar?.addEventListener('click', (event) => {
+    event.preventDefault();
+    confirmarModalPasswordAdmin();
+  });
+
+  adminPasswordModal?.addEventListener('click', (event) => {
+    if (event.target === adminPasswordModal) {
+      cerrarModalPasswordAdmin(null);
+    }
+  });
+
+  adminPasswordModalInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      confirmarModalPasswordAdmin();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      cerrarModalPasswordAdmin(null);
+    }
   });
 
   mergeModalLista?.addEventListener('change', (event) => {
@@ -4336,7 +4961,26 @@ const inicializarEventos = () => {
 
 
 
-  itemsContainer?.addEventListener('click', (event) => {
+  itemsContainer?.addEventListener('click', async (event) => {
+
+    const botonGuardarPrecio = event.target.closest('.caja-item-actualizar-precio');
+    if (botonGuardarPrecio) {
+      event.preventDefault();
+      const itemIndex = Number(botonGuardarPrecio.dataset.itemIndex);
+      if (!Number.isFinite(itemIndex)) return;
+      await actualizarPrecioProductoCuenta(itemIndex, botonGuardarPrecio);
+      return;
+    }
+
+    const botonEliminarItem = event.target.closest('.caja-item-eliminar');
+    if (botonEliminarItem) {
+      event.preventDefault();
+      const itemIndex = Number(botonEliminarItem.dataset.itemIndex);
+      if (!Number.isFinite(itemIndex)) return;
+      const nombre = (botonEliminarItem.dataset.nombre || '').replace(/&quot;/g, '"');
+      await eliminarProductoCuenta(itemIndex, nombre, botonEliminarItem);
+      return;
+    }
 
     const botonAplicar = event.target.closest('.caja-item-aplicar-descuento');
 

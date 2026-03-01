@@ -79,6 +79,7 @@
               <div class="caja-detalle-acciones" id="caja-cuenta-acciones">
                 <button type="button" class="kanm-button ghost" id="caja-separar">Separar cuenta</button>
                 <button type="button" class="kanm-button ghost" id="caja-juntar">Juntar cuentas</button>
+                <button type="button" class="kanm-button ghost-danger" id="caja-eliminar-cuenta">Eliminar cuenta</button>
               </div>
               <div class="caja-items" id="caja-detalle-items"></div>
 
@@ -464,6 +465,27 @@
         <div class="kanm-message" id="caja-merge-mensaje"></div>
         <div class="kanm-modal-actions">
           <button type="button" class="kanm-button secondary" id="caja-merge-confirmar">Juntar cuentas</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="kanm-modal-overlay" id="caja-admin-password-modal" hidden>
+      <div class="kanm-modal caja-admin-password-modal" role="dialog" aria-modal="true" aria-labelledby="caja-admin-password-title">
+        <div class="caja-split-header">
+          <div>
+            <h3 id="caja-admin-password-title">Autorizacion de admin</h3>
+            <p class="kanm-subtitle" id="caja-admin-password-context"></p>
+          </div>
+          <button type="button" class="kanm-button ghost" id="caja-admin-password-cerrar">Cerrar</button>
+        </div>
+        <div class="kanm-input-group">
+          <label for="caja-admin-password-input">Contrasena de admin</label>
+          <input type="password" id="caja-admin-password-input" autocomplete="current-password" />
+        </div>
+        <div class="kanm-message" id="caja-admin-password-mensaje"></div>
+        <div class="kanm-modal-actions">
+          <button type="button" class="kanm-button ghost" id="caja-admin-password-cancelar">Cancelar</button>
+          <button type="button" class="kanm-button secondary" id="caja-admin-password-confirmar">Confirmar</button>
         </div>
       </div>
     </div>

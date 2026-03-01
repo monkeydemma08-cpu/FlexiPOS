@@ -821,6 +821,43 @@ const obtenerTotalesBaseVenta = () => {
   };
 };
 
+const obtenerBaseItemsVentaActual = () => {
+  if (!estado.ventaActual) return 0;
+  const itemsAgrupados = Array.isArray(estado.ventaActual.items_agregados)
+    ? estado.ventaActual.items_agregados
+    : [];
+  const items = itemsAgrupados.length
+    ? itemsAgrupados
+    : Array.isArray(estado.ventaActual.items)
+    ? estado.ventaActual.items
+    : [];
+
+  return items.reduce((acc, item) => {
+    const cantidad = Number(item?.cantidad) || 0;
+    const precio = Number(item?.precio_unitario ?? item?.precio) || 0;
+    const fallback = cantidad * precio;
+    const baseLinea = Number(item?.total_linea ?? item?.subtotal_sin_descuento);
+    const valor = Number.isFinite(baseLinea) ? baseLinea : fallback;
+    return acc + Math.max(valor, 0);
+  }, 0);
+};
+
+const esVentaConImpuestoIncluidoParaDescuentos = () => {
+  const totalesBase = obtenerTotalesBaseVenta();
+  const subtotal = Math.max(Number(totalesBase.subtotal) || 0, 0);
+  const impuesto = Math.max(Number(totalesBase.impuesto) || 0, 0);
+  const base = subtotal + impuesto;
+  const subtotalItems = Math.max(obtenerBaseItemsVentaActual(), 0);
+
+  if (subtotalItems > 0 && impuesto > 0) {
+    const deltaContraTotal = Math.abs(subtotalItems - base);
+    const deltaContraSubtotal = Math.abs(subtotalItems - subtotal);
+    return deltaContraTotal <= deltaContraSubtotal;
+  }
+
+  return Boolean(estado.productosConImpuesto && (Number(estado.impuestoIncluidoPorcentaje) || 0) > 0);
+};
+
 const calcularTotalesCobro = () => {
   if (!estado.ventaActual) {
     calculo = {
@@ -846,36 +883,55 @@ const calcularTotalesCobro = () => {
   const base = subtotal + impuestoBase;
   const descuentoPorcentaje = Math.max(Number(inputDescuento?.value) || 0, 0);
   const propinaPorcentaje = Math.max(Number(inputPropina?.value) || 0, 0);
+  const usaImpuestoIncluido = esVentaConImpuestoIncluidoParaDescuentos();
 
   const descuentoItemsBruto = descuentosPorItem.reduce(
     (acc, item) => acc + (Number(item.montoCalculado) || 0),
     0
   );
-  const descuentoItemsMonto = Math.min(descuentoItemsBruto, subtotal);
-  const subtotalConDescuento = Math.max(subtotal - descuentoItemsMonto, 0);
-  const impuestoAjustado = subtotal > 0 ? impuestoBase * (subtotalConDescuento / subtotal) : impuestoBase;
-  const baseConItems = subtotalConDescuento + impuestoAjustado;
+  const topeItems = usaImpuestoIncluido ? base : subtotal;
+  const descuentoItemsMonto = Math.min(Math.max(descuentoItemsBruto, 0), Math.max(topeItems, 0));
+
+  let subtotalConItems = subtotal;
+  let impuestoConItems = impuestoBase;
+  let baseConItems = base;
+
+  if (usaImpuestoIncluido) {
+    const baseTrasItems = Math.max(base - descuentoItemsMonto, 0);
+    const factorItems = base > 0 ? baseTrasItems / base : 1;
+    subtotalConItems = subtotal * factorItems;
+    impuestoConItems = impuestoBase * factorItems;
+    baseConItems = subtotalConItems + impuestoConItems;
+  } else {
+    subtotalConItems = Math.max(subtotal - descuentoItemsMonto, 0);
+    const factorItems = subtotal > 0 ? subtotalConItems / subtotal : 1;
+    impuestoConItems = impuestoBase * factorItems;
+    baseConItems = subtotalConItems + impuestoConItems;
+  }
+
   const descuentoGeneralMonto = Math.min(baseConItems * (descuentoPorcentaje / 100), baseConItems);
   const baseConDescuento = Math.max(baseConItems - descuentoGeneralMonto, 0);
   const factorDescuentoGeneral = baseConItems > 0 ? baseConDescuento / baseConItems : 1;
-  const subtotalConDescuentoFinal = subtotalConDescuento * factorDescuentoGeneral;
+  const subtotalConDescuentoFinal = subtotalConItems * factorDescuentoGeneral;
+  const impuestoAjustado = impuestoConItems * factorDescuentoGeneral;
   const propinaMonto = subtotalConDescuentoFinal * (propinaPorcentaje / 100);
   const total = baseConDescuento + propinaMonto;
-  const descuentoTotal = Math.min(descuentoItemsMonto + descuentoGeneralMonto, base);
-  const descuentoPorcentajeEfectivo = base > 0 ? ((base - baseConDescuento) / base) * 100 : 0;
+  const descuentoMontoMostrado = descuentoGeneralMonto;
+  const descuentoPorcentajeEfectivo =
+    baseConItems > 0 ? (descuentoGeneralMonto / baseConItems) * 100 : 0;
 
   calculo = {
-    subtotal,
-    impuesto: impuestoAjustado,
+    subtotal: subtotalConItems,
+    impuesto: impuestoConItems,
     descuentoPorcentaje,
     descuentoPorcentajeEfectivo,
     propinaPorcentaje,
     descuentoGeneralMonto,
     descuentoItemsMonto,
-    descuentoMonto: descuentoTotal,
+    descuentoMonto: descuentoMontoMostrado,
     propinaMonto,
     baseConDescuento,
-    baseSinDescuento: base,
+    baseSinDescuento: baseConItems,
     total,
   };
 };
@@ -1741,7 +1797,7 @@ const confirmarPago = async () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        descuento_porcentaje: calculo.descuentoPorcentajeEfectivo ?? calculo.descuentoPorcentaje,
+        descuento_porcentaje: calculo.descuentoPorcentaje,
         descuento_monto: calculo.descuentoMonto,
         propina_porcentaje: calculo.propinaPorcentaje,
         cliente: inputClienteNombre?.value,

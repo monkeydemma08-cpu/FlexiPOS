@@ -52,6 +52,7 @@ const DEFAULT_CONFIG_MODULOS = {
   historialCocina: true,
 };
 const AREAS_PREPARACION = ['ninguna', 'cocina', 'bar'];
+const ESTADOS_PREPARACION_DETALLE = new Set(['pendiente', 'preparando', 'listo']);
 const TIPOS_PRODUCTO = new Set(['FINAL', 'INSUMO']);
 const UNIDADES_BASE = new Set(['UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB']);
 const MODOS_INVENTARIO_COSTOS = new Set(['REVENTA', 'PREPARACION']);
@@ -209,6 +210,41 @@ const validarPasswordUsuario = async (usuarioId, password) => {
     console.warn('No se pudo validar password del usuario:', error?.message || error);
     return false;
   }
+};
+
+const validarPasswordAdminNegocio = async (negocioId, password) => {
+  const negocio = Number(negocioId);
+  const passwordPlano = (password || '').toString().trim();
+  if (!Number.isFinite(negocio) || negocio <= 0 || !passwordPlano) {
+    return { ok: false };
+  }
+
+  try {
+    const admins = await db.all(
+      `SELECT id, usuario, nombre, password
+         FROM usuarios
+        WHERE negocio_id = ?
+          AND activo = 1
+          AND rol = 'admin'`,
+      [negocio]
+    );
+
+    for (const admin of admins || []) {
+      const coincide = await verificarPassword(passwordPlano, admin.password);
+      if (coincide) {
+        return {
+          ok: true,
+          admin_id: Number(admin.id) || null,
+          admin_usuario: admin.usuario || null,
+          admin_nombre: admin.nombre || null,
+        };
+      }
+    }
+  } catch (error) {
+    console.warn('No se pudo validar password de admin del negocio:', error?.message || error);
+  }
+
+  return { ok: false };
 };
 
 const base64UrlEncode = (value) =>
@@ -1066,6 +1102,12 @@ function getLocalDateISO(value = new Date()) {
 function normalizarAreaPreparacion(area) {
   const valor = (area || 'ninguna').toString().trim().toLowerCase();
   return AREAS_PREPARACION.includes(valor) ? valor : 'ninguna';
+}
+
+function normalizarEstadoPreparacionDetalle(estado, fallback = 'pendiente') {
+  const estadoFallback = ESTADOS_PREPARACION_DETALLE.has(fallback) ? fallback : 'pendiente';
+  const valor = (estado || '').toString().trim().toLowerCase();
+  return ESTADOS_PREPARACION_DETALLE.has(valor) ? valor : estadoFallback;
 }
 
 const ORIGENES_CAJA = new Set(['caja', 'mostrador']);
@@ -3753,6 +3795,8 @@ const obtenerDetallePedidosPorIds = async (pedidoIds, negocioId, opciones = {}) 
              COALESCE(dp.descuento_porcentaje, 0) AS descuento_porcentaje,
              COALESCE(dp.descuento_monto, 0) AS descuento_monto,
              COALESCE(dp.cantidad_descuento, 0) AS cantidad_descuento,
+             COALESCE(dp.estado_preparacion, 'pendiente') AS estado_preparacion,
+             COALESCE(dp.cantidad_lista, 0) AS cantidad_lista,
              p.nombre,
              COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
       FROM detalle_pedido dp
@@ -3776,6 +3820,22 @@ const obtenerDetallePedidosPorIds = async (pedidoIds, negocioId, opciones = {}) 
     const precio = Number(row.precio_unitario) || 0;
     const subtotalBruto = cantidad * precio;
     const descuentoMonto = Number(row.descuento_monto) || 0;
+    const estadoPreparacionRaw = normalizarEstadoPreparacionDetalle(row.estado_preparacion, 'pendiente');
+    let cantidadLista = Number(row.cantidad_lista);
+    if (!Number.isFinite(cantidadLista) || cantidadLista < 0) {
+      cantidadLista = 0;
+    }
+    if (estadoPreparacionRaw === 'listo' && cantidad > 0 && cantidadLista <= 0) {
+      cantidadLista = cantidad;
+    }
+    cantidadLista = Math.min(Math.max(cantidadLista, 0), Math.max(cantidad, 0));
+    const cantidadPendiente = Math.max(cantidad - cantidadLista, 0);
+    const estadoPreparacion =
+      cantidadPendiente <= 0
+        ? 'listo'
+        : cantidadLista > 0 || estadoPreparacionRaw === 'preparando'
+          ? 'preparando'
+          : 'pendiente';
     lista.push({
       detalle_id: Number(row.detalle_id) || null,
       pedido_id: Number(row.pedido_id) || null,
@@ -3786,6 +3846,9 @@ const obtenerDetallePedidosPorIds = async (pedidoIds, negocioId, opciones = {}) 
       descuento_porcentaje: Number(row.descuento_porcentaje) || 0,
       descuento_monto: descuentoMonto,
       cantidad_descuento: Number(row.cantidad_descuento) || null,
+      estado_preparacion: estadoPreparacion,
+      cantidad_lista: Number(cantidadLista.toFixed(4)),
+      cantidad_pendiente: Number(cantidadPendiente.toFixed(4)),
       area: areaPreparacion,
       area_preparacion: areaPreparacion,
       subtotal_sin_descuento: subtotalBruto,
@@ -3836,7 +3899,33 @@ const calcularEstadoAreaPedido = (pedido, items = [], area, historialesPorArea =
     return 'cancelado';
   }
 
-  if (pedido.estado === 'listo') {
+  const toleranciaCantidad = 0.0001;
+  const totalCantidad = itemsArea.reduce((acc, item) => acc + Math.max(Number(item.cantidad) || 0, 0), 0);
+  const cantidadLista = itemsArea.reduce((acc, item) => {
+    const cantidad = Math.max(Number(item.cantidad) || 0, 0);
+    let lista = Number(item.cantidad_lista);
+    if (!Number.isFinite(lista) || lista < 0) {
+      lista = 0;
+    }
+    if (normalizarEstadoPreparacionDetalle(item.estado_preparacion, 'pendiente') === 'listo' && lista <= 0) {
+      lista = cantidad;
+    }
+    return acc + Math.min(Math.max(lista, 0), cantidad);
+  }, 0);
+
+  const hayPreparando = itemsArea.some(
+    (item) => normalizarEstadoPreparacionDetalle(item.estado_preparacion, 'pendiente') === 'preparando'
+  );
+
+  if (totalCantidad > 0 && cantidadLista >= totalCantidad - toleranciaCantidad) {
+    return 'listo';
+  }
+
+  if (cantidadLista > toleranciaCantidad || hayPreparando) {
+    return 'preparando';
+  }
+
+  if (pedido.estado === 'listo' || pedido.estado === 'pagado') {
     return 'listo';
   }
 
@@ -3846,16 +3935,12 @@ const calcularEstadoAreaPedido = (pedido, items = [], area, historialesPorArea =
     return 'listo';
   }
 
-  if (pedido.estado === 'pagado') {
-    return 'listo';
-  }
-
   const responsableId =
     areaNormalizada === 'bar'
       ? pedido.bartender_id ?? pedido.bartenderId
       : pedido.cocinero_id ?? pedido.cocineroId;
 
-  if (responsableId) {
+  if (responsableId || pedido.estado === 'preparando') {
     return 'preparando';
   }
 
@@ -3866,6 +3951,86 @@ const calcularEstadosAreasPedido = (pedido, items = [], historialesPorArea = {})
   estadoCocina: calcularEstadoAreaPedido(pedido, items, 'cocina', historialesPorArea),
   estadoBar: calcularEstadoAreaPedido(pedido, items, 'bar', historialesPorArea),
 });
+
+const calcularEstadoGlobalPedidoDesdeAreas = ({
+  pedidoActual = {},
+  requiereCocina = false,
+  requiereBar = false,
+  estadoCocina = null,
+  estadoBar = null,
+}) => {
+  if (pedidoActual.estado === 'pagado' || pedidoActual.estado === 'cancelado') {
+    return pedidoActual.estado;
+  }
+
+  const estados = [];
+  if (requiereCocina && estadoCocina) {
+    estados.push(estadoCocina);
+  }
+  if (requiereBar && estadoBar) {
+    estados.push(estadoBar);
+  }
+
+  if (!estados.length) {
+    return pedidoActual.estado || 'pendiente';
+  }
+
+  if (estados.every((estado) => estado === 'listo')) {
+    return 'listo';
+  }
+
+  if (estados.every((estado) => estado === 'pendiente')) {
+    return 'pendiente';
+  }
+
+  return 'preparando';
+};
+
+const actualizarEstadoPreparacionDetallesPorArea = async ({ pedidoId, negocioId, area, estado }) => {
+  const areaNormalizada = normalizarAreaPreparacion(area);
+  const estadoNormalizado = normalizarEstadoPreparacionDetalle(estado, 'pendiente');
+
+  if (areaNormalizada === 'ninguna') {
+    return;
+  }
+
+  if (estadoNormalizado === 'preparando') {
+    await db.run(
+      `
+        UPDATE detalle_pedido dp
+        JOIN productos p ON p.id = dp.producto_id AND p.negocio_id = dp.negocio_id
+        LEFT JOIN categorias c ON c.id = p.categoria_id
+           SET dp.estado_preparacion = CASE
+             WHEN COALESCE(dp.cantidad_lista, 0) >= dp.cantidad THEN 'listo'
+             ELSE 'preparando'
+           END
+         WHERE dp.pedido_id = ?
+           AND dp.negocio_id = ?
+           AND COALESCE(c.area_preparacion, 'ninguna') = ?
+      `,
+      [pedidoId, negocioId, areaNormalizada]
+    );
+    return;
+  }
+
+  await db.run(
+    `
+      UPDATE detalle_pedido dp
+      JOIN productos p ON p.id = dp.producto_id AND p.negocio_id = dp.negocio_id
+      LEFT JOIN categorias c ON c.id = p.categoria_id
+         SET dp.estado_preparacion = ?,
+             dp.cantidad_lista = CASE
+               WHEN ? = 'listo' THEN dp.cantidad
+               WHEN ? = 'pendiente' THEN 0
+               ELSE LEAST(GREATEST(COALESCE(dp.cantidad_lista, 0), 0), dp.cantidad)
+             END
+       WHERE dp.pedido_id = ?
+         AND dp.negocio_id = ?
+         AND COALESCE(c.area_preparacion, 'ninguna') = ?
+    `,
+    [estadoNormalizado, estadoNormalizado, estadoNormalizado, pedidoId, negocioId, areaNormalizada]
+  );
+};
 
 const calcularEstadoAreaCuenta = (pedidos = [], area = 'cocina') => {
   const estados = new Set();
@@ -4072,9 +4237,17 @@ const normalizarTasaImpuestoPedido = (subtotal, impuesto, fallback = 0) => {
   return fallback;
 };
 
-const recalcularTotalesPedido = async (pedidoId, negocioId, tasaImpuesto = null) => {
+const recalcularTotalesPedido = async (
+  pedidoId,
+  negocioId,
+  { tasaImpuesto = null, configuracionImpuesto = null } = {}
+) => {
   const detalles = await db.all(
-    `SELECT cantidad, precio_unitario, COALESCE(descuento_monto, 0) AS descuento_monto
+    `SELECT cantidad,
+            precio_unitario,
+            COALESCE(descuento_porcentaje, 0) AS descuento_porcentaje,
+            COALESCE(descuento_monto, 0) AS descuento_monto,
+            COALESCE(cantidad_descuento, cantidad) AS cantidad_descuento
        FROM detalle_pedido
       WHERE pedido_id = ? AND negocio_id = ?`,
     [pedidoId, negocioId]
@@ -4084,28 +4257,80 @@ const recalcularTotalesPedido = async (pedidoId, negocioId, tasaImpuesto = null)
     return { subtotal: 0, impuesto: 0, total: 0, cantidadDetalles: 0 };
   }
 
-  let subtotal = 0;
+  let subtotalBruto = 0;
   (detalles || []).forEach((det) => {
     const cantidad = Number(det.cantidad) || 0;
     const precio = Number(det.precio_unitario) || 0;
-    const descuento = Number(det.descuento_monto) || 0;
-    const linea = Math.max(cantidad * precio - descuento, 0);
-    subtotal += linea;
+    const subtotalLinea = Math.max(cantidad * precio, 0);
+    if (subtotalLinea <= 0) {
+      return;
+    }
+    const porcentaje = Math.max(Number(det.descuento_porcentaje) || 0, 0);
+    const montoExtra = Math.max(Number(det.descuento_monto) || 0, 0);
+    const cantidadDescuento = Number(det.cantidad_descuento);
+    const cantidadAplicada = Number.isFinite(cantidadDescuento)
+      ? Math.min(Math.max(cantidadDescuento, 0), cantidad)
+      : cantidad;
+    const proporcional = cantidad > 0 ? cantidadAplicada / cantidad : 1;
+    const descuentoPorcentaje = subtotalLinea * (porcentaje / 100) * proporcional;
+    const descuentoTotal = Math.min(descuentoPorcentaje + montoExtra, subtotalLinea);
+    const linea = Math.max(subtotalLinea - descuentoTotal, 0);
+    subtotalBruto += linea;
   });
 
-  subtotal = Number(subtotal.toFixed(2));
+  subtotalBruto = Number(subtotalBruto.toFixed(2));
 
-  let tasa = tasaImpuesto;
-  if (tasa === null || tasa === undefined) {
-    const pedidoBase = await db.get(
-      'SELECT subtotal, impuesto FROM pedidos WHERE id = ? AND negocio_id = ?',
-      [pedidoId, negocioId]
-    );
-    tasa = normalizarTasaImpuestoPedido(pedidoBase?.subtotal, pedidoBase?.impuesto, 0);
+  let subtotal = subtotalBruto;
+  let impuesto = 0;
+  let total = subtotalBruto;
+
+  let configImpuesto = configuracionImpuesto;
+  if (!configImpuesto || typeof configImpuesto !== 'object') {
+    try {
+      configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+    } catch (error) {
+      configImpuesto = null;
+    }
   }
 
-  const impuesto = Number((subtotal * (Number(tasa) || 0)).toFixed(2));
-  const total = Number((subtotal + impuesto).toFixed(2));
+  const tieneConfigImpuesto = configImpuesto && typeof configImpuesto === 'object';
+  const productosConImpuesto =
+    tieneConfigImpuesto &&
+    normalizarFlag(configImpuesto.productosConImpuesto ?? configImpuesto.productos_con_impuesto, 0) === 1;
+  const tasaFallbackConfiguracion =
+    tieneConfigImpuesto && !productosConImpuesto
+      ? Math.max(Number(configImpuesto.valor) || 0, 0) / 100
+      : 0;
+
+  if (productosConImpuesto) {
+    const totalesConfigurados = calcularTotalesConImpuestoConfigurado(subtotalBruto, configImpuesto || {});
+    subtotal = Number(totalesConfigurados.subtotal) || 0;
+    impuesto = Number(totalesConfigurados.impuesto) || 0;
+    total = Number(totalesConfigurados.total);
+    if (!Number.isFinite(total)) {
+      total = Number((subtotal + impuesto).toFixed(2));
+    }
+  } else {
+    let tasa = tasaImpuesto;
+    if (tasa === null || tasa === undefined) {
+      const pedidoBase = await db.get(
+        'SELECT subtotal, impuesto FROM pedidos WHERE id = ? AND negocio_id = ?',
+        [pedidoId, negocioId]
+      );
+      tasa = normalizarTasaImpuestoPedido(
+        pedidoBase?.subtotal,
+        pedidoBase?.impuesto,
+        tasaFallbackConfiguracion
+      );
+    }
+
+    impuesto = Number((subtotal * (Number(tasa) || 0)).toFixed(2));
+    total = Number((subtotal + impuesto).toFixed(2));
+  }
+
+  subtotal = Number((Math.max(subtotal, 0)).toFixed(2));
+  impuesto = Number((Math.max(impuesto, 0)).toFixed(2));
+  total = Number((Math.max(total, 0)).toFixed(2));
 
   await db.run('UPDATE pedidos SET subtotal = ?, impuesto = ?, total = ? WHERE id = ? AND negocio_id = ?', [
     subtotal,
@@ -7441,15 +7666,23 @@ const actualizarEstadoPedido = async ({ pedidoId, estadoDeseado, usuarioSesion, 
     }
   }
 
-    const pedidoActual = await db.get(
-      `SELECT id, estado, modo_servicio, delivery_estado, cocinero_id, cocinero_nombre, bartender_id, bartender_nombre
-         FROM pedidos
-        WHERE id = ? AND negocio_id = ?`,
-      [pedidoId, negocioId]
-    );
+  const pedidoActual = await db.get(
+    `SELECT id, estado, modo_servicio, delivery_estado, cocinero_id, cocinero_nombre, bartender_id, bartender_nombre
+       FROM pedidos
+      WHERE id = ? AND negocio_id = ?`,
+    [pedidoId, negocioId]
+  );
 
   if (!pedidoActual) {
     return { ok: false, status: 404, error: 'Pedido no encontrado.' };
+  }
+
+  if (pedidoActual.estado === 'pagado' || pedidoActual.estado === 'cancelado') {
+    return {
+      ok: false,
+      status: 400,
+      error: 'No se puede cambiar el estado de un pedido pagado o cancelado.',
+    };
   }
 
   const detalle = await obtenerDetallePedidosPorIds([pedidoId], negocioId);
@@ -7466,17 +7699,26 @@ const actualizarEstadoPedido = async ({ pedidoId, estadoDeseado, usuarioSesion, 
     return { ok: false, status: 400, error: 'El pedido no tiene productos de cocina.' };
   }
 
-  const pedidoActualizado = {
+  await actualizarEstadoPreparacionDetallesPorArea({
+    pedidoId,
+    negocioId,
+    area: areaNormalizada,
+    estado: estadoDeseado,
+  });
+
+  const detalleActualizado = await obtenerDetallePedidosPorIds([pedidoId], negocioId);
+  const itemsActualizados = detalleActualizado.get(pedidoId) || items;
+
+  const pedidoConResponsable = {
     ...pedidoActual,
-    estado: estadoDeseado === 'listo' ? 'listo' : 'preparando',
   };
 
   if (areaNormalizada === 'bar') {
-    pedidoActualizado.bartender_id = usuarioSesion.id;
-    pedidoActualizado.bartender_nombre = usuarioSesion.nombre;
+    pedidoConResponsable.bartender_id = usuarioSesion.id;
+    pedidoConResponsable.bartender_nombre = usuarioSesion.nombre;
   } else {
-    pedidoActualizado.cocinero_id = usuarioSesion.id;
-    pedidoActualizado.cocinero_nombre = usuarioSesion.nombre;
+    pedidoConResponsable.cocinero_id = usuarioSesion.id;
+    pedidoConResponsable.cocinero_nombre = usuarioSesion.nombre;
   }
 
   const historialesActualizados = {
@@ -7492,16 +7734,14 @@ const actualizarEstadoPedido = async ({ pedidoId, estadoDeseado, usuarioSesion, 
     }
   }
 
-  let estadosArea = calcularEstadosAreasPedido(pedidoActualizado, items, historialesActualizados);
-  const areasListas =
-    (!requiereCocina || estadosArea.estadoCocina === 'listo') &&
-    (!requiereBar || estadosArea.estadoBar === 'listo');
-
-  const nuevoEstadoGlobal = estadoDeseado === 'listo' && areasListas ? 'listo' : 'preparando';
-  if (pedidoActualizado.estado !== nuevoEstadoGlobal) {
-    pedidoActualizado.estado = nuevoEstadoGlobal;
-    estadosArea = calcularEstadosAreasPedido(pedidoActualizado, items, historialesActualizados);
-  }
+  const estadosArea = calcularEstadosAreasPedido(pedidoConResponsable, itemsActualizados, historialesActualizados);
+  const nuevoEstadoGlobal = calcularEstadoGlobalPedidoDesdeAreas({
+    pedidoActual,
+    requiereCocina,
+    requiereBar,
+    estadoCocina: estadosArea.estadoCocina,
+    estadoBar: estadosArea.estadoBar,
+  });
 
   const campos = ['estado = ?'];
   const valores = [nuevoEstadoGlobal];
@@ -7515,7 +7755,7 @@ const actualizarEstadoPedido = async ({ pedidoId, estadoDeseado, usuarioSesion, 
   }
 
   if (nuevoEstadoGlobal === 'listo') {
-    campos.push('fecha_listo = CURRENT_TIMESTAMP');
+    campos.push('fecha_listo = COALESCE(fecha_listo, CURRENT_TIMESTAMP)');
   }
 
   if (nuevoEstadoGlobal === 'listo' && pedidoActual?.modo_servicio === 'delivery') {
@@ -7535,7 +7775,8 @@ const actualizarEstadoPedido = async ({ pedidoId, estadoDeseado, usuarioSesion, 
     return { ok: false, status: 404, error: 'Pedido no encontrado.' };
   }
 
-  if (estadoDeseado === 'listo') {
+  const estadoAreaActualizado = areaNormalizada === 'bar' ? estadosArea.estadoBar : estadosArea.estadoCocina;
+  if (estadoAreaActualizado === 'listo') {
     if (areaNormalizada === 'bar') {
       registrarHistorialBar(pedidoId, negocioId);
     } else {
@@ -8027,6 +8268,370 @@ app.get('/api/cuentas/:id/detalle', (req, res) => {
   });
 });
 
+app.post('/api/cuentas/:id/eliminar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const cuentaId = Number(req.params.id);
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const validacionAdmin = await validarPasswordAdminNegocio(negocioId, req.body?.password);
+    if (!validacionAdmin.ok) {
+      return res.status(403).json({ ok: false, error: 'Contrasena de admin invalida.' });
+    }
+
+    try {
+      const pedidos = await db.all(
+        `
+          SELECT id, estado
+          FROM pedidos
+          WHERE (cuenta_id = ? OR id = ?)
+            AND estado = 'listo'
+            AND negocio_id = ?
+          ORDER BY fecha_creacion ASC
+        `,
+        [cuentaId, cuentaId, negocioId]
+      );
+
+      if (!pedidos.length) {
+        return res.status(404).json({ ok: false, error: 'No se encontro una cuenta lista para eliminar.' });
+      }
+
+      await db.run('BEGIN');
+      for (const pedido of pedidos) {
+        const pedidoId = Number(pedido.id);
+        if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+          continue;
+        }
+        await db.run(
+          "UPDATE pedidos SET estado = ?, delivery_estado = CASE WHEN modo_servicio = 'delivery' THEN 'cancelado' ELSE delivery_estado END WHERE id = ? AND negocio_id = ?",
+          ['cancelado', pedidoId, negocioId]
+        );
+        await ajustarStockPorPedido(pedidoId, negocioId, 1);
+        await revertirConsumoInsumosPorPedido(pedidoId, negocioId);
+      }
+      await db.run('COMMIT');
+
+      return res.json({
+        ok: true,
+        cuenta_id: cuentaId,
+        pedidos_cancelados: pedidos.length,
+        admin_usuario: validacionAdmin.admin_usuario || null,
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al eliminar cuenta desde caja:', error?.message || error);
+      return res.status(500).json({ ok: false, error: 'No se pudo eliminar la cuenta.' });
+    }
+  });
+});
+
+app.post('/api/cuentas/:id/detalles/eliminar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const cuentaId = Number(req.params.id);
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
+    }
+
+    const detallesEntrada = req.body?.detalle_ids ?? req.body?.detalleIds ?? req.body?.detalles ?? [];
+    const detalleIds = Array.from(
+      new Set(
+        (Array.isArray(detallesEntrada) ? detallesEntrada : [detallesEntrada])
+          .map((entrada) => {
+            if (typeof entrada === 'object' && entrada !== null) {
+              return Number(entrada.detalle_id ?? entrada.detalleId ?? entrada.id ?? entrada.detalle);
+            }
+            return Number(entrada);
+          })
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
+    );
+
+    if (!detalleIds.length) {
+      return res.status(400).json({ ok: false, error: 'Selecciona al menos un producto para eliminar.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const validacionAdmin = await validarPasswordAdminNegocio(negocioId, req.body?.password);
+    if (!validacionAdmin.ok) {
+      return res.status(403).json({ ok: false, error: 'Contrasena de admin invalida.' });
+    }
+
+    try {
+      const placeholders = detalleIds.map(() => '?').join(', ');
+      const detalles = await db.all(
+        `
+          SELECT dp.id AS detalle_id,
+                 dp.pedido_id,
+                 dp.producto_id,
+                 dp.cantidad,
+                 COALESCE(pf.stock_indefinido, 0) AS stock_indefinido,
+                 p.cuenta_id,
+                 p.estado,
+                 p.subtotal AS pedido_subtotal,
+                 p.impuesto AS pedido_impuesto
+            FROM detalle_pedido dp
+            JOIN pedidos p ON p.id = dp.pedido_id
+            LEFT JOIN productos pf ON pf.id = dp.producto_id AND pf.negocio_id = dp.negocio_id
+           WHERE dp.id IN (${placeholders})
+             AND dp.negocio_id = ?
+             AND p.negocio_id = ?
+        `,
+        [...detalleIds, negocioId, negocioId]
+      );
+
+      if (!detalles || detalles.length !== detalleIds.length) {
+        return res.status(404).json({ ok: false, error: 'No se encontraron todos los productos seleccionados.' });
+      }
+
+      let configImpuesto = null;
+      try {
+        configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+      } catch (error) {
+        configImpuesto = null;
+      }
+      const impuestoConfig =
+        Number(configImpuesto?.valor) || Number(await obtenerImpuestoConfiguradoAsync(negocioId)) || 0;
+      const tasaImpuestoFallback = impuestoConfig / 100;
+      const tasaPorPedido = new Map();
+      const pedidosAfectados = new Set();
+
+      for (const detalle of detalles) {
+        const cuentaReferencia = Number(detalle.cuenta_id || detalle.pedido_id);
+        if (cuentaReferencia !== cuentaId) {
+          return res
+            .status(400)
+            .json({ ok: false, error: 'Los productos seleccionados no pertenecen a esta cuenta.' });
+        }
+
+        if (detalle.estado !== 'listo') {
+          return res
+            .status(400)
+            .json({ ok: false, error: 'Solo puedes eliminar productos de cuentas listas para cobrar.' });
+        }
+
+        if (!tasaPorPedido.has(detalle.pedido_id)) {
+          const tasa = normalizarTasaImpuestoPedido(
+            detalle.pedido_subtotal,
+            detalle.pedido_impuesto,
+            tasaImpuestoFallback
+          );
+          tasaPorPedido.set(detalle.pedido_id, tasa);
+        }
+      }
+
+      await db.run('BEGIN');
+
+      for (const detalle of detalles) {
+        const detalleId = Number(detalle.detalle_id);
+        const pedidoId = Number(detalle.pedido_id);
+        const productoId = Number(detalle.producto_id);
+        const cantidad = Math.max(Number(detalle.cantidad) || 0, 0);
+
+        if (cantidad > 0 && Number(productoId) > 0 && !esStockIndefinido(detalle)) {
+          await db.run('UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?', [
+            cantidad,
+            productoId,
+            negocioId,
+          ]);
+        }
+
+        const consumos = await db.all(
+          `
+            SELECT ci.id,
+                   ci.insumo_id,
+                   ci.cantidad_base,
+                   COALESCE(pi.stock_indefinido, 0) AS stock_indefinido,
+                   COALESCE(pi.contenido_por_unidad, 1) AS contenido_por_unidad
+              FROM consumo_insumos ci
+              LEFT JOIN productos pi ON pi.id = ci.insumo_id AND pi.negocio_id = ci.negocio_id
+             WHERE ci.detalle_pedido_id = ?
+               AND ci.negocio_id = ?
+               AND COALESCE(ci.revertido, 0) = 0
+          `,
+          [detalleId, negocioId]
+        );
+
+        const reposicionInsumos = new Map();
+        (consumos || []).forEach((consumo) => {
+          const insumoId = Number(consumo.insumo_id);
+          if (!Number.isFinite(insumoId) || insumoId <= 0 || esStockIndefinido(consumo)) {
+            return;
+          }
+          const contenido = normalizarContenidoPorUnidad(consumo.contenido_por_unidad, 1);
+          const cantidadBase = Number(consumo.cantidad_base) || 0;
+          const cantidadUnidades = contenido > 0 ? cantidadBase / contenido : 0;
+          const acumulado = reposicionInsumos.get(insumoId) || 0;
+          reposicionInsumos.set(insumoId, Number((acumulado + cantidadUnidades).toFixed(4)));
+        });
+
+        for (const [insumoId, cantidadInsumo] of reposicionInsumos.entries()) {
+          if (!cantidadInsumo) continue;
+          await db.run('UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?', [
+            cantidadInsumo,
+            insumoId,
+            negocioId,
+          ]);
+        }
+
+        await db.run('DELETE FROM consumo_insumos WHERE detalle_pedido_id = ? AND negocio_id = ?', [
+          detalleId,
+          negocioId,
+        ]);
+        await db.run('DELETE FROM detalle_pedido WHERE id = ? AND negocio_id = ?', [detalleId, negocioId]);
+        pedidosAfectados.add(pedidoId);
+      }
+
+      for (const pedidoId of pedidosAfectados) {
+        const tasa = tasaPorPedido.get(pedidoId) ?? tasaImpuestoFallback;
+        const resultado = await recalcularTotalesPedido(pedidoId, negocioId, {
+          tasaImpuesto: tasa,
+          configuracionImpuesto: configImpuesto,
+        });
+        if (resultado.cantidadDetalles === 0) {
+          await db.run(
+            "UPDATE pedidos SET estado = 'cancelado', subtotal = 0, impuesto = 0, total = 0, delivery_estado = CASE WHEN modo_servicio = 'delivery' THEN 'cancelado' ELSE delivery_estado END WHERE id = ? AND negocio_id = ?",
+            [pedidoId, negocioId]
+          );
+        }
+      }
+
+      await db.run('COMMIT');
+      return res.json({
+        ok: true,
+        detalle_ids: detalleIds,
+        pedidos_afectados: Array.from(pedidosAfectados),
+        admin_usuario: validacionAdmin.admin_usuario || null,
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al eliminar producto de cuenta:', error?.message || error);
+      return res.status(500).json({ ok: false, error: 'No se pudo eliminar el producto de la cuenta.' });
+    }
+  });
+});
+
+app.put('/api/cuentas/:id/detalles/precio', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const cuentaId = Number(req.params.id);
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
+    }
+
+    const detallesEntrada = req.body?.detalle_ids ?? req.body?.detalleIds ?? req.body?.detalles ?? [];
+    const detalleIds = Array.from(
+      new Set(
+        (Array.isArray(detallesEntrada) ? detallesEntrada : [detallesEntrada])
+          .map((entrada) => {
+            if (typeof entrada === 'object' && entrada !== null) {
+              return Number(entrada.detalle_id ?? entrada.detalleId ?? entrada.id ?? entrada.detalle);
+            }
+            return Number(entrada);
+          })
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
+    );
+    if (!detalleIds.length) {
+      return res.status(400).json({ ok: false, error: 'Selecciona al menos un producto.' });
+    }
+
+    const precioUnitario = Number(req.body?.precio_unitario ?? req.body?.precioUnitario);
+    if (!Number.isFinite(precioUnitario) || precioUnitario < 0) {
+      return res.status(400).json({ ok: false, error: 'El precio unitario no es valido.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const placeholders = detalleIds.map(() => '?').join(', ');
+      const detalles = await db.all(
+        `
+          SELECT dp.id AS detalle_id,
+                 dp.pedido_id,
+                 p.cuenta_id,
+                 p.estado,
+                 p.subtotal AS pedido_subtotal,
+                 p.impuesto AS pedido_impuesto
+            FROM detalle_pedido dp
+            JOIN pedidos p ON p.id = dp.pedido_id
+           WHERE dp.id IN (${placeholders})
+             AND dp.negocio_id = ?
+             AND p.negocio_id = ?
+        `,
+        [...detalleIds, negocioId, negocioId]
+      );
+
+      if (!detalles || detalles.length !== detalleIds.length) {
+        return res.status(404).json({ ok: false, error: 'No se encontraron todos los productos seleccionados.' });
+      }
+
+      let configImpuesto = null;
+      try {
+        configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+      } catch (error) {
+        configImpuesto = null;
+      }
+      const impuestoConfig =
+        Number(configImpuesto?.valor) || Number(await obtenerImpuestoConfiguradoAsync(negocioId)) || 0;
+      const tasaImpuestoFallback = impuestoConfig / 100;
+      const tasaPorPedido = new Map();
+      const pedidosAfectados = new Set();
+
+      for (const detalle of detalles) {
+        const cuentaReferencia = Number(detalle.cuenta_id || detalle.pedido_id);
+        if (cuentaReferencia !== cuentaId) {
+          return res
+            .status(400)
+            .json({ ok: false, error: 'Los productos seleccionados no pertenecen a esta cuenta.' });
+        }
+        if (detalle.estado !== 'listo') {
+          return res
+            .status(400)
+            .json({ ok: false, error: 'Solo puedes cambiar precios en cuentas listas para cobrar.' });
+        }
+
+        pedidosAfectados.add(Number(detalle.pedido_id));
+        if (!tasaPorPedido.has(detalle.pedido_id)) {
+          const tasa = normalizarTasaImpuestoPedido(
+            detalle.pedido_subtotal,
+            detalle.pedido_impuesto,
+            tasaImpuestoFallback
+          );
+          tasaPorPedido.set(detalle.pedido_id, tasa);
+        }
+      }
+
+      await db.run('BEGIN');
+      for (const detalleId of detalleIds) {
+        await db.run(
+          'UPDATE detalle_pedido SET precio_unitario = ? WHERE id = ? AND negocio_id = ?',
+          [Number(precioUnitario.toFixed(2)), detalleId, negocioId]
+        );
+      }
+
+      for (const pedidoId of pedidosAfectados) {
+        const tasa = tasaPorPedido.get(pedidoId) ?? tasaImpuestoFallback;
+        await recalcularTotalesPedido(pedidoId, negocioId, {
+          tasaImpuesto: tasa,
+          configuracionImpuesto: configImpuesto,
+        });
+      }
+
+      await db.run('COMMIT');
+      return res.json({
+        ok: true,
+        detalle_ids: detalleIds,
+        precio_unitario: Number(precioUnitario.toFixed(2)),
+        pedidos_afectados: Array.from(pedidosAfectados),
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al actualizar precio de producto en cuenta:', error?.message || error);
+      return res.status(500).json({ ok: false, error: 'No se pudo actualizar el precio del producto.' });
+    }
+  });
+});
+
 app.post('/api/cuentas/:id/separar', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const cuentaId = Number(req.params.id);
@@ -8044,13 +8649,49 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
       return res.status(400).json({ ok: false, error: 'Selecciona al menos un producto para separar.' });
     }
 
-    const detalleIds = Array.from(
-      new Set(
-        detallesEntrada
-          .map((id) => Number(id))
-          .filter((id) => Number.isFinite(id) && id > 0)
-      )
-    );
+    const solicitudesPorDetalle = new Map();
+    (detallesEntrada || []).forEach((entrada) => {
+      if (typeof entrada === 'object' && entrada !== null) {
+        const detalleId = Number(
+          entrada.detalle_id ??
+            entrada.detalleId ??
+            entrada.id ??
+            entrada.detalle ??
+            entrada.detalleID
+        );
+        if (!Number.isFinite(detalleId) || detalleId <= 0) {
+          return;
+        }
+        const cantidadRaw =
+          entrada.cantidad ??
+          entrada.cantidad_mover ??
+          entrada.cantidadMover ??
+          entrada.qty ??
+          entrada.quantity;
+        const cantidad = Number(cantidadRaw);
+        const previo = solicitudesPorDetalle.get(detalleId);
+        if (Number.isFinite(cantidad) && cantidad > 0) {
+          if (Number.isFinite(previo) && previo > 0) {
+            solicitudesPorDetalle.set(detalleId, Number((previo + cantidad).toFixed(4)));
+          } else {
+            solicitudesPorDetalle.set(detalleId, Number(cantidad.toFixed(4)));
+          }
+        } else if (!solicitudesPorDetalle.has(detalleId)) {
+          solicitudesPorDetalle.set(detalleId, null);
+        }
+        return;
+      }
+
+      const detalleId = Number(entrada);
+      if (!Number.isFinite(detalleId) || detalleId <= 0) {
+        return;
+      }
+      if (!solicitudesPorDetalle.has(detalleId)) {
+        solicitudesPorDetalle.set(detalleId, null);
+      }
+    });
+
+    const detalleIds = Array.from(solicitudesPorDetalle.keys());
 
     if (!detalleIds.length) {
       return res.status(400).json({ ok: false, error: 'No se identificaron productos validos para separar.' });
@@ -8082,11 +8723,16 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
         `
           SELECT dp.id AS detalle_id,
                  dp.pedido_id,
+                 dp.producto_id,
                  dp.cantidad,
                  dp.precio_unitario,
                  COALESCE(dp.descuento_monto, 0) AS descuento_monto,
                  COALESCE(dp.descuento_porcentaje, 0) AS descuento_porcentaje,
                  COALESCE(dp.cantidad_descuento, 0) AS cantidad_descuento,
+                 COALESCE(dp.estado_preparacion, 'pendiente') AS estado_preparacion,
+                 COALESCE(dp.cantidad_lista, 0) AS cantidad_lista,
+                 COALESCE(dp.costo_unitario_snapshot, 0) AS costo_unitario_snapshot,
+                 COALESCE(dp.cogs_linea, 0) AS cogs_linea,
                  p.cuenta_id,
                  p.mesa,
                  p.cliente,
@@ -8116,7 +8762,18 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
         return res.status(404).json({ ok: false, error: 'No se encontraron todos los productos seleccionados.' });
       }
 
-      const impuestoConfig = Number(await obtenerImpuestoConfiguradoAsync(negocioId)) || 0;
+      let configImpuestoSeparacion = null;
+      try {
+        configImpuestoSeparacion = await obtenerConfiguracionImpuestoNegocio(negocioId);
+      } catch (error) {
+        console.warn(
+          'No se pudo obtener configuracion de impuesto para separacion de cuentas:',
+          error?.message || error
+        );
+      }
+
+      const impuestoConfig =
+        Number(configImpuestoSeparacion?.valor) || Number(await obtenerImpuestoConfiguradoAsync(negocioId)) || 0;
       const tasaImpuestoFallback = impuestoConfig / 100;
       const detallesPorPedido = new Map();
       const tasaPorPedido = new Map();
@@ -8136,6 +8793,28 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
             .status(400)
             .json({ ok: false, error: 'No se pueden mover productos de pedidos ya cobrados o cancelados.' });
         }
+
+        const cantidadTotalDetalle = Math.max(Number(detalle.cantidad) || 0, 0);
+        if (cantidadTotalDetalle <= 0) {
+          await db.run('ROLLBACK');
+          return res
+            .status(400)
+            .json({ ok: false, error: 'Uno de los productos seleccionados no tiene cantidad valida.' });
+        }
+
+        const cantidadSolicitada = solicitudesPorDetalle.get(Number(detalle.detalle_id));
+        const cantidadMover = Number.isFinite(cantidadSolicitada)
+          ? Math.min(Math.max(Number(cantidadSolicitada) || 0, 0), cantidadTotalDetalle)
+          : cantidadTotalDetalle;
+        if (!Number.isFinite(cantidadMover) || cantidadMover <= 0) {
+          await db.run('ROLLBACK');
+          return res
+            .status(400)
+            .json({ ok: false, error: 'Selecciona una cantidad valida para los productos a separar.' });
+        }
+
+        detalle.cantidad_mover = Number(cantidadMover.toFixed(4));
+        detalle.cantidad_total_detalle = Number(cantidadTotalDetalle.toFixed(4));
 
         const lista = detallesPorPedido.get(detalle.pedido_id) || [];
         lista.push(detalle);
@@ -8159,6 +8838,24 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
       let cuentaNuevaId = null;
       const pedidoNuevoPorOrigen = new Map();
       const tasaPorPedidoNuevo = new Map();
+      const toleranciaCantidadSplit = 0.0001;
+      const redondearCantidadSplit = (valor) => Number((Math.max(Number(valor) || 0, 0)).toFixed(4));
+      const redondearMonedaSplit = (valor) => Number((Math.max(Number(valor) || 0, 0)).toFixed(2));
+      const resolverEstadoPreparacionSplit = (estadoBase, cantidadTotal, cantidadLista) => {
+        const cantidad = redondearCantidadSplit(cantidadTotal);
+        const lista = redondearCantidadSplit(Math.min(Math.max(cantidadLista, 0), cantidad));
+        if (cantidad <= toleranciaCantidadSplit) {
+          return normalizarEstadoPreparacionDetalle(estadoBase, 'pendiente');
+        }
+        if (lista >= cantidad - toleranciaCantidadSplit) {
+          return 'listo';
+        }
+        if (lista > toleranciaCantidadSplit) {
+          return 'preparando';
+        }
+        const estado = normalizarEstadoPreparacionDetalle(estadoBase, 'pendiente');
+        return estado === 'listo' ? 'pendiente' : estado;
+      };
 
       for (const [pedidoId, listaDetalles] of detallesPorPedido.entries()) {
         const base = listaDetalles[0];
@@ -8223,24 +8920,213 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
 
       for (const [pedidoId, listaDetalles] of detallesPorPedido.entries()) {
         const nuevoPedidoId = pedidoNuevoPorOrigen.get(pedidoId);
-        const ids = listaDetalles.map((d) => d.detalle_id);
-        const groupPlaceholders = ids.map(() => '?').join(', ');
+        for (const detalle of listaDetalles) {
+          const detalleId = Number(detalle.detalle_id);
+          if (!Number.isFinite(detalleId) || detalleId <= 0) {
+            throw new Error('Detalle invalido para separar.');
+          }
 
-        await db.run(
-          `UPDATE detalle_pedido
-              SET pedido_id = ?
-            WHERE id IN (${groupPlaceholders})
-              AND negocio_id = ?`,
-          [nuevoPedidoId, ...ids, negocioId]
-        );
+          const cantidadTotal = redondearCantidadSplit(detalle.cantidad_total_detalle ?? detalle.cantidad);
+          const cantidadMover = redondearCantidadSplit(detalle.cantidad_mover);
+          if (cantidadTotal <= toleranciaCantidadSplit || cantidadMover <= toleranciaCantidadSplit) {
+            throw new Error('Cantidad invalida para separar.');
+          }
 
-        await db.run(
-          `UPDATE consumo_insumos
-              SET pedido_id = ?
-            WHERE detalle_pedido_id IN (${groupPlaceholders})
-              AND negocio_id = ?`,
-          [nuevoPedidoId, ...ids, negocioId]
-        );
+          const moverCompleto = cantidadMover >= cantidadTotal - toleranciaCantidadSplit;
+          if (moverCompleto) {
+            await db.run(
+              `UPDATE detalle_pedido
+                  SET pedido_id = ?
+                WHERE id = ?
+                  AND negocio_id = ?`,
+              [nuevoPedidoId, detalleId, negocioId]
+            );
+
+            await db.run(
+              `UPDATE consumo_insumos
+                  SET pedido_id = ?
+                WHERE detalle_pedido_id = ?
+                  AND negocio_id = ?`,
+              [nuevoPedidoId, detalleId, negocioId]
+            );
+            continue;
+          }
+
+          const cantidadRestante = redondearCantidadSplit(cantidadTotal - cantidadMover);
+          if (cantidadRestante <= toleranciaCantidadSplit) {
+            await db.run(
+              `UPDATE detalle_pedido
+                  SET pedido_id = ?
+                WHERE id = ?
+                  AND negocio_id = ?`,
+              [nuevoPedidoId, detalleId, negocioId]
+            );
+
+            await db.run(
+              `UPDATE consumo_insumos
+                  SET pedido_id = ?
+                WHERE detalle_pedido_id = ?
+                  AND negocio_id = ?`,
+              [nuevoPedidoId, detalleId, negocioId]
+            );
+            continue;
+          }
+
+          const proporcionMover = cantidadTotal > 0 ? cantidadMover / cantidadTotal : 0;
+          const descuentoTotal = redondearMonedaSplit(detalle.descuento_monto);
+          const descuentoMover = redondearMonedaSplit(descuentoTotal * proporcionMover);
+          const descuentoRestante = redondearMonedaSplit(descuentoTotal - descuentoMover);
+
+          const cantidadDescuentoTotal = redondearCantidadSplit(
+            Math.min(Math.max(Number(detalle.cantidad_descuento) || 0, 0), cantidadTotal)
+          );
+          const cantidadDescuentoMover = redondearCantidadSplit(
+            Math.min(cantidadDescuentoTotal * proporcionMover, cantidadMover)
+          );
+          const cantidadDescuentoRestante = redondearCantidadSplit(cantidadDescuentoTotal - cantidadDescuentoMover);
+
+          const cantidadListaTotal = redondearCantidadSplit(
+            Math.min(Math.max(Number(detalle.cantidad_lista) || 0, 0), cantidadTotal)
+          );
+          const cantidadListaMover = redondearCantidadSplit(Math.min(cantidadListaTotal, cantidadMover));
+          const cantidadListaRestante = redondearCantidadSplit(cantidadListaTotal - cantidadListaMover);
+
+          const cogsTotal = redondearMonedaSplit(detalle.cogs_linea);
+          const cogsMover = redondearMonedaSplit(cogsTotal * proporcionMover);
+          const cogsRestante = redondearMonedaSplit(cogsTotal - cogsMover);
+
+          const estadoMover = resolverEstadoPreparacionSplit(
+            detalle.estado_preparacion,
+            cantidadMover,
+            cantidadListaMover
+          );
+          const estadoRestante = resolverEstadoPreparacionSplit(
+            detalle.estado_preparacion,
+            cantidadRestante,
+            cantidadListaRestante
+          );
+
+          const insertDetalle = await db.run(
+            `
+              INSERT INTO detalle_pedido (
+                pedido_id,
+                producto_id,
+                cantidad,
+                precio_unitario,
+                descuento_monto,
+                descuento_porcentaje,
+                cantidad_descuento,
+                estado_preparacion,
+                cantidad_lista,
+                costo_unitario_snapshot,
+                cogs_linea,
+                negocio_id
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+            [
+              nuevoPedidoId,
+              detalle.producto_id,
+              cantidadMover,
+              Number(detalle.precio_unitario) || 0,
+              descuentoMover,
+              Number(detalle.descuento_porcentaje) || 0,
+              cantidadDescuentoMover,
+              estadoMover,
+              cantidadListaMover,
+              Number(detalle.costo_unitario_snapshot) || 0,
+              cogsMover,
+              negocioId,
+            ]
+          );
+
+          const nuevoDetalleId = Number(insertDetalle?.lastID);
+          if (!Number.isFinite(nuevoDetalleId) || nuevoDetalleId <= 0) {
+            throw new Error('No se pudo crear el detalle parcial para separar.');
+          }
+
+          await db.run(
+            `
+              UPDATE detalle_pedido
+                 SET cantidad = ?,
+                     descuento_monto = ?,
+                     cantidad_descuento = ?,
+                     estado_preparacion = ?,
+                     cantidad_lista = ?,
+                     cogs_linea = ?
+               WHERE id = ?
+                 AND negocio_id = ?
+            `,
+            [
+              cantidadRestante,
+              descuentoRestante,
+              cantidadDescuentoRestante,
+              estadoRestante,
+              cantidadListaRestante,
+              cogsRestante,
+              detalleId,
+              negocioId,
+            ]
+          );
+
+          const consumosDetalle = await db.all(
+            `
+              SELECT id,
+                     producto_final_id,
+                     insumo_id,
+                     cantidad_base,
+                     unidad_base,
+                     COALESCE(revertido, 0) AS revertido
+                FROM consumo_insumos
+               WHERE detalle_pedido_id = ?
+                 AND negocio_id = ?
+            `,
+            [detalleId, negocioId]
+          );
+
+          for (const consumo of consumosDetalle || []) {
+            const consumoId = Number(consumo.id);
+            const cantidadBaseTotal = redondearCantidadSplit(consumo.cantidad_base);
+            const cantidadBaseMover = redondearCantidadSplit(cantidadBaseTotal * proporcionMover);
+            const cantidadBaseRestante = redondearCantidadSplit(cantidadBaseTotal - cantidadBaseMover);
+
+            if (Number.isFinite(consumoId) && consumoId > 0) {
+              await db.run(
+                `UPDATE consumo_insumos
+                    SET cantidad_base = ?
+                  WHERE id = ?
+                    AND negocio_id = ?`,
+                [cantidadBaseRestante, consumoId, negocioId]
+              );
+            }
+
+            if (cantidadBaseMover > toleranciaCantidadSplit) {
+              await db.run(
+                `
+                  INSERT INTO consumo_insumos (
+                    pedido_id,
+                    detalle_pedido_id,
+                    producto_final_id,
+                    insumo_id,
+                    cantidad_base,
+                    unidad_base,
+                    revertido,
+                    negocio_id
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                `,
+                [
+                  nuevoPedidoId,
+                  nuevoDetalleId,
+                  consumo.producto_final_id,
+                  consumo.insumo_id,
+                  cantidadBaseMover,
+                  consumo.unidad_base,
+                  Number(consumo.revertido) || 0,
+                  negocioId,
+                ]
+              );
+            }
+          }
+        }
       }
 
       const pedidosAjustar = new Set([
@@ -8250,7 +9136,10 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
 
       for (const pedidoId of pedidosAjustar) {
         const tasa = tasaPorPedidoNuevo.get(pedidoId) ?? tasaPorPedido.get(pedidoId) ?? tasaImpuestoFallback;
-        const resultado = await recalcularTotalesPedido(pedidoId, negocioId, tasa);
+        const resultado = await recalcularTotalesPedido(pedidoId, negocioId, {
+          tasaImpuesto: tasa,
+          configuracionImpuesto: configImpuestoSeparacion,
+        });
         if (resultado.cantidadDetalles === 0) {
           await db.run('DELETE FROM pedidos WHERE id = ? AND negocio_id = ?', [pedidoId, negocioId]);
         }
@@ -8803,7 +9692,210 @@ app.put('/api/pedidos/:id/estado', (req, res) => {
       return res.status(statusCode).json({ error: resultado.error || 'No se pudo actualizar el pedido.' });
     }
 
-    res.json({ ok: true, estado: resultado.estado });
+    res.json({
+      ok: true,
+      estado: resultado.estado,
+      estadoCocina: resultado.estadoCocina,
+      estadoBar: resultado.estadoBar,
+    });
+  });
+});
+
+app.put('/api/pedidos/:pedidoId/detalles/:detalleId/estado', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioCocina(usuarioSesion) && !esUsuarioBar(usuarioSesion) && !esUsuarioAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const pedidoId = Number(req.params.pedidoId);
+    const detalleId = Number(req.params.detalleId);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0 || !Number.isFinite(detalleId) || detalleId <= 0) {
+      return res.status(400).json({ error: 'Pedido o detalle no valido.' });
+    }
+
+    const estadoDeseado = normalizarEstadoPreparacionDetalle(req.body?.estado, 'listo');
+    if (estadoDeseado !== 'listo') {
+      return res.status(400).json({ error: 'Solo se permite marcar el producto como listo.' });
+    }
+    const cantidadSolicitada = Number(
+      req.body?.cantidad ?? req.body?.cantidad_lista ?? req.body?.cantidadLista ?? 1
+    );
+    if (!Number.isFinite(cantidadSolicitada) || cantidadSolicitada <= 0) {
+      return res.status(400).json({ error: 'La cantidad a marcar como lista no es valida.' });
+    }
+
+    const areaSolicitadaRaw = req.body?.area_preparacion ?? req.body?.areaPreparacion ?? null;
+    const areaSolicitada = areaSolicitadaRaw ? normalizarAreaPreparacion(areaSolicitadaRaw) : null;
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    try {
+      const pedidoActual = await db.get(
+        `SELECT id, estado, modo_servicio, delivery_estado, cocinero_id, cocinero_nombre, bartender_id, bartender_nombre
+           FROM pedidos
+          WHERE id = ? AND negocio_id = ?`,
+        [pedidoId, negocioId]
+      );
+      if (!pedidoActual) {
+        return res.status(404).json({ error: 'Pedido no encontrado.' });
+      }
+
+      if (pedidoActual.estado === 'pagado' || pedidoActual.estado === 'cancelado') {
+        return res
+          .status(400)
+          .json({ error: 'No se puede actualizar un producto de un pedido pagado o cancelado.' });
+      }
+
+      const detalle = await db.get(
+        `
+          SELECT dp.id AS detalle_id,
+                 dp.pedido_id,
+                 dp.cantidad,
+                 COALESCE(dp.estado_preparacion, 'pendiente') AS estado_preparacion,
+                 COALESCE(dp.cantidad_lista, 0) AS cantidad_lista,
+                 COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
+            FROM detalle_pedido dp
+            JOIN productos p ON p.id = dp.producto_id AND p.negocio_id = dp.negocio_id
+            LEFT JOIN categorias c ON c.id = p.categoria_id
+           WHERE dp.id = ?
+             AND dp.pedido_id = ?
+             AND dp.negocio_id = ?
+           LIMIT 1
+        `,
+        [detalleId, pedidoId, negocioId]
+      );
+
+      if (!detalle) {
+        return res.status(404).json({ error: 'Producto no encontrado dentro del pedido.' });
+      }
+
+      const areaDetalle = normalizarAreaPreparacion(detalle.area_preparacion);
+      if (areaDetalle === 'ninguna') {
+        return res.status(400).json({ error: 'Este producto no pertenece a un area de preparacion.' });
+      }
+
+      if (areaSolicitada && areaSolicitada !== 'ninguna' && areaSolicitada !== areaDetalle) {
+        return res.status(400).json({ error: 'El area indicada no coincide con el producto seleccionado.' });
+      }
+
+      if (esUsuarioCocina(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && areaDetalle !== 'cocina') {
+        return res.status(403).json({ error: 'No tienes permiso para actualizar productos de esta area.' });
+      }
+
+      if (esUsuarioBar(usuarioSesion) && !esUsuarioAdmin(usuarioSesion) && areaDetalle !== 'bar') {
+        return res.status(403).json({ error: 'No tienes permiso para actualizar productos de esta area.' });
+      }
+
+      if (areaDetalle === 'bar') {
+        const barActivo = await moduloActivoParaNegocio('bar', negocioId);
+        if (!barActivo) {
+          return res.status(403).json({ error: 'El m\u00f3dulo de bar est\u00e1 desactivado para este negocio.' });
+        }
+      }
+
+      const estadoActualDetalle = normalizarEstadoPreparacionDetalle(detalle.estado_preparacion, 'pendiente');
+      const cantidadTotal = Math.max(Number(detalle.cantidad) || 0, 0);
+      let cantidadListaActual = Number(detalle.cantidad_lista);
+      if (!Number.isFinite(cantidadListaActual) || cantidadListaActual < 0) {
+        cantidadListaActual = 0;
+      }
+      if (estadoActualDetalle === 'listo' && cantidadTotal > 0 && cantidadListaActual <= 0) {
+        cantidadListaActual = cantidadTotal;
+      }
+      cantidadListaActual = Math.min(Math.max(cantidadListaActual, 0), cantidadTotal);
+      const cantidadPendiente = Math.max(cantidadTotal - cantidadListaActual, 0);
+      const cantidadAplicada = Math.min(cantidadSolicitada, cantidadPendiente);
+      const nuevaCantidadLista = Math.min(cantidadListaActual + cantidadAplicada, cantidadTotal);
+      const nuevoEstadoDetalle = nuevaCantidadLista >= cantidadTotal - 0.0001 ? 'listo' : 'preparando';
+
+      if (cantidadAplicada <= 0) {
+        return res.status(400).json({ error: 'Este producto ya esta completamente listo.' });
+      }
+
+      await db.run(
+        'UPDATE detalle_pedido SET estado_preparacion = ?, cantidad_lista = ? WHERE id = ? AND pedido_id = ? AND negocio_id = ?',
+        [nuevoEstadoDetalle, Number(nuevaCantidadLista.toFixed(4)), detalleId, pedidoId, negocioId]
+      );
+
+      const detalleActualizado = await obtenerDetallePedidosPorIds([pedidoId], negocioId);
+      const items = detalleActualizado.get(pedidoId) || [];
+      const requiereCocina = items.some((item) => item.area_preparacion === 'cocina');
+      const requiereBar = items.some((item) => item.area_preparacion === 'bar');
+      const historiales = await obtenerHistorialAreasPorPedidos([pedidoId], negocioId);
+
+      const pedidoConResponsable = { ...pedidoActual };
+      if (areaDetalle === 'bar') {
+        pedidoConResponsable.bartender_id = usuarioSesion.id;
+        pedidoConResponsable.bartender_nombre = usuarioSesion.nombre;
+      } else {
+        pedidoConResponsable.cocinero_id = usuarioSesion.id;
+        pedidoConResponsable.cocinero_nombre = usuarioSesion.nombre;
+      }
+
+      const estadosArea = calcularEstadosAreasPedido(pedidoConResponsable, items, historiales);
+      const nuevoEstadoGlobal = calcularEstadoGlobalPedidoDesdeAreas({
+        pedidoActual,
+        requiereCocina,
+        requiereBar,
+        estadoCocina: estadosArea.estadoCocina,
+        estadoBar: estadosArea.estadoBar,
+      });
+
+      const campos = ['estado = ?'];
+      const valores = [nuevoEstadoGlobal];
+
+      if (areaDetalle === 'bar') {
+        campos.push('bartender_id = ?', 'bartender_nombre = ?');
+        valores.push(usuarioSesion.id, usuarioSesion.nombre);
+      } else {
+        campos.push('cocinero_id = ?', 'cocinero_nombre = ?');
+        valores.push(usuarioSesion.id, usuarioSesion.nombre);
+      }
+
+      if (nuevoEstadoGlobal === 'listo') {
+        campos.push('fecha_listo = COALESCE(fecha_listo, CURRENT_TIMESTAMP)');
+      }
+
+      if (nuevoEstadoGlobal === 'listo' && pedidoActual?.modo_servicio === 'delivery') {
+        const estadoDeliveryActual = (pedidoActual.delivery_estado || '').toString().toLowerCase();
+        if (!estadoDeliveryActual || estadoDeliveryActual === 'pendiente') {
+          campos.push('delivery_estado = ?');
+          valores.push('disponible');
+        }
+      }
+
+      const updatePedido = await db.run(
+        `UPDATE pedidos SET ${campos.join(', ')} WHERE id = ? AND negocio_id = ?`,
+        [...valores, pedidoId, negocioId]
+      );
+
+      if (updatePedido.changes === 0) {
+        return res.status(404).json({ error: 'Pedido no encontrado.' });
+      }
+
+      const estadoAreaActualizado = areaDetalle === 'bar' ? estadosArea.estadoBar : estadosArea.estadoCocina;
+      if (estadoAreaActualizado === 'listo') {
+        if (areaDetalle === 'bar') {
+          registrarHistorialBar(pedidoId, negocioId);
+        } else {
+          registrarHistorialCocina(pedidoId, negocioId);
+        }
+      }
+
+      return res.json({
+        ok: true,
+        estado: nuevoEstadoGlobal,
+        estadoCocina: estadosArea.estadoCocina,
+        estadoBar: estadosArea.estadoBar,
+        detalle_id: detalleId,
+        cantidad_aplicada: Number(cantidadAplicada.toFixed(4)),
+        cantidad_lista: Number(nuevaCantidadLista.toFixed(4)),
+        cantidad_total: Number(cantidadTotal.toFixed(4)),
+        area_preparacion: areaDetalle,
+      });
+    } catch (error) {
+      console.error('Error al actualizar estado del producto del pedido:', error);
+      return res.status(500).json({ error: 'No se pudo actualizar el estado del producto.' });
+    }
   });
 });
 
