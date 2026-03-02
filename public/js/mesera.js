@@ -37,11 +37,12 @@ const listasPorEstado = {
   preparando: document.getElementById('lista-pedidos-preparando'),
   listo: document.getElementById('lista-pedidos-listos'),
 };
-const REFRESCO_PEDIDOS_MS = 20000;
+const REFRESCO_PEDIDOS_MS = 2000;
 const MESERA_ALARMA_TONO_MS = 1400;
 const MESERA_ALARMA_TITULO_MS = 900;
 const MESERA_ALARMA_FRECUENCIA = 980;
 const MESERA_SILENCIO_CAJA_MS = 20000;
+const MESERA_NOTIFICACION_TAG = 'kanm-mesera-alarma';
 let temporizadorPedidos = null;
 
 const estado = {
@@ -82,10 +83,15 @@ let meseraAlarmaUltimoMensaje = '';
 let meseraAlarmaBanner = null;
 let meseraAlarmaTexto = null;
 const tituloOriginalMesera = document.title;
+let meseraWakeLock = null;
+let meseraPermisoNotificacionSolicitado = false;
+let meseraUltimaNotificacionAt = 0;
 const silenciosNotificacionCaja = new Map();
 const areaNotificationState = new Map();
 const AREA_STATE_STORAGE_KEY = 'kanm:area-notifications';
+const areaItemsListosState = new Map();
 let areaNotificationInitialized = false;
+let areaItemsListosInitialized = false;
 let listosBadgeInitialized = false;
 
 const cargarEstadoAreasDesdeStorage = () => {
@@ -237,6 +243,78 @@ const agruparCuentas = (...listas) => {
   return resultado;
 };
 
+const navegadorSoportaNotificacionesMesera = () =>
+  typeof window !== 'undefined' && 'Notification' in window;
+
+const solicitarPermisoNotificacionesMesera = () => {
+  if (!navegadorSoportaNotificacionesMesera()) return;
+  if (Notification.permission === 'granted' || Notification.permission === 'denied') return;
+  if (meseraPermisoNotificacionSolicitado) return;
+  meseraPermisoNotificacionSolicitado = true;
+  try {
+    const resultado = Notification.requestPermission();
+    if (resultado && typeof resultado.then === 'function') {
+      resultado.catch(() => {});
+    }
+  } catch (error) {
+    /* ignore */
+  }
+};
+
+const notificarAlarmaMesera = (mensaje = 'Pedido listo para entregar') => {
+  if (!navegadorSoportaNotificacionesMesera()) return;
+  if (Notification.permission !== 'granted') return;
+
+  const ahora = Date.now();
+  if (ahora - meseraUltimaNotificacionAt < 1200) return;
+  meseraUltimaNotificacionAt = ahora;
+
+  try {
+    new Notification('Alarma de mesera', {
+      body: String(mensaje || 'Pedido listo para entregar'),
+      tag: MESERA_NOTIFICACION_TAG,
+      renotify: true,
+      requireInteraction: true,
+    });
+  } catch (error) {
+    /* ignore */
+  }
+};
+
+const solicitarWakeLockMesera = async () => {
+  if (!('wakeLock' in navigator) || !navigator.wakeLock?.request) return false;
+  if (meseraWakeLock) return true;
+  try {
+    meseraWakeLock = await navigator.wakeLock.request('screen');
+    meseraWakeLock.addEventListener('release', () => {
+      meseraWakeLock = null;
+    });
+    return true;
+  } catch (error) {
+    return false;
+  }
+};
+
+const liberarWakeLockMesera = async () => {
+  if (!meseraWakeLock) return;
+  try {
+    await meseraWakeLock.release();
+  } catch (error) {
+    /* ignore */
+  } finally {
+    meseraWakeLock = null;
+  }
+};
+
+const inicializarWakeLockMesera = () => {
+  solicitarWakeLockMesera().catch(() => {});
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      solicitarWakeLockMesera().catch(() => {});
+    }
+  });
+};
+
 const obtenerAudioContextAlarmaMesera = () => {
   if (meseraAudioContextAlarma) return meseraAudioContextAlarma;
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -339,7 +417,7 @@ const actualizarBannerAlarmaMesera = () => {
       ? 'Hay 1 pedido listo para entregar.'
       : `Hay ${meseraAlarmasPendientes} pedidos listos para entregar.`;
   const detalle = meseraAlarmaUltimoMensaje ? ` Ultimo aviso: ${meseraAlarmaUltimoMensaje}.` : '';
-  const ayudaAudio = meseraAlarmaAudioDisponible ? '' : ' Si no escuchas sonido, toca la pantalla para habilitar audio.';
+  const ayudaAudio = meseraAlarmaAudioDisponible ? '' : ' Verifica permisos de sonido/notificaciones del navegador.';
   meseraAlarmaTexto.textContent = `${resumen} Presiona OK para detener la alarma.${detalle}${ayudaAudio}`;
   meseraAlarmaBanner.classList.add('is-active');
 };
@@ -360,6 +438,9 @@ const iniciarAlarmaMesera = async (cantidad = 1, mensaje = '') => {
 
   actualizarBannerAlarmaMesera();
   actualizarTituloAlarmaMesera();
+  solicitarPermisoNotificacionesMesera();
+  notificarAlarmaMesera(meseraAlarmaUltimoMensaje || 'Pedido listo para entregar');
+  solicitarWakeLockMesera().catch(() => {});
 
   await intentarHabilitarAudioAlarmaMesera();
   reproducirPatronAlarmaMesera();
@@ -388,6 +469,7 @@ const iniciarAlarmaMesera = async (cantidad = 1, mensaje = '') => {
 const registrarDesbloqueoAudioAlarmaMesera = () => {
   if (meseraAlarmaUnlockRegistrado) return;
   meseraAlarmaUnlockRegistrado = true;
+  solicitarPermisoNotificacionesMesera();
 
   const eventos = ['click', 'touchstart', 'keydown'];
   const handler = () => {
@@ -487,6 +569,75 @@ const notifyAreaReady = (cuenta, areaLabel) => {
   showToast(mensaje);
   iniciarAlarmaMesera(1, mensaje).then(() => {
     actualizarBannerAlarmaMesera();
+  });
+};
+
+const notifyAreaItemsReady = (cuenta, areaLabel) => {
+  const mesaTexto = cuenta.mesa || cuenta.mesaNumero || cuenta.mesa_nombre || cuenta.mesa_id || '';
+  const mensaje = mesaTexto
+    ? `Mesa ${mesaTexto} - ${areaLabel} tiene productos listos`
+    : `${areaLabel} tiene productos listos`;
+  showToast(mensaje);
+  iniciarAlarmaMesera(1, mensaje).then(() => {
+    actualizarBannerAlarmaMesera();
+  });
+};
+
+const obtenerCantidadListaPorAreaCuenta = (cuenta, area = 'cocina') => {
+  let total = 0;
+  (cuenta?.pedidos || []).forEach((pedido) => {
+    (pedido?.items || []).forEach((item) => {
+      const areaItem = (item.area_preparacion || item.areaPreparacion || '').toString().trim().toLowerCase();
+      if (areaItem !== area) return;
+      const cantidades = normalizarCantidadesPreparacionItem(item);
+      total += Number(cantidades.lista) || 0;
+    });
+  });
+  return Number(total.toFixed(4));
+};
+
+const checkItemsReadyNotifications = (cuenta, clavesActuales = null) => {
+  if (!cuenta) return;
+  const cuentaId = cuenta.cuenta_id || cuenta.id;
+  if (!cuentaId) return;
+
+  const areas = [
+    { clave: 'cocina', estado: cuenta.estadoCocina, label: 'Cocina' },
+    { clave: 'bar', estado: cuenta.estadoBar, label: 'Bar' },
+  ];
+
+  areas.forEach(({ clave, estado, label }) => {
+    const estadoNormalizado = estado ? estado.toString().toLowerCase() : null;
+    const key = `${cuentaId}-${clave}`;
+    if (clavesActuales) clavesActuales.add(key);
+
+    if (!estadoNormalizado || estadoNormalizado === 'sin_productos' || estadoNormalizado === 'cancelado') {
+      areaItemsListosState.set(key, 0);
+      return;
+    }
+
+    const cantidadListaActual = obtenerCantidadListaPorAreaCuenta(cuenta, clave);
+    const cantidadListaPrevia = Number(areaItemsListosState.get(key) || 0);
+    areaItemsListosState.set(key, cantidadListaActual);
+
+    if (!areaItemsListosInitialized) {
+      return; // Evita notificaciones al cargar por primera vez
+    }
+
+    // Si el area completa ya esta lista, se notifica por checkAreaNotifications para evitar duplicados.
+    if (estadoNormalizado === 'listo') {
+      return;
+    }
+
+    if (cantidadListaActual > cantidadListaPrevia + 0.0001) {
+      if (estaSilenciadaNotificacionCaja(cuentaId)) {
+        return;
+      }
+      notifyAreaItemsReady(cuenta, label);
+      if (estado.tabActiva !== 'listos') {
+        incrementarBadgeListos(1);
+      }
+    }
   });
 };
 
@@ -623,6 +774,14 @@ const obtenerTextoServicio = (modoServicio) => {
 };
 
 const SYNC_STORAGE_KEY = 'kanm:last-update';
+const EVENTOS_SYNC_RELEVANTES = new Set([
+  'stock-actualizado',
+  'pedido-actualizado',
+  'pedido-cobrado',
+  'cuenta-cobrada',
+]);
+let ultimaMarcaSyncProcesada = 0;
+let recargaSyncProgramada = null;
 
 const notificarActualizacionGlobal = (evento, payload = {}) => {
   try {
@@ -635,6 +794,40 @@ const notificarActualizacionGlobal = (evento, payload = {}) => {
     localStorage.setItem(SYNC_STORAGE_KEY, JSON.stringify(data));
   } catch (error) {
     console.warn('No fue posible notificar la actualización global:', error);
+  }
+};
+
+const programarRecargaPorSyncMesera = () => {
+  if (recargaSyncProgramada) return;
+  recargaSyncProgramada = setTimeout(() => {
+    recargaSyncProgramada = null;
+    cargarPedidosActivos(false).catch((error) => {
+      console.error('Error al recargar mesera tras sincronizacion global:', error);
+    });
+  }, 120);
+};
+
+const procesarSyncGlobalMesera = (valor) => {
+  if (!valor) return;
+  try {
+    const data = JSON.parse(valor);
+    if (!data || typeof data.timestamp !== 'number') {
+      return;
+    }
+
+    if (data.timestamp <= ultimaMarcaSyncProcesada) {
+      return;
+    }
+    ultimaMarcaSyncProcesada = data.timestamp;
+
+    const evento = (data.evento || '').toString();
+    if (!EVENTOS_SYNC_RELEVANTES.has(evento)) {
+      return;
+    }
+
+    programarRecargaPorSyncMesera();
+  } catch (error) {
+    console.warn('No se pudo procesar la sincronizacion global en mesera:', error);
   }
 };
 
@@ -1386,7 +1579,99 @@ const obtenerBadgeCuenta = (cuenta) => {
   return { texto, clase: `estado-${base}` };
 };
 
-const crearCardCuenta = (cuenta) => {
+const formatearCantidadItemMesera = (valor) => {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) return '0';
+  if (Math.abs(numero - Math.round(numero)) < 0.0001) {
+    return String(Math.round(numero));
+  }
+  return Number(numero.toFixed(2)).toString();
+};
+
+const normalizarCantidadesPreparacionItem = (item = {}) => {
+  const total = Math.max(Number(item.cantidad) || 0, 0);
+
+  let lista = Number(item.cantidad_lista);
+  if (!Number.isFinite(lista) || lista < 0) {
+    lista = 0;
+  }
+
+  const estadoPreparacion = (item.estado_preparacion || '').toString().trim().toLowerCase();
+  if (estadoPreparacion === 'listo' && total > 0 && lista <= 0) {
+    lista = total;
+  }
+  lista = Math.min(Math.max(lista, 0), total);
+
+  let pendiente = Number(item.cantidad_pendiente);
+  if (!Number.isFinite(pendiente) || pendiente < 0) {
+    pendiente = total - lista;
+  }
+  pendiente = Math.min(Math.max(pendiente, 0), total);
+
+  if (Math.abs(total - (lista + pendiente)) > 0.0001) {
+    pendiente = Math.max(total - lista, 0);
+  }
+
+  return {
+    total: Number(total.toFixed(4)),
+    lista: Number(lista.toFixed(4)),
+    pendiente: Number(pendiente.toFixed(4)),
+  };
+};
+
+const obtenerItemsPedidoParaVistaMesera = (pedido, vista = 'pendiente') => {
+  const items = Array.isArray(pedido?.items) ? pedido.items : [];
+  const mostrarListos = vista === 'listo';
+  const resultado = [];
+
+  items.forEach((item) => {
+    const cantidades = normalizarCantidadesPreparacionItem(item);
+    const total = cantidades.total;
+    const lista = cantidades.lista;
+    const pendiente = cantidades.pendiente;
+
+    if (!(total > 0)) {
+      return;
+    }
+
+    let cantidadMostrar = 0;
+    if (mostrarListos) {
+      if (lista > 0) {
+        cantidadMostrar = lista;
+      } else if (pendiente <= 0) {
+        cantidadMostrar = total;
+      }
+    } else if (pendiente > 0) {
+      cantidadMostrar = pendiente;
+    } else {
+      const estadoPreparacion = (item.estado_preparacion || '').toString().trim().toLowerCase();
+      if ((estadoPreparacion === '' || estadoPreparacion === 'pendiente' || estadoPreparacion === 'preparando') && lista <= 0) {
+        cantidadMostrar = total;
+      }
+    }
+
+    if (!(cantidadMostrar > 0)) {
+      return;
+    }
+
+    resultado.push({
+      ...item,
+      cantidad_mostrar: Number(cantidadMostrar.toFixed(4)),
+      cantidad_total: total,
+      cantidad_lista: lista,
+      cantidad_pendiente: pendiente,
+    });
+  });
+
+  return resultado;
+};
+
+const cuentaTieneItemsParaVistaMesera = (cuenta, vista = 'pendiente') => {
+  const pedidos = deduplicatePedidos(cuenta?.pedidos || []);
+  return pedidos.some((pedido) => obtenerItemsPedidoParaVistaMesera(pedido, vista).length > 0);
+};
+
+const crearCardCuenta = (cuenta, vista = 'pendiente') => {
   const card = document.createElement('article');
   card.className = 'kanm-card pedido-activo-card';
 
@@ -1431,7 +1716,14 @@ const crearCardCuenta = (cuenta) => {
     return fechaA - fechaB;
   });
 
-  pedidosOrdenados.forEach((pedido, index) => {
+  let pedidosRenderizados = 0;
+  pedidosOrdenados.forEach((pedido) => {
+    const itemsVista = obtenerItemsPedidoParaVistaMesera(pedido, vista);
+    if (!itemsVista.length) {
+      return;
+    }
+    pedidosRenderizados += 1;
+
     const pedidoWrapper = document.createElement('div');
     pedidoWrapper.className = 'pedido-subcard';
 
@@ -1440,7 +1732,7 @@ const crearCardCuenta = (cuenta) => {
 
     const badgePedido = document.createElement('span');
     badgePedido.className = 'kanm-badge ghost';
-    badgePedido.textContent = `Pedido #${index + 1}`;
+    badgePedido.textContent = `Pedido #${pedidosRenderizados}`;
 
     const badgeEstado = document.createElement('span');
     badgeEstado.className = `kanm-badge estado-${pedido.estado}`;
@@ -1464,10 +1756,12 @@ const crearCardCuenta = (cuenta) => {
     const lista = document.createElement('ul');
     lista.className = 'kanm-pedido-items';
 
-    if (pedido.items && pedido.items.length) {
-      pedido.items.forEach((item) => {
+    if (itemsVista.length) {
+      itemsVista.forEach((item) => {
         const li = document.createElement('li');
-        li.textContent = `${item.nombre || `Producto ${item.producto_id}`} × ${item.cantidad}`;
+        li.textContent =
+          `${item.nombre || `Producto ${item.producto_id}`} x ` +
+          formatearCantidadItemMesera(item.cantidad_mostrar);
         lista.appendChild(li);
       });
     } else {
@@ -1479,7 +1773,7 @@ const crearCardCuenta = (cuenta) => {
     const accionesPedido = document.createElement('div');
     accionesPedido.className = 'pedido-activo-acciones';
 
-    if (pedido.estado === 'pendiente') {
+    if (vista !== 'listo' && pedido.estado === 'pendiente') {
       const botonEditarPedido = document.createElement('button');
       botonEditarPedido.type = 'button';
       botonEditarPedido.className = 'kanm-button secondary';
@@ -1508,6 +1802,10 @@ const crearCardCuenta = (cuenta) => {
     pedidosContainer.appendChild(pedidoWrapper);
   });
 
+  if (!pedidosRenderizados) {
+    return null;
+  }
+
   const accionesCuenta = document.createElement('div');
   accionesCuenta.className = 'pedido-activo-acciones cuenta-acciones';
 
@@ -1535,13 +1833,20 @@ const crearCardCuenta = (cuenta) => {
   return card;
 };
 
-const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVacio) => {
+const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVacio, vista = null) => {
   if (!contenedor) return;
 
+  const vistaActual = vista || (estadosFiltro.includes('listo') ? 'listo' : estadosFiltro[0] || 'pendiente');
   contenedor.innerHTML = '';
-  const cuentasFiltradas = estado.pedidosActivos.filter((cuenta) =>
-    estadosFiltro.includes(cuenta.estadoCuentaMesera)
-  );
+  const cuentasFiltradas = estado.pedidosActivos.filter((cuenta) => {
+    if (vistaActual === 'listo') {
+      return cuentaTieneItemsParaVistaMesera(cuenta, 'listo');
+    }
+    if (!estadosFiltro.includes(cuenta.estadoCuentaMesera)) {
+      return false;
+    }
+    return cuentaTieneItemsParaVistaMesera(cuenta, vistaActual);
+  });
 
   if (!cuentasFiltradas.length) {
     mostrarMensajeTab(mensajeEl, mensajeVacio, 'info');
@@ -1551,7 +1856,7 @@ const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVac
   mostrarMensajeTab(mensajeEl, '');
   const fragment = document.createDocumentFragment();
 
-  const preferirRecientes = estadosFiltro.includes('listo');
+  const preferirRecientes = vistaActual === 'listo';
   const obtenerMarcaTiempo = (cuenta, usarMaximo) => {
     const tiempos = (cuenta.pedidos || []).map((p) =>
       p.fecha_creacion ? new Date(p.fecha_creacion).getTime() : 0
@@ -1567,8 +1872,16 @@ const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVac
   });
 
   cuentasOrdenadas.forEach((cuenta) => {
-    fragment.appendChild(crearCardCuenta(cuenta));
+    const card = crearCardCuenta(cuenta, vistaActual);
+    if (card) {
+      fragment.appendChild(card);
+    }
   });
+
+  if (!fragment.childNodes.length) {
+    mostrarMensajeTab(mensajeEl, mensajeVacio, 'info');
+    return;
+  }
 
   contenedor.appendChild(fragment);
 };
@@ -1634,28 +1947,52 @@ const cargarPedidosActivos = async (mostrarCarga = true) => {
       }));
     });
 
-    cuentasAgrupadas.forEach((cuenta) => checkAreaNotifications(cuenta));
+    const clavesItemsListosActuales = new Set();
+    cuentasAgrupadas.forEach((cuenta) => {
+      checkItemsReadyNotifications(cuenta, clavesItemsListosActuales);
+      checkAreaNotifications(cuenta);
+    });
+
+    Array.from(areaItemsListosState.keys()).forEach((key) => {
+      if (!clavesItemsListosActuales.has(key)) {
+        areaItemsListosState.delete(key);
+      }
+    });
 
     guardarEstadoAreasEnStorage();
 
-    const cuentasListas = cuentasAgrupadas.filter(
-      (cuenta) => cuenta.estadoCuentaMesera === 'listo'
+    const cuentasListas = cuentasAgrupadas.filter((cuenta) =>
+      cuentaTieneItemsParaVistaMesera(cuenta, 'listo')
     );
     if (!areaNotificationInitialized && estado.tabActiva !== 'listos' && cuentasListas.length) {
       incrementarBadgeListos(cuentasListas.length);
     }
 
     areaNotificationInitialized = true;
+    areaItemsListosInitialized = true;
 
     estado.pedidosActivos = cuentasAgrupadas;
-    renderPedidosPorEstado(['pendiente'], listasPorEstado.pendiente, mensajesPorEstado.pendiente, 'No hay pedidos pendientes.');
+    renderPedidosPorEstado(
+      ['pendiente'],
+      listasPorEstado.pendiente,
+      mensajesPorEstado.pendiente,
+      'No hay pedidos pendientes.',
+      'pendiente'
+    );
     renderPedidosPorEstado(
       ['preparando'],
       listasPorEstado.preparando,
       mensajesPorEstado.preparando,
-      'No hay pedidos en preparación.'
+      'No hay pedidos en preparacion.',
+      'preparando'
     );
-    renderPedidosPorEstado(['listo'], listasPorEstado.listo, mensajesPorEstado.listo, 'No hay pedidos listos.');
+    renderPedidosPorEstado(
+      ['listo'],
+      listasPorEstado.listo,
+      mensajesPorEstado.listo,
+      'No hay pedidos listos.',
+      'listo'
+    );
   } catch (error) {
     console.error('Error al cargar pedidos activos:', error);
     if (!mostrarCarga && Array.isArray(estado.pedidosActivos) && estado.pedidosActivos.length) {
@@ -1875,6 +2212,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   actualizarBadgeListos();
   crearBannerAlarmaMesera();
   registrarDesbloqueoAudioAlarmaMesera();
+  inicializarWakeLockMesera();
   const usuario = obtenerUsuarioActual();
   if (identidadMesera && usuario?.nombre) {
     identidadMesera.textContent = `Mesera: ${usuario.nombre}`;
@@ -1883,6 +2221,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   activarTab('tomar');
 
   await Promise.all([cargarProductos(), cargarImpuesto(), cargarPedidosActivos()]);
+  try {
+    const ultimaSync = localStorage.getItem(SYNC_STORAGE_KEY);
+    if (ultimaSync) {
+      procesarSyncGlobalMesera(ultimaSync);
+    }
+  } catch (error) {
+    console.warn('No se pudo leer el estado de sincronizacion global en mesera', error);
+  }
   actualizarCarritoUI();
   inicializarEventos();
   iniciarRefrescoPedidos();
@@ -1891,4 +2237,15 @@ window.addEventListener('DOMContentLoaded', async () => {
 window.addEventListener('beforeunload', () => {
   detenerRefrescoPedidos();
   detenerAlarmaMesera();
+  if (recargaSyncProgramada) {
+    clearTimeout(recargaSyncProgramada);
+    recargaSyncProgramada = null;
+  }
+  liberarWakeLockMesera().catch(() => {});
+});
+
+window.addEventListener('storage', (event) => {
+  if (event.key === SYNC_STORAGE_KEY) {
+    procesarSyncGlobalMesera(event.newValue);
+  }
 });

@@ -5453,6 +5453,16 @@ body[data-role='mesera'] .kanm-main {
   gap: 8px;
 }
 
+.cocina-focus-item-group {
+  list-style: none;
+  color: #6b7280;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 2px 0;
+}
+
 .cocina-focus-item-row {
   display: flex;
   align-items: center;
@@ -5462,6 +5472,15 @@ body[data-role='mesera'] .kanm-main {
   border-radius: 10px;
   padding: 8px 10px;
   background: rgba(255, 255, 255, 0.8);
+}
+
+.cocina-focus-item-row.is-pendiente {
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.cocina-focus-item-row.is-listo {
+  border-color: rgba(16, 185, 129, 0.25);
+  background: rgba(16, 185, 129, 0.06);
 }
 
 .cocina-focus-item-main {

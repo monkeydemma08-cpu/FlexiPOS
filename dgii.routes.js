@@ -156,15 +156,17 @@ const crearHandler = (tipo) => async (req, res) => {
   }
 };
 
-router.use(jsonParser);
-router.use(xmlParser);
-router.use(rateLimitMiddleware);
+const dgiiMiddlewares = [jsonParser, xmlParser, rateLimitMiddleware];
 
-router.post('/fe/recepcion/api/ecf', crearHandler('recepcion'));
-router.post('/fe/aprobacioncomercial/api/ecf', crearHandler('aprobacioncomercial'));
-router.post('/fe/autenticacion/api/semilla', crearHandler('semilla'));
-router.post('/fe/autenticacion/api/validacioncertificado', crearHandler('validacioncertificado'));
-router.post('/fe/autenticacion/api/validarsemilla', crearHandler('validarsemilla'));
+router.post('/fe/recepcion/api/ecf', ...dgiiMiddlewares, crearHandler('recepcion'));
+router.post('/fe/aprobacioncomercial/api/ecf', ...dgiiMiddlewares, crearHandler('aprobacioncomercial'));
+router.post('/fe/autenticacion/api/semilla', ...dgiiMiddlewares, crearHandler('semilla'));
+router.post(
+  '/fe/autenticacion/api/validacioncertificado',
+  ...dgiiMiddlewares,
+  crearHandler('validacioncertificado')
+);
+router.post('/fe/autenticacion/api/validarsemilla', ...dgiiMiddlewares, crearHandler('validarsemilla'));
 
 router.use((err, req, res, next) => {
   if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {

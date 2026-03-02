@@ -19,6 +19,8 @@ const REFRESH_INTERVAL = 5000;
 const COCINA_ALARMA_TONO_MS = 1400;
 const COCINA_ALARMA_TITULO_MS = 900;
 const COCINA_ALARMA_FRECUENCIA = 920;
+const COCINA_NOTIFICACION_TAG = 'kanm-cocina-alarma';
+const COCINA_CONFIG_CACHE_MS = 30000;
 let refreshTimer = null;
 let cargando = false;
 let cuentasActivas = [];
@@ -38,6 +40,12 @@ let idsPendientesPrevios = new Set();
 let alarmaParpadeoTitulo = false;
 let alarmaBanner = null;
 let alarmaTexto = null;
+let wakeLockCocina = null;
+let cocinaPermisoNotificacionSolicitado = false;
+let cocinaUltimaNotificacionAt = 0;
+let cocinaMultipedidosHabilitado = false;
+let cocinaConfigUltimaCarga = 0;
+let cocinaConfigCargaEnCurso = null;
 const LOCAL_STORAGE_TRABAJO = 'kanm_cocina_pedido_en_trabajo';
 const SYNC_STORAGE_KEY = 'kanm:last-update';
 const EVENTOS_SYNC_RELEVANTES = new Set([
@@ -53,6 +61,20 @@ const sessionApi = window.KANMSession;
 const authApi = window.kanmAuth;
 const tituloOriginalPagina = document.title;
 
+const notificarActualizacionGlobal = (evento, payload = {}) => {
+  try {
+    const data = {
+      evento,
+      payload,
+      timestamp: Date.now(),
+      nonce: Math.random(),
+    };
+    localStorage.setItem(SYNC_STORAGE_KEY, JSON.stringify(data));
+  } catch (error) {
+    console.warn('No fue posible notificar la actualizacion global:', error);
+  }
+};
+
 const obtenerUsuarioActual = () => sessionApi?.getUser?.() || null;
 
 const obtenerAuthHeaders = () => {
@@ -62,6 +84,142 @@ const obtenerAuthHeaders = () => {
     console.warn('No se pudieron obtener los encabezados de autenticacion', error);
     return {};
   }
+};
+
+const normalizarFlagCocina = (valor, predeterminado = false) => {
+  if (valor === undefined || valor === null) return predeterminado;
+  if (typeof valor === 'boolean') return valor;
+  if (typeof valor === 'number') return valor !== 0;
+  if (typeof valor === 'string') {
+    const limpio = valor.trim().toLowerCase();
+    if (['1', 'true', 'on', 'yes', 'si'].includes(limpio)) return true;
+    if (['0', 'false', 'off', 'no'].includes(limpio)) return false;
+    return predeterminado;
+  }
+  return Boolean(valor);
+};
+
+const cargarConfiguracionCocina = async (force = false) => {
+  const ahora = Date.now();
+  if (!force && cocinaConfigUltimaCarga && ahora - cocinaConfigUltimaCarga < COCINA_CONFIG_CACHE_MS) {
+    return cocinaMultipedidosHabilitado;
+  }
+  if (cocinaConfigCargaEnCurso) {
+    return cocinaConfigCargaEnCurso;
+  }
+
+  cocinaConfigCargaEnCurso = (async () => {
+    try {
+      const res = await fetch('/api/configuracion/inventario', {
+        headers: {
+          ...obtenerAuthHeaders(),
+        },
+      });
+
+      if (manejarSesionVencida(res)) {
+        return cocinaMultipedidosHabilitado;
+      }
+
+      if (!res.ok) {
+        throw new Error('No se pudo obtener la configuracion de cocina.');
+      }
+
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok === false) {
+        throw new Error(data.error || 'No se pudo obtener la configuracion de cocina.');
+      }
+
+      cocinaMultipedidosHabilitado = normalizarFlagCocina(
+        data?.cocina_multipedidos ?? data?.cocinaMultipedidos,
+        false
+      );
+      cocinaConfigUltimaCarga = Date.now();
+      return cocinaMultipedidosHabilitado;
+    } catch (error) {
+      console.warn('No se pudo cargar la configuracion de cocina multipedidos:', error);
+      return cocinaMultipedidosHabilitado;
+    } finally {
+      cocinaConfigCargaEnCurso = null;
+    }
+  })();
+
+  return cocinaConfigCargaEnCurso;
+};
+
+const navegadorSoportaNotificaciones = () => typeof window !== 'undefined' && 'Notification' in window;
+
+const solicitarPermisoNotificacionesCocina = () => {
+  if (!navegadorSoportaNotificaciones()) return;
+  if (Notification.permission === 'granted' || Notification.permission === 'denied') return;
+  if (cocinaPermisoNotificacionSolicitado) return;
+  cocinaPermisoNotificacionSolicitado = true;
+  try {
+    const resultado = Notification.requestPermission();
+    if (resultado && typeof resultado.then === 'function') {
+      resultado.catch(() => {});
+    }
+  } catch (error) {
+    /* ignore */
+  }
+};
+
+const notificarAlarmaCocina = (cantidad = 1) => {
+  if (!navegadorSoportaNotificaciones()) return;
+  if (Notification.permission !== 'granted') return;
+
+  const ahora = Date.now();
+  if (ahora - cocinaUltimaNotificacionAt < 1200) return;
+  cocinaUltimaNotificacionAt = ahora;
+
+  const body =
+    cantidad === 1
+      ? 'Nueva orden pendiente en cocina.'
+      : `${cantidad} nuevas ordenes pendientes en cocina.`;
+
+  try {
+    new Notification('Alarma de cocina', {
+      body,
+      tag: COCINA_NOTIFICACION_TAG,
+      renotify: true,
+      requireInteraction: true,
+    });
+  } catch (error) {
+    /* ignore */
+  }
+};
+
+const solicitarWakeLockCocina = async () => {
+  if (!('wakeLock' in navigator) || !navigator.wakeLock?.request) return false;
+  if (wakeLockCocina) return true;
+  try {
+    wakeLockCocina = await navigator.wakeLock.request('screen');
+    wakeLockCocina.addEventListener('release', () => {
+      wakeLockCocina = null;
+    });
+    return true;
+  } catch (error) {
+    return false;
+  }
+};
+
+const liberarWakeLockCocina = async () => {
+  if (!wakeLockCocina) return;
+  try {
+    await wakeLockCocina.release();
+  } catch (error) {
+    /* ignore */
+  } finally {
+    wakeLockCocina = null;
+  }
+};
+
+const inicializarWakeLockCocina = () => {
+  solicitarWakeLockCocina().catch(() => {});
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      solicitarWakeLockCocina().catch(() => {});
+    }
+  });
 };
 
 const obtenerAudioContextAlarma = () => {
@@ -166,7 +324,7 @@ const actualizarBannerAlarma = () => {
   }
 
   const ordenes = alarmaNuevasOrdenes === 1 ? 'Nueva orden en cocina.' : `${alarmaNuevasOrdenes} nuevas ordenes en cocina.`;
-  const ayudaAudio = audioAlarmaDisponible ? '' : ' Si no escuchas sonido, toca la pantalla para habilitar audio.';
+  const ayudaAudio = audioAlarmaDisponible ? '' : ' Verifica permisos de sonido/notificaciones del navegador.';
   alarmaTexto.textContent = `${ordenes} Presiona OK para detener la alarma.${ayudaAudio}`;
   alarmaBanner.classList.add('is-active');
 };
@@ -184,6 +342,9 @@ const iniciarAlarmaNuevaOrden = async (cantidad = 1) => {
 
   actualizarBannerAlarma();
   actualizarTituloAlarma();
+  solicitarPermisoNotificacionesCocina();
+  notificarAlarmaCocina(alarmaNuevasOrdenes);
+  solicitarWakeLockCocina().catch(() => {});
 
   await intentarHabilitarAudioAlarma();
   reproducirPatronAlarma();
@@ -212,6 +373,7 @@ const iniciarAlarmaNuevaOrden = async (cantidad = 1) => {
 const registrarDesbloqueoAudioAlarma = () => {
   if (listenersDesbloqueoAudioRegistrados) return;
   listenersDesbloqueoAudioRegistrados = true;
+  solicitarPermisoNotificacionesCocina();
 
   const eventos = ['click', 'touchstart', 'keydown'];
   const handler = () => {
@@ -365,6 +527,13 @@ const obtenerPedidoPropioEnPreparacion = () => {
 };
 
 const sincronizarPedidoEnTrabajo = () => {
+  if (cocinaMultipedidosHabilitado) {
+    if (leerPedidoEnTrabajo()) {
+      limpiarPedidoEnTrabajo();
+    }
+    return;
+  }
+
   const enTrabajo = leerPedidoEnTrabajo();
   const enServidor = obtenerPedidoPropioEnPreparacion();
 
@@ -538,15 +707,23 @@ const marcarDetalleListo = async (pedidoId, detalleId, cantidad, boton) => {
 
     const cuenta = focoCuenta || buscarCuentaPorPedido(pedidoId);
     const cuentaId = cuenta?.cuenta_id || cuenta?.id || null;
-    if (data.estadoCocina === 'listo') {
-      if (leerPedidoEnTrabajo()?.id === pedidoId) {
-        limpiarPedidoEnTrabajo();
+    if (!cocinaMultipedidosHabilitado) {
+      if (data.estadoCocina === 'listo') {
+        if (leerPedidoEnTrabajo()?.id === pedidoId) {
+          limpiarPedidoEnTrabajo();
+        }
+      } else {
+        guardarPedidoEnTrabajo(pedidoId, cuentaId);
       }
-    } else {
-      guardarPedidoEnTrabajo(pedidoId, cuentaId);
     }
 
     await cargarPedidos(false);
+    notificarActualizacionGlobal('pedido-actualizado', {
+      pedidoId: Number(pedidoId),
+      detalleId: Number(detalleId),
+      estado: data.estadoCocina || 'preparando',
+    });
+
     const actualizado = buscarPedidoEnActivos(pedidoId);
     if (actualizado) {
       abrirFoco(actualizado.cuenta, actualizado.pedido);
@@ -577,18 +754,74 @@ const listaProductosFoco = (pedido) => {
 
   const estadoPedido = pedido?.estadoCocina || pedido?.estado;
   const permiteAccion = estadoPedido === 'pendiente' || estadoPedido === 'preparando';
+  let filasPendientes = 0;
 
-  items.forEach((item) => {
+  const crearFilaProducto = ({
+    nombreProducto,
+    cantidadPendiente,
+    cantidadTotal,
+    cantidadLista,
+    detalleId = null,
+  }) => {
     const li = document.createElement('li');
     li.className = 'cocina-focus-item-row';
+    li.classList.add('is-pendiente');
 
     const main = document.createElement('div');
     main.className = 'cocina-focus-item-main';
 
     const titulo = document.createElement('span');
     titulo.className = 'cocina-focus-item-title';
-    titulo.textContent = (item.nombre || ('Producto ' + item.producto_id)) + ' x ' + formatearCantidadItem(item.cantidad);
+    titulo.textContent = `${nombreProducto} x ${formatearCantidadItem(cantidadPendiente)}`;
     main.appendChild(titulo);
+
+    if (cantidadTotal > 1) {
+      const subinfo = document.createElement('span');
+      subinfo.className = 'cocina-focus-item-subinfo';
+      subinfo.textContent = `Pendientes: ${formatearCantidadItem(cantidadPendiente)} de ${formatearCantidadItem(cantidadTotal)}`;
+      main.appendChild(subinfo);
+    }
+
+    const acciones = document.createElement('div');
+    acciones.className = 'cocina-focus-item-actions';
+
+    const badge = document.createElement('span');
+    badge.className = 'cocina-item-estado';
+    badge.dataset.estado = cantidadLista > 0 ? 'preparando' : 'pendiente';
+    badge.textContent =
+      cantidadTotal > 1
+        ? `${etiquetaEstadoItem(cantidadLista > 0 ? 'preparando' : 'pendiente')} ${formatearCantidadItem(cantidadPendiente)}/${formatearCantidadItem(cantidadTotal)}`
+        : etiquetaEstadoItem(cantidadLista > 0 ? 'preparando' : 'pendiente');
+    acciones.appendChild(badge);
+
+    if (permiteAccion && cantidadPendiente > 0 && detalleId) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'kanm-button secondary cocina-item-action';
+      btn.textContent = cantidadPendiente > 1 ? 'Marcar 1 listo' : 'Marcar listo';
+      btn.addEventListener('click', () => marcarDetalleListo(pedido.id, detalleId, 1, btn));
+      acciones.appendChild(btn);
+
+      if (cantidadPendiente > 1) {
+        const btnTodo = document.createElement('button');
+        btnTodo.type = 'button';
+        btnTodo.className = 'kanm-button ghost cocina-item-action';
+        btnTodo.textContent = 'Marcar todo';
+        btnTodo.addEventListener('click', () =>
+          marcarDetalleListo(pedido.id, detalleId, cantidadPendiente, btnTodo)
+        );
+        acciones.appendChild(btnTodo);
+      }
+    }
+
+    li.appendChild(main);
+    li.appendChild(acciones);
+    ul.appendChild(li);
+    filasPendientes += 1;
+  };
+
+  items.forEach((item) => {
+    const nombreProducto = item.nombre || ('Producto ' + item.producto_id);
 
     const cantidadTotal = Math.max(Number(item.cantidad) || 0, 0);
     let cantidadLista = Number(item.cantidad_lista);
@@ -601,50 +834,22 @@ const listaProductosFoco = (pedido) => {
     cantidadLista = Math.min(Math.max(cantidadLista, 0), cantidadTotal);
     const cantidadPendiente = Math.max(cantidadTotal - cantidadLista, 0);
 
-    if (cantidadTotal > 1) {
-      const subinfo = document.createElement('span');
-      subinfo.className = 'cocina-focus-item-subinfo';
-      subinfo.textContent = formatearCantidadItem(cantidadLista) + ' listas - ' + formatearCantidadItem(cantidadPendiente) + ' pendientes';
-      main.appendChild(subinfo);
+    if (cantidadPendiente > 0) {
+      crearFilaProducto({
+        nombreProducto,
+        cantidadPendiente,
+        cantidadTotal,
+        cantidadLista,
+        detalleId: item.detalle_id,
+      });
     }
-
-    const acciones = document.createElement('div');
-    acciones.className = 'cocina-focus-item-actions';
-
-    const estadoItem = cantidadPendiente <= 0 ? 'listo' : cantidadLista > 0 ? 'preparando' : normalizarEstadoItem(item.estado_preparacion);
-    const badge = document.createElement('span');
-    badge.className = 'cocina-item-estado';
-    badge.dataset.estado = estadoItem;
-    badge.textContent =
-      cantidadTotal > 1 && cantidadPendiente > 0
-        ? etiquetaEstadoItem(estadoItem) + ' ' + formatearCantidadItem(cantidadLista) + '/' + formatearCantidadItem(cantidadTotal)
-        : etiquetaEstadoItem(estadoItem);
-    acciones.appendChild(badge);
-
-    if (permiteAccion && cantidadPendiente > 0 && item.detalle_id) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'kanm-button secondary cocina-item-action';
-      btn.textContent = cantidadPendiente > 1 ? 'Marcar 1 listo' : 'Marcar listo';
-      btn.addEventListener('click', () => marcarDetalleListo(pedido.id, item.detalle_id, 1, btn));
-      acciones.appendChild(btn);
-
-      if (cantidadPendiente > 1) {
-        const btnTodo = document.createElement('button');
-        btnTodo.type = 'button';
-        btnTodo.className = 'kanm-button ghost cocina-item-action';
-        btnTodo.textContent = 'Marcar todo';
-        btnTodo.addEventListener('click', () =>
-          marcarDetalleListo(pedido.id, item.detalle_id, cantidadPendiente, btnTodo)
-        );
-        acciones.appendChild(btnTodo);
-      }
-    }
-
-    li.appendChild(main);
-    li.appendChild(acciones);
-    ul.appendChild(li);
   });
+
+  if (!filasPendientes) {
+    const li = document.createElement('li');
+    li.textContent = 'No hay productos pendientes en este pedido.';
+    ul.appendChild(li);
+  }
 
   return ul;
 };
@@ -653,22 +858,22 @@ const abrirFoco = (cuenta, pedido) => {
   if (!focusOverlay || !cuenta || !pedido) return;
 
   const usuario = obtenerUsuarioActual();
-  const enCurso = obtenerPedidoPropioEnPreparacion();
-  const enTrabajo = leerPedidoEnTrabajo();
+  const enCurso = cocinaMultipedidosHabilitado ? null : obtenerPedidoPropioEnPreparacion();
+  const enTrabajo = cocinaMultipedidosHabilitado ? null : leerPedidoEnTrabajo();
 
   if (pedido.cocinero_id && usuario && pedido.cocinero_id !== usuario.id) {
     alert(`Este pedido está siendo preparado por ${pedido.cocinero_nombre || 'otro cocinero'}.`);
     return;
   }
 
-  if (enCurso && enCurso.pedido.id !== pedido.id) {
+  if (!cocinaMultipedidosHabilitado && enCurso && enCurso.pedido.id !== pedido.id) {
     alert(
       `Ya estás trabajando en el pedido #${enCurso.pedido.id}. Marca listo o cancela antes de tomar otro.`
     );
     return;
   }
 
-  if (enTrabajo && enTrabajo.id && enTrabajo.id !== pedido.id) {
+  if (!cocinaMultipedidosHabilitado && enTrabajo && enTrabajo.id && enTrabajo.id !== pedido.id) {
     alert('Ya tienes un pedido en preparacion. Marca listo o cancela ese pedido antes de tomar otro.');
     return;
   }
@@ -750,7 +955,38 @@ const cargarPedidosFinalizados = async () => {
   return cuentas;
 };
 
-const listaProductos = (items = []) => {
+const normalizarCantidadesPreparacionItem = (item = {}) => {
+  const total = Math.max(Number(item.cantidad) || 0, 0);
+
+  let lista = Number(item.cantidad_lista);
+  if (!Number.isFinite(lista) || lista < 0) {
+    lista = 0;
+  }
+
+  if (normalizarEstadoItem(item.estado_preparacion) === 'listo' && total > 0 && lista <= 0) {
+    lista = total;
+  }
+  lista = Math.min(Math.max(lista, 0), total);
+
+  let pendiente = Number(item.cantidad_pendiente);
+  if (!Number.isFinite(pendiente) || pendiente < 0) {
+    pendiente = total - lista;
+  }
+  pendiente = Math.min(Math.max(pendiente, 0), total);
+
+  if (Math.abs(total - (lista + pendiente)) > 0.0001) {
+    pendiente = Math.max(total - lista, 0);
+  }
+
+  return {
+    total: Number(total.toFixed(4)),
+    lista: Number(lista.toFixed(4)),
+    pendiente: Number(pendiente.toFixed(4)),
+  };
+};
+
+const listaProductos = (items = [], opciones = {}) => {
+  const soloPendientes = opciones?.soloPendientes === true;
   const ul = document.createElement('ul');
   ul.className = 'kanm-pedido-items';
   if (!items.length) {
@@ -759,11 +995,29 @@ const listaProductos = (items = []) => {
     ul.appendChild(li);
     return ul;
   }
+
+  let agregados = 0;
   items.forEach((item) => {
+    const cantidades = normalizarCantidadesPreparacionItem(item);
+    const cantidadMostrar = soloPendientes ? cantidades.pendiente : cantidades.total;
+    if (!(cantidadMostrar > 0)) {
+      return;
+    }
+
     const li = document.createElement('li');
-    li.textContent = `${item.nombre || `Producto ${item.producto_id}`} × ${item.cantidad}`;
+    li.textContent = `${item.nombre || `Producto ${item.producto_id}`} × ${formatearCantidadItem(cantidadMostrar)}`;
     ul.appendChild(li);
+    agregados += 1;
   });
+
+  if (agregados === 0) {
+    const li = document.createElement('li');
+    li.textContent = soloPendientes
+      ? 'No hay productos pendientes en este pedido.'
+      : 'Sin productos registrados';
+    ul.appendChild(li);
+  }
+
   return ul;
 };
 
@@ -781,10 +1035,10 @@ const crearAccionesPedido = (cuenta, pedido) => {
   acciones.className = 'kanm-pedido-acciones';
 
   const usuario = obtenerUsuarioActual();
-  const enCurso = obtenerPedidoPropioEnPreparacion();
+  const enCurso = cocinaMultipedidosHabilitado ? null : obtenerPedidoPropioEnPreparacion();
   const estadoCocina = pedido.estadoCocina || pedido.estado;
   const bloqueadoPorOtro = pedido.cocinero_id && usuario && pedido.cocinero_id !== usuario.id;
-  const bloqueadoPorTrabajo = enCurso && enCurso.pedido.id !== pedido.id;
+  const bloqueadoPorTrabajo = !cocinaMultipedidosHabilitado && enCurso && enCurso.pedido.id !== pedido.id;
   const bloqueoMensaje = bloqueadoPorOtro
     ? `Pedido asignado a ${pedido.cocinero_nombre || 'otro cocinero'}.`
     : bloqueadoPorTrabajo
@@ -880,7 +1134,7 @@ const crearPedidoSubcard = (cuenta, pedido, indice, conAcciones = false) => {
     nota.textContent = `Nota: ${pedido.nota}`;
     subcard.appendChild(nota);
   }
-  subcard.appendChild(listaProductos(pedido.items));
+  subcard.appendChild(listaProductos(pedido.items, { soloPendientes: conAcciones }));
 
   if (conAcciones) {
     subcard.appendChild(crearAccionesPedido(cuenta, pedido));
@@ -1015,6 +1269,8 @@ const cargarPedidos = async (mostrarCarga = true) => {
   }
 
   try {
+    await cargarConfiguracionCocina();
+
     const [activos, finalizados] = await Promise.all([
       cargarPedidosActivos(),
       cargarPedidosFinalizados(),
@@ -1071,10 +1327,10 @@ const procesarSyncGlobal = (valor) => {
 
 const cambiarEstado = async (pedidoId, estado, boton) => {
   const usuario = obtenerUsuarioActual();
-  const enCurso = obtenerPedidoPropioEnPreparacion();
+  const enCurso = cocinaMultipedidosHabilitado ? null : obtenerPedidoPropioEnPreparacion();
   const datosPedido = buscarPedidoEnActivos(pedidoId)?.pedido;
 
-  if (estado === 'preparando' && enCurso && enCurso.pedido.id !== pedidoId) {
+  if (!cocinaMultipedidosHabilitado && estado === 'preparando' && enCurso && enCurso.pedido.id !== pedidoId) {
     if (boton) {
       boton.disabled = false;
       boton.classList.remove('is-loading');
@@ -1126,15 +1382,24 @@ const cambiarEstado = async (pedidoId, estado, boton) => {
     await cargarPedidos(false);
     cerrarFoco();
 
-    if (estado === 'preparando') {
+    if (!cocinaMultipedidosHabilitado && estado === 'preparando') {
       const cuenta = focoCuenta || buscarCuentaPorPedido(pedidoId);
       const cuentaId = cuenta?.cuenta_id || cuenta?.id || null;
       guardarPedidoEnTrabajo(pedidoId, cuentaId);
     }
 
-    if ((estado === 'listo' || estado === 'cancelado') && leerPedidoEnTrabajo()?.id === pedidoId) {
+    if (
+      !cocinaMultipedidosHabilitado &&
+      (estado === 'listo' || estado === 'cancelado') &&
+      leerPedidoEnTrabajo()?.id === pedidoId
+    ) {
       limpiarPedidoEnTrabajo();
     }
+
+    notificarActualizacionGlobal('pedido-actualizado', {
+      pedidoId: Number(pedidoId),
+      estado,
+    });
   } catch (error) {
     console.error('Error al actualizar pedido:', error);
     alert(error.message || 'No se pudo actualizar el pedido. Intenta de nuevo.');
@@ -1154,6 +1419,7 @@ const iniciarAutoRefresco = () => {
 document.addEventListener('DOMContentLoaded', () => {
   crearBannerAlarma();
   registrarDesbloqueoAudioAlarma();
+  inicializarWakeLockCocina();
 
   tabs.forEach((btn) =>
     btn.addEventListener('click', () => cambiarTab(btn.dataset.tab || 'activos'))
@@ -1191,6 +1457,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 window.addEventListener('beforeunload', () => {
   detenerAlarmaNuevaOrden();
+  liberarWakeLockCocina().catch(() => {});
   if (refreshTimer) clearInterval(refreshTimer);
   if (recargaSyncProgramada) {
     clearTimeout(recargaSyncProgramada);
@@ -1204,5 +1471,4 @@ window.addEventListener('storage', (event) => {
   }
 });
 
-// El backend valida que cada cocinero solo tenga un pedido en preparacion.
-// Se mantiene el guardado en localStorage para recordar visualmente el pedido en curso en este navegador.
+// Se mantiene el guardado en localStorage solo para el modo de un pedido en preparacion por cocinero.

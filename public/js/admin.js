@@ -68,6 +68,12 @@ const impuestoMensaje = document.getElementById('impuesto-mensaje');
 const itbisAcreditaInput = document.getElementById('itbis-acredita');
 const itbisAcreditaGuardarBtn = document.getElementById('itbis-acredita-guardar');
 const itbisAcreditaMensaje = document.getElementById('itbis-acredita-mensaje');
+const inventarioConfigForm = document.getElementById('inventario-config-form');
+const inventarioModoInput = document.getElementById('inventario-modo');
+const insumosBloqueoInput = document.getElementById('insumos-bloqueo');
+const cocinaMultipedidosInput = document.getElementById('cocina-multipedidos');
+const inventarioGuardarBtn = document.getElementById('inventario-guardar');
+const inventarioConfigMensaje = document.getElementById('inventario-mensaje');
 
 const facturaForm = document.getElementById('factura-form');
 const facturaTelefonosContainer = document.getElementById('factura-telefonos');
@@ -184,6 +190,8 @@ const analisisKpiMargen = document.getElementById('analisis-kpi-margen');
 const analisisKpiTicket = document.getElementById('analisis-kpi-ticket');
 const analisisKpiVentasCount = document.getElementById('analisis-kpi-ventas-count');
 const analisisKpiUtilidadReal = document.getElementById('analisis-kpi-utilidad-real');
+const analisisKpiItbisRecaudado = document.getElementById('analisis-kpi-itbis-recaudado');
+const analisisKpiVentasSinItbis = document.getElementById('analisis-kpi-ventas-sin-itbis');
 const analisisUtilidadRealAviso = document.getElementById('analisis-utilidad-real-aviso');
 const analisisKpiVentasDelta = document.getElementById('analisis-kpi-ventas-delta');
 const analisisKpiGastosDelta = document.getElementById('analisis-kpi-gastos-delta');
@@ -2944,6 +2952,90 @@ const normalizarFlagUI = (valor, predeterminado = true) => {
   return Boolean(valor);
 };
 
+const aplicarConfiguracionInventario = (config = {}) => {
+  const modoRaw = config.modo_inventario_costos ?? config.modoInventarioCostos;
+  const modo = String(modoRaw || 'PREPARACION').trim().toUpperCase() === 'REVENTA' ? 'REVENTA' : 'PREPARACION';
+  const bloquearInsumos = normalizarFlagUI(
+    config.bloquear_insumos_sin_stock ?? config.bloquearInsumosSinStock,
+    false
+  );
+  const cocinaMultipedidos = normalizarFlagUI(
+    config.cocina_multipedidos ?? config.cocinaMultipedidos,
+    false
+  );
+
+  if (inventarioModoInput) inventarioModoInput.value = modo;
+  if (insumosBloqueoInput) insumosBloqueoInput.checked = bloquearInsumos;
+  if (cocinaMultipedidosInput) cocinaMultipedidosInput.checked = cocinaMultipedidos;
+};
+
+const cargarConfiguracionInventario = async () => {
+  if (!inventarioModoInput && !insumosBloqueoInput && !cocinaMultipedidosInput) return;
+  try {
+    setMessage(inventarioConfigMensaje, '', 'info');
+    const respuesta = await fetchConAutorizacion('/api/configuracion/inventario');
+    if (!respuesta.ok) {
+      throw new Error('No se pudo obtener la configuracion de inventario.');
+    }
+    const data = await respuesta.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudo obtener la configuracion de inventario.');
+    }
+    aplicarConfiguracionInventario(data);
+    setMessage(inventarioConfigMensaje, '', 'info');
+  } catch (error) {
+    console.error('Error al cargar configuracion de inventario:', error);
+    setMessage(
+      inventarioConfigMensaje,
+      error.message || 'No se pudo cargar la configuracion de inventario.',
+      'error'
+    );
+  }
+};
+
+const guardarConfiguracionInventario = async () => {
+  const modoInventario = (inventarioModoInput?.value || 'PREPARACION').toString().trim().toUpperCase() === 'REVENTA'
+    ? 'REVENTA'
+    : 'PREPARACION';
+  const bloquearInsumos = insumosBloqueoInput?.checked ? 1 : 0;
+  const cocinaMultipedidos = cocinaMultipedidosInput?.checked ? 1 : 0;
+
+  try {
+    setMessage(inventarioConfigMensaje, '', 'info');
+    if (inventarioGuardarBtn) {
+      inventarioGuardarBtn.disabled = true;
+      inventarioGuardarBtn.classList.add('is-loading');
+    }
+    const respuesta = await fetchJsonAutorizado('/api/configuracion/inventario', {
+      method: 'PUT',
+      body: JSON.stringify({
+        modo_inventario_costos: modoInventario,
+        bloquear_insumos_sin_stock: bloquearInsumos,
+        cocina_multipedidos: cocinaMultipedidos,
+      }),
+    });
+    const data = await respuesta.json().catch(() => ({ ok: false }));
+    if (!respuesta.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo guardar la configuracion de inventario.');
+    }
+
+    aplicarConfiguracionInventario(data);
+    setMessage(inventarioConfigMensaje, 'Configuracion guardada correctamente.', 'info');
+  } catch (error) {
+    console.error('Error al guardar configuracion de inventario:', error);
+    setMessage(
+      inventarioConfigMensaje,
+      error.message || 'No se pudo guardar la configuracion de inventario.',
+      'error'
+    );
+  } finally {
+    if (inventarioGuardarBtn) {
+      inventarioGuardarBtn.disabled = false;
+      inventarioGuardarBtn.classList.remove('is-loading');
+    }
+  }
+};
+
 const aplicarConfigSecuencias = (config = {}) => {
   const permitirB01 = normalizarFlagUI(config.permitir_b01 ?? config.permitirB01, true);
   const permitirB02 = normalizarFlagUI(config.permitir_b02 ?? config.permitirB02, true);
@@ -5149,6 +5241,12 @@ const renderAnalisis = (data) => {
   const costosConfigurados = data.costos_configurados !== false;
 
   if (analisisKpiVentas) analisisKpiVentas.textContent = formatCurrency(ingresos.total || 0);
+  if (analisisKpiItbisRecaudado) {
+    analisisKpiItbisRecaudado.textContent = formatCurrency(data.itbis_recaudado || 0);
+  }
+  if (analisisKpiVentasSinItbis) {
+    analisisKpiVentasSinItbis.textContent = formatCurrency(data.ventas_sin_itbis || 0);
+  }
   if (analisisKpiGastos) analisisKpiGastos.textContent = formatCurrency(gastosData.total || 0);
   if (analisisKpiGanancia) analisisKpiGanancia.textContent = formatCurrency(ganancias.neta || 0);
   if (analisisKpiUtilidadReal) {
@@ -7132,6 +7230,15 @@ itbisAcreditaGuardarBtn?.addEventListener('click', (event) => {
   guardarConfiguracionItbisAcredita();
 });
 
+inventarioConfigForm?.addEventListener('submit', (event) => {
+  event.preventDefault();
+});
+
+inventarioGuardarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  guardarConfiguracionInventario();
+});
+
 document.getElementById('factura-form')?.addEventListener('submit', (event) => {
   event.preventDefault();
 });
@@ -7817,6 +7924,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     cargarProductos(),
     cargarImpuesto(),
     cargarConfiguracionItbisAcredita(),
+    cargarConfiguracionInventario(),
     cargarConfiguracionFactura(),
     cargarConfigSecuencias(),
     cargarCompras(),

@@ -340,6 +340,15 @@
               </label>
               <p class="kanm-input-help">Aplica solo cuando el modo es preparacion.</p>
             </div>
+            <div class="kanm-input-group">
+              <label class="kanm-input-toggle" for="cocina-multipedidos">
+                <span>Habilitar cocina multipedidos</span>
+                <input type="checkbox" id="cocina-multipedidos" />
+              </label>
+              <p class="kanm-input-help">
+                Permite que un mismo usuario de cocina trabaje varios pedidos en paralelo.
+              </p>
+            </div>
             <div class="admin-form-actions">
               <button type="button" class="kanm-button" id="inventario-guardar">
                 Guardar configuracion
@@ -1943,6 +1952,10 @@
             <span class="resumen-delta" id="analisis-kpi-ventas-delta"></span>
           </div>
           <div class="resumen-metric">
+            <span class="resumen-label">Venta total sin ITBIS</span>
+            <span class="resumen-value" id="analisis-kpi-ventas-sin-itbis">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
             <span class="resumen-label">Gastos</span>
             <span class="resumen-value" id="analisis-kpi-gastos">DOP&nbsp;0.00</span>
             <span class="resumen-delta" id="analisis-kpi-gastos-delta"></span>
@@ -1951,6 +1964,10 @@
             <span class="resumen-label">Ganancia neta</span>
             <span class="resumen-value" id="analisis-kpi-ganancia">DOP&nbsp;0.00</span>
             <span class="resumen-delta" id="analisis-kpi-ganancia-delta"></span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">ITBIS recaudado</span>
+            <span class="resumen-value" id="analisis-kpi-itbis-recaudado">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
             <span class="resumen-label">Utilidad real</span>

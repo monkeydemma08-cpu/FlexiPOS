@@ -36,6 +36,47 @@ const setLoadingState = (isLoading) => {
   }
 };
 
+const parseJsonSafe = (raw) => {
+  if (!raw || typeof raw !== 'string') return null;
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    return null;
+  }
+};
+
+const resolveLoginErrorMessage = (status, payload, rawBody) => {
+  const payloadError =
+    (payload && typeof payload.error === 'string' && payload.error.trim()) ||
+    (payload && typeof payload.message === 'string' && payload.message.trim()) ||
+    '';
+  if (payloadError) return payloadError;
+
+  if (status === 429) {
+    return 'Demasiados intentos de inicio de sesion. Espera unos segundos e intenta nuevamente.';
+  }
+  if (status === 401 || status === 403) {
+    return 'No tienes permiso para iniciar sesion con este usuario.';
+  }
+  if (status >= 500) {
+    return 'El servidor reporto un error al iniciar sesion.';
+  }
+
+  const raw = (rawBody || '').toString().trim();
+  if (raw && raw.length <= 180) {
+    return raw;
+  }
+  return 'No fue posible iniciar sesion.';
+};
+
+const isLoginPayloadOk = (response, payload) => {
+  if (!response.ok) return false;
+  if (!payload || typeof payload !== 'object') return false;
+  if (payload.ok === true || payload.success === true) return true;
+  const tieneSesion = Boolean(payload.token) && Boolean(payload.rol || payload.id || payload.usuario);
+  return tieneSesion;
+};
+
 const handleSuccess = (payload) => {
   const sessionApi = window.KANMSession;
   const sesion = {
@@ -101,30 +142,25 @@ form?.addEventListener('submit', async (event) => {
       body: JSON.stringify({ usuario, password }),
     });
 
-    let data;
+    const rawBody = await response.text();
+    const data = parseJsonSafe(rawBody);
+    const payload = data && typeof data === 'object' ? data : {};
 
-    try {
-      data = await response.json();
-    } catch (parseError) {
-      showError('Respuesta inesperada del servidor.');
-      return;
-    }
-
-    if (!response.ok || !data.ok) {
-      showError(data?.error || 'No fue posible iniciar sesion.');
+    if (!isLoginPayloadOk(response, payload)) {
+      showError(resolveLoginErrorMessage(response.status, payload, rawBody));
       return;
     }
 
     handleSuccess({
       usuario,
-      rol: data.rol,
-      id: data.id,
-      nombre: data.nombre,
-      token: data.token,
-      negocioId: data.negocio_id ?? data.negocioId,
-      empresaId: data.empresa_id ?? data.empresaId,
-      esSuperAdmin: data.es_super_admin ?? data.esSuperAdmin,
-      forcePasswordChange: data.force_password_change ?? data.forcePasswordChange,
+      rol: payload.rol,
+      id: payload.id,
+      nombre: payload.nombre,
+      token: payload.token,
+      negocioId: payload.negocio_id ?? payload.negocioId,
+      empresaId: payload.empresa_id ?? payload.empresaId,
+      esSuperAdmin: payload.es_super_admin ?? payload.esSuperAdmin,
+      forcePasswordChange: payload.force_password_change ?? payload.forcePasswordChange,
     });
   } catch (error) {
     console.error('Error en el proceso de login:', error);

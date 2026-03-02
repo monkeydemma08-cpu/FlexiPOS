@@ -3039,6 +3039,7 @@ const COGS_CONFIG_KEY = 'cogs_costo_estimado';
 const ITBIS_ACREDITA_CONFIG_KEY = 'itbis_acredita';
 const INVENTARIO_MODO_CONFIG_KEY = 'modo_inventario_costos';
 const INSUMOS_BLOQUEO_CONFIG_KEY = 'insumos_bloquear_sin_stock';
+const COCINA_MULTIPEDIDOS_CONFIG_KEY = 'cocina_multipedidos';
 
 const obtenerCostoEstimadoCogs = async (negocioId) => {
   try {
@@ -3081,6 +3082,17 @@ const obtenerConfigBloqueoInsumos = async (negocioId) => {
     return normalizarFlag(raw, 0) === 1;
   } catch (error) {
     console.warn('No se pudo obtener configuracion de bloqueo de insumos:', error?.message || error);
+    return false;
+  }
+};
+
+const obtenerConfigCocinaMultipedidos = async (negocioId) => {
+  try {
+    const valores = await leerConfiguracionNegocio(negocioId, [COCINA_MULTIPEDIDOS_CONFIG_KEY]);
+    const raw = valores?.[COCINA_MULTIPEDIDOS_CONFIG_KEY];
+    return normalizarFlag(raw, 0) === 1;
+  } catch (error) {
+    console.warn('No se pudo obtener configuracion de cocina multipedidos:', error?.message || error);
     return false;
   }
 };
@@ -6948,10 +6960,12 @@ app.get('/api/configuracion/inventario', (req, res) => {
     try {
       const modoInventario = await obtenerModoInventarioCostos(negocioId);
       const bloquearInsumos = await obtenerConfigBloqueoInsumos(negocioId);
+      const cocinaMultipedidos = await obtenerConfigCocinaMultipedidos(negocioId);
       res.json({
         ok: true,
         modo_inventario_costos: modoInventario,
         bloquear_insumos_sin_stock: bloquearInsumos ? 1 : 0,
+        cocina_multipedidos: cocinaMultipedidos ? 1 : 0,
       });
     } catch (error) {
       console.error('Error al obtener configuracion de inventario:', error?.message || error);
@@ -6966,17 +6980,22 @@ app.put('/api/configuracion/inventario', (req, res) => {
     const rawModo = req.body?.modo_inventario_costos ?? req.body?.modoInventarioCostos;
     const rawBloqueo =
       req.body?.bloquear_insumos_sin_stock ?? req.body?.bloquearInsumosSinStock;
+    const rawCocinaMultipedidos =
+      req.body?.cocina_multipedidos ?? req.body?.cocinaMultipedidos;
     const modoInventario = normalizarModoInventarioCostos(rawModo, 'PREPARACION');
     const bloquearInsumos = normalizarFlag(rawBloqueo, 0);
+    const cocinaMultipedidos = normalizarFlag(rawCocinaMultipedidos, 0);
     try {
       await guardarConfiguracionNegocio(negocioId, {
         [INVENTARIO_MODO_CONFIG_KEY]: modoInventario,
         [INSUMOS_BLOQUEO_CONFIG_KEY]: bloquearInsumos,
+        [COCINA_MULTIPEDIDOS_CONFIG_KEY]: cocinaMultipedidos,
       });
       res.json({
         ok: true,
         modo_inventario_costos: modoInventario,
         bloquear_insumos_sin_stock: bloquearInsumos,
+        cocina_multipedidos: cocinaMultipedidos,
       });
     } catch (error) {
       console.error('Error al guardar configuracion de inventario:', error?.message || error);
@@ -21048,9 +21067,62 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         `,
         paramsBase
       );
+      const metricasPedidosResumen = await db.get(
+        `
+          SELECT SUM(impuesto) AS itbis_recaudado,
+                 SUM(subtotal - descuento_monto + propina_monto) AS total_sin_itbis
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+      const metricasDeudasResumen = await db.get(
+        `
+          SELECT SUM(
+                   CASE
+                     WHEN COALESCE(det.subtotal_lineas, 0) > 0
+                      AND d.monto_total >= COALESCE(det.subtotal_lineas, 0)
+                     THEN d.monto_total - COALESCE(det.subtotal_lineas, 0)
+                     ELSE 0
+                   END
+                 ) AS itbis_recaudado,
+                 SUM(
+                   CASE
+                     WHEN COALESCE(det.subtotal_lineas, 0) > 0
+                      AND d.monto_total >= COALESCE(det.subtotal_lineas, 0)
+                     THEN COALESCE(det.subtotal_lineas, 0)
+                     ELSE d.monto_total
+                   END
+                 ) AS total_sin_itbis
+          FROM clientes_deudas d
+          LEFT JOIN (
+            SELECT deuda_id, SUM(total_linea) AS subtotal_lineas
+            FROM clientes_deudas_detalle
+            WHERE negocio_id = ?
+            GROUP BY deuda_id
+          ) det ON det.deuda_id = d.id
+          WHERE d.negocio_id = ?
+            AND DATE(d.fecha) BETWEEN ? AND ?
+        `,
+        [negocioId, negocioId, rango.desde, rango.hasta]
+      );
 
       const ingresosTotal =
         (Number(ventasPedidosResumen?.total) || 0) + (Number(ventasDeudasResumen?.total) || 0);
+      const itbisRecaudado = Number(
+        (
+          (Number(metricasPedidosResumen?.itbis_recaudado) || 0) +
+          (Number(metricasDeudasResumen?.itbis_recaudado) || 0)
+        ).toFixed(2)
+      );
+      const ventasSinItbis = Number(
+        (
+          (Number(metricasPedidosResumen?.total_sin_itbis) || 0) +
+          (Number(metricasDeudasResumen?.total_sin_itbis) || 0)
+        ).toFixed(2)
+      );
       const ventasCount =
         (Number(ventasPedidosResumen?.total_ventas) || 0) +
         (Number(ventasDeudasResumen?.total_ventas) || 0);
@@ -21692,6 +21764,8 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           tarjeta: Number(metodosPago?.tarjeta) || 0,
           transferencia: Number(metodosPago?.transferencia) || 0,
         },
+        itbis_recaudado: itbisRecaudado,
+        ventas_sin_itbis: ventasSinItbis,
         alertas,
       };
 
