@@ -6999,3 +6999,155 @@ body[data-role='mesera'] .kanm-main {
   background: color-mix(in srgb, var(--kanm-success) 18%, #ffffff);
   color: var(--kanm-success);
 }
+
+/* Ajustes de rescate para telefono (sin afectar PC/tablet). */
+@media (max-width: 640px) {
+  .caja-main,
+  .mostrador-main {
+    width: 100%;
+    max-width: 1280px;
+    margin: 16px auto 28px;
+    padding: 0 12px;
+  }
+
+  .kanm-card {
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .kanm-table th,
+  .kanm-table td {
+    padding: 10px 8px;
+    font-size: 0.86rem;
+  }
+
+  .mesera-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .mesera-tab-btn {
+    min-width: 0;
+    width: 100%;
+    height: auto;
+    padding: 10px 8px;
+  }
+
+  .caja-tabs,
+  .cocina-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .caja-tabs .kanm-tab,
+  .cocina-tabs .kanm-tab {
+    min-width: 0;
+    width: 100%;
+    padding: 10px 12px;
+  }
+
+  .producto-card,
+  .carrito-item {
+    grid-template-columns: 1fr;
+  }
+
+  .producto-card .producto-acciones,
+  .carrito-item .carrito-controles {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .producto-precio-select {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .pedido-activo-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pedido-activo-acciones {
+    width: 100%;
+  }
+
+  .pedido-activo-acciones .kanm-button {
+    flex: 1 1 100%;
+  }
+
+  .admin-report-actions,
+  .admin-form-actions,
+  .caja-acciones,
+  .acciones-pedido,
+  .acciones-pedido--delivery {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .admin-report-actions .kanm-button,
+  .admin-form-actions .kanm-button,
+  .caja-acciones .kanm-button,
+  .acciones-pedido .kanm-button,
+  .acciones-pedido--delivery .kanm-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .salida-row {
+    grid-template-columns: 1fr;
+  }
+
+  .salida-monto {
+    text-align: left;
+  }
+
+  .cocina-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cocina-focus-card {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    overflow: auto;
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .cocina-focus-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .cocina-focus-header .kanm-button {
+    width: 100%;
+  }
+
+  .cocina-focus-actions {
+    justify-content: stretch;
+  }
+
+  .cocina-focus-actions .kanm-button {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .kanm-scroll-actions {
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .kanm-toast-container {
+    left: 8px;
+    right: 8px;
+  }
+
+  .kanm-toast {
+    min-width: 0;
+    width: 100%;
+  }
+}
