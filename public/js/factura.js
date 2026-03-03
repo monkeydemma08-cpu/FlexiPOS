@@ -25,7 +25,7 @@
   const pedidoSpan = document.getElementById('factura-pedido');
   const clienteSpan = document.getElementById('factura-cliente');
   const documentoSpan = document.getElementById('factura-documento');
-  const tipoSpan = document.getElementById('factura-tipo');
+  const metodoPagoSpan = document.getElementById('factura-metodo-pago');
   const subtotalSpan = document.getElementById('factura-subtotal');
   const impuestoSpan = document.getElementById('factura-impuesto');
   const descuentoSpan = document.getElementById('factura-descuento');
@@ -118,18 +118,19 @@
     return limpio || fallback;
   };
 
-  const normalizarTipoComprobante = (valor) => {
-    if (valor === undefined || valor === null) return '';
-    const texto = String(valor).trim();
-    if (!texto) return '';
-    const lower = texto.toLowerCase();
-    if (['sin comprobante', 'sin_comprobante', 'sin'].includes(lower)) {
-      return 'Sin comprobante';
-    }
-    if (['b01', 'b02', 'b14'].includes(lower)) {
-      return lower.toUpperCase();
-    }
-    return texto;
+  const normalizarMetodoPagoFactura = (pedido) => {
+    const efectivo = Number(pedido?.pago_efectivo) || 0;
+    const tarjeta = Number(pedido?.pago_tarjeta) || 0;
+    const transferencia = Number(pedido?.pago_transferencia) || 0;
+    const metodos = [];
+
+    if (efectivo > 0.009) metodos.push('Efectivo');
+    if (tarjeta > 0.009) metodos.push('Tarjeta');
+    if (transferencia > 0.009) metodos.push('Transferencia');
+
+    if (!metodos.length) return 'Sin registrar';
+    if (metodos.length === 1) return metodos[0];
+    return `Mixto (${metodos.join(' + ')})`;
   };
 
   const obtenerNombreNegocio = () =>
@@ -259,15 +260,8 @@
     }
     if (clienteSpan) clienteSpan.textContent = pedido.cliente || 'Consumidor final';
     if (documentoSpan) documentoSpan.textContent = pedido.cliente_documento || '00000000000';
-    if (tipoSpan) {
-      const tipoTexto = normalizarTipoComprobante(pedido.tipo_comprobante || 'B02');
-      const filaTipo = tipoSpan.closest('p');
-      if (tipoTexto.toLowerCase() === 'sin comprobante') {
-        if (filaTipo) filaTipo.style.display = 'none';
-      } else {
-        if (filaTipo) filaTipo.style.display = '';
-        tipoSpan.textContent = tipoTexto || 'B02';
-      }
+    if (metodoPagoSpan) {
+      metodoPagoSpan.textContent = normalizarMetodoPagoFactura(pedido);
     }
 
     const itemsAgregados = agruparItemsFactura(items || []);

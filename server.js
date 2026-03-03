@@ -4721,6 +4721,7 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
     `
       SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
              impuesto, total, descuento_monto, propina_monto, tipo_comprobante, ncf,
+             pago_efectivo, pago_tarjeta, pago_transferencia,
              cliente_documento, fecha_creacion, fecha_cierre, fecha_factura
       FROM pedidos
       WHERE (cuenta_id = ? OR id = ?)
@@ -4741,6 +4742,12 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
   const impuestoTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.impuesto) || 0), 0);
   const descuentoTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.descuento_monto) || 0), 0);
   const propinaTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.propina_monto) || 0), 0);
+  const pagoEfectivoTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.pago_efectivo) || 0), 0);
+  const pagoTarjetaTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.pago_tarjeta) || 0), 0);
+  const pagoTransferenciaTotal = pedidosRelacionados.reduce(
+    (acc, p) => acc + (Number(p.pago_transferencia) || 0),
+    0
+  );
   const totalFinal = Number(
     Math.max(subtotalTotal + impuestoTotal - descuentoTotal + propinaTotal, 0).toFixed(2)
   );
@@ -4758,6 +4765,9 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
       impuesto: impuestoTotal,
       descuento_monto: descuentoTotal,
       propina_monto: propinaTotal,
+      pago_efectivo: Number(pagoEfectivoTotal.toFixed(2)),
+      pago_tarjeta: Number(pagoTarjetaTotal.toFixed(2)),
+      pago_transferencia: Number(pagoTransferenciaTotal.toFixed(2)),
       total: totalFinal,
       total_final: totalFinal,
     },
