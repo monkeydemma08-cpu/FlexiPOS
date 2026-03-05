@@ -5949,22 +5949,43 @@ const parseFechaISO = (valor) => {
   if (!esFechaISOValida(valor)) {
     return null;
   }
-  return new Date(`${valor}T00:00:00`);
+  const [anio, mes, dia] = String(valor).split('-').map(Number);
+  const fecha = new Date(Date.UTC(anio, mes - 1, dia));
+  return Number.isNaN(fecha.getTime()) ? null : fecha;
+};
+
+const formatearFechaISODesdeUTC = (fecha) => {
+  if (!(fecha instanceof Date) || Number.isNaN(fecha.getTime())) {
+    return '';
+  }
+  const anio = fecha.getUTCFullYear();
+  const mes = String(fecha.getUTCMonth() + 1).padStart(2, '0');
+  const dia = String(fecha.getUTCDate()).padStart(2, '0');
+  return `${anio}-${mes}-${dia}`;
+};
+
+const sumarDiasFechaISO = (fechaIso, dias = 0) => {
+  const fecha = parseFechaISO(fechaIso);
+  if (!fecha) return '';
+  fecha.setUTCDate(fecha.getUTCDate() + Number(dias || 0));
+  return formatearFechaISODesdeUTC(fecha);
 };
 
 const calcularDiasIncluidos = (desde, hasta) => {
-  const ms = hasta.getTime() - desde.getTime();
+  const fechaDesde = desde instanceof Date ? desde : parseFechaISO(desde);
+  const fechaHasta = hasta instanceof Date ? hasta : parseFechaISO(hasta);
+  if (!fechaDesde || !fechaHasta) return 1;
+  const ms = fechaHasta.getTime() - fechaDesde.getTime();
   return Math.max(1, Math.round(ms / 86400000) + 1);
 };
 
 const normalizarRangoAnalisis = (desdeInput, hastaInput, diasDefecto = 30) => {
-  let fechaHasta = parseFechaISO(hastaInput) || new Date();
-  let fechaDesde = parseFechaISO(desdeInput);
+  let fechaHasta = esFechaISOValida(hastaInput) ? hastaInput : obtenerFechaLocalISO(new Date());
+  let fechaDesde = esFechaISOValida(desdeInput) ? desdeInput : null;
+  const diasRestar = Math.max(Number(diasDefecto) - 1, 0);
 
   if (!fechaDesde) {
-    const inicio = new Date(fechaHasta.getTime());
-    inicio.setDate(inicio.getDate() - Math.max(diasDefecto - 1, 0));
-    fechaDesde = inicio;
+    fechaDesde = sumarDiasFechaISO(fechaHasta, -diasRestar) || fechaHasta;
   }
 
   if (fechaDesde > fechaHasta) {
@@ -5973,21 +5994,19 @@ const normalizarRangoAnalisis = (desdeInput, hastaInput, diasDefecto = 30) => {
 
   const dias = calcularDiasIncluidos(fechaDesde, fechaHasta);
   return {
-    desde: obtenerFechaLocalISO(fechaDesde),
-    hasta: obtenerFechaLocalISO(fechaHasta),
+    desde: fechaDesde,
+    hasta: fechaHasta,
     dias,
   };
 };
 
 const obtenerRangoAnterior = (desde, dias) => {
-  const fechaDesde = parseFechaISO(desde) || new Date();
-  const finAnterior = new Date(fechaDesde.getTime());
-  finAnterior.setDate(finAnterior.getDate() - 1);
-  const inicioAnterior = new Date(finAnterior.getTime());
-  inicioAnterior.setDate(inicioAnterior.getDate() - Math.max(dias - 1, 0));
+  const diasRango = Math.max(Number(dias) || 1, 1);
+  const finAnterior = sumarDiasFechaISO(desde, -1) || obtenerFechaLocalISO(new Date());
+  const inicioAnterior = sumarDiasFechaISO(finAnterior, -(diasRango - 1)) || finAnterior;
   return {
-    desde: obtenerFechaLocalISO(inicioAnterior),
-    hasta: obtenerFechaLocalISO(finAnterior),
+    desde: inicioAnterior,
+    hasta: finAnterior,
   };
 };
 
@@ -20963,6 +20982,101 @@ app.delete('/api/admin/gastos/:id', (req, res) => {
   });
 });
 
+app.get('/api/inventario/compras/:id/reporte', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const compraId = Number(req.params.id);
+    if (!Number.isInteger(compraId) || compraId <= 0) {
+      return res.status(400).json({ error: 'ID invalido.' });
+    }
+
+    try {
+      const compra = await db.get(
+        `
+          SELECT ci.id,
+                 ci.fecha,
+                 ci.proveedor,
+                 ci.origen_fondos,
+                 ci.metodo_pago,
+                 CASE WHEN ci.subtotal IS NULL OR ci.subtotal = 0 THEN ci.total ELSE ci.subtotal END AS subtotal,
+                 COALESCE(ci.itbis, 0) AS itbis,
+                 COALESCE(ci.aplica_itbis, 0) AS aplica_itbis,
+                 COALESCE(ci.itbis_capitalizable, 0) AS itbis_capitalizable,
+                 ci.total,
+                 ci.observaciones,
+                 ci.creado_en,
+                 ci.gasto_id,
+                 u.nombre AS creado_por
+            FROM compras_inventario ci
+            LEFT JOIN usuarios u ON u.id = ci.creado_por
+           WHERE ci.id = ? AND ci.negocio_id = ?
+        `,
+        [compraId, negocioId]
+      );
+
+      if (!compra) {
+        return res.status(404).json({ error: 'Compra no encontrada.' });
+      }
+
+      const detalles = await db.all(
+        `
+          SELECT cid.id, cid.producto_id, p.nombre AS producto_nombre, cid.cantidad,
+                 cid.costo_unitario, cid.costo_unitario_sin_itbis, cid.costo_unitario_efectivo,
+                 cid.itbis_aplica, cid.itbis_capitalizable, cid.total_linea
+            FROM compras_inventario_detalle cid
+            LEFT JOIN productos p ON p.id = cid.producto_id
+           WHERE cid.compra_id = ? AND cid.negocio_id = ?
+           ORDER BY cid.id ASC
+        `,
+        [compraId, negocioId]
+      );
+
+      let cuenta = null;
+      let pagos = [];
+      const gastoId = Number(compra.gasto_id);
+      if (Number.isInteger(gastoId) && gastoId > 0) {
+        cuenta = await db.get(
+          `
+            SELECT g.id, g.fecha, g.referencia, g.proveedor, g.descripcion, g.metodo_pago, g.origen_fondos,
+                   g.monto, COALESCE(g.monto_pagado, 0) AS monto_pagado,
+                   GREATEST(COALESCE(g.monto, 0) - COALESCE(g.monto_pagado, 0), 0) AS saldo,
+                   COALESCE(g.estado, 'PAGADO') AS estado, g.fecha_pago, g.updated_at
+              FROM gastos g
+             WHERE g.id = ? AND g.negocio_id = ?
+          `,
+          [gastoId, negocioId]
+        );
+
+        pagos = await db.all(
+          `
+            SELECT id, fecha, monto, metodo_pago, origen_fondos, origen_detalle, referencia, notas, created_at
+              FROM gastos_pagos
+             WHERE gasto_id = ? AND (negocio_id = ? OR negocio_id IS NULL)
+             ORDER BY fecha ASC, id ASC
+          `,
+          [gastoId, negocioId]
+        );
+      }
+
+      res.json({
+        ok: true,
+        generado_en: new Date().toISOString(),
+        compra,
+        detalles: detalles || [],
+        cuenta_por_pagar: cuenta || null,
+        pagos: pagos || [],
+      });
+    } catch (error) {
+      console.error('Error al generar reporte de compra de inventario:', error?.message || error);
+      res.status(500).json({ error: 'No se pudo generar el reporte de compra.' });
+    }
+  });
+});
+
 app.get('/api/admin/cuentas-por-pagar', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     if (!tienePermisoAdmin(usuarioSesion)) {
@@ -21056,6 +21170,163 @@ app.get('/api/admin/cuentas-por-pagar', (req, res) => {
     } catch (error) {
       console.error('Error al obtener cuentas por pagar:', error?.message || error);
       res.status(500).json({ error: 'No se pudieron obtener las cuentas por pagar.' });
+    }
+  });
+});
+
+app.get('/api/admin/cuentas-por-pagar/reporte', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const desde = esFechaISOValida(req.query?.from) ? req.query.from : null;
+    const hasta = esFechaISOValida(req.query?.to) ? req.query.to : null;
+    const estadoRawTexto = normalizarCampoTexto(req.query?.estado, null);
+    const estadoRaw =
+      estadoRawTexto && ESTADOS_GASTO.includes(estadoRawTexto.toUpperCase())
+        ? estadoRawTexto.toUpperCase()
+        : null;
+    const q = normalizarCampoTexto(req.query?.q, null);
+
+    const filtros = [
+      'g.negocio_id = ?',
+      "COALESCE(g.tipo_gasto, 'OPERATIVO') = 'INVENTARIO'",
+      "COALESCE(g.estado, 'PAGADO') <> 'ANULADO'",
+      "(LOWER(COALESCE(g.metodo_pago, '')) LIKE '%credito%' OR COALESCE(g.monto_pagado, 0) < COALESCE(g.monto, 0) OR COALESCE(g.estado, 'PAGADO') IN ('BORRADOR','PENDIENTE','APROBADO'))",
+    ];
+    const params = [negocioId];
+
+    if (desde) {
+      filtros.push('DATE(g.fecha) >= ?');
+      params.push(desde);
+    }
+    if (hasta) {
+      filtros.push('DATE(g.fecha) <= ?');
+      params.push(hasta);
+    }
+    if (estadoRaw) {
+      filtros.push("COALESCE(g.estado, 'PAGADO') = ?");
+      params.push(estadoRaw);
+    }
+    if (q) {
+      const termino = `%${q.toLowerCase()}%`;
+      filtros.push(
+        '(LOWER(COALESCE(g.proveedor, \'\')) LIKE ? OR LOWER(COALESCE(g.descripcion, \'\')) LIKE ? OR LOWER(COALESCE(g.referencia, \'\')) LIKE ?)'
+      );
+      params.push(termino, termino, termino);
+    }
+
+    const whereClause = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
+
+    try {
+      const [negocio, cuentasBase] = await Promise.all([
+        db.get('SELECT id, nombre FROM negocios WHERE id = ? LIMIT 1', [negocioId]),
+        db.all(
+          `
+            SELECT g.id, g.fecha, g.referencia, g.proveedor, g.descripcion, g.metodo_pago,
+                   COALESCE(g.origen_fondos, g.origen, 'manual') AS origen_fondos,
+                   g.monto, COALESCE(g.monto_pagado, 0) AS monto_pagado,
+                   GREATEST(COALESCE(g.monto, 0) - COALESCE(g.monto_pagado, 0), 0) AS saldo,
+                   COALESCE(g.estado, 'PAGADO') AS estado, g.fecha_pago, g.updated_at
+            FROM gastos g
+            ${whereClause}
+            ORDER BY (GREATEST(COALESCE(g.monto, 0) - COALESCE(g.monto_pagado, 0), 0) > 0) DESC, DATE(g.fecha) ASC, g.id ASC
+          `,
+          params
+        ),
+      ]);
+
+      const cuentas = Array.isArray(cuentasBase) ? cuentasBase : [];
+      const cuentaIds = cuentas
+        .map((cuenta) => Number(cuenta?.id))
+        .filter((id) => Number.isInteger(id) && id > 0);
+
+      let pagos = [];
+      if (cuentaIds.length) {
+        const placeholders = cuentaIds.map(() => '?').join(', ');
+        pagos = await db.all(
+          `
+            SELECT gp.id, gp.gasto_id, gp.fecha, gp.monto, gp.metodo_pago, gp.origen_fondos,
+                   gp.origen_detalle, gp.referencia, gp.notas, gp.created_at
+            FROM gastos_pagos gp
+            WHERE (gp.negocio_id = ? OR gp.negocio_id IS NULL)
+              AND gp.gasto_id IN (${placeholders})
+            ORDER BY DATE(gp.fecha) ASC, gp.id ASC
+          `,
+          [negocioId, ...cuentaIds]
+        );
+      }
+
+      const pagosPorCuenta = new Map();
+      (pagos || []).forEach((pago) => {
+        const gastoId = Number(pago?.gasto_id);
+        if (!Number.isInteger(gastoId) || gastoId <= 0) return;
+        if (!pagosPorCuenta.has(gastoId)) {
+          pagosPorCuenta.set(gastoId, []);
+        }
+        pagosPorCuenta.get(gastoId).push(pago);
+      });
+
+      const resumen = {
+        total_cuentas: 0,
+        cuentas_pendientes: 0,
+        cuentas_pagadas: 0,
+        total_monto: 0,
+        total_pagado: 0,
+        total_saldo: 0,
+        abonos_registrados: 0,
+      };
+
+      const cuentasDetalle = cuentas.map((cuenta) => {
+        const saldo = Number(cuenta?.saldo) || 0;
+        const pagosCuenta = pagosPorCuenta.get(Number(cuenta?.id)) || [];
+
+        resumen.total_cuentas += 1;
+        if (saldo > 0.001) {
+          resumen.cuentas_pendientes += 1;
+        } else {
+          resumen.cuentas_pagadas += 1;
+        }
+        resumen.total_monto += Number(cuenta?.monto) || 0;
+        resumen.total_pagado += Number(cuenta?.monto_pagado) || 0;
+        resumen.total_saldo += saldo;
+        resumen.abonos_registrados += pagosCuenta.length;
+
+        return {
+          ...cuenta,
+          pagos: pagosCuenta,
+        };
+      });
+
+      res.json({
+        ok: true,
+        generado_en: new Date().toISOString(),
+        negocio: {
+          id: Number(negocio?.id) || negocioId,
+          nombre: negocio?.nombre || 'Negocio',
+        },
+        filtros: {
+          from: desde,
+          to: hasta,
+          estado: estadoRaw,
+          q: q || null,
+        },
+        resumen: {
+          total_cuentas: Number(resumen.total_cuentas) || 0,
+          cuentas_pendientes: Number(resumen.cuentas_pendientes) || 0,
+          cuentas_pagadas: Number(resumen.cuentas_pagadas) || 0,
+          total_monto: Number(resumen.total_monto.toFixed(2)),
+          total_pagado: Number(resumen.total_pagado.toFixed(2)),
+          total_saldo: Number(resumen.total_saldo.toFixed(2)),
+          abonos_registrados: Number(resumen.abonos_registrados) || 0,
+        },
+        cuentas: cuentasDetalle,
+      });
+    } catch (error) {
+      console.error('Error al generar reporte de cuentas por pagar:', error?.message || error);
+      res.status(500).json({ error: 'No se pudo generar el reporte de cuentas por pagar.' });
     }
   });
 });

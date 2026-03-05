@@ -3171,6 +3171,98 @@ body[data-role='mesera'] .kanm-main {
   font-weight: 700;
 }
 
+.cxp-print .cxp-print__table th,
+.cxp-print .cxp-print__table td {
+  text-align: left;
+}
+
+.cxp-print .cxp-print__table .text-right {
+  text-align: right;
+}
+
+.cxp-print__empty {
+  color: var(--kanm-gray-600);
+  font-style: italic;
+}
+
+.cxp-print__estado {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.cxp-print__estado.estado-pendiente {
+  background: rgba(234, 179, 8, 0.18);
+  color: #854d0e;
+}
+
+.cxp-print__estado.estado-pagado {
+  background: rgba(34, 197, 94, 0.16);
+  color: #166534;
+}
+
+.cxp-print__estado.estado-aprobado {
+  background: rgba(37, 99, 235, 0.15);
+  color: #1d4ed8;
+}
+
+.cxp-print__estado.estado-borrador {
+  background: rgba(107, 114, 128, 0.16);
+  color: #374151;
+}
+
+.abastecimiento-print__empty {
+  color: var(--kanm-gray-600);
+  font-style: italic;
+}
+
+.abastecimiento-print .abastecimiento-print__table th,
+.abastecimiento-print .abastecimiento-print__table td {
+  text-align: left;
+}
+
+.abastecimiento-print .abastecimiento-print__table .text-right {
+  text-align: right;
+}
+
+.abastecimiento-print__estado {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.abastecimiento-print__estado.estado-pendiente {
+  background: rgba(234, 179, 8, 0.18);
+  color: #854d0e;
+}
+
+.abastecimiento-print__estado.estado-pagado {
+  background: rgba(34, 197, 94, 0.16);
+  color: #166534;
+}
+
+.abastecimiento-print__estado.estado-aprobado {
+  background: rgba(37, 99, 235, 0.15);
+  color: #1d4ed8;
+}
+
+.abastecimiento-print__estado.estado-borrador {
+  background: rgba(107, 114, 128, 0.16);
+  color: #374151;
+}
+
 @media (max-width: 768px) {
   .cotizacion-print__header {
     flex-direction: column;

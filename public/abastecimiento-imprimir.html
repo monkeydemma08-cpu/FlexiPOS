@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Detalle de abastecimiento</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script src="/js/auth.js" defer></script>
+    <script src="/js/abastecimiento-imprimir.js" defer></script>
+  </head>
+  <body class="cotizacion-print abastecimiento-print" data-role="admin">
+    <main class="cotizacion-print__container">
+      <header class="cotizacion-print__header">
+        <div class="cotizacion-print__brand">
+          <div class="header-logo" data-negocio-titulo>Negocio</div>
+        </div>
+        <div class="cotizacion-print__identity">
+          <p class="cotizacion-print__title" id="abastecimiento-print-titulo">Compra de abastecimiento</p>
+          <p class="cotizacion-print__meta" id="abastecimiento-print-generado">Generado: --</p>
+          <p class="cotizacion-print__meta" id="abastecimiento-print-fecha">Fecha compra: --</p>
+          <p class="cotizacion-print__meta" id="abastecimiento-print-proveedor">Proveedor: --</p>
+        </div>
+        <div class="cotizacion-print__actions">
+          <button type="button" class="kanm-button" id="abastecimiento-imprimir-btn">Imprimir</button>
+          <button type="button" class="kanm-button secondary" id="abastecimiento-descargar-pdf-btn">
+            Descargar PDF
+          </button>
+        </div>
+      </header>
+
+      <section class="cotizacion-print__panel cotizacion-print__grid">
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Origen de fondos</span>
+          <span class="cotizacion-print__value" id="abastecimiento-print-origen">--</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Metodo de pago</span>
+          <span class="cotizacion-print__value" id="abastecimiento-print-metodo">--</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Registrado por</span>
+          <span class="cotizacion-print__value" id="abastecimiento-print-creado-por">--</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Observaciones</span>
+          <span class="cotizacion-print__value" id="abastecimiento-print-observaciones">--</span>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel">
+        <div class="cotizacion-print__section-header">
+          <h2>Detalle de productos comprados</h2>
+        </div>
+        <div class="cotizacion-print__table-wrapper">
+          <table class="cotizacion-print__table abastecimiento-print__table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th class="text-right">Cantidad</th>
+                <th class="text-right">Costo unitario</th>
+                <th class="text-right">Total linea</th>
+              </tr>
+            </thead>
+            <tbody id="abastecimiento-print-detalles-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel cotizacion-print__totales">
+        <div class="cotizacion-print__totales-linea">
+          <span>Subtotal</span>
+          <span id="abastecimiento-print-subtotal">RD$0.00</span>
+        </div>
+        <div class="cotizacion-print__totales-linea">
+          <span>ITBIS</span>
+          <span id="abastecimiento-print-itbis">RD$0.00</span>
+        </div>
+        <div class="cotizacion-print__totales-linea cotizacion-print__totales-final">
+          <span>Total compra</span>
+          <span id="abastecimiento-print-total">RD$0.00</span>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel" id="abastecimiento-print-cxp-panel" hidden>
+        <div class="cotizacion-print__section-header">
+          <h2>Cuenta por pagar asociada</h2>
+        </div>
+        <div class="cotizacion-print__grid">
+          <div class="cotizacion-print__field">
+            <span class="cotizacion-print__label">Estado</span>
+            <span class="cotizacion-print__value" id="abastecimiento-print-cxp-estado">--</span>
+          </div>
+          <div class="cotizacion-print__field">
+            <span class="cotizacion-print__label">Total cuenta</span>
+            <span class="cotizacion-print__value" id="abastecimiento-print-cxp-total">RD$0.00</span>
+          </div>
+          <div class="cotizacion-print__field">
+            <span class="cotizacion-print__label">Monto pagado</span>
+            <span class="cotizacion-print__value" id="abastecimiento-print-cxp-pagado">RD$0.00</span>
+          </div>
+          <div class="cotizacion-print__field">
+            <span class="cotizacion-print__label">Saldo pendiente</span>
+            <span class="cotizacion-print__value" id="abastecimiento-print-cxp-saldo">RD$0.00</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel" id="abastecimiento-print-abonos-panel" hidden>
+        <div class="cotizacion-print__section-header">
+          <h2>Abonos registrados</h2>
+        </div>
+        <div class="cotizacion-print__table-wrapper">
+          <table class="cotizacion-print__table abastecimiento-print__table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Metodo</th>
+                <th>Referencia</th>
+                <th>Notas</th>
+                <th class="text-right">Monto</th>
+              </tr>
+            </thead>
+            <tbody id="abastecimiento-print-abonos-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reporte cuentas por pagar</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script src="/js/auth.js" defer></script>
+    <script src="/js/cxp-imprimir.js" defer></script>
+  </head>
+  <body class="cotizacion-print cxp-print" data-role="admin">
+    <main class="cotizacion-print__container">
+      <header class="cotizacion-print__header">
+        <div class="cotizacion-print__brand">
+          <div class="header-logo" data-negocio-titulo>Negocio</div>
+        </div>
+        <div class="cotizacion-print__identity">
+          <p class="cotizacion-print__title">Reporte de cuentas por pagar</p>
+          <p class="cotizacion-print__meta" id="cxp-print-generado">Generado: --</p>
+          <p class="cotizacion-print__meta" id="cxp-print-periodo">Periodo: --</p>
+          <p class="cotizacion-print__meta" id="cxp-print-filtros">Filtros: --</p>
+        </div>
+        <div class="cotizacion-print__actions">
+          <button type="button" class="kanm-button" id="cxp-imprimir-btn">Imprimir</button>
+          <button type="button" class="kanm-button secondary" id="cxp-descargar-pdf-btn">Descargar PDF</button>
+        </div>
+      </header>
+
+      <section class="cotizacion-print__panel cotizacion-print__grid">
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Total cuentas</span>
+          <span class="cotizacion-print__value" id="cxp-print-total-cuentas">0</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Pendientes</span>
+          <span class="cotizacion-print__value" id="cxp-print-pendientes">0</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Pagadas</span>
+          <span class="cotizacion-print__value" id="cxp-print-pagadas">0</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Total comprometido</span>
+          <span class="cotizacion-print__value" id="cxp-print-total-monto">RD$0.00</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Total pagado</span>
+          <span class="cotizacion-print__value" id="cxp-print-total-pagado">RD$0.00</span>
+        </div>
+        <div class="cotizacion-print__field">
+          <span class="cotizacion-print__label">Saldo pendiente</span>
+          <span class="cotizacion-print__value" id="cxp-print-total-saldo">RD$0.00</span>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel">
+        <div class="cotizacion-print__section-header">
+          <h2>Detalle de cuentas</h2>
+        </div>
+        <div class="cotizacion-print__table-wrapper">
+          <table class="cotizacion-print__table cxp-print__table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Fecha</th>
+                <th>Referencia</th>
+                <th>Proveedor</th>
+                <th>Metodo</th>
+                <th class="text-right">Monto</th>
+                <th class="text-right">Pagado</th>
+                <th class="text-right">Saldo</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody id="cxp-print-cuentas-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="cotizacion-print__panel" id="cxp-print-abonos-panel" hidden>
+        <div class="cotizacion-print__section-header">
+          <h2>Abonos registrados</h2>
+        </div>
+        <div class="cotizacion-print__table-wrapper">
+          <table class="cotizacion-print__table cxp-print__table">
+            <thead>
+              <tr>
+                <th>Cuenta</th>
+                <th>Fecha abono</th>
+                <th>Metodo</th>
+                <th>Referencia</th>
+                <th>Notas</th>
+                <th class="text-right">Monto</th>
+              </tr>
+            </thead>
+            <tbody id="cxp-print-abonos-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

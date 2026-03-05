@@ -191,10 +191,12 @@ const cxpPagoSubmitBtn = document.getElementById('cxp-pago-submit');
 const cxpPagoMensaje = document.getElementById('cxp-pago-mensaje');
 const cxpPagosWrapper = document.getElementById('cxp-pagos-wrapper');
 const cxpPagosTabla = document.getElementById('cxp-pagos-tabla');
+const cxpExportarPdfBtn = document.getElementById('cxp-exportar-pdf');
 
 const analisisDesdeInput = document.getElementById('analisis-desde');
 const analisisHastaInput = document.getElementById('analisis-hasta');
 const analisisActualizarBtn = document.getElementById('analisis-actualizar');
+const analisisExportarCsvBtn = document.getElementById('analisis-exportar-csv');
 const analisisMensaje = document.getElementById('analisis-mensaje');
 const analisisRangeButtons = Array.from(document.querySelectorAll('[data-analisis-range]'));
 const analisisKpiVentas = document.getElementById('analisis-kpi-ventas');
@@ -4253,8 +4255,15 @@ const renderComprasInventario = (lista) => {
     botonEditar.textContent = 'Editar';
     botonEditar.dataset.editarAbastecimiento = compra.id;
 
+    const botonPdf = document.createElement('button');
+    botonPdf.type = 'button';
+    botonPdf.className = 'kanm-button ghost';
+    botonPdf.textContent = 'PDF';
+    botonPdf.dataset.imprimirAbastecimiento = compra.id;
+
     accionesWrapper.appendChild(botonDetalle);
     accionesWrapper.appendChild(botonEditar);
+    accionesWrapper.appendChild(botonPdf);
     acciones.appendChild(accionesWrapper);
 
     fila.appendChild(fecha);
@@ -5017,6 +5026,17 @@ const registrarPagoCuentaPorPagar = async (cuentaId, payload) => {
   return data;
 };
 
+const exportarCuentasPorPagarPdf = () => {
+  window.open('/cuentas-por-pagar-imprimir.html', '_blank', 'noopener');
+};
+
+const exportarDetalleAbastecimientoPdf = (compraId) => {
+  const id = Number(compraId);
+  if (!Number.isInteger(id) || id <= 0) return;
+  const url = `/abastecimiento-imprimir.html?id=${encodeURIComponent(id)}`;
+  window.open(url, '_blank', 'noopener');
+};
+
 /* =====================
  * Reportes DGII 607 y 606
  * ===================== */
@@ -5274,20 +5294,69 @@ const establecerRangoAnalisis = (desde, hasta) => {
   if (analisisHastaInput) analisisHastaInput.value = hasta;
 };
 
+const ANALISIS_TIME_ZONE = 'America/Santo_Domingo';
+
+const padDatePart = (value) => String(Number(value) || 0).padStart(2, '0');
+
+const obtenerPartesFechaEnZona = (date = new Date(), timeZone = ANALISIS_TIME_ZONE) => {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = formatter.formatToParts(date);
+  const year = Number(parts.find((part) => part.type === 'year')?.value) || 0;
+  const month = Number(parts.find((part) => part.type === 'month')?.value) || 0;
+  const day = Number(parts.find((part) => part.type === 'day')?.value) || 0;
+  return { year, month, day };
+};
+
+const isoDateFromParts = ({ year, month, day }) => `${year}-${padDatePart(month)}-${padDatePart(day)}`;
+
+const addDaysToISODate = (isoDate, daysToAdd = 0) => {
+  const match = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '';
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const base = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(base.getTime())) return '';
+  base.setUTCDate(base.getUTCDate() + Number(daysToAdd || 0));
+  const y = base.getUTCFullYear();
+  const m = base.getUTCMonth() + 1;
+  const d = base.getUTCDate();
+  return `${y}-${padDatePart(m)}-${padDatePart(d)}`;
+};
+
+const obtenerHoyAnalisisISO = () => {
+  const partes = obtenerPartesFechaEnZona(new Date(), ANALISIS_TIME_ZONE);
+  return isoDateFromParts(partes);
+};
+
 const obtenerRangoMes = (offset = 0) => {
-  const base = new Date();
-  const inicio = new Date(base.getFullYear(), base.getMonth() + offset, 1);
-  const fin = new Date(base.getFullYear(), base.getMonth() + offset + 1, 0);
+  const { year: yearBase, month: monthBase } = obtenerPartesFechaEnZona(new Date(), ANALISIS_TIME_ZONE);
+  let year = yearBase;
+  let month = monthBase + Number(offset || 0);
+  while (month > 12) {
+    month -= 12;
+    year += 1;
+  }
+  while (month < 1) {
+    month += 12;
+    year -= 1;
+  }
+  const ultimoDia = new Date(Date.UTC(year, month, 0)).getUTCDate();
   return {
-    desde: getLocalDateISO(inicio),
-    hasta: getLocalDateISO(fin),
+    desde: `${year}-${padDatePart(month)}-01`,
+    hasta: `${year}-${padDatePart(month)}-${padDatePart(ultimoDia)}`,
   };
 };
 
 const aplicarRangoAnalisis = (tipo) => {
-  const hoy = new Date();
+  const hoyISO = obtenerHoyAnalisisISO();
   if (tipo === 'hoy') {
-    const valor = getLocalDateISO(hoy);
+    const valor = hoyISO;
     establecerRangoAnalisis(valor, valor);
     cargarAnalisis();
     return;
@@ -5295,9 +5364,8 @@ const aplicarRangoAnalisis = (tipo) => {
 
   if (tipo === '7d' || tipo === '30d') {
     const dias = tipo === '7d' ? 7 : 30;
-    const inicio = new Date(hoy.getTime());
-    inicio.setDate(inicio.getDate() - (dias - 1));
-    establecerRangoAnalisis(getLocalDateISO(inicio), getLocalDateISO(hoy));
+    const inicio = addDaysToISODate(hoyISO, -(dias - 1));
+    establecerRangoAnalisis(inicio, hoyISO);
     cargarAnalisis();
     return;
   }
@@ -5773,6 +5841,229 @@ const cargarAnalisis = async () => {
   } catch (error) {
     console.error('Error al cargar analisis:', error);
     setMessage(analisisMensaje, error.message || 'Error al cargar el analisis.', 'error');
+  }
+};
+
+const csvEscape = (value) => {
+  const text = value === null || value === undefined ? '' : String(value);
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+};
+
+const descargarCSV = (filename, content) => {
+  const blob = new Blob([`\uFEFF${content}`], { type: 'text/csv;charset=utf-8;' });
+  const enlace = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  enlace.href = url;
+  enlace.download = filename;
+  document.body.appendChild(enlace);
+  enlace.click();
+  document.body.removeChild(enlace);
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+};
+
+const combinarSerieDiariaAnalisis = (ventasSerie = [], gastosSerie = []) => {
+  const mapa = new Map();
+  (ventasSerie || []).forEach((row) => {
+    const fecha = row?.fecha || '';
+    if (!fecha) return;
+    mapa.set(fecha, {
+      fecha,
+      ventas: Number(row?.total) || 0,
+      gastos: 0,
+    });
+  });
+  (gastosSerie || []).forEach((row) => {
+    const fecha = row?.fecha || '';
+    if (!fecha) return;
+    const actual = mapa.get(fecha) || { fecha, ventas: 0, gastos: 0 };
+    actual.gastos = Number(row?.total) || 0;
+    mapa.set(fecha, actual);
+  });
+  return Array.from(mapa.values()).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+};
+
+const construirCSVAnalisisCompleto = (basico = {}, avanzado = {}, desde = '', hasta = '') => {
+  const rows = [];
+  const addRow = (...cells) => rows.push(cells.map(csvEscape).join(','));
+  const addSpacer = () => rows.push('');
+
+  const ingresos = basico?.ingresos || {};
+  const gastos = basico?.gastos || {};
+  const ganancias = basico?.ganancias || {};
+  const metodos = basico?.metodos_pago || {};
+  const rankings = basico?.rankings || {};
+  const comparacion = basico?.comparacion || {};
+  const serieDiaria = combinarSerieDiariaAnalisis(ingresos.serie_diaria || [], gastos.serie_diaria || []);
+  const alertasBasico = Array.isArray(basico?.alertas) ? basico.alertas : [];
+  const alertasAvanzado = Array.isArray(avanzado?.alertas) ? avanzado.alertas : [];
+  const alertas = [...alertasBasico, ...alertasAvanzado];
+
+  addRow('Reporte', 'Analisis del negocio');
+  addRow('Generado', formatDateTime(new Date().toISOString()));
+  addRow('Desde', desde || '--');
+  addRow('Hasta', hasta || '--');
+  addSpacer();
+
+  addRow('KPIs principales');
+  addRow('Metrica', 'Valor');
+  addRow('Ventas', Number(ingresos.total || 0).toFixed(2));
+  addRow('Ventas sin ITBIS', Number(basico.ventas_sin_itbis || 0).toFixed(2));
+  addRow('ITBIS recaudado', Number(basico.itbis_recaudado || 0).toFixed(2));
+  addRow('Cantidad ventas', Number(ingresos.count || 0).toFixed(0));
+  addRow('Ticket promedio', Number(ingresos.ticket_promedio || 0).toFixed(2));
+  addRow('Gastos', Number(gastos.total || 0).toFixed(2));
+  addRow('Ganancia neta', Number(ganancias.neta || 0).toFixed(2));
+  addRow('Margen neto', Number((Number(ganancias.margen || 0) * 100).toFixed(2)));
+  addRow('COGS total', Number(ganancias.cogs_total || 0).toFixed(2));
+  addRow('Utilidad bruta', Number(ganancias.utilidad_bruta || 0).toFixed(2));
+  addRow('Utilidad real', Number(ganancias.utilidad_real || 0).toFixed(2));
+  addSpacer();
+
+  addRow('Comparacion vs periodo anterior');
+  addRow('Metrica', 'Total anterior', 'Delta', 'Porcentaje');
+  addRow(
+    'Ventas',
+    Number(comparacion?.ventas?.total || 0).toFixed(2),
+    Number(comparacion?.ventas?.delta || 0).toFixed(2),
+    comparacion?.ventas?.porcentaje === null || comparacion?.ventas?.porcentaje === undefined
+      ? ''
+      : Number(comparacion.ventas.porcentaje * 100).toFixed(2)
+  );
+  addRow(
+    'Gastos',
+    Number(comparacion?.gastos?.total || 0).toFixed(2),
+    Number(comparacion?.gastos?.delta || 0).toFixed(2),
+    comparacion?.gastos?.porcentaje === null || comparacion?.gastos?.porcentaje === undefined
+      ? ''
+      : Number(comparacion.gastos.porcentaje * 100).toFixed(2)
+  );
+  addRow(
+    'Ganancia',
+    Number(comparacion?.ganancia?.total || 0).toFixed(2),
+    Number(comparacion?.ganancia?.delta || 0).toFixed(2),
+    comparacion?.ganancia?.porcentaje === null || comparacion?.ganancia?.porcentaje === undefined
+      ? ''
+      : Number(comparacion.ganancia.porcentaje * 100).toFixed(2)
+  );
+  addSpacer();
+
+  addRow('Serie diaria');
+  addRow('Fecha', 'Ventas', 'Gastos', 'Ganancia');
+  (serieDiaria || []).forEach((row) => {
+    const ventas = Number(row?.ventas) || 0;
+    const gastosDia = Number(row?.gastos) || 0;
+    const ganancia = ventas - gastosDia;
+    addRow(row.fecha || '', ventas.toFixed(2), gastosDia.toFixed(2), ganancia.toFixed(2));
+  });
+  addSpacer();
+
+  addRow('Metodos de pago');
+  addRow('Metodo', 'Monto');
+  addRow('Efectivo', Number(metodos.efectivo || 0).toFixed(2));
+  addRow('Tarjeta', Number(metodos.tarjeta || 0).toFixed(2));
+  addRow('Transferencia', Number(metodos.transferencia || 0).toFixed(2));
+  addSpacer();
+
+  addRow('Top productos por cantidad');
+  addRow('Producto', 'Categoria', 'Cantidad', 'Ingresos');
+  (rankings.top_productos_cantidad || []).forEach((row) => {
+    addRow(
+      row?.nombre || '',
+      row?.categoria || '',
+      Number(row?.cantidad || 0).toFixed(2),
+      Number(row?.ingresos || 0).toFixed(2)
+    );
+  });
+  addSpacer();
+
+  addRow('Top productos por ingresos');
+  addRow('Producto', 'Categoria', 'Cantidad', 'Ingresos');
+  (rankings.top_productos_ingresos || []).forEach((row) => {
+    addRow(
+      row?.nombre || '',
+      row?.categoria || '',
+      Number(row?.cantidad || 0).toFixed(2),
+      Number(row?.ingresos || 0).toFixed(2)
+    );
+  });
+  addSpacer();
+
+  addRow('Top categorias de gastos');
+  addRow('Categoria', 'Total');
+  (gastos.top_categorias || []).forEach((row) => {
+    addRow(row?.categoria || '', Number(row?.total || 0).toFixed(2));
+  });
+  addSpacer();
+
+  addRow('Analisis avanzado');
+  addRow('Metrica', 'Valor');
+  addRow('Compras inventario', Number(avanzado?.gastos?.total_inventario || 0).toFixed(2));
+  addRow('Gastos operativos', Number(avanzado?.gastos?.total_operativos || 0).toFixed(2));
+  addRow('COGS total', Number(avanzado?.cogs_total || 0).toFixed(2));
+  addRow('Utilidad bruta', Number(avanzado?.utilidad_bruta || 0).toFixed(2));
+  addRow('Utilidad neta real', Number(avanzado?.utilidad_neta_real || 0).toFixed(2));
+  addRow('Flujo caja variacion', Number(avanzado?.flujo_caja?.variacion || 0).toFixed(2));
+  addRow('Caja inicial', Number(avanzado?.flujo_caja?.caja_inicial || 0).toFixed(2));
+  addRow('Caja final', Number(avanzado?.flujo_caja?.caja_final || 0).toFixed(2));
+  addRow('Inventario inicial', Number(avanzado?.inventario?.inicial || 0).toFixed(2));
+  addRow('Inventario final', Number(avanzado?.inventario?.final || 0).toFixed(2));
+  addSpacer();
+
+  addRow('Alertas');
+  addRow('Nivel', 'Mensaje');
+  if (!alertas.length) {
+    addRow('info', 'Sin alertas');
+  } else {
+    alertas.forEach((alerta) => addRow(alerta?.nivel || 'info', alerta?.mensaje || ''));
+  }
+
+  return rows.join('\n');
+};
+
+const exportarAnalisisCSV = async () => {
+  if (!analisisDesdeInput || !analisisHastaInput) return;
+  const desde = analisisDesdeInput.value;
+  const hasta = analisisHastaInput.value;
+
+  try {
+    setMessage(analisisMensaje, 'Generando CSV de analisis...', 'info');
+    const params = new URLSearchParams();
+    if (desde) params.set('from', desde);
+    if (hasta) params.set('to', hasta);
+
+    const urlBasico = `/api/admin/analytics/overview?${params.toString()}`;
+    const urlAvanzado = `/api/admin/analytics/advanced?${params.toString()}`;
+    const [respuestaBasico, respuestaAvanzado] = await Promise.all([
+      fetchConAutorizacion(urlBasico),
+      fetchConAutorizacion(urlAvanzado),
+    ]);
+
+    if (!respuestaBasico.ok) {
+      throw new Error('No se pudo obtener el analisis basico para exportar.');
+    }
+    if (!respuestaAvanzado.ok) {
+      throw new Error('No se pudo obtener el analisis avanzado para exportar.');
+    }
+
+    const dataBasico = await respuestaBasico.json();
+    const dataAvanzado = await respuestaAvanzado.json();
+    if (!dataBasico?.ok) {
+      throw new Error(dataBasico?.error || 'No se pudo obtener el analisis basico para exportar.');
+    }
+    if (!dataAvanzado?.ok) {
+      throw new Error(dataAvanzado?.error || 'No se pudo obtener el analisis avanzado para exportar.');
+    }
+
+    const contenido = construirCSVAnalisisCompleto(dataBasico, dataAvanzado, desde, hasta);
+    const nombre = `analisis_negocio_${desde || 'inicio'}_a_${hasta || 'hoy'}.csv`;
+    descargarCSV(nombre, contenido);
+    setMessage(analisisMensaje, 'CSV de analisis generado correctamente.', 'info');
+  } catch (error) {
+    console.error('Error al exportar analisis en CSV:', error);
+    setMessage(analisisMensaje, error.message || 'No se pudo exportar el analisis en CSV.', 'error');
   }
 };
 
@@ -7765,6 +8056,16 @@ abastecimientoForm?.addEventListener('submit', async (event) => {
 });
 
 abastecimientoTabla?.addEventListener('click', (event) => {
+  const botonPdf = event.target.closest('[data-imprimir-abastecimiento]');
+  if (botonPdf) {
+    event.preventDefault();
+    const id = Number(botonPdf.dataset.imprimirAbastecimiento);
+    if (Number.isFinite(id) && id > 0) {
+      exportarDetalleAbastecimientoPdf(id);
+    }
+    return;
+  }
+
   const botonEditar = event.target.closest('[data-editar-abastecimiento]');
   if (botonEditar) {
     event.preventDefault();
@@ -7856,6 +8157,11 @@ cxpTabla?.addEventListener('click', (event) => {
   }
 });
 
+cxpExportarPdfBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  exportarCuentasPorPagarPdf();
+});
+
 cxpPagoForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const cuentaId = Number(cuentaPorPagarActiva?.id);
@@ -7917,6 +8223,11 @@ analisisRangeButtons.forEach((btn) => {
 analisisActualizarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   cargarAnalisis();
+});
+
+analisisExportarCsvBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  exportarAnalisisCSV();
 });
 
 analisisCapitalAbrirBtn?.addEventListener('click', (event) => {
@@ -8220,12 +8531,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     gastosDesdeInput.value = getLocalDateISO(inicioMes);
   }
   if (analisisHastaInput && !analisisHastaInput.value) {
-    analisisHastaInput.value = fechaHoy;
+    analisisHastaInput.value = obtenerHoyAnalisisISO();
   }
   if (analisisDesdeInput && !analisisDesdeInput.value) {
-    const inicioAnalisis = new Date();
-    inicioAnalisis.setDate(inicioAnalisis.getDate() - 29);
-    analisisDesdeInput.value = getLocalDateISO(inicioAnalisis);
+    const hoyAnalisis = obtenerHoyAnalisisISO();
+    analisisDesdeInput.value = addDaysToISODate(hoyAnalisis, -29);
   }
 
   await reaplicarTemaNegocioActual();
