@@ -3549,6 +3549,42 @@ const normalizarOrigenFondosCompra = (valor, predeterminado = 'negocio') => {
   return ORIGENES_FONDOS_COMPRA.includes(predeterminado) ? predeterminado : 'negocio';
 };
 
+const esMetodoPagoCredito = (metodoPago) => {
+  if (!metodoPago) return false;
+  const limpio = String(metodoPago).trim().toLowerCase();
+  return limpio.includes('credito');
+};
+
+const resolverEstadoPagoGasto = ({
+  metodoPago,
+  montoTotal,
+  montoPagadoActual = 0,
+  fechaReferencia = null,
+  fechaPagoActual = null,
+} = {}) => {
+  const total = Number(montoTotal) || 0;
+  const esCredito = esMetodoPagoCredito(metodoPago);
+
+  if (!esCredito) {
+    return {
+      esCredito: false,
+      estado: 'PAGADO',
+      monto_pagado: Number(total.toFixed(2)),
+      fecha_pago: fechaReferencia || null,
+    };
+  }
+
+  const pagadoNormalizado = Math.max(0, Math.min(Number(montoPagadoActual) || 0, total));
+  const estado = pagadoNormalizado >= total && total > 0 ? 'PAGADO' : 'PENDIENTE';
+
+  return {
+    esCredito: true,
+    estado,
+    monto_pagado: Number(pagadoNormalizado.toFixed(2)),
+    fecha_pago: estado === 'PAGADO' ? fechaPagoActual || fechaReferencia || null : null,
+  };
+};
+
 const normalizarEstadoCliente = (valor, predeterminado = 'ACTIVO') => {
   if (!valor) {
     return ESTADOS_CLIENTE.includes(predeterminado) ? predeterminado : 'ACTIVO';
@@ -12535,6 +12571,10 @@ app.get('/api/empresa/analytics/overview', (req, res) => {
       const fechaBaseRaw = 'COALESCE(fecha_factura, fecha_cierre, fecha_creacion)';
       const fechaBase = `DATE(${fechaBaseRaw})`;
       const paramsBase = [...ids, rango.desde, rango.hasta];
+      const gastosOrigenOperativoSql = `
+        LOWER(REPLACE(REPLACE(TRIM(COALESCE(origen_fondos, origen, '')), ' ', '_'), '-', '_'))
+          NOT IN ('externo', 'aporte_externo', 'empresa')
+      `;
 
       const supervisoresRows = await db.all(
         `SELECT u.id, u.nombre, u.usuario, u.negocio_id
@@ -12578,7 +12618,8 @@ app.get('/api/empresa/analytics/overview', (req, res) => {
            WHERE negocio_id IN (${placeholders})
              AND DATE(fecha) BETWEEN ? AND ?
              AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
-           GROUP BY negocio_id
+             AND ${gastosOrigenOperativoSql}
+            GROUP BY negocio_id
         `,
         paramsBase
       );
@@ -20212,6 +20253,11 @@ app.post('/api/inventario/compras', (req, res) => {
         subtotal,
         aplicaItbis
       );
+      const pagoGasto = resolverEstadoPagoGasto({
+        metodoPago,
+        montoTotal: total,
+        fechaReferencia: fecha,
+      });
 
       await db.run('BEGIN');
 
@@ -20375,8 +20421,9 @@ app.post('/api/inventario/compras', (req, res) => {
         const gastoInsert = await db.run(
           `
           INSERT INTO gastos
-            (fecha, monto, moneda, categoria, tipo_gasto, origen, metodo_pago, proveedor, descripcion, referencia, es_recurrente, negocio_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (fecha, monto, moneda, categoria, tipo_gasto, origen, origen_fondos, metodo_pago, proveedor, descripcion,
+             referencia, es_recurrente, estado, fecha_pago, monto_pagado, negocio_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
           [
             fecha,
@@ -20385,11 +20432,15 @@ app.post('/api/inventario/compras', (req, res) => {
             'Compras inventario',
             'INVENTARIO',
             'compra',
+            origenFondos,
             metodoPago,
             proveedor,
             descripcionGasto,
             `INV-${compraId}`,
             0,
+            pagoGasto.estado,
+            pagoGasto.fecha_pago,
+            pagoGasto.monto_pagado,
             negocioId,
           ]
         );
@@ -20398,7 +20449,7 @@ app.post('/api/inventario/compras', (req, res) => {
       }
 
       let salidaId = null;
-      if (origenFondos === 'caja') {
+      if (origenFondos === 'caja' && !pagoGasto.esCredito) {
         const descripcionSalida = `Compra inventario #${compraId} - ${proveedor}`;
         const salidaInsert = await db.run(
           `
@@ -20502,8 +20553,11 @@ app.get('/api/admin/gastos', (req, res) => {
       const listadoSql = `
         SELECT id, fecha, monto, moneda, categoria, COALESCE(tipo_gasto, 'OPERATIVO') AS tipo_gasto,
                COALESCE(origen, 'manual') AS origen,
+               COALESCE(origen_fondos, origen, 'manual') AS origen_fondos,
                metodo_pago, proveedor, descripcion,
-               comprobante_ncf, referencia, es_recurrente, frecuencia, tags, created_at, updated_at
+               comprobante_ncf, referencia, es_recurrente, frecuencia, tags,
+               COALESCE(estado, 'PAGADO') AS estado, fecha_vencimiento, fecha_pago, COALESCE(monto_pagado, 0) AS monto_pagado,
+               created_at, updated_at
         FROM gastos
         ${whereClause}
         ORDER BY fecha DESC, id DESC
@@ -20635,13 +20689,18 @@ app.post('/api/admin/gastos', (req, res) => {
       tagsEntrada = JSON.stringify(tagsEntrada);
     }
     const tags = normalizarCampoTexto(tagsEntrada, null);
+    const pagoGasto = resolverEstadoPagoGasto({
+      metodoPago,
+      montoTotal: montoValor,
+      fechaReferencia: fecha,
+    });
 
     try {
       const sql = `
         INSERT INTO gastos (
           fecha, monto, moneda, categoria, tipo_gasto, origen, metodo_pago, proveedor, descripcion,
-          comprobante_ncf, referencia, es_recurrente, frecuencia, tags, negocio_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          comprobante_ncf, referencia, es_recurrente, frecuencia, tags, estado, fecha_pago, monto_pagado, negocio_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       const params = [
         fecha,
@@ -20658,6 +20717,9 @@ app.post('/api/admin/gastos', (req, res) => {
         esRecurrente ? 1 : 0,
         frecuencia,
         tags,
+        pagoGasto.estado,
+        pagoGasto.fecha_pago,
+        pagoGasto.monto_pagado,
         negocioId,
       ];
 
@@ -20681,6 +20743,9 @@ app.post('/api/admin/gastos', (req, res) => {
           es_recurrente: esRecurrente ? 1 : 0,
           frecuencia,
           tags,
+          estado: pagoGasto.estado,
+          fecha_pago: pagoGasto.fecha_pago,
+          monto_pagado: pagoGasto.monto_pagado,
         },
       });
     } catch (error) {
@@ -20894,6 +20959,290 @@ app.delete('/api/admin/gastos/:id', (req, res) => {
     } catch (error) {
       console.error('Error al eliminar gasto:', error?.message || error);
       res.status(500).json({ error: 'Error al eliminar el gasto' });
+    }
+  });
+});
+
+app.get('/api/admin/cuentas-por-pagar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const page = Math.max(parseInt(req.query?.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query?.limit, 10) || 200, 1), 500);
+    const offset = (page - 1) * limit;
+    const desde = esFechaISOValida(req.query?.from) ? req.query.from : null;
+    const hasta = esFechaISOValida(req.query?.to) ? req.query.to : null;
+    const estadoRawTexto = normalizarCampoTexto(req.query?.estado, null);
+    const estadoRaw = estadoRawTexto && ESTADOS_GASTO.includes(estadoRawTexto.toUpperCase())
+      ? estadoRawTexto.toUpperCase()
+      : null;
+    const q = normalizarCampoTexto(req.query?.q, null);
+
+    const filtros = [
+      'g.negocio_id = ?',
+      "COALESCE(g.tipo_gasto, 'OPERATIVO') = 'INVENTARIO'",
+      "COALESCE(g.estado, 'PAGADO') <> 'ANULADO'",
+      "(LOWER(COALESCE(g.metodo_pago, '')) LIKE '%credito%' OR COALESCE(g.monto_pagado, 0) < COALESCE(g.monto, 0) OR COALESCE(g.estado, 'PAGADO') IN ('BORRADOR','PENDIENTE','APROBADO'))",
+    ];
+    const params = [negocioId];
+
+    if (desde) {
+      filtros.push('DATE(g.fecha) >= ?');
+      params.push(desde);
+    }
+    if (hasta) {
+      filtros.push('DATE(g.fecha) <= ?');
+      params.push(hasta);
+    }
+    if (estadoRaw) {
+      filtros.push("COALESCE(g.estado, 'PAGADO') = ?");
+      params.push(estadoRaw);
+    }
+    if (q) {
+      const termino = `%${q.toLowerCase()}%`;
+      filtros.push(
+        '(LOWER(COALESCE(g.proveedor, \'\')) LIKE ? OR LOWER(COALESCE(g.descripcion, \'\')) LIKE ? OR LOWER(COALESCE(g.referencia, \'\')) LIKE ?)'
+      );
+      params.push(termino, termino, termino);
+    }
+
+    const whereClause = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
+
+    try {
+      const cuentas = await db.all(
+        `
+          SELECT g.id, g.fecha, g.referencia, g.proveedor, g.descripcion, g.metodo_pago, g.origen_fondos,
+                 g.monto, COALESCE(g.monto_pagado, 0) AS monto_pagado,
+                 GREATEST(COALESCE(g.monto, 0) - COALESCE(g.monto_pagado, 0), 0) AS saldo,
+                 COALESCE(g.estado, 'PAGADO') AS estado, g.fecha_pago, g.updated_at
+          FROM gastos g
+          ${whereClause}
+          ORDER BY (GREATEST(COALESCE(g.monto, 0) - COALESCE(g.monto_pagado, 0), 0) > 0) DESC, g.fecha DESC, g.id DESC
+          LIMIT ${limit} OFFSET ${offset}
+        `,
+        params
+      );
+
+      const totalRow = await db.get(`SELECT COUNT(1) AS total FROM gastos g ${whereClause}`, params);
+      const resumenRow = await db.get(
+        `
+          SELECT
+            COUNT(1) AS total_cuentas,
+            SUM(COALESCE(g.monto, 0)) AS total_monto,
+            SUM(COALESCE(g.monto_pagado, 0)) AS total_pagado,
+            SUM(GREATEST(COALESCE(g.monto, 0) - COALESCE(g.monto_pagado, 0), 0)) AS total_saldo
+          FROM gastos g
+          ${whereClause}
+        `,
+        params
+      );
+
+      res.json({
+        ok: true,
+        cuentas: cuentas || [],
+        total: Number(totalRow?.total) || 0,
+        page,
+        limit,
+        resumen: {
+          total_cuentas: Number(resumenRow?.total_cuentas) || 0,
+          total_monto: Number(resumenRow?.total_monto) || 0,
+          total_pagado: Number(resumenRow?.total_pagado) || 0,
+          total_saldo: Number(resumenRow?.total_saldo) || 0,
+        },
+      });
+    } catch (error) {
+      console.error('Error al obtener cuentas por pagar:', error?.message || error);
+      res.status(500).json({ error: 'No se pudieron obtener las cuentas por pagar.' });
+    }
+  });
+});
+
+app.get('/api/admin/cuentas-por-pagar/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'ID invalido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    try {
+      const cuenta = await db.get(
+        `
+          SELECT g.id, g.fecha, g.referencia, g.proveedor, g.descripcion, g.metodo_pago, g.origen_fondos,
+                 g.monto, COALESCE(g.monto_pagado, 0) AS monto_pagado,
+                 GREATEST(COALESCE(g.monto, 0) - COALESCE(g.monto_pagado, 0), 0) AS saldo,
+                 COALESCE(g.estado, 'PAGADO') AS estado, g.fecha_pago, g.updated_at
+            FROM gastos g
+           WHERE g.id = ?
+             AND g.negocio_id = ?
+             AND COALESCE(g.tipo_gasto, 'OPERATIVO') = 'INVENTARIO'
+        `,
+        [id, negocioId]
+      );
+
+      if (!cuenta) {
+        return res.status(404).json({ error: 'Cuenta por pagar no encontrada.' });
+      }
+
+      const pagos = await db.all(
+        `
+          SELECT id, fecha, monto, metodo_pago, origen_fondos, origen_detalle, referencia, notas, created_at
+            FROM gastos_pagos
+           WHERE gasto_id = ? AND (negocio_id = ? OR negocio_id IS NULL)
+           ORDER BY fecha DESC, id DESC
+        `,
+        [id, negocioId]
+      );
+
+      res.json({ ok: true, cuenta, pagos: pagos || [] });
+    } catch (error) {
+      console.error('Error al obtener cuenta por pagar:', error?.message || error);
+      res.status(500).json({ error: 'No se pudo obtener la cuenta por pagar.' });
+    }
+  });
+});
+
+app.post('/api/admin/cuentas-por-pagar/:id/pagos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'ID invalido.' });
+    }
+
+    const fechaPago = normalizarCampoTexto(req.body?.fecha_pago ?? req.body?.fechaPago ?? req.body?.fecha, null);
+    if (!fechaPago || !esFechaISOValida(fechaPago)) {
+      return res.status(400).json({ error: 'La fecha de pago es obligatoria.' });
+    }
+
+    const montoPago = normalizarNumero(req.body?.monto ?? req.body?.monto_pagado ?? req.body?.montoPagado, null);
+    if (montoPago === null || montoPago <= 0) {
+      return res.status(400).json({ error: 'El monto pagado debe ser mayor a 0.' });
+    }
+
+    const metodoPago = normalizarCampoTexto(req.body?.metodo_pago ?? req.body?.metodoPago, null);
+    if (!metodoPago) {
+      return res.status(400).json({ error: 'El metodo de pago es obligatorio.' });
+    }
+    if (metodoPago.length > 40) {
+      return res.status(400).json({ error: 'El metodo de pago no puede superar 40 caracteres.' });
+    }
+
+    const origenFondos = normalizarOrigenFondosGasto(
+      req.body?.origen_fondos ?? req.body?.origenFondos ?? req.body?.origen_fondo,
+      null
+    );
+    const origenDetalle = normalizarCampoTexto(req.body?.origen_detalle ?? req.body?.origenDetalle, null);
+    const referencia = normalizarCampoTexto(req.body?.referencia, null);
+    const notas = normalizarCampoTexto(req.body?.notas, null);
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    try {
+      const gasto = await db.get(
+        `
+          SELECT id, negocio_id, monto, COALESCE(monto_pagado, 0) AS monto_pagado,
+                 COALESCE(estado, 'PAGADO') AS estado, COALESCE(tipo_gasto, 'OPERATIVO') AS tipo_gasto
+            FROM gastos
+           WHERE id = ? AND negocio_id = ?
+        `,
+        [id, negocioId]
+      );
+
+      if (!gasto) {
+        return res.status(404).json({ error: 'Cuenta por pagar no encontrada.' });
+      }
+
+      if (String(gasto.tipo_gasto || '').toUpperCase() !== 'INVENTARIO') {
+        return res.status(400).json({ error: 'Solo se permiten pagos para compras de inventario.' });
+      }
+
+      const estadoActual = String(gasto.estado || 'PAGADO').toUpperCase();
+      if (estadoActual === 'ANULADO') {
+        return res.status(400).json({ error: 'No se puede pagar una cuenta anulada.' });
+      }
+
+      const montoTotal = Number(gasto.monto || 0);
+      const montoAnterior = Number(gasto.monto_pagado || 0);
+      const saldoAnterior = Number((montoTotal - montoAnterior).toFixed(2));
+      if (saldoAnterior <= 0) {
+        return res.status(400).json({ error: 'La cuenta ya esta pagada.' });
+      }
+      if (montoPago - saldoAnterior > 0.001) {
+        return res.status(400).json({ error: `El monto excede el saldo pendiente (${saldoAnterior.toFixed(2)}).` });
+      }
+
+      const nuevoMontoPagado = Number((montoAnterior + montoPago).toFixed(2));
+      const estadoFinal = nuevoMontoPagado >= montoTotal ? 'PAGADO' : 'PENDIENTE';
+      const fechaPagoFinal = estadoFinal === 'PAGADO' ? fechaPago : null;
+
+      await db.run('BEGIN');
+      await db.run(
+        `
+          INSERT INTO gastos_pagos
+            (gasto_id, negocio_id, fecha, monto, metodo_pago, origen_fondos, origen_detalle, referencia, notas, usuario_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          id,
+          negocioId,
+          fechaPago,
+          montoPago,
+          metodoPago,
+          origenFondos,
+          origenDetalle,
+          referencia,
+          notas,
+          usuarioSesion?.id || null,
+        ]
+      );
+
+      await db.run(
+        `
+          UPDATE gastos
+             SET monto_pagado = ?,
+                 fecha_pago = ?,
+                 estado = ?,
+                 updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND negocio_id = ?
+        `,
+        [nuevoMontoPagado, fechaPagoFinal, estadoFinal, id, negocioId]
+      );
+
+      if (origenFondos === 'caja') {
+        await db.run(
+          `
+            INSERT INTO salidas_caja (negocio_id, fecha, descripcion, monto, metodo)
+            VALUES (?, ?, ?, ?, ?)
+          `,
+          [negocioId, fechaPago, `Pago cuenta por pagar #${id}`, montoPago, metodoPago || 'efectivo']
+        );
+      }
+
+      await db.run('COMMIT');
+      limpiarCacheAnalitica(negocioId);
+
+      res.json({
+        ok: true,
+        estado: estadoFinal,
+        monto_pagado: nuevoMontoPagado,
+        saldo: Number((montoTotal - nuevoMontoPagado).toFixed(2)),
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al registrar pago de cuenta por pagar:', error?.message || error);
+      res.status(500).json({ error: 'No se pudo registrar el pago.' });
     }
   });
 });
@@ -21457,6 +21806,10 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           ELSE 'OPERATIVO'
         END
       `;
+      const gastosOrigenOperativoSql = `
+        LOWER(REPLACE(REPLACE(TRIM(COALESCE(origen_fondos, origen, '')), ' ', '_'), '-', '_'))
+          NOT IN ('externo', 'aporte_externo', 'empresa')
+      `;
 
       const gastosResumen = await db.get(
         `
@@ -21466,6 +21819,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
             AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
+            AND ${gastosOrigenOperativoSql}
         `,
         paramsBase
       );
@@ -21479,6 +21833,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
             AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
+            AND ${gastosOrigenOperativoSql}
           GROUP BY fecha
           ORDER BY fecha ASC
         `,
@@ -21492,6 +21847,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
             AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
+            AND ${gastosOrigenOperativoSql}
             AND categoria IS NOT NULL
             AND categoria <> ''
           GROUP BY categoria
@@ -21508,6 +21864,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
             AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
+            AND ${gastosOrigenOperativoSql}
           GROUP BY es_recurrente
         `,
         paramsBase
@@ -21595,6 +21952,8 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM gastos
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
+            AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
+            AND ${gastosOrigenOperativoSql}
         `,
         [negocioId, rangoAnterior.desde, rangoAnterior.hasta]
       );
@@ -21906,6 +22265,10 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
           ELSE 'OPERATIVO'
         END
       `;
+      const gastosOrigenOperativoSql = `
+        LOWER(REPLACE(REPLACE(TRIM(COALESCE(origen_fondos, origen, '')), ' ', '_'), '-', '_'))
+          NOT IN ('externo', 'aporte_externo', 'empresa')
+      `;
 
       const gastosTotalesResumen = await db.get(
         `
@@ -21938,6 +22301,7 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
           WHERE negocio_id = ?
             AND DATE(fecha) BETWEEN ? AND ?
             AND (estado IS NULL OR estado IN ('APROBADO', 'PAGADO'))
+            AND ${gastosOrigenOperativoSql}
         `,
         paramsBase
       );
@@ -22405,9 +22769,11 @@ app.put('/api/inventario/compras/:id', (req, res) => {
     try {
       const compraActual = await db.get(
         `
-        SELECT id, origen_fondos, metodo_pago, compra_id, gasto_id, salida_id, itbis_capitalizable
-          FROM compras_inventario
-         WHERE id = ? AND negocio_id = ?
+        SELECT ci.id, ci.origen_fondos, ci.metodo_pago, ci.compra_id, ci.gasto_id, ci.salida_id, ci.itbis_capitalizable,
+               g.monto_pagado AS gasto_monto_pagado, g.fecha_pago AS gasto_fecha_pago
+          FROM compras_inventario ci
+          LEFT JOIN gastos g ON g.id = ci.gasto_id AND g.negocio_id = ci.negocio_id
+         WHERE ci.id = ? AND ci.negocio_id = ?
         `,
         [compraId, negocioId]
       );
@@ -22518,6 +22884,13 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         subtotal,
         aplicaItbis
       );
+      const pagoGasto = resolverEstadoPagoGasto({
+        metodoPago,
+        montoTotal: total,
+        montoPagadoActual: compraActual?.gasto_monto_pagado ?? 0,
+        fechaReferencia: fecha,
+        fechaPagoActual: compraActual?.gasto_fecha_pago ?? null,
+      });
 
       const cantidadesPrevias = new Map();
       detallesActuales.forEach((detalle) => {
@@ -22683,6 +23056,15 @@ app.put('/api/inventario/compras/:id', (req, res) => {
       let gastoId = compraActual.gasto_id || null;
       if (origenFondos === 'aporte_externo') {
         if (gastoId) {
+          const pagosRegistrados = await db.get(
+            'SELECT COUNT(1) AS total FROM gastos_pagos WHERE gasto_id = ?',
+            [gastoId]
+          );
+          if (Number(pagosRegistrados?.total) > 0) {
+            throw new Error(
+              'No se puede cambiar a aporte externo porque la compra ya tiene abonos registrados.'
+            );
+          }
           await db.run('DELETE FROM gastos WHERE id = ? AND negocio_id = ?', [gastoId, negocioId]);
           gastoId = null;
         }
@@ -22692,7 +23074,8 @@ app.put('/api/inventario/compras/:id', (req, res) => {
           await db.run(
             `
             UPDATE gastos
-               SET fecha = ?, monto = ?, tipo_gasto = ?, origen = ?, metodo_pago = ?, proveedor = ?, descripcion = ?
+               SET fecha = ?, monto = ?, tipo_gasto = ?, origen = ?, origen_fondos = ?, metodo_pago = ?,
+                   proveedor = ?, descripcion = ?, estado = ?, fecha_pago = ?, monto_pagado = ?
              WHERE id = ? AND negocio_id = ?
           `,
             [
@@ -22700,9 +23083,13 @@ app.put('/api/inventario/compras/:id', (req, res) => {
               total,
               'INVENTARIO',
               'compra',
+              origenFondos,
               metodoPago,
               proveedor,
               descripcionGasto,
+              pagoGasto.estado,
+              pagoGasto.fecha_pago,
+              pagoGasto.monto_pagado,
               gastoId,
               negocioId,
             ]
@@ -22711,8 +23098,9 @@ app.put('/api/inventario/compras/:id', (req, res) => {
           const gastoInsert = await db.run(
             `
             INSERT INTO gastos
-              (fecha, monto, moneda, categoria, tipo_gasto, origen, metodo_pago, proveedor, descripcion, referencia, es_recurrente, negocio_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (fecha, monto, moneda, categoria, tipo_gasto, origen, origen_fondos, metodo_pago, proveedor, descripcion,
+               referencia, es_recurrente, estado, fecha_pago, monto_pagado, negocio_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
             [
               fecha,
@@ -22721,11 +23109,15 @@ app.put('/api/inventario/compras/:id', (req, res) => {
               'Compras inventario',
               'INVENTARIO',
               'compra',
+              origenFondos,
               metodoPago,
               proveedor,
               descripcionGasto,
               `INV-${compraId}`,
               0,
+              pagoGasto.estado,
+              pagoGasto.fecha_pago,
+              pagoGasto.monto_pagado,
               negocioId,
             ]
           );
@@ -22734,7 +23126,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
       }
 
       let salidaId = compraActual.salida_id || null;
-      if (origenFondos === 'caja') {
+      if (origenFondos === 'caja' && !pagoGasto.esCredito) {
         const descripcionSalida = `Compra inventario #${compraId} - ${proveedor}`;
         if (salidaId) {
           await db.run(

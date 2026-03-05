@@ -177,6 +177,20 @@ const gastosLimpiarBtn = document.getElementById('gastos-limpiar');
 const gastosMensajeLista = document.getElementById('gastos-mensaje-lista');
 const gastosTabla = document.getElementById('gastos-tabla');
 const gastosCategoriasList = document.getElementById('gastos-categorias');
+const cxpMensaje = document.getElementById('cxp-mensaje');
+const cxpTabla = document.getElementById('cxp-tabla');
+const cxpPagoForm = document.getElementById('cxp-pago-form');
+const cxpPagoTitulo = document.getElementById('cxp-pago-titulo');
+const cxpPagoFechaInput = document.getElementById('cxp-pago-fecha');
+const cxpPagoMontoInput = document.getElementById('cxp-pago-monto');
+const cxpPagoMetodoInput = document.getElementById('cxp-pago-metodo');
+const cxpPagoOrigenInput = document.getElementById('cxp-pago-origen');
+const cxpPagoReferenciaInput = document.getElementById('cxp-pago-referencia');
+const cxpPagoNotasInput = document.getElementById('cxp-pago-notas');
+const cxpPagoSubmitBtn = document.getElementById('cxp-pago-submit');
+const cxpPagoMensaje = document.getElementById('cxp-pago-mensaje');
+const cxpPagosWrapper = document.getElementById('cxp-pagos-wrapper');
+const cxpPagosTabla = document.getElementById('cxp-pagos-tabla');
 
 const analisisDesdeInput = document.getElementById('analisis-desde');
 const analisisHastaInput = document.getElementById('analisis-hasta');
@@ -316,6 +330,8 @@ let productoEdicionBase = null;
 let compras = [];
 let comprasInventario = [];
 let gastos = [];
+let cuentasPorPagar = [];
+let cuentaPorPagarActiva = null;
 let datosReporte607 = [];
 let datosReporte606 = [];
 let cierresCaja = [];
@@ -4761,6 +4777,244 @@ const eliminarGasto = async (id) => {
     limpiarFormularioGasto();
   }
   await cargarGastos();
+  await cargarCuentasPorPagar();
+};
+
+const calcularSaldoCuentaPorPagar = (cuenta) => {
+  const total = Number(cuenta?.monto || 0);
+  const pagado = Number(cuenta?.monto_pagado || 0);
+  return Math.max(0, Number((total - pagado).toFixed(2)));
+};
+
+const formatearEstadoCuentaPorPagar = (estado, saldo = 0) => {
+  const estadoUpper = String(estado || '').toUpperCase();
+  if (estadoUpper === 'ANULADO') return 'Anulado';
+  if (saldo <= 0) return 'Pagado';
+  if (estadoUpper === 'BORRADOR') return 'Borrador';
+  if (estadoUpper === 'APROBADO') return 'Aprobado';
+  return 'Pendiente';
+};
+
+const limpiarDetalleCuentaPorPagar = () => {
+  cuentaPorPagarActiva = null;
+  if (cxpPagoForm) cxpPagoForm.hidden = true;
+  if (cxpPagosWrapper) cxpPagosWrapper.hidden = true;
+  if (cxpPagosTabla) cxpPagosTabla.innerHTML = '';
+  if (cxpPagoTitulo) cxpPagoTitulo.textContent = 'Registrar abono';
+  if (cxpPagoMontoInput) setMoneyInputValueAdmin(cxpPagoMontoInput, '');
+  if (cxpPagoNotasInput) cxpPagoNotasInput.value = '';
+  if (cxpPagoSubmitBtn) cxpPagoSubmitBtn.disabled = false;
+  if (cxpPagoMensaje) setMessage(cxpPagoMensaje, '', 'info');
+};
+
+const renderPagosCuentaPorPagar = (pagos = []) => {
+  if (!cxpPagosTabla) return;
+  cxpPagosTabla.innerHTML = '';
+
+  if (!Array.isArray(pagos) || pagos.length === 0) {
+    const fila = document.createElement('tr');
+    const celda = document.createElement('td');
+    celda.colSpan = 5;
+    celda.className = 'tabla-vacia';
+    celda.textContent = 'Sin abonos registrados.';
+    fila.appendChild(celda);
+    cxpPagosTabla.appendChild(fila);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  pagos.forEach((pago) => {
+    const fila = document.createElement('tr');
+
+    const cFecha = document.createElement('td');
+    cFecha.textContent = formatDate(pago.fecha);
+    const cMonto = document.createElement('td');
+    cMonto.textContent = formatCurrency(pago.monto || 0);
+    const cMetodo = document.createElement('td');
+    cMetodo.textContent = pago.metodo_pago || '--';
+    const cRef = document.createElement('td');
+    cRef.textContent = pago.referencia || '--';
+    const cNotas = document.createElement('td');
+    cNotas.textContent = pago.notas || '--';
+
+    fila.appendChild(cFecha);
+    fila.appendChild(cMonto);
+    fila.appendChild(cMetodo);
+    fila.appendChild(cRef);
+    fila.appendChild(cNotas);
+    fragment.appendChild(fila);
+  });
+
+  cxpPagosTabla.appendChild(fragment);
+};
+
+const renderCuentasPorPagar = (lista = []) => {
+  if (!cxpTabla) return;
+  cxpTabla.innerHTML = '';
+
+  if (!Array.isArray(lista) || lista.length === 0) {
+    const fila = document.createElement('tr');
+    const celda = document.createElement('td');
+    celda.colSpan = 8;
+    celda.className = 'tabla-vacia';
+    celda.textContent = 'No hay cuentas por pagar registradas.';
+    fila.appendChild(celda);
+    cxpTabla.appendChild(fila);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  lista.forEach((cuenta) => {
+    const fila = document.createElement('tr');
+    const saldo = calcularSaldoCuentaPorPagar(cuenta);
+    const pagado = Number(cuenta?.monto_pagado || 0);
+    const estadoLabel = formatearEstadoCuentaPorPagar(cuenta?.estado, saldo);
+
+    const cFecha = document.createElement('td');
+    cFecha.textContent = formatDate(cuenta.fecha);
+    const cReferencia = document.createElement('td');
+    cReferencia.textContent = cuenta.referencia || `Gasto #${cuenta.id}`;
+    const cProveedor = document.createElement('td');
+    cProveedor.textContent = cuenta.proveedor || '--';
+    const cTotal = document.createElement('td');
+    cTotal.textContent = formatCurrency(cuenta.monto || 0);
+    const cPagado = document.createElement('td');
+    cPagado.textContent = formatCurrency(pagado);
+    const cSaldo = document.createElement('td');
+    cSaldo.textContent = formatCurrency(saldo);
+    const cEstado = document.createElement('td');
+    cEstado.textContent = estadoLabel;
+
+    const cAcciones = document.createElement('td');
+    const btnVer = document.createElement('button');
+    btnVer.type = 'button';
+    btnVer.className = 'kanm-button secondary';
+    btnVer.textContent = saldo > 0 ? 'Abonar' : 'Ver';
+    btnVer.dataset.cxpDetalle = cuenta.id;
+    cAcciones.appendChild(btnVer);
+
+    fila.appendChild(cFecha);
+    fila.appendChild(cReferencia);
+    fila.appendChild(cProveedor);
+    fila.appendChild(cTotal);
+    fila.appendChild(cPagado);
+    fila.appendChild(cSaldo);
+    fila.appendChild(cEstado);
+    fila.appendChild(cAcciones);
+    fragment.appendChild(fila);
+  });
+
+  cxpTabla.appendChild(fragment);
+};
+
+const cargarDetalleCuentaPorPagar = async (id, mostrarCarga = true) => {
+  if (!id) return;
+  try {
+    if (mostrarCarga) {
+      setMessage(cxpMensaje, 'Cargando cuenta por pagar...', 'info');
+    }
+    const respuesta = await fetchConAutorizacion(`/api/admin/cuentas-por-pagar/${id}`);
+    if (!respuesta.ok) {
+      throw new Error('No se pudo obtener la cuenta por pagar.');
+    }
+    const data = await respuesta.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudo obtener la cuenta por pagar.');
+    }
+
+    cuentaPorPagarActiva = data.cuenta || null;
+    if (!cuentaPorPagarActiva) {
+      limpiarDetalleCuentaPorPagar();
+      return;
+    }
+
+    const saldo = calcularSaldoCuentaPorPagar(cuentaPorPagarActiva);
+    if (cxpPagoTitulo) {
+      cxpPagoTitulo.textContent = `Registrar abono - ${cuentaPorPagarActiva.referencia || `Cuenta #${id}`}`;
+    }
+    if (cxpPagoFechaInput) {
+      cxpPagoFechaInput.value = getLocalDateISO(new Date());
+    }
+    if (cxpPagoMontoInput) {
+      setMoneyInputValueAdmin(cxpPagoMontoInput, saldo > 0 ? saldo : '');
+    }
+    if (cxpPagoSubmitBtn) {
+      cxpPagoSubmitBtn.disabled = saldo <= 0;
+    }
+    if (cxpPagoMetodoInput && !cxpPagoMetodoInput.value) {
+      cxpPagoMetodoInput.value = 'efectivo';
+    }
+    if (cxpPagoOrigenInput && !cxpPagoOrigenInput.value) {
+      cxpPagoOrigenInput.value = 'caja';
+    }
+    if (cxpPagoReferenciaInput) {
+      cxpPagoReferenciaInput.value = '';
+    }
+    if (cxpPagoNotasInput) {
+      cxpPagoNotasInput.value = '';
+    }
+    if (cxpPagoForm) {
+      cxpPagoForm.hidden = false;
+    }
+    if (cxpPagosWrapper) {
+      cxpPagosWrapper.hidden = false;
+    }
+    renderPagosCuentaPorPagar(data.pagos || []);
+    setMessage(cxpPagoMensaje, saldo > 0 ? '' : 'La cuenta ya esta pagada.', saldo > 0 ? 'info' : 'warning');
+    setMessage(cxpMensaje, '', 'info');
+  } catch (error) {
+    console.error('Error al cargar detalle de cuenta por pagar:', error);
+    limpiarDetalleCuentaPorPagar();
+    setMessage(cxpMensaje, error.message || 'No se pudo cargar la cuenta por pagar.', 'error');
+  }
+};
+
+const cargarCuentasPorPagar = async () => {
+  if (!cxpTabla) return;
+  try {
+    setMessage(cxpMensaje, 'Cargando cuentas por pagar...', 'info');
+    const respuesta = await fetchConAutorizacion('/api/admin/cuentas-por-pagar?limit=300');
+    if (!respuesta.ok) {
+      throw new Error('No se pudieron obtener las cuentas por pagar.');
+    }
+    const data = await respuesta.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudieron obtener las cuentas por pagar.');
+    }
+    cuentasPorPagar = Array.isArray(data.cuentas) ? data.cuentas : [];
+    renderCuentasPorPagar(cuentasPorPagar);
+    setMessage(cxpMensaje, '', 'info');
+
+    if (cuentaPorPagarActiva?.id) {
+      const existe = cuentasPorPagar.some((cuenta) => Number(cuenta.id) === Number(cuentaPorPagarActiva.id));
+      const editandoPago = !!(cxpPagoForm && document.activeElement && cxpPagoForm.contains(document.activeElement));
+      if (existe) {
+        if (!editandoPago) {
+          await cargarDetalleCuentaPorPagar(cuentaPorPagarActiva.id, false);
+        }
+      } else {
+        limpiarDetalleCuentaPorPagar();
+      }
+    }
+  } catch (error) {
+    console.error('Error al cargar cuentas por pagar:', error);
+    cuentasPorPagar = [];
+    renderCuentasPorPagar([]);
+    limpiarDetalleCuentaPorPagar();
+    setMessage(cxpMensaje, error.message || 'No se pudieron cargar las cuentas por pagar.', 'error');
+  }
+};
+
+const registrarPagoCuentaPorPagar = async (cuentaId, payload) => {
+  const respuesta = await fetchJsonAutorizado(`/api/admin/cuentas-por-pagar/${cuentaId}/pagos`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  const data = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok || !data.ok) {
+    throw new Error(data.error || 'No se pudo registrar el abono.');
+  }
+  return data;
 };
 
 /* =====================
@@ -5994,6 +6248,13 @@ const recargarEstadoAdmin = async (mostrarCarga = false) => {
 
     if (abastecimientoTabla) {
       tareas.push(cargarComprasInventario());
+    }
+
+    if (gastosTabla) {
+      tareas.push(cargarGastos());
+    }
+    if (cxpTabla) {
+      tareas.push(cargarCuentasPorPagar());
     }
 
     if (usuariosTablaBody) {
@@ -7491,6 +7752,7 @@ abastecimientoForm?.addEventListener('submit', async (event) => {
     if (edicionId && Number(detalleAbastecimientoActivo) === Number(edicionId)) {
       await cargarDetalleAbastecimiento(edicionId);
     }
+    await cargarCuentasPorPagar();
     await cargarProductos();
   } catch (error) {
     console.error('Error al registrar compra de inventario:', error);
@@ -7561,6 +7823,7 @@ gastoForm?.addEventListener('submit', async (event) => {
     setMessage(gastoMensaje, 'Gasto guardado correctamente.', 'info');
     limpiarFormularioGasto();
     await cargarGastos();
+    await cargarCuentasPorPagar();
   } catch (error) {
     console.error('Error al guardar gasto:', error);
     setMessage(gastoMensaje, error.message || 'No se pudo guardar el gasto.', 'error');
@@ -7581,6 +7844,68 @@ gastosLimpiarBtn?.addEventListener('click', (event) => {
   if (gastosMetodoFiltroInput) gastosMetodoFiltroInput.value = '';
   if (gastosBuscarInput) gastosBuscarInput.value = '';
   cargarGastos();
+});
+
+cxpTabla?.addEventListener('click', (event) => {
+  const boton = event.target.closest('[data-cxp-detalle]');
+  if (!boton) return;
+  event.preventDefault();
+  const id = Number(boton.dataset.cxpDetalle);
+  if (Number.isFinite(id) && id > 0) {
+    cargarDetalleCuentaPorPagar(id);
+  }
+});
+
+cxpPagoForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const cuentaId = Number(cuentaPorPagarActiva?.id);
+  if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+    setMessage(cxpPagoMensaje, 'Selecciona una cuenta por pagar.', 'error');
+    return;
+  }
+
+  const fecha = cxpPagoFechaInput?.value;
+  const monto = parseMoneyValueAdmin(cxpPagoMontoInput, { allowEmpty: false });
+  const metodoPago = cxpPagoMetodoInput?.value || '';
+  const origenFondos = cxpPagoOrigenInput?.value || '';
+  const referencia = cxpPagoReferenciaInput?.value.trim() || null;
+  const notas = cxpPagoNotasInput?.value.trim() || null;
+  const saldoActual = calcularSaldoCuentaPorPagar(cuentaPorPagarActiva);
+
+  if (!fecha) {
+    setMessage(cxpPagoMensaje, 'La fecha es obligatoria.', 'error');
+    return;
+  }
+  if (!Number.isFinite(monto) || monto <= 0) {
+    setMessage(cxpPagoMensaje, 'El monto del abono debe ser mayor a 0.', 'error');
+    return;
+  }
+  if (monto > saldoActual + 0.001) {
+    setMessage(cxpPagoMensaje, `El monto excede el saldo pendiente (${formatCurrency(saldoActual)}).`, 'error');
+    return;
+  }
+  if (!metodoPago) {
+    setMessage(cxpPagoMensaje, 'Selecciona el metodo de pago.', 'error');
+    return;
+  }
+
+  try {
+    setMessage(cxpPagoMensaje, 'Registrando abono...', 'info');
+    await registrarPagoCuentaPorPagar(cuentaId, {
+      fecha_pago: fecha,
+      monto: Number(monto.toFixed(2)),
+      metodo_pago: metodoPago,
+      origen_fondos: origenFondos || null,
+      referencia,
+      notas,
+    });
+    setMessage(cxpPagoMensaje, 'Abono registrado correctamente.', 'info');
+    await cargarCuentasPorPagar();
+    await cargarGastos();
+  } catch (error) {
+    console.error('Error al registrar abono de cuenta por pagar:', error);
+    setMessage(cxpPagoMensaje, error.message || 'No se pudo registrar el abono.', 'error');
+  }
 });
 
 analisisRangeButtons.forEach((btn) => {
@@ -7941,6 +8266,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     cargarCompras(),
     cargarComprasInventario(),
     cargarGastos(),
+    cargarCuentasPorPagar(),
     cargarAnalisis(),
     cargarUsuarios(usuariosRolSelect?.value || 'mesera'),
   ]);
