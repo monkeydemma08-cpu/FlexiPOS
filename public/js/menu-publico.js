@@ -20,6 +20,11 @@ const dom = {
   total: document.getElementById('menu-publico-total'),
   submit: document.getElementById('menu-publico-submit'),
   formMessage: document.getElementById('menu-publico-form-message'),
+  mobileToggle: document.getElementById('menu-publico-mobile-toggle'),
+  mobileCount: document.getElementById('menu-publico-mobile-count'),
+  mobileTotal: document.getElementById('menu-publico-mobile-total'),
+  overlay: document.getElementById('menu-publico-overlay'),
+  orderClose: document.getElementById('menu-publico-order-close'),
 };
 
 const state = {
@@ -30,7 +35,13 @@ const state = {
   pollHandle: null,
   loading: false,
   submitting: false,
+  drawerOpen: false,
 };
+
+const compactViewportQuery =
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(max-width: 860px)')
+    : null;
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('es-DO', {
@@ -91,6 +102,23 @@ const getCatalogProducts = () =>
 
 const findProductById = (productId) =>
   getCatalogProducts().find((producto) => Number(producto.id) === Number(productId)) || null;
+
+const isCompactViewport = () => Boolean(compactViewportQuery?.matches);
+
+const setDrawerOpen = (open) => {
+  const nextState = Boolean(open) && isCompactViewport();
+  state.drawerOpen = nextState;
+  document.body.classList.toggle('menu-publico-drawer-open', nextState);
+  if (dom.overlay) {
+    dom.overlay.hidden = !nextState;
+  }
+};
+
+const syncDrawerViewport = () => {
+  if (!isCompactViewport()) {
+    setDrawerOpen(false);
+  }
+};
 
 const calculateTotals = () => {
   const base = roundMoney(
@@ -223,43 +251,27 @@ const syncCartWithCatalog = () => {
       const product = findProductById(item.productId);
       if (!product) return null;
 
-      const option =
-        (product.precios || []).find(
-          (candidate) =>
-            String(candidate.label || '').trim() === String(item.priceLabel || '').trim() &&
-            roundMoney(candidate.valor) === roundMoney(item.price)
-        ) ||
-        (product.precios || []).find((candidate) => roundMoney(candidate.valor) === roundMoney(item.price)) ||
-        (product.precios || [])[0];
-
-      if (!option) return null;
-
       return {
         ...item,
         name: product.nombre,
         categoryName: product.categoria_nombre,
         available: Boolean(product.disponible),
-        price: roundMoney(option.valor),
-        priceLabel: option.label || item.priceLabel || 'Base',
+        price: roundMoney(product.precio),
       };
     })
     .filter(Boolean);
 };
 
-const buildCartKey = (productId, option) =>
-  `${Number(productId)}::${String(option?.label || 'Base')}::${roundMoney(option?.valor)}`;
+const buildCartKey = (productId) => `${Number(productId)}`;
 
-const addToCart = (productId, optionIndex = 0) => {
+const addToCart = (productId) => {
   const product = findProductById(productId);
   if (!product || !product.disponible) {
     setBoxMessage(dom.formMessage, 'Ese producto ya no esta disponible.', 'error');
     return;
   }
 
-  const option = (product.precios || [])[Number(optionIndex)] || (product.precios || [])[0];
-  if (!option) return;
-
-  const key = buildCartKey(product.id, option);
+  const key = buildCartKey(product.id);
   const existing = state.cart.find((item) => item.key === key);
   if (existing) {
     existing.quantity += 1;
@@ -270,14 +282,13 @@ const addToCart = (productId, optionIndex = 0) => {
       name: product.nombre,
       categoryName: product.categoria_nombre,
       available: Boolean(product.disponible),
-      price: roundMoney(option.valor),
-      priceLabel: option.label || 'Base',
+      price: roundMoney(product.precio),
       quantity: 1,
     });
   }
 
   setBoxMessage(dom.formMessage, '');
-  renderCart();
+  renderAll();
 };
 
 const updateCartQuantity = (key, delta) => {
@@ -287,12 +298,12 @@ const updateCartQuantity = (key, delta) => {
   if (item.quantity <= 0) {
     state.cart = state.cart.filter((candidate) => candidate.key !== key);
   }
-  renderCart();
+  renderAll();
 };
 
 const removeCartItem = (key) => {
   state.cart = state.cart.filter((candidate) => candidate.key !== key);
-  renderCart();
+  renderAll();
 };
 
 const getFilteredCategories = () => {
@@ -336,6 +347,9 @@ const renderCatalog = () => {
   }
 
   const categorias = getFilteredCategories();
+  const cantidadesEnCarrito = new Map(
+    state.cart.map((item) => [Number(item.productId), Number(item.quantity) || 0])
+  );
   renderNav(categorias);
 
   if (!categorias.length) {
@@ -359,31 +373,11 @@ const renderCatalog = () => {
           <div class="menu-publico-category-grid">
             ${(categoria.productos || [])
               .map((producto) => {
-                const priceText =
-                  (producto.precios || []).length > 1
-                    ? `Desde ${formatCurrency(producto.precio)}`
-                    : formatCurrency(producto.precio);
-                const priceHelper =
-                  (producto.precios || []).length > 1
-                    ? 'Elige tamano o variante antes de agregar.'
-                    : producto.disponible
-                      ? 'Disponible ahora mismo.'
-                      : 'No disponible por el momento.';
-                const options =
-                  (producto.precios || []).length > 1
-                    ? `
-                        <select class="menu-publico-item-select" data-role="price-select" data-product-id="${producto.id}">
-                          ${(producto.precios || [])
-                            .map(
-                              (option, optionIndex) =>
-                                `<option value="${optionIndex}">
-                                  ${escapeHtml(option.label)} - ${escapeHtml(formatCurrency(option.valor))}
-                                </option>`
-                            )
-                            .join('')}
-                        </select>
-                      `
-                    : `<div class="menu-publico-item-subtext">${escapeHtml(producto.precios?.[0]?.label || 'Precio base')}</div>`;
+                const quantityInCart = cantidadesEnCarrito.get(Number(producto.id)) || 0;
+                const priceText = formatCurrency(producto.precio);
+                const priceHelper = producto.disponible
+                  ? 'Disponible ahora mismo.'
+                  : 'No disponible por el momento.';
 
                 return `
                   <article class="menu-publico-item${producto.disponible ? '' : ' is-unavailable'}">
@@ -396,7 +390,14 @@ const renderCatalog = () => {
                       <span class="menu-publico-item-badge">${producto.disponible ? 'Disponible' : 'No disponible'}</span>
                     </div>
                     <div class="menu-publico-item-footer">
-                      ${options}
+                      <div class="menu-publico-item-footer-copy">
+                        <div class="menu-publico-item-subtext">Precio original</div>
+                        ${
+                          quantityInCart > 0
+                            ? `<span class="menu-publico-item-cart-hint">En tu pedido: ${quantityInCart}</span>`
+                            : ''
+                        }
+                      </div>
                       <button
                         type="button"
                         class="menu-publico-item-button"
@@ -404,7 +405,7 @@ const renderCatalog = () => {
                         data-product-id="${producto.id}"
                         ${producto.disponible ? '' : 'disabled'}
                       >
-                        Agregar
+                        ${quantityInCart > 0 ? 'Agregar otro' : 'Agregar'}
                       </button>
                     </div>
                   </article>
@@ -436,10 +437,7 @@ const renderCart = () => {
             <div class="menu-publico-cart-top">
               <div>
                 <p class="menu-publico-cart-name">${escapeHtml(item.name)}</p>
-                <p class="menu-publico-cart-meta">
-                  ${escapeHtml(item.priceLabel)} · ${escapeHtml(formatCurrency(item.price))}
-                  ${item.available ? '' : ' · No disponible'}
-                </p>
+                <p class="menu-publico-cart-meta">${escapeHtml(formatCurrency(item.price))}${item.available ? '' : ' - No disponible'}</p>
               </div>
               <strong class="menu-publico-cart-total">${escapeHtml(formatCurrency(totalLinea))}</strong>
             </div>
@@ -460,13 +458,20 @@ const renderCart = () => {
   }
 
   const totals = calculateTotals();
+  const totalItems = state.cart.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
   if (dom.orderCount) {
-    const totalItems = state.cart.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
     dom.orderCount.textContent = `${totalItems} ${totalItems === 1 ? 'item' : 'items'}`;
+  }
+  if (dom.mobileCount) {
+    dom.mobileCount.textContent = `${totalItems} ${totalItems === 1 ? 'item' : 'items'}`;
   }
   if (dom.subtotal) dom.subtotal.textContent = formatCurrency(totals.subtotal);
   if (dom.impuesto) dom.impuesto.textContent = formatCurrency(totals.impuesto);
   if (dom.total) dom.total.textContent = formatCurrency(totals.total);
+  if (dom.mobileTotal) dom.mobileTotal.textContent = formatCurrency(totals.total);
+  if (dom.mobileToggle) {
+    dom.mobileToggle.classList.toggle('has-items', state.cart.length > 0);
+  }
 
   const hasUnavailable = state.cart.some((item) => !item.available);
   setSubmitDisabled(state.submitting || state.loading || !state.cart.length || hasUnavailable);
@@ -563,7 +568,6 @@ const submitOrder = async (event) => {
         items: state.cart.map((item) => ({
           producto_id: item.productId,
           cantidad: item.quantity,
-          precio_unitario: item.price,
         })),
       }),
     });
@@ -576,10 +580,10 @@ const submitOrder = async (event) => {
     const cuentaId = Number(data?.pedido?.cuenta_id) || null;
     state.cart = [];
     if (dom.nota) dom.nota.value = '';
-    renderCart();
+    renderAll();
     setBoxMessage(
       dom.formMessage,
-      `Pedido enviado${pedidoId ? ` #${pedidoId}` : ''}${cuentaId ? ` · Cuenta #${cuentaId}` : ''}.`,
+      `Pedido enviado${pedidoId ? ` #${pedidoId}` : ''}${cuentaId ? ` - Cuenta #${cuentaId}` : ''}.`,
       'success'
     );
     await loadMenu({ silent: true });
@@ -596,10 +600,7 @@ const handleCatalogClick = (event) => {
   if (!addButton) return;
 
   const productId = Number(addButton.dataset.productId);
-  const card = addButton.closest('.menu-publico-item');
-  const select = card?.querySelector('[data-role="price-select"]');
-  const optionIndex = Number(select?.value ?? 0);
-  addToCart(productId, optionIndex);
+  addToCart(productId);
 };
 
 const handleCartClick = (event) => {
@@ -630,6 +631,8 @@ const init = async () => {
     return;
   }
 
+  syncDrawerViewport();
+
   dom.search?.addEventListener('input', (event) => {
     state.search = event.target.value || '';
     renderCatalog();
@@ -638,6 +641,16 @@ const init = async () => {
   dom.cart?.addEventListener('click', handleCartClick);
   dom.nav?.addEventListener('click', handleNavClick);
   dom.form?.addEventListener('submit', submitOrder);
+  dom.mobileToggle?.addEventListener('click', () => {
+    setDrawerOpen(!state.drawerOpen);
+  });
+  dom.overlay?.addEventListener('click', () => {
+    setDrawerOpen(false);
+  });
+  dom.orderClose?.addEventListener('click', () => {
+    setDrawerOpen(false);
+  });
+  compactViewportQuery?.addEventListener?.('change', syncDrawerViewport);
 
   await loadMenu();
   state.pollHandle = window.setInterval(() => {
@@ -649,6 +662,7 @@ window.addEventListener('beforeunload', () => {
   if (state.pollHandle) {
     window.clearInterval(state.pollHandle);
   }
+  compactViewportQuery?.removeEventListener?.('change', syncDrawerViewport);
 });
 
 init();

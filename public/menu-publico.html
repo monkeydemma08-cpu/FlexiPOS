@@ -79,7 +79,10 @@
                 <p class="menu-publico-order-kicker">Tu pedido</p>
                 <h2>Envialo directo al negocio</h2>
               </div>
-              <span class="menu-publico-order-count" id="menu-publico-order-count">0 items</span>
+              <div class="menu-publico-order-head-actions">
+                <span class="menu-publico-order-count" id="menu-publico-order-count">0 items</span>
+                <button type="button" class="menu-publico-order-close" id="menu-publico-order-close">Cerrar</button>
+              </div>
             </div>
 
             <form id="menu-publico-form" class="menu-publico-form">
@@ -129,6 +132,16 @@
           </section>
         </aside>
       </main>
+
+      <button type="button" class="menu-publico-mobile-toggle" id="menu-publico-mobile-toggle">
+        <span class="menu-publico-mobile-toggle-copy">
+          <strong id="menu-publico-mobile-count">0 items</strong>
+          <span>Ver pedido</span>
+        </span>
+        <strong class="menu-publico-mobile-toggle-total" id="menu-publico-mobile-total">RD$0.00</strong>
+      </button>
+
+      <div class="menu-publico-overlay" id="menu-publico-overlay" hidden></div>
     </div>
   </body>
 </html>

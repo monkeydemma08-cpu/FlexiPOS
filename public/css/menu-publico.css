@@ -433,6 +433,24 @@ body.menu-publico-body::after {
   align-items: end;
 }
 
+.menu-publico-item-footer-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.menu-publico-item-cart-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: rgba(217, 106, 138, 0.12);
+  color: var(--menu-brand-strong);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
 .menu-publico-item-button,
 .menu-publico-submit,
 .menu-publico-cart-action,
@@ -472,6 +490,12 @@ body.menu-publico-body::after {
   margin-bottom: 18px;
 }
 
+.menu-publico-order-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .menu-publico-order-head h2 {
   font-size: 2rem;
 }
@@ -486,6 +510,18 @@ body.menu-publico-body::after {
   background: rgba(217, 106, 138, 0.12);
   font-weight: 800;
   color: var(--menu-brand-strong);
+}
+
+.menu-publico-order-close {
+  display: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: rgba(77, 45, 50, 0.08);
+  color: var(--menu-ink);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .menu-publico-form {
@@ -610,6 +646,11 @@ body.menu-publico-body::after {
   font-size: 1.02rem;
 }
 
+.menu-publico-mobile-toggle,
+.menu-publico-overlay {
+  display: none;
+}
+
 @keyframes menuFadeIn {
   from {
     opacity: 0;
@@ -630,6 +671,141 @@ body.menu-publico-body::after {
 
   .menu-publico-sidebar {
     position: static;
+  }
+}
+
+@media (max-width: 860px) {
+  body.menu-publico-body {
+    padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+  }
+
+  body.menu-publico-drawer-open {
+    overflow: hidden;
+  }
+
+  .menu-publico-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .menu-publico-hero-card {
+    display: none;
+  }
+
+  .menu-publico-main {
+    grid-template-columns: 1fr;
+    margin-top: 18px;
+  }
+
+  .menu-publico-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    padding-bottom: 10px;
+    background: linear-gradient(180deg, rgba(246, 232, 230, 0.97), rgba(246, 232, 230, 0.88));
+    backdrop-filter: blur(10px);
+  }
+
+  .menu-publico-sidebar {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 30;
+    padding: 0 10px;
+  }
+
+  .menu-publico-order-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 0;
+    max-height: calc(100vh - 72px);
+    border-radius: 28px 28px 0 0;
+    transform: translateY(110%);
+    transition: transform 0.24s ease;
+    box-shadow: 0 -14px 44px rgba(77, 45, 50, 0.16);
+  }
+
+  body.menu-publico-drawer-open .menu-publico-order-card {
+    transform: translateY(0);
+  }
+
+  .menu-publico-order-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: 0 0 14px;
+    padding-bottom: 12px;
+    background: var(--menu-paper);
+  }
+
+  .menu-publico-order-head-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .menu-publico-order-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .menu-publico-form {
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .menu-publico-mobile-toggle {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    width: auto;
+    border: 0;
+    border-radius: 22px;
+    padding: 15px 18px;
+    background: linear-gradient(135deg, var(--menu-brand), var(--menu-brand-strong));
+    color: #fff;
+    font: inherit;
+    box-shadow: 0 18px 36px rgba(199, 81, 116, 0.3);
+    cursor: pointer;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+
+  body.menu-publico-drawer-open .menu-publico-mobile-toggle {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(10px);
+  }
+
+  .menu-publico-mobile-toggle-copy {
+    display: grid;
+    gap: 2px;
+    text-align: left;
+  }
+
+  .menu-publico-mobile-toggle-copy strong,
+  .menu-publico-mobile-toggle-total {
+    font-size: 1rem;
+    font-weight: 800;
+  }
+
+  .menu-publico-mobile-toggle-copy span {
+    font-size: 0.88rem;
+    opacity: 0.9;
+  }
+
+  .menu-publico-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 24;
+    background: rgba(52, 31, 36, 0.32);
+    backdrop-filter: blur(4px);
   }
 }
 

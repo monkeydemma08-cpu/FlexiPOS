@@ -18736,6 +18736,7 @@ const obtenerCatalogoMenuPublico = async (negocioId) => {
   const productos = (rows || []).map((row) => {
     const stockIndefinido = esStockIndefinido(row);
     let disponible = stockIndefinido || (Number(row.stock) || 0) > 0;
+    const precioBase = redondearMoneda(Number(row.precio) || 0);
 
     if (usaRecetas) {
       const receta = recetasMap.get(Number(row.id)) || [];
@@ -18760,13 +18761,12 @@ const obtenerCatalogoMenuPublico = async (negocioId) => {
       }
     }
 
-    const opcionesPrecio = construirOpcionesPrecioProducto(row);
     const categoriaNombre = limpiarTextoGeneral(row.categoria_nombre) || 'Menu';
     const producto = {
       id: Number(row.id),
       nombre: row.nombre,
-      precio: opcionesPrecio.length ? opcionesPrecio[0].valor : redondearMoneda(Number(row.precio) || 0),
-      precios: opcionesPrecio,
+      precio: precioBase,
+      precios: [{ label: 'Base', valor: precioBase }],
       disponible,
       categoria_id: row.categoria_id ? Number(row.categoria_id) : null,
       categoria_nombre: categoriaNombre,
@@ -18881,23 +18881,7 @@ const prepararItemsPedidoMenuPublico = async (
       }
     }
 
-    const opcionesPrecio = construirOpcionesPrecioProducto(producto);
-    let precioUnitario = opcionesPrecio.length ? opcionesPrecio[0].valor : normalizarNumero(producto.precio, 0);
-    const precioSolicitadoRaw = item?.precio_unitario ?? item?.precioUnitario ?? null;
-    if (precioSolicitadoRaw !== null && precioSolicitadoRaw !== undefined && precioSolicitadoRaw !== '') {
-      const precioSolicitado = normalizarNumero(precioSolicitadoRaw, null);
-      if (precioSolicitado === null || precioSolicitado < 0) {
-        throw crearErrorEstado(400, `Precio invalido para ${producto.nombre || productoId}.`);
-      }
-      const precioRedondeado = Number(precioSolicitado.toFixed(2));
-      const permitido = opcionesPrecio.some(
-        (opcion) => Number(opcion.valor).toFixed(2) === precioRedondeado.toFixed(2)
-      );
-      if (!permitido) {
-        throw crearErrorEstado(400, `Precio no permitido para ${producto.nombre || productoId}.`);
-      }
-      precioUnitario = precioRedondeado;
-    }
+    const precioUnitario = Number((normalizarNumero(producto.precio, 0) || 0).toFixed(2));
 
     itemsProcesados.push({
       producto_id: productoId,
