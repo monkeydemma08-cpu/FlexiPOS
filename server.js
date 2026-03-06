@@ -6965,11 +6965,12 @@ app.get('/api/public/menu/:token/qr.svg', async (req, res) => {
     const qrUrl = construirUrlMenuPublico(req, acceso.token);
     const svg = await QRCode.toString(qrUrl, {
       type: 'svg',
-      margin: 1,
-      width: 320,
+      errorCorrectionLevel: 'H',
+      margin: 4,
+      width: 384,
       color: {
-        dark: '#4d2d32',
-        light: '#0000',
+        dark: '#000000',
+        light: '#FFFFFF',
       },
     });
 
@@ -18606,17 +18607,30 @@ const prepararItemsDeuda = async (
   };
 };
 
+const MENU_PUBLICO_BASE_URL = String(
+  process.env.MENU_PUBLICO_BASE_URL || process.env.APP_BASE_URL || process.env.PUBLIC_BASE_URL || ''
+)
+  .trim()
+  .replace(/\/+$/, '');
+
 const construirUrlMenuPublico = (req, token) => {
   const tokenSeguro = encodeURIComponent((token || '').toString().trim());
   const ruta = `/menu/${tokenSeguro}`;
-  if (!req || !tokenSeguro) {
+  if (!tokenSeguro) {
     return ruta;
   }
-  const host = req.get?.('host');
+  if (MENU_PUBLICO_BASE_URL) {
+    return `${MENU_PUBLICO_BASE_URL}${ruta}`;
+  }
+  if (!req) {
+    return ruta;
+  }
+  const host = (req.get?.('x-forwarded-host') || req.get?.('host') || '').split(',')[0].trim();
   if (!host) {
     return ruta;
   }
-  return `${req.protocol || 'http'}://${host}${ruta}`;
+  const protocol = (req.get?.('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim() || 'http';
+  return `${protocol}://${host}${ruta}`;
 };
 
 const mapAccesoMenuPublico = (row = {}, req = null) => {
