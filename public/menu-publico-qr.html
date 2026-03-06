@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QR menu publico</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/menu-publico-qr.css?v=20260305a" />
+    <script src="/js/auth.js" defer></script>
+    <script src="/js/menu-publico-qr.js?v=20260305a" defer></script>
+  </head>
+  <body data-role="admin,empresa,supervisor" class="menu-qr-body">
+    <main class="menu-qr-shell">
+      <header class="menu-qr-header">
+        <div>
+          <p class="menu-qr-kicker">Menu publico</p>
+          <h1>Hoja imprimible de QR por mesa</h1>
+          <p id="menu-qr-subtitle">Cargando accesos del negocio...</p>
+        </div>
+        <div class="menu-qr-actions">
+          <button type="button" class="menu-qr-button menu-qr-button-ghost" id="menu-qr-recargar">Recargar</button>
+          <button type="button" class="menu-qr-button" id="menu-qr-imprimir">Imprimir</button>
+        </div>
+      </header>
+
+      <section class="menu-qr-feedback" id="menu-qr-feedback" hidden></section>
+      <section class="menu-qr-grid" id="menu-qr-grid"></section>
+    </main>
+  </body>
+</html>

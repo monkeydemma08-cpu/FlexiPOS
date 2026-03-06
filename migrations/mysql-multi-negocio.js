@@ -1014,6 +1014,38 @@ async function ensureTableConsumoInsumos() {
   await ensureIndexByName('consumo_insumos', 'idx_consumo_insumos_negocio_insumo', '(negocio_id, insumo_id)');
 }
 
+async function ensureTableMenuPublicoAccesos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS menu_publico_accesos (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      token VARCHAR(64) NOT NULL,
+      nombre VARCHAR(120) NOT NULL,
+      mesa VARCHAR(100) NULL,
+      tipo VARCHAR(20) NOT NULL DEFAULT 'mesa',
+      activo TINYINT(1) NOT NULL DEFAULT 1,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY ux_menu_publico_accesos_token (token),
+      CONSTRAINT fk_menu_publico_accesos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureColumn('menu_publico_accesos', 'nombre VARCHAR(120) NOT NULL DEFAULT "Acceso publico"');
+  await ensureColumn('menu_publico_accesos', 'mesa VARCHAR(100) NULL');
+  await ensureColumn('menu_publico_accesos', "tipo VARCHAR(20) NOT NULL DEFAULT 'mesa'");
+  await ensureColumn('menu_publico_accesos', 'activo TINYINT(1) NOT NULL DEFAULT 1');
+  await ensureColumn('menu_publico_accesos', 'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
+  await ensureColumn(
+    'menu_publico_accesos',
+    'updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+  );
+  await ensureIndexByName('menu_publico_accesos', 'idx_menu_publico_accesos_negocio', '(negocio_id)');
+  await ensureIndexByName('menu_publico_accesos', 'idx_menu_publico_accesos_mesa', '(negocio_id, mesa)');
+  await ensureIndexByName('menu_publico_accesos', 'idx_menu_publico_accesos_tipo', '(negocio_id, tipo, activo)');
+  await ensureForeignKey('menu_publico_accesos', 'negocio_id');
+}
+
 async function ensureTableAnalisisCapitalInicial() {
   await query(`
     CREATE TABLE IF NOT EXISTS analisis_capital_inicial (
@@ -1841,6 +1873,7 @@ async function runMigrations() {
   await ensureTableRecetas();
   await ensureTableRecetaDetalle();
   await ensureTableConsumoInsumos();
+  await ensureTableMenuPublicoAccesos();
   await ensureTableAnalisisCapitalInicial();
   await ensureTableClientes();
   await ensureTableClientesNotas();

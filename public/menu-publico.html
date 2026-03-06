@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <title>Menu digital</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Playfair+Display:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/menu-publico.css?v=20260305a" />
+    <script src="/js/menu-publico.js?v=20260305a" defer></script>
+  </head>
+  <body class="menu-publico-body">
+    <div class="menu-publico-shell">
+      <header class="menu-publico-hero">
+        <div class="menu-publico-hero-copy">
+          <p class="menu-publico-kicker">Menu digital</p>
+          <div class="menu-publico-brand">
+            <div class="menu-publico-logo" aria-hidden="true">
+              <img id="menu-publico-logo" alt="" hidden />
+              <span id="menu-publico-logo-fallback">KM</span>
+            </div>
+            <div class="menu-publico-brand-text">
+              <h1 id="menu-publico-titulo">Cargando menu...</h1>
+              <p id="menu-publico-subtitulo">Espera un momento mientras sincronizamos disponibilidad y precios.</p>
+            </div>
+          </div>
+          <div class="menu-publico-badges">
+            <span class="menu-publico-badge" id="menu-publico-badge-acceso">Mesa</span>
+            <span class="menu-publico-badge menu-publico-badge-soft" id="menu-publico-badge-sync"
+              >Sincronizando...</span
+            >
+          </div>
+        </div>
+
+        <div class="menu-publico-hero-card">
+          <p class="menu-publico-hero-card-label">Pide desde tu celular</p>
+          <h2>La mesa comparte una sola cuenta en caja.</h2>
+          <p>
+            Si varias personas escanean este QR, cada una puede pedir por separado y luego caja decide si cobra junto o
+            separa la cuenta.
+          </p>
+          <ul class="menu-publico-hero-list">
+            <li>Disponibilidad en tiempo real</li>
+            <li>Nota para cocina o bar</li>
+            <li>Consumo en local o para llevar</li>
+          </ul>
+        </div>
+      </header>
+
+      <main class="menu-publico-main">
+        <section class="menu-publico-catalogo-panel">
+          <div class="menu-publico-toolbar">
+            <label class="menu-publico-search">
+              <span>Buscar</span>
+              <input
+                id="menu-publico-search"
+                type="search"
+                placeholder="Empanada, jugo, postre..."
+                autocomplete="off"
+              />
+            </label>
+            <div class="menu-publico-nav" id="menu-publico-categorias-nav"></div>
+          </div>
+
+          <div class="menu-publico-feedback" id="menu-publico-estado" hidden></div>
+          <div class="menu-publico-categorias" id="menu-publico-categorias"></div>
+        </section>
+
+        <aside class="menu-publico-sidebar">
+          <section class="menu-publico-order-card">
+            <div class="menu-publico-order-head">
+              <div>
+                <p class="menu-publico-order-kicker">Tu pedido</p>
+                <h2>Envialo directo al negocio</h2>
+              </div>
+              <span class="menu-publico-order-count" id="menu-publico-order-count">0 items</span>
+            </div>
+
+            <form id="menu-publico-form" class="menu-publico-form">
+              <label class="menu-publico-field">
+                <span>Tu nombre (opcional)</span>
+                <input id="menu-publico-cliente" type="text" maxlength="120" placeholder="Ej. Ana o Silla 3" />
+              </label>
+
+              <label class="menu-publico-field">
+                <span>Tipo de servicio</span>
+                <select id="menu-publico-servicio">
+                  <option value="en_local">Consumir en el negocio</option>
+                  <option value="para_llevar">Para llevar</option>
+                </select>
+              </label>
+
+              <label class="menu-publico-field">
+                <span>Nota para preparacion</span>
+                <textarea
+                  id="menu-publico-nota"
+                  rows="3"
+                  maxlength="200"
+                  placeholder="Ej. Sin cebolla, extra queso, poco azucar..."
+                ></textarea>
+              </label>
+
+              <div class="menu-publico-cart" id="menu-publico-cart"></div>
+
+              <div class="menu-publico-totales">
+                <div class="menu-publico-total-row">
+                  <span>Subtotal</span>
+                  <strong id="menu-publico-subtotal">RD$0.00</strong>
+                </div>
+                <div class="menu-publico-total-row">
+                  <span>Impuesto</span>
+                  <strong id="menu-publico-impuesto">RD$0.00</strong>
+                </div>
+                <div class="menu-publico-total-row menu-publico-total-row-strong">
+                  <span>Total estimado</span>
+                  <strong id="menu-publico-total">RD$0.00</strong>
+                </div>
+              </div>
+
+              <button id="menu-publico-submit" class="menu-publico-submit" type="submit">Enviar pedido</button>
+              <div class="menu-publico-form-message" id="menu-publico-form-message" hidden></div>
+            </form>
+          </section>
+        </aside>
+      </main>
+    </div>
+  </body>
+</html>

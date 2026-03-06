@@ -311,6 +311,23 @@ CREATE TABLE IF NOT EXISTS detalle_pedido (
   CONSTRAINT fk_detalle_pedido_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS menu_publico_accesos (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  negocio_id INT NOT NULL,
+  token VARCHAR(64) NOT NULL,
+  nombre VARCHAR(120) NOT NULL,
+  mesa VARCHAR(100),
+  tipo VARCHAR(20) NOT NULL DEFAULT 'mesa',
+  activo TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY ux_menu_publico_accesos_token (token),
+  KEY idx_menu_publico_accesos_negocio (negocio_id),
+  KEY idx_menu_publico_accesos_mesa (negocio_id, mesa),
+  KEY idx_menu_publico_accesos_tipo (negocio_id, tipo, activo),
+  CONSTRAINT fk_menu_publico_accesos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS historial_cocina (
   id INT AUTO_INCREMENT PRIMARY KEY,
   cuenta_id INT,

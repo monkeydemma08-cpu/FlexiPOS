@@ -322,6 +322,12 @@ const dgiiCasosMensaje = document.getElementById('dgii-casos-mensaje');
 const dgiiCasosTabla = document.getElementById('dgii-casos-tabla');
 const adminTabs = Array.from(document.querySelectorAll('[data-admin-tab]'));
 const adminSections = Array.from(document.querySelectorAll('[data-admin-section]'));
+const menuPublicoRefrescarBtn = document.getElementById('menu-publico-refrescar');
+const menuPublicoMensaje = document.getElementById('menu-publico-mensaje');
+const menuPublicoAccesosBody = document.getElementById('menu-publico-accesos-body');
+const menuPublicoLinks = document.getElementById('menu-publico-links');
+const menuPublicoTotalEl = document.getElementById('menu-publico-total');
+const menuPublicoMesasEl = document.getElementById('menu-publico-mesas');
 
 let paginaHistorialCocina = 1;
 const HIST_COCINA_PAGE_SIZE = 50;
@@ -345,6 +351,8 @@ let acreditaItbisConfig = true;
 let recetaProductoIdActivo = null;
 let dgiiSets = [];
 let dgiiCasos = [];
+let menuPublicoAccesos = [];
+let menuPublicoCargado = false;
 
 const REFRESH_INTERVAL_ADMIN = 15000;
 const SYNC_STORAGE_KEY = 'kanm:last-update';
@@ -1257,6 +1265,7 @@ const tabsSoloAdmin = [
   'compras',
   'abastecimiento',
   'gastos',
+  'menuPublico',
   'ventas',
   'analisis',
   'cuadres',
@@ -1334,6 +1343,195 @@ const setMessage = (element, text, type = 'info') => {
   if (!element) return;
   element.textContent = text || '';
   element.dataset.type = text ? type : '';
+};
+
+const limpiarNodo = (node) => {
+  if (!node) return;
+  while (node.firstChild) {
+    node.removeChild(node.firstChild);
+  }
+};
+
+const construirUrlAbsoluta = (value) => {
+  if (!value) return '';
+  try {
+    return new URL(value, window.location.origin).toString();
+  } catch (_) {
+    return String(value || '');
+  }
+};
+
+const obtenerRutaVisibleMenuPublico = (value) => {
+  const url = construirUrlAbsoluta(value);
+  if (!url) return '--';
+  try {
+    const parsed = new URL(url);
+    return `${parsed.pathname}${parsed.search || ''}`;
+  } catch (_) {
+    return url;
+  }
+};
+
+const obtenerUrlQrMenuPublico = (acceso = {}) => {
+  const token = String(acceso?.token || '').trim();
+  if (!token) return '';
+  return `/api/public/menu/${encodeURIComponent(token)}/qr.svg`;
+};
+
+const crearLinkBotonMenuPublico = (label, href, variant = 'ghost') => {
+  const anchor = document.createElement('a');
+  anchor.className = `kanm-button ${variant} sm`;
+  anchor.href = href || '#';
+  anchor.target = '_blank';
+  anchor.rel = 'noopener noreferrer';
+  anchor.textContent = label;
+  if (!href) {
+    anchor.setAttribute('aria-disabled', 'true');
+    anchor.classList.add('disabled');
+    anchor.addEventListener('click', (event) => event.preventDefault());
+  }
+  return anchor;
+};
+
+const renderMenuPublicoAccesos = () => {
+  if (!menuPublicoAccesosBody || !menuPublicoLinks) return;
+
+  limpiarNodo(menuPublicoAccesosBody);
+  limpiarNodo(menuPublicoLinks);
+
+  const accesos = Array.isArray(menuPublicoAccesos) ? menuPublicoAccesos : [];
+  const mesas = accesos.filter((acceso) => acceso?.tipo === 'mesa');
+
+  if (menuPublicoTotalEl) {
+    menuPublicoTotalEl.textContent = String(accesos.length);
+  }
+  if (menuPublicoMesasEl) {
+    menuPublicoMesasEl.textContent = String(mesas.length);
+  }
+
+  if (!accesos.length) {
+    const fila = document.createElement('tr');
+    const celda = document.createElement('td');
+    celda.colSpan = 5;
+    celda.textContent = 'No hay accesos del menu publico creados para este negocio.';
+    fila.appendChild(celda);
+    menuPublicoAccesosBody.appendChild(fila);
+
+    const card = document.createElement('article');
+    card.className = 'admin-menu-publico-link-card';
+    const titulo = document.createElement('strong');
+    titulo.textContent = 'Sin accesos configurados';
+    const texto = document.createElement('p');
+    texto.className = 'kanm-subtitle';
+    texto.textContent = 'Usa la hoja de QR para crear o revisar los accesos de las mesas.';
+    card.append(titulo, texto);
+    menuPublicoLinks.appendChild(card);
+    return;
+  }
+
+  accesos.forEach((acceso) => {
+    const fila = document.createElement('tr');
+    const urlMenu = construirUrlAbsoluta(acceso?.url);
+    const qrUrl = obtenerUrlQrMenuPublico(acceso);
+
+    const nombreTd = document.createElement('td');
+    nombreTd.textContent = acceso?.nombre || acceso?.mesa || 'Menu publico';
+
+    const tipoTd = document.createElement('td');
+    tipoTd.textContent = acceso?.tipo === 'mesa' ? 'Mesa' : 'Para llevar';
+
+    const rutaTd = document.createElement('td');
+    rutaTd.textContent = obtenerRutaVisibleMenuPublico(urlMenu);
+
+    const estadoTd = document.createElement('td');
+    estadoTd.textContent = Number(acceso?.activo) ? 'Activo' : 'Inactivo';
+
+    const accionesTd = document.createElement('td');
+    const accionesWrap = document.createElement('div');
+    accionesWrap.className = 'admin-menu-publico-link-actions';
+    accionesWrap.append(
+      crearLinkBotonMenuPublico('Abrir menu', urlMenu),
+      crearLinkBotonMenuPublico('Ver QR', qrUrl),
+    );
+    accionesTd.appendChild(accionesWrap);
+
+    fila.append(nombreTd, tipoTd, rutaTd, estadoTd, accionesTd);
+    menuPublicoAccesosBody.appendChild(fila);
+  });
+
+  accesos.slice(0, 5).forEach((acceso) => {
+    const card = document.createElement('article');
+    card.className = 'admin-menu-publico-link-card';
+
+    const head = document.createElement('div');
+    head.className = 'admin-menu-publico-link-head';
+
+    const titulo = document.createElement('strong');
+    titulo.textContent = acceso?.nombre || acceso?.mesa || 'Menu publico';
+
+    const tipo = document.createElement('span');
+    tipo.className = 'kanm-subtitle';
+    tipo.textContent = acceso?.tipo === 'mesa' ? 'Cuenta compartida por mesa' : 'Acceso para llevar';
+
+    head.append(titulo, tipo);
+
+    const ruta = document.createElement('p');
+    ruta.className = 'admin-menu-publico-link-path';
+    ruta.textContent = construirUrlAbsoluta(acceso?.url) || '--';
+
+    const acciones = document.createElement('div');
+    acciones.className = 'admin-menu-publico-link-actions';
+    acciones.append(
+      crearLinkBotonMenuPublico('Abrir menu', construirUrlAbsoluta(acceso?.url), 'primary'),
+      crearLinkBotonMenuPublico('QR individual', obtenerUrlQrMenuPublico(acceso)),
+    );
+
+    card.append(head, ruta, acciones);
+    menuPublicoLinks.appendChild(card);
+  });
+};
+
+const cargarMenuPublicoAccesos = async ({ force = false } = {}) => {
+  if (!menuPublicoAccesosBody) return;
+  if (menuPublicoCargado && !force) {
+    renderMenuPublicoAccesos();
+    return;
+  }
+
+  setMessage(menuPublicoMensaje, 'Cargando accesos del menu publico...', 'info');
+
+  try {
+    const response = await fetchConAutorizacion('/api/menu-publico/accesos');
+    const data = await leerRespuestaApi(response);
+
+    if (!response.ok || !data?.ok) {
+      const mensajeError =
+        data?.error ||
+        (response.status === 404
+          ? 'El servidor actual no ha cargado las rutas del menu publico. Reinicia server.js y vuelve a entrar.'
+          : 'No se pudieron cargar los accesos del menu publico.');
+      throw new Error(mensajeError);
+    }
+
+    menuPublicoAccesos = Array.isArray(data.accesos) ? data.accesos : [];
+    menuPublicoCargado = true;
+    renderMenuPublicoAccesos();
+
+    if (menuPublicoAccesos.length) {
+      setMessage(menuPublicoMensaje, `${menuPublicoAccesos.length} accesos listos para usar e imprimir.`, 'success');
+    } else {
+      setMessage(menuPublicoMensaje, 'No hay accesos creados para este negocio.', 'warning');
+    }
+  } catch (error) {
+    menuPublicoAccesos = [];
+    menuPublicoCargado = false;
+    renderMenuPublicoAccesos();
+    setMessage(
+      menuPublicoMensaje,
+      error?.message || 'No se pudo cargar el modulo del menu publico.',
+      'warning',
+    );
+  }
 };
 
 const cerrarModalEliminar = () => {
@@ -8444,6 +8642,11 @@ adminTabs.forEach((btn) =>
         cargarRegistrosSolicitudes();
       }
     }
+    if (tab === 'menuPublico') {
+      cargarMenuPublicoAccesos({ force: true }).catch((error) => {
+        console.warn('No se pudieron cargar los accesos del menu publico:', error);
+      });
+    }
     if (tab === 'dgiiPaso2') {
       if (!sesion?.esSuperAdmin) {
         setMessage(dgiiSetMensaje, 'Modulo DGII Paso 2 habilitado solo para super admin.', 'warning');
@@ -8475,6 +8678,12 @@ histCocinaCocineroSelect?.addEventListener('change', () => cargarHistorialCocina
 histCocinaAreaSelect?.addEventListener('change', () => {
   cargarCocinerosHistorial();
   cargarHistorialCocina(1);
+  });
+
+menuPublicoRefrescarBtn?.addEventListener('click', () => {
+  cargarMenuPublicoAccesos({ force: true }).catch((error) => {
+    console.warn('No se pudieron refrescar los accesos del menu publico:', error);
+  });
 });
 
 document.addEventListener('keydown', (event) => {
@@ -8549,6 +8758,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   const esAdmin = esRolAdmin(usuarioActual?.rol);
   if (!esAdmin) {
     return;
+  }
+
+  if (tabInicial === 'menuPublico') {
+    await cargarMenuPublicoAccesos({ force: true });
   }
 
   if (tabInicial === 'dgiiPaso2' && (usuarioActual?.esSuperAdmin || usuarioActual?.es_super_admin)) {

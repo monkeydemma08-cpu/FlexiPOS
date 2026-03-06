@@ -110,6 +110,7 @@
       <button type="button" class="kanm-tab" data-admin-tab="configuracion" data-modulo="admin">Configuración</button>
       <button type="button" class="kanm-tab" data-admin-tab="usuarios" data-modulo="admin">Usuarios</button>
       <button type="button" class="kanm-tab" data-admin-tab="categorias" data-modulo="admin">Categorías</button>
+      <button type="button" class="kanm-tab" data-admin-tab="menuPublico" data-modulo="admin">Menu QR</button>
       <button type="button" class="kanm-tab" data-admin-tab="clientes" data-modulo="admin">Clientes</button>
       <button type="button" class="kanm-tab" data-admin-tab="cotizaciones" data-modulo="admin" data-tab-url="/admin/cotizaciones">
         Cotizaciones
@@ -657,6 +658,91 @@
             </div>
             <div id="categoria-mensaje" class="kanm-message"></div>
           </form>
+        </section>
+      </div>
+    </section>
+
+    <!-- Menu publico -->
+    <section class="admin-panel hidden" data-admin-section="menuPublico" id="admin-section-menu-publico">
+      <div class="kanm-card-header">
+        <h2>Menu QR</h2>
+        <p class="kanm-subtitle">Gestiona los accesos publicos por mesa y abre la hoja lista para imprimir.</p>
+      </div>
+
+      <div class="admin-seccion-grid">
+        <section class="kanm-card admin-card admin-menu-publico-panel">
+          <header class="kanm-card-header admin-menu-publico-header">
+            <div>
+              <h3>Accesos activos</h3>
+              <p class="kanm-subtitle">Cada QR comparte la cuenta de su mesa para que caja la cierre en una sola cuenta.</p>
+            </div>
+            <div class="admin-menu-publico-actions">
+              <button type="button" class="kanm-button ghost" id="menu-publico-refrescar">Refrescar</button>
+              <a
+                class="kanm-button primary"
+                id="menu-publico-abrir-panel"
+                href="/admin/menu-publico/qr"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Imprimir QR
+              </a>
+            </div>
+          </header>
+
+          <div class="admin-resumen-grid admin-menu-publico-resumen">
+            <article class="resumen-metric">
+              <span class="resumen-label">Accesos activos</span>
+              <strong class="resumen-value" id="menu-publico-total">0</strong>
+            </article>
+            <article class="resumen-metric">
+              <span class="resumen-label">Mesas configuradas</span>
+              <strong class="resumen-value" id="menu-publico-mesas">0</strong>
+            </article>
+          </div>
+
+          <p class="kanm-subtitle admin-menu-publico-mensaje" id="menu-publico-mensaje">
+            Cargando accesos del menu publico...
+          </p>
+
+          <div class="kanm-table-wrapper">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Tipo</th>
+                  <th>Ruta</th>
+                  <th>Estado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="menu-publico-accesos-body">
+                <tr>
+                  <td colspan="5">Cargando accesos...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="kanm-card admin-card admin-menu-publico-panel">
+          <header class="kanm-card-header">
+            <div>
+              <h3>Enlaces rapidos</h3>
+              <p class="kanm-subtitle">Abre el menu de una mesa o descarga su QR individual.</p>
+            </div>
+          </header>
+
+          <div class="admin-menu-publico-links" id="menu-publico-links">
+            <article class="admin-menu-publico-link-card">
+              <strong>Preparando accesos...</strong>
+              <p class="kanm-subtitle">Cuando cargue la lista veras cada mesa con sus enlaces directos.</p>
+            </article>
+          </div>
+
+          <div class="admin-menu-publico-note">
+            Si al abrir la hoja QR o un menu te sale 404, reinicia `server.js`. La pestaña puede aparecer antes de que el proceso viejo cargue las rutas nuevas.
+          </div>
         </section>
       </div>
     </section>

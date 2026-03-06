@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const http = require('http');
 const { Server } = require('socket.io');
+const QRCode = require('qrcode');
 
 let nodemailer = null;
 try {
@@ -1111,6 +1112,8 @@ function normalizarEstadoPreparacionDetalle(estado, fallback = 'pendiente') {
 }
 
 const ORIGENES_CAJA = new Set(['caja', 'mostrador']);
+const TIPOS_MENU_PUBLICO = new Set(['mesa', 'pickup']);
+const MODOS_SERVICIO_MENU_PUBLICO = new Set(['en_local', 'para_llevar']);
 
 function normalizarOrigenCaja(valor, fallback = 'caja') {
   if (valor === undefined || valor === null) {
@@ -1127,6 +1130,20 @@ function construirFiltroOrigenCaja(origen, params = [], campo = 'origen_caja') {
   }
   params.push(normalizado);
   return `${campo} = ?`;
+}
+
+function normalizarTipoMenuPublico(valor, fallback = 'mesa') {
+  const tipo = (valor || '').toString().trim().toLowerCase();
+  return TIPOS_MENU_PUBLICO.has(tipo) ? tipo : fallback;
+}
+
+function normalizarModoServicioMenuPublico(valor, fallback = 'en_local') {
+  const modo = (valor || '').toString().trim().toLowerCase();
+  return MODOS_SERVICIO_MENU_PUBLICO.has(modo) ? modo : fallback;
+}
+
+function generarTokenMenuPublico() {
+  return crypto.randomBytes(18).toString('hex');
 }
 
 function parseConfigModulos(configModulos) {
@@ -6923,6 +6940,310 @@ app.get('/supervisor/cotizaciones', (req, res) => {
 
 app.get('/admin/cotizaciones/:id/imprimir', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'cotizacion-imprimir.html'));
+});
+
+app.get('/admin/menu-publico/qr', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'menu-publico-qr.html'));
+});
+
+app.get('/menu/:token', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'menu-publico.html'));
+});
+
+app.get('/api/public/menu/:token/qr.svg', async (req, res) => {
+  const token = normalizarCampoTexto(req.params?.token ?? req.query?.token, null);
+  if (!token) {
+    return res.status(400).type('text/plain').send('Token de menu invalido.');
+  }
+
+  try {
+    const acceso = await obtenerAccesoMenuPublicoPorToken(token, { req });
+    if (!acceso || normalizarFlag(acceso.activo, 1) !== 1) {
+      return res.status(404).type('text/plain').send('Acceso de menu no encontrado.');
+    }
+
+    const qrUrl = construirUrlMenuPublico(req, acceso.token);
+    const svg = await QRCode.toString(qrUrl, {
+      type: 'svg',
+      margin: 1,
+      width: 320,
+      color: {
+        dark: '#4d2d32',
+        light: '#0000',
+      },
+    });
+
+    res.type('image/svg+xml').send(svg);
+  } catch (error) {
+    console.error('Error al generar QR del menu publico:', error?.message || error);
+    res.status(500).type('text/plain').send('No se pudo generar el QR.');
+  }
+});
+
+app.get('/api/public/menu/:token', async (req, res) => {
+  const token = normalizarCampoTexto(req.params?.token ?? req.query?.token, null);
+  if (!token) {
+    return res.status(400).json({ ok: false, error: 'Token de menu invalido.' });
+  }
+
+  try {
+    const acceso = await obtenerAccesoMenuPublicoPorToken(token, { req });
+    if (!acceso) {
+      return res.status(404).json({ ok: false, error: 'Acceso del menu no encontrado.' });
+    }
+    if (normalizarFlag(acceso.activo, 1) !== 1) {
+      return res.status(403).json({ ok: false, error: 'Este acceso del menu esta inactivo.' });
+    }
+
+    const estadoNegocio = await validarEstadoNegocio(acceso.negocio_id);
+    if (!estadoNegocio?.ok) {
+      return res.status(estadoNegocio?.status || 403).json({
+        ok: false,
+        error: estadoNegocio?.error || 'El menu publico no esta disponible.',
+      });
+    }
+
+    const [negocioTema, catalogo, configImpuesto] = await Promise.all([
+      obtenerTemaNegocioPublico(acceso.negocio_id),
+      obtenerCatalogoMenuPublico(acceso.negocio_id),
+      obtenerConfiguracionImpuestoNegocio(acceso.negocio_id),
+    ]);
+
+    if (!negocioTema) {
+      return res.status(404).json({ ok: false, error: 'Negocio no encontrado.' });
+    }
+
+    res.json({
+      ok: true,
+      acceso,
+      negocio: {
+        id: negocioTema.id,
+        slug: negocioTema.slug,
+        nombre: negocioTema.nombre,
+        titulo: negocioTema.titulo_sistema || negocioTema.nombre,
+        logoUrl: negocioTema.logoUrl || negocioTema.logo_url || null,
+        colorPrimario: negocioTema.colorPrimario,
+        colorSecundario: negocioTema.colorSecundario,
+        colorHeader: negocioTema.colorHeader,
+        colorTexto: negocioTema.colorTexto,
+        colorBotonPrimario: negocioTema.colorBotonPrimario,
+        colorBotonSecundario: negocioTema.colorBotonSecundario,
+      },
+      configuracion: {
+        moneda: 'RD$',
+        modo_inventario: catalogo.modoInventario,
+        usa_recetas: catalogo.usaRecetas,
+        bloquear_insumos_sin_stock: catalogo.bloquearInsumosSinStock ? 1 : 0,
+        modos_servicio:
+          acceso.tipo === 'pickup'
+            ? ['para_llevar']
+            : Array.from(MODOS_SERVICIO_MENU_PUBLICO.values()),
+      },
+      impuesto: {
+        valor: configImpuesto.valor,
+        productos_con_impuesto: configImpuesto.productosConImpuesto ? 1 : 0,
+        impuesto_incluido_valor: configImpuesto.impuestoIncluidoValor,
+      },
+      menu: {
+        total_productos: catalogo.productos.length,
+        categorias: catalogo.categorias,
+      },
+    });
+  } catch (error) {
+    console.error('Error al cargar menu publico:', error?.message || error);
+    res.status(500).json({ ok: false, error: 'No se pudo cargar el menu publico.' });
+  }
+});
+
+app.post('/api/public/menu/:token/pedidos', async (req, res) => {
+  const token = normalizarCampoTexto(req.params?.token ?? req.query?.token, null);
+  if (!token) {
+    return res.status(400).json({ ok: false, error: 'Token de menu invalido.' });
+  }
+
+  try {
+    const acceso = await obtenerAccesoMenuPublicoPorToken(token, { req });
+    if (!acceso) {
+      return res.status(404).json({ ok: false, error: 'Acceso del menu no encontrado.' });
+    }
+
+    const resultado = await crearPedidoMenuPublico(acceso, req.body || {});
+    res.status(201).json({
+      ok: true,
+      acceso,
+      pedido: resultado.pedido,
+      advertencias: resultado.advertencias,
+    });
+  } catch (error) {
+    const status = error?.status || 500;
+    if (status >= 500) {
+      console.error('Error al crear pedido desde menu publico:', error?.message || error);
+    }
+    res.status(status).json({
+      ok: false,
+      error: error?.message || 'No se pudo crear el pedido desde el menu publico.',
+    });
+  }
+});
+
+app.get('/api/menu-publico/accesos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    try {
+      const rows = await db.all(
+        `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, created_at, updated_at
+           FROM menu_publico_accesos
+          WHERE negocio_id = ?
+          ORDER BY CASE WHEN tipo = 'mesa' THEN 0 ELSE 1 END ASC, mesa ASC, id ASC`,
+        [negocioId]
+      );
+      res.json({
+        ok: true,
+        accesos: (rows || []).map((row) => mapAccesoMenuPublico(row, req)),
+      });
+    } catch (error) {
+      console.error('Error al listar accesos del menu publico:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron cargar los accesos del menu publico.' });
+    }
+  });
+});
+
+app.post('/api/menu-publico/accesos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const entradas = Array.isArray(req.body?.accesos) ? req.body.accesos : [req.body || {}];
+
+    if (!entradas.length) {
+      return res.status(400).json({ ok: false, error: 'No se recibieron accesos para guardar.' });
+    }
+
+    const crearErrorEstado = (status, message) => {
+      const error = new Error(message);
+      error.status = status;
+      return error;
+    };
+
+    let transaccionIniciada = false;
+
+    try {
+      await db.run('BEGIN');
+      transaccionIniciada = true;
+
+      const accesosGuardados = [];
+
+      for (const entrada of entradas) {
+        const tipo = normalizarTipoMenuPublico(entrada?.tipo, 'mesa');
+        const mesa = tipo === 'mesa' ? limpiarTextoGeneral(entrada?.mesa ?? entrada?.nombre) : null;
+        if (tipo === 'mesa' && !mesa) {
+          throw crearErrorEstado(400, 'Cada acceso de mesa debe incluir una mesa valida.');
+        }
+
+        const nombre = limpiarTextoGeneral(entrada?.nombre) || mesa || 'Para llevar';
+        const activo = normalizarFlag(entrada?.activo, 1);
+        const accesoId = Number(entrada?.id);
+        const tokenEntrada = normalizarCampoTexto(entrada?.token, null);
+        let existente = null;
+
+        if (Number.isFinite(accesoId) && accesoId > 0) {
+          existente = await db.get(
+            `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, created_at, updated_at
+               FROM menu_publico_accesos
+              WHERE id = ? AND negocio_id = ?
+              LIMIT 1
+              FOR UPDATE`,
+            [accesoId, negocioId]
+          );
+        } else if (tipo === 'mesa' && mesa) {
+          existente = await db.get(
+            `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, created_at, updated_at
+               FROM menu_publico_accesos
+              WHERE negocio_id = ? AND tipo = ? AND mesa = ?
+              LIMIT 1
+              FOR UPDATE`,
+            [negocioId, tipo, mesa]
+          );
+        }
+
+        const tokenFinal = tokenEntrada || existente?.token || generarTokenMenuPublico();
+
+        if (existente) {
+          await db.run(
+            `UPDATE menu_publico_accesos
+                SET token = ?, nombre = ?, mesa = ?, tipo = ?, activo = ?, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ? AND negocio_id = ?`,
+            [tokenFinal, nombre, mesa, tipo, activo, existente.id, negocioId]
+          );
+          accesosGuardados.push(
+            mapAccesoMenuPublico(
+              {
+                ...existente,
+                token: tokenFinal,
+                nombre,
+                mesa,
+                tipo,
+                activo,
+                updated_at: new Date(),
+              },
+              req
+            )
+          );
+          continue;
+        }
+
+        const insertResult = await db.run(
+          `INSERT INTO menu_publico_accesos (negocio_id, token, nombre, mesa, tipo, activo)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [negocioId, tokenFinal, nombre, mesa, tipo, activo]
+        );
+
+        accesosGuardados.push(
+          mapAccesoMenuPublico(
+            {
+              id: insertResult.lastID,
+              negocio_id: negocioId,
+              token: tokenFinal,
+              nombre,
+              mesa,
+              tipo,
+              activo,
+              created_at: new Date(),
+              updated_at: new Date(),
+            },
+            req
+          )
+        );
+      }
+
+      await db.run('COMMIT');
+      transaccionIniciada = false;
+
+      res.status(201).json({ ok: true, accesos: accesosGuardados });
+    } catch (error) {
+      if (transaccionIniciada) {
+        await db.run('ROLLBACK').catch(() => {});
+      }
+      if (error?.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ ok: false, error: 'Ya existe un acceso con ese token.' });
+      }
+      const status = error?.status || 500;
+      if (status >= 500) {
+        console.error('Error al guardar accesos del menu publico:', error?.message || error);
+      }
+      res.status(status).json({
+        ok: false,
+        error: error?.message || 'No se pudieron guardar los accesos del menu publico.',
+      });
+    }
+  });
 });
 
 app.get('/api/configuracion/impuesto', (req, res) => {
@@ -18283,6 +18604,586 @@ const prepararItemsDeuda = async (
     insumosMap,
     advertenciasInsumos,
   };
+};
+
+const construirUrlMenuPublico = (req, token) => {
+  const tokenSeguro = encodeURIComponent((token || '').toString().trim());
+  const ruta = `/menu/${tokenSeguro}`;
+  if (!req || !tokenSeguro) {
+    return ruta;
+  }
+  const host = req.get?.('host');
+  if (!host) {
+    return ruta;
+  }
+  return `${req.protocol || 'http'}://${host}${ruta}`;
+};
+
+const mapAccesoMenuPublico = (row = {}, req = null) => {
+  const token = normalizarCampoTexto(row.token ?? row.access_token, null);
+  const tipo = normalizarTipoMenuPublico(row.tipo, 'mesa');
+  const mesa = tipo === 'mesa' ? limpiarTextoGeneral(row.mesa) : null;
+  const nombre =
+    limpiarTextoGeneral(row.nombre) || mesa || (tipo === 'pickup' ? 'Para llevar' : 'Menu publico');
+  const negocioId = Number(row.negocio_id ?? row.negocioId);
+  const accesoId = Number(row.id);
+
+  return {
+    id: Number.isFinite(accesoId) ? accesoId : null,
+    negocio_id: Number.isFinite(negocioId) ? negocioId : null,
+    token,
+    nombre,
+    mesa,
+    tipo,
+    activo: normalizarFlag(row.activo, 1),
+    created_at: row.created_at || row.createdAt || null,
+    updated_at: row.updated_at || row.updatedAt || null,
+    url: token ? construirUrlMenuPublico(req, token) : null,
+  };
+};
+
+const obtenerTemaNegocioPublico = async (negocioId) => {
+  const row = await db.get(
+    `SELECT id, slug, nombre, titulo_sistema, color_primario, color_secundario, color_texto, color_header,
+            color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos,
+            logo_url, activo
+       FROM negocios
+      WHERE id = ?
+      LIMIT 1`,
+    [negocioId]
+  );
+
+  return row ? mapNegocioWithDefaults(row) : null;
+};
+
+const obtenerAccesoMenuPublicoPorToken = async (token, opciones = {}) => {
+  const tokenNormalizado = normalizarCampoTexto(token, null);
+  if (!tokenNormalizado) {
+    return null;
+  }
+
+  const clausulaLock = opciones.forUpdate === true ? ' FOR UPDATE' : '';
+  const row = await db.get(
+    `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, created_at, updated_at
+       FROM menu_publico_accesos
+      WHERE token = ?
+      LIMIT 1${clausulaLock}`,
+    [tokenNormalizado]
+  );
+
+  return row ? mapAccesoMenuPublico(row, opciones.req || null) : null;
+};
+
+const obtenerCuentaActivaMenuPublico = async (negocioId, mesa) => {
+  const mesaNormalizada = limpiarTextoGeneral(mesa);
+  if (!mesaNormalizada) {
+    return null;
+  }
+
+  const row = await db.get(
+    `SELECT COALESCE(cuenta_id, id) AS cuenta_id
+       FROM pedidos
+      WHERE negocio_id = ?
+        AND mesa = ?
+        AND estado NOT IN ('pagado', 'cancelado')
+        AND fecha_cierre IS NULL
+      ORDER BY fecha_creacion ASC, id ASC
+      LIMIT 1`,
+    [negocioId, mesaNormalizada]
+  );
+
+  const cuentaId = Number(row?.cuenta_id);
+  return Number.isFinite(cuentaId) && cuentaId > 0 ? cuentaId : null;
+};
+
+const obtenerCatalogoMenuPublico = async (negocioId) => {
+  const tieneNegocioId = await verificarCategoriaNegocioId();
+  const joinCond = tieneNegocioId
+    ? 'LEFT JOIN categorias c ON c.id = p.categoria_id AND c.negocio_id = ?'
+    : 'LEFT JOIN categorias c ON c.id = p.categoria_id';
+
+  const params = [];
+  if (tieneNegocioId) {
+    params.push(negocioId);
+  }
+  params.push(negocioId);
+
+  const rows = await db.all(
+    `
+      SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo,
+             p.tipo_producto, p.insumo_vendible, p.categoria_id,
+             COALESCE(c.nombre, 'Menu') AS categoria_nombre,
+             COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
+        FROM productos p
+        ${joinCond}
+       WHERE p.negocio_id = ?
+         AND COALESCE(p.activo, 1) = 1
+         AND (COALESCE(p.tipo_producto, 'FINAL') <> 'INSUMO' OR COALESCE(p.insumo_vendible, 0) = 1)
+       ORDER BY COALESCE(c.nombre, 'Menu') ASC, p.nombre ASC
+    `,
+    params
+  );
+
+  const modoInventario = await obtenerModoInventarioCostos(negocioId);
+  const usaRecetas = modoInventario === 'PREPARACION';
+  const bloquearInsumosSinStock = usaRecetas ? await obtenerConfigBloqueoInsumos(negocioId) : false;
+  const productoIds = (rows || [])
+    .map((row) => Number(row.id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  const recetasMap = usaRecetas && productoIds.length ? await obtenerRecetasPorProductos(productoIds, negocioId) : new Map();
+
+  const categoriasMap = new Map();
+  const productos = (rows || []).map((row) => {
+    const stockIndefinido = esStockIndefinido(row);
+    let disponible = stockIndefinido || (Number(row.stock) || 0) > 0;
+
+    if (usaRecetas) {
+      const receta = recetasMap.get(Number(row.id)) || [];
+      if (receta.length) {
+        for (const detalle of receta) {
+          if (detalle.tipo_producto !== 'INSUMO') {
+            disponible = false;
+            break;
+          }
+          if (esStockIndefinido(detalle)) {
+            continue;
+          }
+          const cantidadBase = Number(detalle.cantidad) || 0;
+          const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
+          const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
+          const stockDisponible = Number(detalle.stock) || 0;
+          if (cantidadUnidades > stockDisponible) {
+            disponible = false;
+            break;
+          }
+        }
+      }
+    }
+
+    const opcionesPrecio = construirOpcionesPrecioProducto(row);
+    const categoriaNombre = limpiarTextoGeneral(row.categoria_nombre) || 'Menu';
+    const producto = {
+      id: Number(row.id),
+      nombre: row.nombre,
+      precio: opcionesPrecio.length ? opcionesPrecio[0].valor : redondearMoneda(Number(row.precio) || 0),
+      precios: opcionesPrecio,
+      disponible,
+      categoria_id: row.categoria_id ? Number(row.categoria_id) : null,
+      categoria_nombre: categoriaNombre,
+      area_preparacion: normalizarAreaPreparacion(row.area_preparacion),
+      tipo_producto: normalizarTipoProducto(row.tipo_producto, 'FINAL'),
+      insumo_vendible: normalizarFlag(row.insumo_vendible, 0),
+    };
+
+    const categoriaKey = `${producto.categoria_id || 'sin-categoria'}:${categoriaNombre}`;
+    if (!categoriasMap.has(categoriaKey)) {
+      categoriasMap.set(categoriaKey, {
+        id: producto.categoria_id,
+        nombre: categoriaNombre,
+        productos: [],
+      });
+    }
+    categoriasMap.get(categoriaKey).productos.push(producto);
+    return producto;
+  });
+
+  return {
+    productos,
+    categorias: Array.from(categoriasMap.values()),
+    modoInventario,
+    usaRecetas,
+    bloquearInsumosSinStock,
+  };
+};
+
+const prepararItemsPedidoMenuPublico = async (
+  itemsEntrada,
+  negocioId,
+  { validarStock = true, usaRecetas = false, bloquearInsumosSinStock = false } = {}
+) => {
+  const crearErrorEstado = (status, message) => {
+    const error = new Error(message);
+    error.status = status;
+    return error;
+  };
+
+  const itemsLista = Array.isArray(itemsEntrada) ? itemsEntrada : [];
+  const ids = Array.from(
+    new Set(
+      itemsLista
+        .map((item) => Number(item?.producto_id ?? item?.productoId ?? item?.id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    )
+  );
+
+  if (!ids.length) {
+    throw crearErrorEstado(400, 'Agrega al menos un producto al pedido.');
+  }
+
+  const tieneNegocioId = await verificarCategoriaNegocioId();
+  const joinCond = tieneNegocioId
+    ? 'LEFT JOIN categorias c ON c.id = p.categoria_id AND c.negocio_id = ?'
+    : 'LEFT JOIN categorias c ON c.id = p.categoria_id';
+  const placeholders = ids.map(() => '?').join(', ');
+  const params = [];
+  if (tieneNegocioId) {
+    params.push(negocioId);
+  }
+  params.push(negocioId, ...ids);
+
+  const productos = await db.all(
+    `
+      SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo,
+             p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad,
+             COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
+        FROM productos p
+        ${joinCond}
+       WHERE p.negocio_id = ?
+         AND p.id IN (${placeholders})
+    `,
+    params
+  );
+  const productosMap = new Map((productos || []).map((producto) => [Number(producto.id), producto]));
+
+  if (productosMap.size !== ids.length) {
+    throw crearErrorEstado(400, 'Hay un producto invalido en el pedido.');
+  }
+
+  const itemsProcesados = [];
+
+  for (const item of itemsLista) {
+    const productoId = Number(item?.producto_id ?? item?.productoId ?? item?.id);
+    const cantidad = normalizarNumero(item?.cantidad, 0);
+    if (!Number.isFinite(productoId) || productoId <= 0) {
+      throw crearErrorEstado(400, 'Hay un producto invalido en el pedido.');
+    }
+    if (!Number.isFinite(cantidad) || cantidad <= 0) {
+      throw crearErrorEstado(400, 'Todas las cantidades deben ser mayores a cero.');
+    }
+
+    const producto = productosMap.get(productoId);
+    if (!producto || normalizarFlag(producto.activo, 1) !== 1) {
+      throw crearErrorEstado(404, `Producto ${productoId} no encontrado.`);
+    }
+
+    const tipoProducto = normalizarTipoProducto(producto.tipo_producto, 'FINAL');
+    const esInsumo = tipoProducto === 'INSUMO';
+    const insumoVendible = normalizarFlag(producto.insumo_vendible, 0) === 1;
+    if (usaRecetas && esInsumo && !insumoVendible) {
+      throw crearErrorEstado(400, `El producto ${producto.nombre || productoId} es un insumo no vendible.`);
+    }
+
+    const stockIndefinido = esStockIndefinido(producto);
+    if (validarStock && !stockIndefinido) {
+      const stockDisponible = Number(producto.stock) || 0;
+      if (cantidad > stockDisponible) {
+        throw crearErrorEstado(400, `Stock insuficiente para ${producto.nombre || `el producto ${productoId}`}.`);
+      }
+    }
+
+    const opcionesPrecio = construirOpcionesPrecioProducto(producto);
+    let precioUnitario = opcionesPrecio.length ? opcionesPrecio[0].valor : normalizarNumero(producto.precio, 0);
+    const precioSolicitadoRaw = item?.precio_unitario ?? item?.precioUnitario ?? null;
+    if (precioSolicitadoRaw !== null && precioSolicitadoRaw !== undefined && precioSolicitadoRaw !== '') {
+      const precioSolicitado = normalizarNumero(precioSolicitadoRaw, null);
+      if (precioSolicitado === null || precioSolicitado < 0) {
+        throw crearErrorEstado(400, `Precio invalido para ${producto.nombre || productoId}.`);
+      }
+      const precioRedondeado = Number(precioSolicitado.toFixed(2));
+      const permitido = opcionesPrecio.some(
+        (opcion) => Number(opcion.valor).toFixed(2) === precioRedondeado.toFixed(2)
+      );
+      if (!permitido) {
+        throw crearErrorEstado(400, `Precio no permitido para ${producto.nombre || productoId}.`);
+      }
+      precioUnitario = precioRedondeado;
+    }
+
+    itemsProcesados.push({
+      producto_id: productoId,
+      nombre: producto.nombre,
+      cantidad,
+      precio_unitario: Number(precioUnitario) || 0,
+      stock_indefinido: stockIndefinido ? 1 : 0,
+      area_preparacion: normalizarAreaPreparacion(producto.area_preparacion),
+      tipo_producto: tipoProducto,
+      insumo_vendible: insumoVendible ? 1 : 0,
+      unidad_base: normalizarUnidadBase(producto.unidad_base, 'UND'),
+      contenido_por_unidad: normalizarContenidoPorUnidad(producto.contenido_por_unidad, 1),
+    });
+  }
+
+  const itemsPorProducto = new Map();
+  itemsProcesados.forEach((item) => {
+    const acumulado = itemsPorProducto.get(item.producto_id) || 0;
+    itemsPorProducto.set(item.producto_id, Number((acumulado + item.cantidad).toFixed(4)));
+  });
+
+  let consumoPorInsumo = new Map();
+  let insumosMap = new Map();
+  let advertenciasInsumos = [];
+
+  if (usaRecetas && itemsPorProducto.size > 0) {
+    const productoIds = Array.from(itemsPorProducto.keys()).filter((id) => Number.isFinite(id) && id > 0);
+    const recetasMap = await obtenerRecetasPorProductos(productoIds, negocioId);
+
+    if (recetasMap.size > 0) {
+      for (const item of itemsProcesados) {
+        const receta = recetasMap.get(Number(item.producto_id));
+        if (!Array.isArray(receta) || receta.length === 0) {
+          continue;
+        }
+        item.consumos = [];
+        for (const detalle of receta) {
+          if (detalle.tipo_producto !== 'INSUMO') {
+            throw crearErrorEstado(400, `La receta de ${item.nombre || item.producto_id} tiene insumos invalidos.`);
+          }
+          const cantidadBase = Number((item.cantidad * (Number(detalle.cantidad) || 0)).toFixed(4));
+          if (!cantidadBase) {
+            continue;
+          }
+          const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
+          const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
+          item.consumos.push({
+            insumo_id: Number(detalle.insumo_id),
+            cantidad_base: cantidadBase,
+            cantidad_unidades: cantidadUnidades,
+            unidad_base: detalle.unidad_base,
+          });
+        }
+      }
+
+      const resultadoConsumo = await calcularConsumoInsumosPorProductos(itemsPorProducto, negocioId);
+      consumoPorInsumo = resultadoConsumo.consumoPorInsumo;
+      insumosMap = resultadoConsumo.insumosMap;
+      if (validarStock) {
+        advertenciasInsumos = validarStockInsumos(consumoPorInsumo, insumosMap, bloquearInsumosSinStock);
+      }
+    }
+  }
+
+  const subtotalBruto = itemsProcesados.reduce(
+    (acc, item) => acc + (Number(item.precio_unitario) || 0) * item.cantidad,
+    0
+  );
+  const tienePreparacion = itemsProcesados.some(
+    (item) => item.area_preparacion === 'cocina' || item.area_preparacion === 'bar'
+  );
+
+  return {
+    itemsProcesados,
+    itemsPorProducto,
+    subtotalBruto,
+    tienePreparacion,
+    consumoPorInsumo,
+    insumosMap,
+    advertenciasInsumos,
+  };
+};
+
+const crearPedidoMenuPublico = async (acceso, payload = {}) => {
+  const crearErrorEstado = (status, message) => {
+    const error = new Error(message);
+    error.status = status;
+    return error;
+  };
+
+  const accesoNormalizado = mapAccesoMenuPublico(acceso || {});
+  const negocioId = accesoNormalizado.negocio_id || NEGOCIO_ID_DEFAULT;
+  const itemsEntrada = Array.isArray(payload.items) ? payload.items : [];
+
+  if (!itemsEntrada.length) {
+    throw crearErrorEstado(400, 'Agrega al menos un producto al pedido.');
+  }
+
+  const estadoNegocio = await validarEstadoNegocio(negocioId);
+  if (!estadoNegocio?.ok) {
+    throw crearErrorEstado(
+      estadoNegocio?.status || 403,
+      estadoNegocio?.error || 'El menu publico no esta disponible para este negocio.'
+    );
+  }
+
+  if (normalizarFlag(accesoNormalizado.activo, 1) !== 1) {
+    throw crearErrorEstado(403, 'Este acceso del menu publico esta inactivo.');
+  }
+
+  const cliente = limpiarTextoGeneral(payload.cliente);
+  const nota = limpiarTextoGeneral(payload.nota);
+  if (cliente && cliente.length > 120) {
+    throw crearErrorEstado(400, 'El nombre del cliente no puede superar 120 caracteres.');
+  }
+  if (nota && nota.length > 200) {
+    throw crearErrorEstado(400, 'La nota no puede superar 200 caracteres.');
+  }
+
+  const modoServicio = normalizarModoServicioMenuPublico(
+    payload.modo_servicio,
+    accesoNormalizado.tipo === 'pickup' ? 'para_llevar' : 'en_local'
+  );
+  const mesa = accesoNormalizado.tipo === 'mesa' ? limpiarTextoGeneral(accesoNormalizado.mesa) : null;
+  const modoInventario = await obtenerModoInventarioCostos(negocioId);
+  const usaRecetas = modoInventario === 'PREPARACION';
+  const bloquearInsumosSinStock = usaRecetas ? await obtenerConfigBloqueoInsumos(negocioId) : false;
+  const resultadoItems = await prepararItemsPedidoMenuPublico(itemsEntrada, negocioId, {
+    validarStock: true,
+    usaRecetas,
+    bloquearInsumosSinStock,
+  });
+  const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+  const totalesPedido = calcularTotalesConImpuestoConfigurado(resultadoItems.subtotalBruto, configImpuesto);
+  const subtotal = totalesPedido.subtotal;
+  const impuesto = totalesPedido.impuesto;
+  const total = totalesPedido.total;
+  const estadoInicial = resultadoItems.tienePreparacion ? 'pendiente' : 'listo';
+  const fechaListo = estadoInicial === 'listo' ? new Date() : null;
+  const consumoRegistros = [];
+  let transaccionIniciada = false;
+
+  try {
+    await db.run('BEGIN');
+    transaccionIniciada = true;
+
+    const accesoBloqueado = await obtenerAccesoMenuPublicoPorToken(accesoNormalizado.token, { forUpdate: true });
+    if (!accesoBloqueado) {
+      throw crearErrorEstado(404, 'Acceso del menu publico no encontrado.');
+    }
+    if (normalizarFlag(accesoBloqueado.activo, 1) !== 1) {
+      throw crearErrorEstado(403, 'Este acceso del menu publico esta inactivo.');
+    }
+
+    const cuentaReferencia =
+      accesoBloqueado.tipo === 'mesa' ? await obtenerCuentaActivaMenuPublico(negocioId, accesoBloqueado.mesa) : null;
+
+    const insertResult = await db.run(
+      `
+        INSERT INTO pedidos (
+          cuenta_id, mesa, cliente, modo_servicio, nota, estado,
+          subtotal, impuesto, total, fecha_listo, origen_caja, creado_por, negocio_id,
+          delivery_estado, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        cuentaReferencia,
+        mesa,
+        cliente,
+        modoServicio,
+        nota,
+        estadoInicial,
+        subtotal,
+        impuesto,
+        total,
+        fechaListo,
+        'caja',
+        null,
+        negocioId,
+        null,
+        null,
+        null,
+        null,
+        null,
+      ]
+    );
+
+    const pedidoId = insertResult.lastID;
+    const cuentaAsignada = cuentaReferencia || pedidoId;
+
+    if (!cuentaReferencia) {
+      await db.run('UPDATE pedidos SET cuenta_id = ? WHERE id = ? AND negocio_id = ?', [
+        cuentaAsignada,
+        pedidoId,
+        negocioId,
+      ]);
+    }
+
+    for (const item of resultadoItems.itemsProcesados) {
+      const detalleResult = await db.run(
+        'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id) VALUES (?, ?, ?, ?, ?)',
+        [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId]
+      );
+      const detalleId = detalleResult?.lastID;
+      if (detalleId && Array.isArray(item.consumos) && item.consumos.length) {
+        item.consumos.forEach((consumo) => {
+          consumoRegistros.push({
+            detalle_pedido_id: detalleId,
+            producto_final_id: item.producto_id,
+            insumo_id: consumo.insumo_id,
+            cantidad_base: consumo.cantidad_base,
+            unidad_base: consumo.unidad_base,
+          });
+        });
+      }
+      if (!item.stock_indefinido) {
+        const stockResult = await db.run(
+          'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+          [item.cantidad, item.producto_id, negocioId, item.cantidad]
+        );
+        if (stockResult.changes === 0) {
+          throw crearErrorEstado(400, `No se pudo actualizar el stock del producto ${item.producto_id}.`);
+        }
+      }
+    }
+
+    if (usaRecetas && resultadoItems.consumoPorInsumo.size > 0) {
+      for (const [insumoId, cantidadUnidades] of resultadoItems.consumoPorInsumo.entries()) {
+        if (!cantidadUnidades) continue;
+        const insumo = resultadoItems.insumosMap.get(insumoId);
+        if (!insumo || esStockIndefinido(insumo)) {
+          continue;
+        }
+        const stockResult = await db.run(
+          'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+          [cantidadUnidades, insumoId, negocioId, cantidadUnidades]
+        );
+        if (stockResult.changes === 0) {
+          throw crearErrorEstado(400, `No se pudo actualizar el stock del insumo ${insumoId}.`);
+        }
+      }
+
+      for (const consumo of consumoRegistros) {
+        await db.run(
+          `INSERT INTO consumo_insumos
+            (pedido_id, detalle_pedido_id, producto_final_id, insumo_id, cantidad_base, unidad_base, negocio_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            pedidoId,
+            consumo.detalle_pedido_id,
+            consumo.producto_final_id,
+            consumo.insumo_id,
+            consumo.cantidad_base,
+            consumo.unidad_base,
+            negocioId,
+          ]
+        );
+      }
+    }
+
+    await db.run('COMMIT');
+    transaccionIniciada = false;
+
+    return {
+      pedido: {
+        id: pedidoId,
+        cuenta_id: cuentaAsignada,
+        estado: estadoInicial,
+        subtotal,
+        impuesto,
+        total,
+        modo_servicio: modoServicio,
+        mesa,
+        cliente,
+        nota,
+        fecha_listo: fechaListo,
+        items: resultadoItems.itemsProcesados,
+      },
+      advertencias: resultadoItems.advertenciasInsumos.length ? resultadoItems.advertenciasInsumos : undefined,
+    };
+  } catch (error) {
+    if (transaccionIniciada) {
+      await db.run('ROLLBACK').catch(() => {});
+    }
+    throw error;
+  }
 };
 
 // Deudas de clientes
