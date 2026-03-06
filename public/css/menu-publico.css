@@ -679,8 +679,26 @@ body.menu-publico-body::after {
     padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
   }
 
+  body.menu-publico-body::before,
+  body.menu-publico-body::after {
+    display: none;
+  }
+
   body.menu-publico-drawer-open {
     overflow: hidden;
+  }
+
+  .menu-publico-hero-copy,
+  .menu-publico-catalogo-panel,
+  .menu-publico-order-card,
+  .menu-publico-toolbar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .menu-publico-hero-copy,
+  .menu-publico-catalogo-panel {
+    background: rgba(255, 248, 245, 0.96);
   }
 
   .menu-publico-hero {
@@ -701,8 +719,7 @@ body.menu-publico-body::after {
     top: 0;
     z-index: 6;
     padding-bottom: 10px;
-    background: linear-gradient(180deg, rgba(246, 232, 230, 0.97), rgba(246, 232, 230, 0.88));
-    backdrop-filter: blur(10px);
+    background: linear-gradient(180deg, rgba(249, 239, 235, 0.98), rgba(249, 239, 235, 0.94));
   }
 
   .menu-publico-sidebar {
@@ -719,6 +736,7 @@ body.menu-publico-body::after {
     margin: 0;
     max-height: calc(100vh - 72px);
     border-radius: 28px 28px 0 0;
+    background: #fff8f4;
     transform: translateY(110%);
     transition: transform 0.24s ease;
     box-shadow: 0 -14px 44px rgba(77, 45, 50, 0.16);
@@ -734,7 +752,7 @@ body.menu-publico-body::after {
     z-index: 2;
     margin: 0 0 14px;
     padding-bottom: 12px;
-    background: var(--menu-paper);
+    background: #fff8f4;
   }
 
   .menu-publico-order-head-actions {
@@ -804,8 +822,9 @@ body.menu-publico-body::after {
     position: fixed;
     inset: 0;
     z-index: 24;
-    background: rgba(52, 31, 36, 0.32);
-    backdrop-filter: blur(4px);
+    background: rgba(52, 31, 36, 0.18);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 
