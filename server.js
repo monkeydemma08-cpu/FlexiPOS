@@ -6942,6 +6942,92 @@ app.get('/admin/cotizaciones/:id/imprimir', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'cotizacion-imprimir.html'));
 });
 
+const MENU_PUBLICO_PEDIDOS_WINDOW_MS = 15 * 60 * 1000;
+const MENU_PUBLICO_PEDIDOS_MAXIMO = 8;
+const MENU_PUBLICO_PEDIDOS_COOLDOWN_MS = 20 * 1000;
+const menuPublicoPedidosRateMap = new Map();
+const MENU_PUBLICO_SESION_EXPIRADA_ERROR = 'Esta mesa fue reiniciada. Vuelve a escanear el QR para seguir pidiendo.';
+
+const construirClienteMenuPublicoKey = (req = {}) => {
+  const clientId = normalizarCampoTexto(
+    req.get?.('x-menu-publico-client') ?? req.body?.client_id ?? req.query?.client_id,
+    null
+  );
+  if (clientId) {
+    return `client:${clientId.slice(0, 120)}`;
+  }
+
+  const forwardedFor = String(req.headers?.['x-forwarded-for'] || req.ip || '')
+    .split(',')[0]
+    .trim();
+  const userAgent = String(req.get?.('user-agent') || '').trim().toLowerCase();
+  const digest = crypto.createHash('sha1').update(`${forwardedFor}|${userAgent}`).digest('hex').slice(0, 16);
+  return `ip:${forwardedFor || 'desconocido'}:${digest}`;
+};
+
+const obtenerSesionPedidosRequest = (req = {}) =>
+  normalizarCampoTexto(req.get?.('x-menu-publico-session') ?? req.body?.sesion_pedidos ?? req.query?.sesion_pedidos, null);
+
+const validarSesionPedidosMenuPublico = (sesionCliente, acceso) => {
+  const sesionEsperada = normalizarCampoTexto(acceso?.sesion_pedidos ?? acceso?.pedido_version, null);
+  if (!sesionEsperada) {
+    return;
+  }
+  if (!sesionCliente || sesionCliente !== sesionEsperada) {
+    const error = new Error(MENU_PUBLICO_SESION_EXPIRADA_ERROR);
+    error.status = 409;
+    throw error;
+  }
+};
+
+const validarRateLimitMenuPublicoPedidos = (req, token) => {
+  const tokenNormalizado = normalizarCampoTexto(token, null);
+  if (!tokenNormalizado) {
+    return;
+  }
+
+  const now = Date.now();
+  const clienteKey = construirClienteMenuPublicoKey(req);
+  const rateKey = `${tokenNormalizado}|${clienteKey}`;
+  const registro = menuPublicoPedidosRateMap.get(rateKey) || {
+    eventos: [],
+    ultimoPedidoAt: 0,
+  };
+
+  registro.eventos = registro.eventos.filter((timestamp) => now - timestamp < MENU_PUBLICO_PEDIDOS_WINDOW_MS);
+
+  if (registro.ultimoPedidoAt && now - registro.ultimoPedidoAt < MENU_PUBLICO_PEDIDOS_COOLDOWN_MS) {
+    const segundosRestantes = Math.max(
+      1,
+      Math.ceil((MENU_PUBLICO_PEDIDOS_COOLDOWN_MS - (now - registro.ultimoPedidoAt)) / 1000)
+    );
+    const error = new Error(`Espera ${segundosRestantes} segundos antes de enviar otro pedido.`);
+    error.status = 429;
+    throw error;
+  }
+
+  if (registro.eventos.length >= MENU_PUBLICO_PEDIDOS_MAXIMO) {
+    const error = new Error('Limite temporal alcanzado. Espera unos minutos antes de enviar otro pedido.');
+    error.status = 429;
+    throw error;
+  }
+
+  registro.eventos.push(now);
+  registro.ultimoPedidoAt = now;
+  menuPublicoPedidosRateMap.set(rateKey, registro);
+
+  if (menuPublicoPedidosRateMap.size > 3000) {
+    for (const [mapKey, mapValue] of menuPublicoPedidosRateMap.entries()) {
+      const eventosVigentes = (mapValue?.eventos || []).filter(
+        (timestamp) => now - timestamp < MENU_PUBLICO_PEDIDOS_WINDOW_MS
+      );
+      if (!eventosVigentes.length && now - (mapValue?.ultimoPedidoAt || 0) > MENU_PUBLICO_PEDIDOS_WINDOW_MS) {
+        menuPublicoPedidosRateMap.delete(mapKey);
+      }
+    }
+  }
+};
+
 app.get('/admin/menu-publico/qr', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'menu-publico-qr.html'));
 });
@@ -7068,7 +7154,10 @@ app.post('/api/public/menu/:token/pedidos', async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Acceso del menu no encontrado.' });
     }
 
-    const resultado = await crearPedidoMenuPublico(acceso, req.body || {});
+    const sesionPedidos = obtenerSesionPedidosRequest(req);
+    validarSesionPedidosMenuPublico(sesionPedidos, acceso);
+    validarRateLimitMenuPublicoPedidos(req, token);
+    const resultado = await crearPedidoMenuPublico(acceso, req.body || {}, { sesionPedidos });
     res.status(201).json({
       ok: true,
       acceso,
@@ -7097,7 +7186,7 @@ app.get('/api/menu-publico/accesos', (req, res) => {
 
     try {
       const rows = await db.all(
-        `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, created_at, updated_at
+        `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, pedido_version, created_at, updated_at
            FROM menu_publico_accesos
           WHERE negocio_id = ?
           ORDER BY CASE WHEN tipo = 'mesa' THEN 0 ELSE 1 END ASC, mesa ASC, id ASC`,
@@ -7156,7 +7245,7 @@ app.post('/api/menu-publico/accesos', (req, res) => {
 
         if (Number.isFinite(accesoId) && accesoId > 0) {
           existente = await db.get(
-            `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, created_at, updated_at
+            `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, pedido_version, created_at, updated_at
                FROM menu_publico_accesos
               WHERE id = ? AND negocio_id = ?
               LIMIT 1
@@ -7165,7 +7254,7 @@ app.post('/api/menu-publico/accesos', (req, res) => {
           );
         } else if (tipo === 'mesa' && mesa) {
           existente = await db.get(
-            `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, created_at, updated_at
+            `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, pedido_version, created_at, updated_at
                FROM menu_publico_accesos
               WHERE negocio_id = ? AND tipo = ? AND mesa = ?
               LIMIT 1
@@ -7192,6 +7281,7 @@ app.post('/api/menu-publico/accesos', (req, res) => {
                 mesa,
                 tipo,
                 activo,
+                pedido_version: existente.pedido_version,
                 updated_at: new Date(),
               },
               req
@@ -7216,6 +7306,7 @@ app.post('/api/menu-publico/accesos', (req, res) => {
               mesa,
               tipo,
               activo,
+              pedido_version: 1,
               created_at: new Date(),
               updated_at: new Date(),
             },
@@ -9831,12 +9922,32 @@ app.put('/api/cuentas/:id/cerrar', (req, res) => {
           return res.status(status).json({ ok: false, error: err.message || 'No se pudo cerrar la cuenta.' });
         }
 
-        res.json({
-          ok: true,
-          factura: resultado?.factura || null,
-          totales: resultado?.totales || null,
-          cliente: resultado?.cliente || null,
-        });
+        (async () => {
+          const mesasCuenta = Array.from(
+            new Set(
+              (pedidos || [])
+                .map((pedido) => limpiarTextoGeneral(pedido?.mesa))
+                .filter((mesa) => Boolean(mesa))
+            )
+          );
+          if (mesasCuenta.length) {
+            await reiniciarSesionPedidosMenuPublicoPorMesas(negocioId, mesasCuenta);
+          }
+        })()
+          .catch((errorCierreMenu) => {
+            console.error(
+              'No se pudo reiniciar la sesion del menu publico al cerrar la cuenta:',
+              errorCierreMenu?.message || errorCierreMenu
+            );
+          })
+          .finally(() => {
+            res.json({
+              ok: true,
+              factura: resultado?.factura || null,
+              totales: resultado?.totales || null,
+              cliente: resultado?.cliente || null,
+            });
+          });
       });
     } catch (error) {
       console.error('Error al cerrar la cuenta:', error);
@@ -18641,6 +18752,7 @@ const mapAccesoMenuPublico = (row = {}, req = null) => {
     limpiarTextoGeneral(row.nombre) || mesa || (tipo === 'pickup' ? 'Para llevar' : 'Menu publico');
   const negocioId = Number(row.negocio_id ?? row.negocioId);
   const accesoId = Number(row.id);
+  const pedidoVersion = Math.max(1, Number(row.pedido_version ?? row.pedidoVersion) || 1);
 
   return {
     id: Number.isFinite(accesoId) ? accesoId : null,
@@ -18650,6 +18762,8 @@ const mapAccesoMenuPublico = (row = {}, req = null) => {
     mesa,
     tipo,
     activo: normalizarFlag(row.activo, 1),
+    pedido_version: pedidoVersion,
+    sesion_pedidos: String(pedidoVersion),
     created_at: row.created_at || row.createdAt || null,
     updated_at: row.updated_at || row.updatedAt || null,
     url: token ? construirUrlMenuPublico(req, token) : null,
@@ -18678,7 +18792,7 @@ const obtenerAccesoMenuPublicoPorToken = async (token, opciones = {}) => {
 
   const clausulaLock = opciones.forUpdate === true ? ' FOR UPDATE' : '';
   const row = await db.get(
-    `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, created_at, updated_at
+    `SELECT id, negocio_id, token, nombre, mesa, tipo, activo, pedido_version, created_at, updated_at
        FROM menu_publico_accesos
       WHERE token = ?
       LIMIT 1${clausulaLock}`,
@@ -18708,6 +18822,33 @@ const obtenerCuentaActivaMenuPublico = async (negocioId, mesa) => {
 
   const cuentaId = Number(row?.cuenta_id);
   return Number.isFinite(cuentaId) && cuentaId > 0 ? cuentaId : null;
+};
+
+const reiniciarSesionPedidosMenuPublicoPorMesas = async (negocioId, mesas = []) => {
+  const negocioNormalizado = Number(negocioId);
+  if (!Number.isFinite(negocioNormalizado) || negocioNormalizado <= 0) {
+    return 0;
+  }
+
+  const mesasNormalizadas = Array.from(
+    new Set((Array.isArray(mesas) ? mesas : []).map((mesa) => limpiarTextoGeneral(mesa)).filter((mesa) => Boolean(mesa)))
+  );
+  if (!mesasNormalizadas.length) {
+    return 0;
+  }
+
+  const placeholders = mesasNormalizadas.map(() => '?').join(', ');
+  const resultado = await db.run(
+    `UPDATE menu_publico_accesos
+        SET pedido_version = COALESCE(pedido_version, 1) + 1,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE negocio_id = ?
+        AND tipo = 'mesa'
+        AND activo = 1
+        AND mesa IN (${placeholders})`,
+    [negocioNormalizado, ...mesasNormalizadas]
+  );
+  return Number(resultado?.changes) || 0;
 };
 
 const obtenerCatalogoMenuPublico = async (negocioId) => {
@@ -18979,7 +19120,7 @@ const prepararItemsPedidoMenuPublico = async (
   };
 };
 
-const crearPedidoMenuPublico = async (acceso, payload = {}) => {
+const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
   const crearErrorEstado = (status, message) => {
     const error = new Error(message);
     error.status = status;
@@ -19049,6 +19190,7 @@ const crearPedidoMenuPublico = async (acceso, payload = {}) => {
     if (normalizarFlag(accesoBloqueado.activo, 1) !== 1) {
       throw crearErrorEstado(403, 'Este acceso del menu publico esta inactivo.');
     }
+    validarSesionPedidosMenuPublico(normalizarCampoTexto(opciones?.sesionPedidos, null), accesoBloqueado);
 
     const cuentaReferencia =
       accesoBloqueado.tipo === 'mesa' ? await obtenerCuentaActivaMenuPublico(negocioId, accesoBloqueado.mesa) : null;

@@ -1035,6 +1035,7 @@ async function ensureTableMenuPublicoAccesos() {
   await ensureColumn('menu_publico_accesos', 'mesa VARCHAR(100) NULL');
   await ensureColumn('menu_publico_accesos', "tipo VARCHAR(20) NOT NULL DEFAULT 'mesa'");
   await ensureColumn('menu_publico_accesos', 'activo TINYINT(1) NOT NULL DEFAULT 1');
+  await ensureColumn('menu_publico_accesos', 'pedido_version INT NOT NULL DEFAULT 1');
   await ensureColumn('menu_publico_accesos', 'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
   await ensureColumn(
     'menu_publico_accesos',

@@ -17,6 +17,8 @@ const dom = {
   orderCount: document.getElementById('menu-publico-order-count'),
   subtotal: document.getElementById('menu-publico-subtotal'),
   impuesto: document.getElementById('menu-publico-impuesto'),
+  propina: document.getElementById('menu-publico-propina'),
+  propinaRow: document.getElementById('menu-publico-propina-row'),
   total: document.getElementById('menu-publico-total'),
   submit: document.getElementById('menu-publico-submit'),
   formMessage: document.getElementById('menu-publico-form-message'),
@@ -36,12 +38,33 @@ const state = {
   loading: false,
   submitting: false,
   drawerOpen: false,
+  clientId: '',
+  orderSession: '',
+  orderingLocked: false,
 };
+
+const ORDERING_LOCK_MESSAGE = 'Esta mesa fue reiniciada. Vuelve a escanear el QR para seguir pidiendo.';
 
 const compactViewportQuery =
   typeof window !== 'undefined' && typeof window.matchMedia === 'function'
     ? window.matchMedia('(max-width: 860px)')
     : null;
+
+const getClientId = () => {
+  try {
+    const storageKey = 'kanm-menu-publico-client';
+    const existing = window.sessionStorage?.getItem?.(storageKey);
+    if (existing) return existing;
+    const nextValue =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `menu-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    window.sessionStorage?.setItem?.(storageKey, nextValue);
+    return nextValue;
+  } catch (_) {
+    return `menu-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+  }
+};
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('es-DO', {
@@ -136,16 +159,20 @@ const calculateTotals = () => {
     if (tasaIncluida > 0) {
       const subtotal = roundMoney(base / (1 + tasaIncluida / 100));
       const impuesto = roundMoney(base - subtotal);
-      return { subtotal, impuesto, total: roundMoney(base) };
+      const propina = (dom.servicio?.value || 'en_local') === 'en_local' ? roundMoney(subtotal * 0.1) : 0;
+      return { subtotal, impuesto, propina, total: roundMoney(base + propina) };
     }
-    return { subtotal: base, impuesto: 0, total: base };
+    const propina = (dom.servicio?.value || 'en_local') === 'en_local' ? roundMoney(base * 0.1) : 0;
+    return { subtotal: base, impuesto: 0, propina, total: roundMoney(base + propina) };
   }
 
   const impuesto = roundMoney(base * (tasaNormal / 100));
+  const propina = (dom.servicio?.value || 'en_local') === 'en_local' ? roundMoney(base * 0.1) : 0;
   return {
     subtotal: base,
     impuesto,
-    total: roundMoney(base + impuesto),
+    propina,
+    total: roundMoney(base + impuesto + propina),
   };
 };
 
@@ -403,7 +430,7 @@ const renderCatalog = () => {
                         class="menu-publico-item-button"
                         data-action="add"
                         data-product-id="${producto.id}"
-                        ${producto.disponible ? '' : 'disabled'}
+                        ${producto.disponible && !state.orderingLocked ? '' : 'disabled'}
                       >
                         ${quantityInCart > 0 ? 'Agregar otro' : 'Agregar'}
                       </button>
@@ -467,6 +494,8 @@ const renderCart = () => {
   }
   if (dom.subtotal) dom.subtotal.textContent = formatCurrency(totals.subtotal);
   if (dom.impuesto) dom.impuesto.textContent = formatCurrency(totals.impuesto);
+  if (dom.propina) dom.propina.textContent = formatCurrency(totals.propina || 0);
+  if (dom.propinaRow) dom.propinaRow.hidden = !(Number(totals.propina) > 0);
   if (dom.total) dom.total.textContent = formatCurrency(totals.total);
   if (dom.mobileTotal) dom.mobileTotal.textContent = formatCurrency(totals.total);
   if (dom.mobileToggle) {
@@ -474,7 +503,7 @@ const renderCart = () => {
   }
 
   const hasUnavailable = state.cart.some((item) => !item.available);
-  setSubmitDisabled(state.submitting || state.loading || !state.cart.length || hasUnavailable);
+  setSubmitDisabled(state.submitting || state.loading || state.orderingLocked || !state.cart.length || hasUnavailable);
 };
 
 const updateSyncBadge = (text, fallbackTime = true) => {
@@ -485,6 +514,20 @@ const updateSyncBadge = (text, fallbackTime = true) => {
   }
   if (!fallbackTime) return;
   dom.badgeSync.textContent = `Actualizado ${formatTime(new Date())}`;
+};
+
+const lockOrdering = (message = ORDERING_LOCK_MESSAGE) => {
+  state.orderingLocked = true;
+  if (state.pollHandle) {
+    window.clearInterval(state.pollHandle);
+    state.pollHandle = null;
+  }
+  setDrawerOpen(false);
+  setBoxMessage(dom.estado, message, 'error');
+  setBoxMessage(dom.formMessage, message, 'error');
+  updateSyncBadge('Sesion reiniciada');
+  renderCatalog();
+  renderCart();
 };
 
 const renderAll = () => {
@@ -511,13 +554,29 @@ const loadMenu = async ({ silent = false } = {}) => {
   try {
     const response = await fetch(`/api/public/menu/${encodeURIComponent(state.token)}?ts=${Date.now()}`, {
       cache: 'no-store',
+      headers: state.clientId
+        ? {
+            'x-menu-publico-client': state.clientId,
+          }
+        : undefined,
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data?.ok) {
       throw new Error(data?.error || 'No se pudo cargar el menu.');
     }
 
+    const nextOrderSession = String(data?.acceso?.sesion_pedidos || '').trim();
+    if (silent && state.orderSession && nextOrderSession && state.orderSession !== nextOrderSession) {
+      state.data = data;
+      syncCartWithCatalog();
+      state.orderSession = nextOrderSession;
+      renderAll();
+      lockOrdering();
+      return;
+    }
+
     state.data = data;
+    state.orderSession = nextOrderSession;
     syncCartWithCatalog();
     renderAll();
     setBoxMessage(dom.estado, '');
@@ -546,6 +605,10 @@ const submitOrder = async (event) => {
     setBoxMessage(dom.formMessage, 'Agrega al menos un producto al pedido.', 'error');
     return;
   }
+  if (state.orderingLocked) {
+    setBoxMessage(dom.formMessage, ORDERING_LOCK_MESSAGE, 'error');
+    return;
+  }
   if (state.cart.some((item) => !item.available)) {
     setBoxMessage(dom.formMessage, 'Hay productos no disponibles en el carrito. Revisalo antes de enviar.', 'error');
     return;
@@ -560,6 +623,16 @@ const submitOrder = async (event) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(state.clientId
+          ? {
+              'x-menu-publico-client': state.clientId,
+            }
+          : {}),
+        ...(state.orderSession
+          ? {
+              'x-menu-publico-session': state.orderSession,
+            }
+          : {}),
       },
       body: JSON.stringify({
         cliente: dom.cliente?.value?.trim() || null,
@@ -573,6 +646,9 @@ const submitOrder = async (event) => {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data?.ok) {
+      if (response.status === 409) {
+        lockOrdering(data?.error || ORDERING_LOCK_MESSAGE);
+      }
       throw new Error(data?.error || 'No se pudo enviar el pedido.');
     }
 
@@ -625,6 +701,7 @@ const handleNavClick = (event) => {
 
 const init = async () => {
   state.token = getTokenFromLocation();
+  state.clientId = getClientId();
   if (!state.token) {
     setBoxMessage(dom.estado, 'No se encontro el token del menu publico.', 'error');
     setSubmitDisabled(true);
@@ -636,6 +713,9 @@ const init = async () => {
   dom.search?.addEventListener('input', (event) => {
     state.search = event.target.value || '';
     renderCatalog();
+  });
+  dom.servicio?.addEventListener('change', () => {
+    renderCart();
   });
   dom.categorias?.addEventListener('click', handleCatalogClick);
   dom.cart?.addEventListener('click', handleCartClick);
