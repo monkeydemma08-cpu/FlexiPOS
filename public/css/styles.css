@@ -2683,7 +2683,6 @@ body[data-role='mesera'] .kanm-main {
 
 .admin-clientes-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -2692,6 +2691,7 @@ body[data-role='mesera'] .kanm-main {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
 .admin-clientes-filtros {
@@ -2707,15 +2707,24 @@ body[data-role='mesera'] .kanm-main {
 }
 
 .admin-clientes-filtros-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   align-items: center;
-  flex-wrap: wrap;
   margin-top: 12px;
+}
+
+.admin-clientes-filtros-actions .kanm-button {
+  width: 100%;
+}
+
+.admin-clientes-filtros-actions #clientes-lista-mensaje {
+  grid-column: 1 / -1;
 }
 
 .admin-clientes-lista {
   min-height: 420px;
+  min-width: 0;
 }
 
 .admin-clientes-lista-header {
@@ -2729,6 +2738,13 @@ body[data-role='mesera'] .kanm-main {
 .admin-clientes-table-scroll {
   max-height: 360px;
   overflow: auto;
+}
+
+.admin-clientes-col--detail,
+.admin-clientes-perfil,
+.admin-clientes-facturas,
+.admin-clientes-subcard {
+  min-width: 0;
 }
 
 .admin-clientes-perfil-header {
@@ -2802,6 +2818,20 @@ body[data-role='mesera'] .kanm-main {
   flex-wrap: wrap;
 }
 
+.admin-clientes-facturas {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.admin-clientes-facturas-header,
+.admin-clientes-facturas > .admin-resumen-grid,
+.admin-clientes-facturas > .kanm-message,
+.admin-clientes-facturas > .admin-clientes-deudas-scroll {
+  grid-column: 1 / -1;
+}
+
 .admin-clientes-deudas-scroll {
   max-height: 320px;
   overflow: auto;
@@ -2835,6 +2865,21 @@ body[data-role='mesera'] .kanm-main {
   overflow: auto;
 }
 
+.admin-clientes-perfil .clientes-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-clientes-table-scroll thead th,
+.admin-clientes-deudas-scroll thead th,
+.admin-clientes-abonos-scroll thead th,
+.deuda-productos-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #ffffff;
+  box-shadow: inset 0 -1px 0 var(--tone-12);
+}
+
 .admin-clientes-table-scroll .acciones-inline .kanm-button,
 .admin-clientes-deudas-scroll .acciones-inline .kanm-button {
   padding: 6px 10px;
@@ -2856,8 +2901,70 @@ body[data-role='mesera'] .kanm-main {
   transform: none;
 }
 
+@media (min-width: 1101px) {
+  .admin-clientes-layout {
+    grid-template-columns: minmax(0, 1.55fr) minmax(360px, 0.95fr);
+  }
+
+  .admin-clientes-col--list {
+    display: grid;
+    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .admin-clientes-filtros {
+    position: sticky;
+    top: 16px;
+    align-self: start;
+  }
+
+  .admin-clientes-filtros-scroll {
+    max-height: calc(100vh - 310px);
+  }
+
+  .admin-clientes-table-scroll {
+    max-height: calc(100vh - 310px);
+  }
+
+  .admin-clientes-facturas {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  }
+
+  .admin-clientes-subcard--deuda {
+    grid-column: 1;
+  }
+
+  .admin-clientes-subcard--abonos {
+    grid-column: 2;
+  }
+
+  .admin-clientes-deudas-scroll {
+    max-height: 400px;
+  }
+
+  .admin-clientes-abonos-scroll {
+    max-height: 320px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .admin-clientes-perfil .clientes-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1100px) {
   .admin-clientes-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-clientes-filtros-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-clientes-facturas {
     grid-template-columns: 1fr;
   }
 

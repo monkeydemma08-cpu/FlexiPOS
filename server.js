@@ -31,6 +31,18 @@ app.set('trust proxy', 1);
 // Allow larger payloads for long logo URLs or data URIs in configuration.
 app.use(express.json({ limit: '35mb' }));
 app.use(cors());
+app.use((req, res, next) => {
+  if (
+    req.path === '/menu-publico.html' ||
+    req.path === '/css/menu-publico.css' ||
+    req.path === '/js/menu-publico.js'
+  ) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+  }
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(dgiiRoutes);
 const LOG_DELIVERY_REQUESTS = process.env.LOG_DELIVERY_REQUESTS === '1';
@@ -7033,6 +7045,9 @@ app.get('/admin/menu-publico/qr', (req, res) => {
 });
 
 app.get('/menu/:token', (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   res.sendFile(path.join(__dirname, 'public', 'menu-publico.html'));
 });
 
@@ -7068,6 +7083,9 @@ app.get('/api/public/menu/:token/qr.svg', async (req, res) => {
 });
 
 app.get('/api/public/menu/:token', async (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   const token = normalizarCampoTexto(req.params?.token ?? req.query?.token, null);
   if (!token) {
     return res.status(400).json({ ok: false, error: 'Token de menu invalido.' });
@@ -7143,6 +7161,9 @@ app.get('/api/public/menu/:token', async (req, res) => {
 });
 
 app.post('/api/public/menu/:token/pedidos', async (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   const token = normalizarCampoTexto(req.params?.token ?? req.query?.token, null);
   if (!token) {
     return res.status(400).json({ ok: false, error: 'Token de menu invalido.' });
