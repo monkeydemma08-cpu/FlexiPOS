@@ -260,7 +260,16 @@
             value="${item.cantidad}"
           />
         </td>
-        <td class="text-right">${formatCurrency(item.precio_unitario)}</td>
+        <td class="text-right">
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            class="deuda-item-precio"
+            data-deuda-item-precio="${item.producto_id}"
+            value="${Number(item.precio_unitario || 0).toFixed(2)}"
+          />
+        </td>
         <td class="text-right">${formatCurrency(totalLinea)}</td>
         <td>
           <button type="button" class="kanm-button ghost" data-deuda-item-remove="${item.producto_id}">
@@ -971,16 +980,33 @@
 
   tablaDeudaProductos?.addEventListener('change', (event) => {
     const inputCantidad = event.target.closest('[data-deuda-item]');
-    if (!inputCantidad) return;
-    const productoId = Number(inputCantidad.dataset.deudaItem);
-    const cantidad = Number(inputCantidad.value);
+    if (inputCantidad) {
+      const productoId = Number(inputCantidad.dataset.deudaItem);
+      const cantidad = Number(inputCantidad.value);
+      const item = deudaItems.find((dato) => dato.producto_id === productoId);
+      if (!item) return;
+      if (!Number.isFinite(cantidad) || cantidad <= 0) {
+        deudaItems = deudaItems.filter((dato) => dato.producto_id !== productoId);
+      } else {
+        item.cantidad = cantidad;
+      }
+      renderDeudaItems();
+      return;
+    }
+
+    const inputPrecio = event.target.closest('[data-deuda-item-precio]');
+    if (!inputPrecio) return;
+    const productoId = Number(inputPrecio.dataset.deudaItemPrecio);
+    const precio = Number(inputPrecio.value);
     const item = deudaItems.find((dato) => dato.producto_id === productoId);
     if (!item) return;
-    if (!Number.isFinite(cantidad) || cantidad <= 0) {
-      deudaItems = deudaItems.filter((dato) => dato.producto_id !== productoId);
-    } else {
-      item.cantidad = cantidad;
+    if (!Number.isFinite(precio) || precio < 0) {
+      inputPrecio.value = Number(item.precio_unitario || 0).toFixed(2);
+      setMessage(mensajeDeuda, 'Ingresa un precio valido.', 'warning');
+      return;
     }
+    item.precio_unitario = Number(precio.toFixed(2));
+    setMessage(mensajeDeuda, '');
     renderDeudaItems();
   });
 
