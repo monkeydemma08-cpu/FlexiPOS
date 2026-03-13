@@ -44,7 +44,16 @@ const prodPrecioAgregarBtn = document.getElementById('prod-precio-agregar');
 const inputProdStock = document.getElementById('prod-stock');
 const inputProdStockIndefinido = document.getElementById('prod-stock-indefinido');
 const inputProdCategoria = document.getElementById('prod-categoria');
+const inputProdImagenUrl = document.getElementById('prod-imagen-url');
 const inputProdActivo = document.getElementById('prod-activo');
+const prodMenuPreview = document.getElementById('prod-menu-preview');
+const prodMenuPreviewImg = document.getElementById('prod-menu-preview-img');
+const prodMenuPreviewFallback = document.getElementById('prod-menu-preview-fallback');
+const prodMenuPreviewCategory = document.getElementById('prod-menu-preview-category');
+const prodMenuPreviewTitle = document.getElementById('prod-menu-preview-title');
+const prodMenuPreviewPrice = document.getElementById('prod-menu-preview-price');
+const prodMenuPreviewOldPrice = document.getElementById('prod-menu-preview-old-price');
+const prodMenuPreviewNote = document.getElementById('prod-menu-preview-note');
 const botonProdCancelar = document.getElementById('prod-cancelar');
 const mensajeProductos = document.getElementById('admin-mensaje');
 const filtroCategoriaProductos = document.getElementById('productos-filtro-categoria');
@@ -1069,6 +1078,129 @@ const formatCurrencySigned = (value) => {
   return `${prefix}${formatCurrency(Math.abs(number))}`;
 };
 
+const obtenerInicialesProducto = (value, fallback = 'KM') => {
+  const iniciales = String(value || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((chunk) => chunk.charAt(0).toUpperCase())
+    .join('');
+  return iniciales || fallback;
+};
+
+const validarUrlImagenProducto = (value) => {
+  const texto = value === null || value === undefined ? '' : String(value).trim();
+  if (!texto) {
+    return { ok: true, value: null };
+  }
+  if (/^data:/i.test(texto)) {
+    return {
+      ok: false,
+      error: 'La imagen del producto debe ser una URL http/https. No pegues base64.',
+    };
+  }
+  if (texto.length > 2048) {
+    return {
+      ok: false,
+      error: 'La imagen del producto es demasiado larga. Usa una URL publica mas corta.',
+    };
+  }
+  try {
+    const parsed = new URL(texto);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return {
+        ok: false,
+        error: 'La imagen del producto debe iniciar con http:// o https://.',
+      };
+    }
+    return { ok: true, value: parsed.href };
+  } catch (_) {
+    return { ok: false, error: 'La imagen del producto no es valida.' };
+  }
+};
+
+const obtenerCategoriaSeleccionadaProducto = () => {
+  const option = inputProdCategoria?.selectedOptions?.[0];
+  const texto = option?.textContent?.trim() || '';
+  return texto && texto.toLowerCase() !== 'selecciona' ? texto : 'Categoria';
+};
+
+const aplicarImagenVistaPreviaProducto = (imageUrl, fallbackText) => {
+  if (prodMenuPreviewFallback) {
+    prodMenuPreviewFallback.textContent = fallbackText || 'KM';
+    prodMenuPreviewFallback.hidden = false;
+  }
+  if (!prodMenuPreviewImg) return;
+
+  prodMenuPreviewImg.onload = () => {
+    prodMenuPreviewImg.hidden = false;
+    if (prodMenuPreviewFallback) prodMenuPreviewFallback.hidden = true;
+  };
+  prodMenuPreviewImg.onerror = () => {
+    prodMenuPreviewImg.hidden = true;
+    if (prodMenuPreviewFallback) prodMenuPreviewFallback.hidden = false;
+  };
+
+  if (!imageUrl) {
+    prodMenuPreviewImg.removeAttribute('src');
+    prodMenuPreviewImg.hidden = true;
+    return;
+  }
+
+  if (prodMenuPreviewImg.getAttribute('src') !== imageUrl) {
+    prodMenuPreviewImg.hidden = true;
+    prodMenuPreviewImg.src = imageUrl;
+    return;
+  }
+
+  if (prodMenuPreviewImg.complete && prodMenuPreviewImg.naturalWidth > 0) {
+    prodMenuPreviewImg.hidden = false;
+    if (prodMenuPreviewFallback) prodMenuPreviewFallback.hidden = true;
+  }
+};
+
+const actualizarVistaPreviaProducto = () => {
+  const nombre = inputProdNombre?.value.trim() || 'Nombre del producto';
+  const categoria = obtenerCategoriaSeleccionadaProducto();
+  const precioValor = parseMoneyValueAdmin(inputProdPrecio, { fallback: 0, allowEmpty: true });
+  const precio = formatCurrency(Number.isFinite(precioValor) ? precioValor : 0);
+  const activo = inputProdActivo?.checked ?? true;
+  const esInsumo = inputProdEsInsumo?.checked ?? false;
+  const insumoVendible = inputProdInsumoVendible?.checked ?? false;
+  const imageUrlValidacion = validarUrlImagenProducto(inputProdImagenUrl?.value ?? '');
+  const imageUrl = imageUrlValidacion.ok ? imageUrlValidacion.value : null;
+  const initials = obtenerInicialesProducto(nombre, 'KM');
+  let previewState = 'visible';
+  let note = 'Asi se mostraria en el menu digital.';
+
+  if (!activo) {
+    previewState = 'inactive';
+    note = 'Producto inactivo. No aparecera en el menu hasta activarlo.';
+  } else if (esInsumo && !insumoVendible) {
+    previewState = 'internal';
+    note = 'Este insumo es interno. Activa "Insumo vendible" para mostrarlo en el menu digital.';
+  } else if (!imageUrlValidacion.ok && String(inputProdImagenUrl?.value || '').trim()) {
+    note = imageUrlValidacion.error || 'La imagen del producto no es valida.';
+  } else if (imageUrl) {
+    note = 'Vista previa del producto con imagen para el menu digital.';
+  }
+
+  if (prodMenuPreview) {
+    prodMenuPreview.dataset.previewState = previewState;
+  }
+  if (prodMenuPreviewCategory) prodMenuPreviewCategory.textContent = categoria;
+  if (prodMenuPreviewTitle) prodMenuPreviewTitle.textContent = nombre;
+  if (prodMenuPreviewPrice) prodMenuPreviewPrice.textContent = precio;
+  if (prodMenuPreviewOldPrice) {
+    prodMenuPreviewOldPrice.textContent = '';
+    prodMenuPreviewOldPrice.hidden = true;
+  }
+  if (prodMenuPreviewNote) prodMenuPreviewNote.textContent = note;
+
+  aplicarImagenVistaPreviaProducto(imageUrl, initials);
+};
+
 const formatDate = (value) => {
   if (!value) return 'N/D';
   const texto = String(value).trim();
@@ -1691,6 +1823,7 @@ const limpiarFormularioProducto = () => {
   recetaProductoIdActivo = null;
   productoEdicionBase = null;
   actualizarEstadoRecetaUI();
+  actualizarVistaPreviaProducto();
 };
 
 const abrirInventarioModal = ({ limpiar = false } = {}) => {
@@ -2237,6 +2370,7 @@ const seleccionarProductoEdicion = (producto) => {
   if (botonProdCancelar) botonProdCancelar.hidden = false;
   if (inputProdNombre) inputProdNombre.value = producto.nombre ?? '';
   if (inputProdPrecio) setMoneyInputValueAdmin(inputProdPrecio, producto.precio ?? '');
+  if (inputProdImagenUrl) inputProdImagenUrl.value = producto.image_url ?? '';
   if (inputProdCostoBase) setMoneyInputValueAdmin(inputProdCostoBase, producto.costo_base_sin_itbis ?? 0);
   if (inputProdCostoPromedio) setMoneyInputValueAdmin(inputProdCostoPromedio, producto.costo_promedio_actual ?? 0);
   if (inputProdUltimoCosto) setMoneyInputValueAdmin(inputProdUltimoCosto, producto.ultimo_costo_sin_itbis ?? 0);
@@ -2267,6 +2401,7 @@ const seleccionarProductoEdicion = (producto) => {
   if (inputProdCategoria) inputProdCategoria.value = producto.categoria_id ?? '';
   if (inputProdActivo) inputProdActivo.checked = activo;
   setPreciosProductoUI(producto.precios || []);
+  actualizarVistaPreviaProducto();
   setMessage(mensajeProductos, `Editando producto: ${producto.nombre}`, 'info');
   cargarRecetaProducto(producto.id);
   inputProdNombre?.focus();
@@ -2646,10 +2781,20 @@ productosVistaCategoriaInput?.addEventListener('change', () => filtrarProductosV
 productosVistaTipoInput?.addEventListener('change', () => filtrarProductosVistaCompleta());
 productosVistaOrdenInput?.addEventListener('change', () => filtrarProductosVistaCompleta());
 inputProdStockIndefinido?.addEventListener('change', () => refrescarUiStockIndefinido(true));
-inputProdEsInsumo?.addEventListener('change', () => refrescarUiInsumo(false));
+inputProdEsInsumo?.addEventListener('change', () => {
+  refrescarUiInsumo(false);
+  actualizarVistaPreviaProducto();
+});
+inputProdNombre?.addEventListener('input', () => actualizarVistaPreviaProducto());
+inputProdCategoria?.addEventListener('change', () => actualizarVistaPreviaProducto());
+inputProdPrecio?.addEventListener('input', () => actualizarVistaPreviaProducto());
+inputProdImagenUrl?.addEventListener('input', () => actualizarVistaPreviaProducto());
+inputProdActivo?.addEventListener('change', () => actualizarVistaPreviaProducto());
+inputProdInsumoVendible?.addEventListener('change', () => actualizarVistaPreviaProducto());
 refrescarUiStockIndefinido(false);
 refrescarUiInsumo(false);
 setPreciosProductoUI([]);
+actualizarVistaPreviaProducto();
 
 prodPrecioAgregarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
@@ -2700,10 +2845,13 @@ const obtenerValoresProducto = () => {
   const categoriaId = categoriaValor === '' ? null : parseInt(categoriaValor, 10);
   const activo = inputProdActivo?.checked ?? true;
   const actualizaCostoCompras = inputProdActualizaCostoCompras?.checked ?? true;
+  const imageUrlValidacion = validarUrlImagenProducto(inputProdImagenUrl?.value ?? '');
   const { precios } = leerPreciosProductoUI();
 
   return {
     nombre,
+    imageUrl: imageUrlValidacion.value,
+    imageUrlValidacion,
     precio,
     precios,
     stock,
@@ -2730,9 +2878,14 @@ const validarProducto = ({
   contenidoPorUnidad,
   tipoProducto,
   insumoVendible,
+  imageUrlValidacion,
 }) => {
   if (!nombre) {
     setMessage(mensajeProductos, 'El nombre del producto es obligatorio.', 'error');
+    return false;
+  }
+  if (!imageUrlValidacion?.ok) {
+    setMessage(mensajeProductos, imageUrlValidacion.error || 'La imagen del producto no es valida.', 'error');
     return false;
   }
   if (Number.isNaN(precio)) {
@@ -2815,6 +2968,7 @@ const setCategoriasOptions = (lista = []) => {
       productosVistaCategoriaInput.value = valorVista;
     }
   }
+  actualizarVistaPreviaProducto();
 };
 
 window.KANMActualizarCategorias = (lista) => {
@@ -2834,6 +2988,7 @@ const cargarCategorias = async () => {
 
 const crearProducto = async ({
   nombre,
+  imageUrl,
   precio,
   precios,
   stock,
@@ -2849,6 +3004,7 @@ const crearProducto = async ({
 }) => {
   const body = {
     nombre,
+    image_url: imageUrl,
     precio,
     precios: Array.isArray(precios) ? precios : [],
     stock_indefinido: stockIndefinido ? 1 : 0,
@@ -2885,6 +3041,7 @@ const actualizarProducto = async (
   id,
   {
     nombre,
+    imageUrl,
     precio,
     precios,
     stock,
@@ -2902,6 +3059,7 @@ const actualizarProducto = async (
 ) => {
   const body = {
     nombre,
+    image_url: imageUrl,
     precio,
     precios: Array.isArray(precios) ? precios : [],
     categoria_id: categoriaId !== null && !Number.isNaN(categoriaId) ? categoriaId : null,

@@ -12,87 +12,145 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Playfair+Display:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/css/menu-publico.css?v=20260306c" />
-    <script src="/js/menu-publico.js?v=20260306c" defer></script>
+    <link rel="stylesheet" href="/css/menu-publico.css?v=20260311b" />
+    <script src="/js/menu-publico.js?v=20260311b" defer></script>
   </head>
   <body class="menu-publico-body">
-    <div class="menu-publico-shell">
-      <header class="menu-publico-hero">
-        <div class="menu-publico-hero-copy">
-          <p class="menu-publico-kicker">Menu digital</p>
-          <div class="menu-publico-brand">
+    <div class="menu-publico-shell" id="menu-publico-top">
+      <header class="menu-publico-app-shell">
+        <div class="menu-publico-appbar">
+          <button
+            type="button"
+            class="menu-publico-icon-button"
+            id="menu-publico-back"
+            aria-label="Volver"
+            data-i18n-aria-label="actionBack"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 5 8 12l7 7" />
+            </svg>
+          </button>
+
+          <div class="menu-publico-appbar-title">
             <div class="menu-publico-logo" aria-hidden="true">
               <img id="menu-publico-logo" alt="" hidden />
               <span id="menu-publico-logo-fallback">KM</span>
             </div>
-            <div class="menu-publico-brand-text">
+            <div class="menu-publico-appbar-copy">
               <h1 id="menu-publico-titulo">Cargando menu...</h1>
               <p id="menu-publico-subtitulo">Espera un momento mientras sincronizamos disponibilidad y precios.</p>
             </div>
           </div>
-          <div class="menu-publico-badges">
-            <span class="menu-publico-badge" id="menu-publico-badge-acceso">Mesa</span>
-            <span class="menu-publico-badge menu-publico-badge-soft" id="menu-publico-badge-sync"
-              >Sincronizando...</span
+
+          <div class="menu-publico-appbar-actions">
+            <div class="menu-publico-language-picker">
+              <button
+                type="button"
+                class="menu-publico-icon-button menu-publico-language-toggle"
+                id="menu-publico-language-toggle"
+                aria-label="Idioma"
+                aria-haspopup="true"
+                aria-expanded="false"
+                data-i18n-aria-label="actionLanguage"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 12h16" />
+                  <path d="M12 4a12 12 0 0 1 0 16" />
+                  <path d="M12 4a12 12 0 0 0 0 16" />
+                  <path d="M6 7.5a18 18 0 0 0 12 0" />
+                  <path d="M6 16.5a18 18 0 0 1 12 0" />
+                </svg>
+                <span class="menu-publico-language-code" id="menu-publico-language-code">ES</span>
+              </button>
+              <div class="menu-publico-language-menu" id="menu-publico-language-menu" hidden></div>
+            </div>
+
+            <button
+              type="button"
+              class="menu-publico-icon-button"
+              id="menu-publico-search-toggle"
+              aria-label="Buscar"
+              data-i18n-aria-label="actionSearch"
             >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="6.5" />
+                <path d="M16 16 21 21" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              class="menu-publico-icon-button menu-publico-cart-toggle"
+              id="menu-publico-cart-toggle"
+              aria-label="Ver pedido"
+              data-i18n-aria-label="actionCart"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h2.5l1.2 7.2a1 1 0 0 0 1 .8h8.6a1 1 0 0 0 1-.8L20 8H8.3" />
+                <circle cx="10" cy="18.5" r="1.3" />
+                <circle cx="17" cy="18.5" r="1.3" />
+              </svg>
+              <span class="menu-publico-cart-badge" id="menu-publico-cart-badge" hidden>0</span>
+            </button>
           </div>
         </div>
 
-        <div class="menu-publico-hero-card">
-          <p class="menu-publico-hero-card-label">Pide desde tu celular</p>
-          <h2>La mesa comparte una sola cuenta en caja.</h2>
-          <p>
-            Si varias personas escanean este QR, cada una puede pedir por separado y luego caja decide si cobra junto o
-            separa la cuenta.
-          </p>
-          <ul class="menu-publico-hero-list">
-            <li>Disponibilidad en tiempo real</li>
-            <li>Nota para cocina o bar</li>
-            <li>Consumo en local o para llevar</li>
-          </ul>
+        <div class="menu-publico-meta-row">
+          <span class="menu-publico-badge" id="menu-publico-badge-acceso">Mesa</span>
+          <span class="menu-publico-badge menu-publico-badge-soft" id="menu-publico-badge-sync">Sincronizando...</span>
         </div>
+
+        <div class="menu-publico-search-wrap" id="menu-publico-search-wrap">
+          <label class="menu-publico-search">
+            <span class="menu-publico-sr-only" data-i18n="searchLabel">Buscar</span>
+            <input
+              id="menu-publico-search"
+              type="search"
+              placeholder="Buscar combos, bebidas, postres..."
+              data-i18n-placeholder="searchPlaceholder"
+              autocomplete="off"
+            />
+          </label>
+        </div>
+
+        <div class="menu-publico-nav" id="menu-publico-categorias-nav"></div>
       </header>
 
       <main class="menu-publico-main">
         <section class="menu-publico-catalogo-panel">
-          <div class="menu-publico-toolbar">
-            <label class="menu-publico-search">
-              <span>Buscar</span>
-              <input
-                id="menu-publico-search"
-                type="search"
-                placeholder="Empanada, jugo, postre..."
-                autocomplete="off"
-              />
-            </label>
-            <div class="menu-publico-nav" id="menu-publico-categorias-nav"></div>
-          </div>
-
           <div class="menu-publico-feedback" id="menu-publico-estado" hidden></div>
           <div class="menu-publico-categorias" id="menu-publico-categorias"></div>
         </section>
 
         <aside class="menu-publico-sidebar">
-          <section class="menu-publico-order-card">
+          <section class="menu-publico-order-card" id="menu-publico-order-card" tabindex="-1">
             <div class="menu-publico-order-head">
               <div>
-                <p class="menu-publico-order-kicker">Tu pedido</p>
-                <h2>Envialo directo al negocio</h2>
+                <p class="menu-publico-order-kicker" data-i18n="orderKicker">Tu pedido</p>
+                <h2 data-i18n="orderTitle">Envialo directo al negocio</h2>
               </div>
               <div class="menu-publico-order-head-actions">
-                <span class="menu-publico-order-count" id="menu-publico-order-count">0 items</span>
-                <button type="button" class="menu-publico-order-close" id="menu-publico-order-close">Cerrar</button>
+                <span class="menu-publico-order-count" id="menu-publico-order-count">0 productos</span>
+                <button type="button" class="menu-publico-order-close" id="menu-publico-order-close" data-i18n="actionClose">
+                  Cerrar
+                </button>
               </div>
             </div>
 
             <form id="menu-publico-form" class="menu-publico-form">
               <label class="menu-publico-field">
-                <span>Tu nombre (opcional)</span>
-                <input id="menu-publico-cliente" type="text" maxlength="120" placeholder="Ej. Ana o Silla 3" />
+                <span data-i18n="fieldCustomerName">Tu nombre (opcional)</span>
+                <input
+                  id="menu-publico-cliente"
+                  type="text"
+                  maxlength="120"
+                  placeholder="Ej. Ana o Silla 3"
+                  data-i18n-placeholder="fieldCustomerNamePlaceholder"
+                />
               </label>
 
               <label class="menu-publico-field">
-                <span>Tipo de servicio</span>
+                <span data-i18n="fieldService">Tipo de servicio</span>
                 <select id="menu-publico-servicio">
                   <option value="en_local">Consumir en el negocio</option>
                   <option value="para_llevar">Para llevar</option>
@@ -100,12 +158,13 @@
               </label>
 
               <label class="menu-publico-field">
-                <span>Nota para preparacion</span>
+                <span data-i18n="fieldNote">Nota para preparacion</span>
                 <textarea
                   id="menu-publico-nota"
                   rows="3"
                   maxlength="200"
                   placeholder="Ej. Sin cebolla, extra queso, poco azucar..."
+                  data-i18n-placeholder="fieldNotePlaceholder"
                 ></textarea>
               </label>
 
@@ -113,37 +172,31 @@
 
               <div class="menu-publico-totales">
                 <div class="menu-publico-total-row">
-                  <span>Subtotal</span>
+                  <span data-i18n="totalSubtotal">Subtotal</span>
                   <strong id="menu-publico-subtotal">RD$0.00</strong>
                 </div>
                 <div class="menu-publico-total-row">
-                  <span>Impuesto</span>
+                  <span data-i18n="totalTax">Impuesto</span>
                   <strong id="menu-publico-impuesto">RD$0.00</strong>
                 </div>
                 <div class="menu-publico-total-row" id="menu-publico-propina-row" hidden>
-                  <span>Propina legal (10%)</span>
+                  <span data-i18n="totalTip">Propina legal (10%)</span>
                   <strong id="menu-publico-propina">RD$0.00</strong>
                 </div>
                 <div class="menu-publico-total-row menu-publico-total-row-strong">
-                  <span>Total estimado</span>
+                  <span data-i18n="totalEstimated">Total estimado</span>
                   <strong id="menu-publico-total">RD$0.00</strong>
                 </div>
               </div>
 
-              <button id="menu-publico-submit" class="menu-publico-submit" type="submit">Enviar pedido</button>
+              <button id="menu-publico-submit" class="menu-publico-submit" type="submit" data-i18n="submitOrder">
+                Enviar pedido
+              </button>
               <div class="menu-publico-form-message" id="menu-publico-form-message" hidden></div>
             </form>
           </section>
         </aside>
       </main>
-
-      <button type="button" class="menu-publico-mobile-toggle" id="menu-publico-mobile-toggle">
-        <span class="menu-publico-mobile-toggle-copy">
-          <strong id="menu-publico-mobile-count">0 items</strong>
-          <span>Ver pedido</span>
-        </span>
-        <strong class="menu-publico-mobile-toggle-total" id="menu-publico-mobile-total">RD$0.00</strong>
-      </button>
 
       <div class="menu-publico-overlay" id="menu-publico-overlay" hidden></div>
     </div>

@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS categorias (
 CREATE TABLE IF NOT EXISTS productos (
   id INT AUTO_INCREMENT PRIMARY KEY,
   nombre VARCHAR(255) NOT NULL,
+  image_url LONGTEXT,
   categoria_id INT,
   precio DECIMAL(10,2) NOT NULL,
   costo_base_sin_itbis DECIMAL(12,2) NOT NULL DEFAULT 0,

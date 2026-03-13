@@ -123,11 +123,20 @@
     const tarjeta = Number(pedido?.pago_tarjeta) || 0;
     const transferencia = Number(pedido?.pago_transferencia) || 0;
     const metodos = [];
+    const totalPedido = Math.max(
+      Number(pedido?.total_final ?? pedido?.total) ||
+        (Number(pedido?.subtotal) || 0) +
+          (Number(pedido?.impuesto) || 0) -
+          (Number(pedido?.descuento_monto) || 0) +
+          (Number(pedido?.propina_monto) || 0),
+      0
+    );
 
     if (efectivo > 0.009) metodos.push('Efectivo');
     if (tarjeta > 0.009) metodos.push('Tarjeta');
     if (transferencia > 0.009) metodos.push('Transferencia');
 
+    if (!metodos.length && totalPedido > 0.009) return 'Efectivo';
     if (!metodos.length) return 'Sin registrar';
     if (metodos.length === 1) return metodos[0];
     return `Mixto (${metodos.join(' + ')})`;

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/styles.css?v=20260310a" />
   <style>
     /* Modal Negocios */
     #kanm-negocios-modal {
@@ -2770,6 +2770,48 @@
 
             <section class="product-form-section">
               <div class="product-form-section-header">
+                <h4>Imagen y vista previa</h4>
+                <p class="kanm-subtitle">Usa una URL publica para mostrar el producto en el menu digital.</p>
+              </div>
+              <div class="product-form-grid">
+                <div class="kanm-input-group product-form-span">
+                  <label for="prod-imagen-url">Imagen del producto (URL)</label>
+                  <input
+                    type="url"
+                    id="prod-imagen-url"
+                    inputmode="url"
+                    placeholder="https://tu-cdn.com/productos/hamburguesa.jpg"
+                  />
+                  <span class="kanm-input-help">
+                    Recomendado: imagen cuadrada o vertical, liviana y publica. No pegues base64.
+                  </span>
+                </div>
+                <div class="product-form-span">
+                  <div class="product-menu-preview" id="prod-menu-preview">
+                    <div class="product-menu-preview-card">
+                      <div class="product-menu-preview-media">
+                        <img id="prod-menu-preview-img" alt="Vista previa del producto" hidden />
+                        <div id="prod-menu-preview-fallback" class="product-menu-preview-fallback">Sin imagen</div>
+                        <span class="product-menu-preview-badge">Menu</span>
+                        <button type="button" class="product-menu-preview-plus" disabled>+</button>
+                      </div>
+                      <div class="product-menu-preview-body">
+                        <div class="product-menu-preview-category" id="prod-menu-preview-category">Categoria</div>
+                        <h5 id="prod-menu-preview-title">Nombre del producto</h5>
+                        <div class="product-menu-preview-price-row">
+                          <strong id="prod-menu-preview-price">RD$0.00</strong>
+                          <span id="prod-menu-preview-old-price" hidden></span>
+                        </div>
+                        <p id="prod-menu-preview-note">Asi se mostraria en el menu digital.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="product-form-section">
+              <div class="product-form-section-header">
                 <h4>Precios</h4>
                 <p class="kanm-subtitle">Define el precio principal y precios alternativos.</p>
               </div>
@@ -3365,7 +3407,7 @@
 
   <script src="/js/password-toggle.js"></script>
   <script src="/js/auth.js"></script>
-  <script src="/js/admin.js?v=20260225b"></script>
+  <script src="/js/admin.js?v=20260310a"></script>
   <script src="/js/admin-facturacion-posium.js"></script>
   <script src="/js/admin-cotizaciones.js"></script>
   <script src="/js/admin-clientes.js"></script>

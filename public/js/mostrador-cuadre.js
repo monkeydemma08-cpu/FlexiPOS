@@ -503,10 +503,33 @@
     setCampoCuadre('cuadre-efectivo-esperado', esperado);
   };
 
-  const obtenerMetodoPagoLabel = (pedido = {}) => {
+  const obtenerEfectivoAplicadoCuadre = (pedido = {}) => {
     const efectivoRegistrado = Number(pedido.pago_efectivo) || 0;
+    if (efectivoRegistrado > 0) return efectivoRegistrado;
+
+    const efectivoEntregado = Number(pedido.pago_efectivo_entregado) || 0;
     const cambioRegistrado = Number(pedido.pago_cambio) || 0;
-    const efectivoAplicado = Math.max(efectivoRegistrado - cambioRegistrado, 0);
+    const efectivoInferido = Math.max(efectivoEntregado - cambioRegistrado, 0);
+    if (efectivoInferido > 0) return efectivoInferido;
+
+    const tarjeta = Number(pedido.pago_tarjeta) || 0;
+    const transferencia = Number(pedido.pago_transferencia) || 0;
+    const totalPedido = Math.max(
+      (Number(pedido.subtotal) || 0) +
+        (Number(pedido.impuesto) || 0) -
+        (Number(pedido.descuento_monto) || 0) +
+        (Number(pedido.propina_monto) || 0),
+      0
+    );
+    if (tarjeta <= 0 && transferencia <= 0 && totalPedido > 0) {
+      return totalPedido;
+    }
+
+    return 0;
+  };
+
+  const obtenerMetodoPagoLabel = (pedido = {}) => {
+    const efectivoAplicado = obtenerEfectivoAplicadoCuadre(pedido);
     const tarjeta = Number(pedido.pago_tarjeta) || 0;
     const transferencia = Number(pedido.pago_transferencia) || 0;
 

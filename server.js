@@ -332,6 +332,34 @@ function normalizarCampoTexto(valor) {
   return limpio === '' ? null : limpio;
 }
 
+function validarUrlHttpPublica(valorEntrada, etiqueta = 'La URL') {
+  const valor = normalizarCampoTexto(valorEntrada);
+  if (!valor) {
+    return { ok: true, valor: null };
+  }
+  if (/^data:/i.test(valor)) {
+    return {
+      ok: false,
+      error: `${etiqueta} debe ser una URL http/https. No pegues imagen en base64/data URI.`,
+    };
+  }
+  if (valor.length > 2048) {
+    return {
+      ok: false,
+      error: `${etiqueta} es demasiado larga. Usa una URL publica mas corta.`,
+    };
+  }
+  try {
+    const parsed = new URL(valor);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return { ok: false, error: `${etiqueta} debe iniciar con http:// o https://.` };
+    }
+  } catch (_) {
+    return { ok: false, error: `${etiqueta} no es valida.` };
+  }
+  return { ok: true, valor };
+}
+
 function normalizarDocumentoFiscal(valor) {
   const clean = normalizarCampoTexto(valor);
   if (!clean) return null;
@@ -1804,12 +1832,14 @@ const obtenerNegocioAdmin = async (negocioId) =>
 
 const migrationsReady = runMultiNegocioMigrations()
   .then(() => runChatMigrations())
+  .then(() => asegurarColumnaProductosImageUrl())
   .then(() => seedUsuariosIniciales())
   .catch((err) => {
     console.error('Error en migraciones/seed:', err?.message || err);
   });
 
 let categoriasTieneNegocioId = null;
+let productosTieneImageUrl = null;
 
 const verificarCategoriaNegocioId = async () => {
   if (categoriasTieneNegocioId !== null) {
@@ -1833,6 +1863,45 @@ const verificarCategoriaNegocioId = async () => {
 
   return categoriasTieneNegocioId;
 };
+
+const verificarProductosTieneImageUrl = async () => {
+  if (productosTieneImageUrl !== null) {
+    return productosTieneImageUrl;
+  }
+  try {
+    const row = await db.get(
+      `SELECT COLUMN_NAME
+         FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'productos'
+          AND COLUMN_NAME = 'image_url'
+        LIMIT 1`
+    );
+    productosTieneImageUrl = Boolean(row?.COLUMN_NAME);
+  } catch (error) {
+    console.error('Error al verificar columna image_url en productos:', error?.message || error);
+    productosTieneImageUrl = false;
+  }
+  return productosTieneImageUrl;
+};
+
+async function asegurarColumnaProductosImageUrl() {
+  try {
+    const existe = await verificarProductosTieneImageUrl();
+    if (existe) return true;
+    await db.run('ALTER TABLE productos ADD COLUMN image_url LONGTEXT NULL AFTER nombre');
+    productosTieneImageUrl = true;
+    return true;
+  } catch (error) {
+    const mensaje = String(error?.message || error || '');
+    if (/duplicate column name|already exists/i.test(mensaje)) {
+      productosTieneImageUrl = true;
+      return true;
+    }
+    console.error('Error al asegurar columna image_url en productos:', mensaje);
+    return false;
+  }
+}
 
 const cerrarSesionPorToken = (token, callback) => {
   db.run(
@@ -5176,8 +5245,10 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     const descuentosDistribuidos = distribuirSegunSubtotal(descuentoMonto);
     const propinasDistribuidas = distribuirSegunSubtotal(propinaMonto);
     const pagoEfectivoDistribuido = distribuirSegunSubtotal(pagoEfectivoFinal);
+    const pagoEfectivoEntregadoDistribuido = distribuirSegunSubtotal(efectivoEntregado);
     const pagoTarjetaDistribuido = distribuirSegunSubtotal(tarjeta);
     const pagoTransferenciaDistribuido = distribuirSegunSubtotal(transferencia);
+    const pagoCambioDistribuido = distribuirSegunSubtotal(cambio);
 
   const reintentosNCF = 2;
   const puedeReintentarNCF = generar_ncf !== false && !ncfManualNormalizado;
@@ -5328,10 +5399,10 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
           usuario_id || null,
           origenCaja,
           pagoEfectivoDistribuido[indice] || 0,
-          efectivoEntregado,
+          pagoEfectivoEntregadoDistribuido[indice] || 0,
           pagoTarjetaDistribuido[indice] || 0,
           pagoTransferenciaDistribuido[indice] || 0,
-          cambio,
+          pagoCambioDistribuido[indice] || 0,
           p.id,
           negocioIdOperacion,
         ];
@@ -5431,6 +5502,17 @@ const normalizarFechaOperacion = (valor) => {
   }
   return obtenerFechaLocalISO(new Date());
 };
+
+function obtenerPagoEfectivoAplicado(registro = {}) {
+  const efectivoRegistrado = Number(registro?.pago_efectivo) || 0;
+  if (efectivoRegistrado > 0) {
+    return Number(efectivoRegistrado.toFixed(2));
+  }
+
+  const efectivoEntregado = Number(registro?.pago_efectivo_entregado) || 0;
+  const cambioRegistrado = Number(registro?.pago_cambio) || 0;
+  return Number(Math.max(efectivoEntregado - cambioRegistrado, 0).toFixed(2));
+}
 
 const FECHA_BASE_PEDIDOS_SQL = 'COALESCE(fecha_factura, fecha_cierre, fecha_creacion)';
 const FECHA_BASE_PEDIDOS_ALIAS_SQL = 'COALESCE(p.fecha_factura, p.fecha_cierre, p.fecha_creacion)';
@@ -5833,23 +5915,19 @@ const calcularResumenCajaPorFecha = (
           const totalPedido = subtotal + impuesto - descuento + propina;
           totalDescuentos += descuento;
 
-          const efectivoEntregado = Number(pedido.pago_efectivo_entregado) || 0;
-          const efectivoRegistrado = Number(pedido.pago_efectivo) || 0;
-          const cambioRegistrado = Number(pedido.pago_cambio) || 0;
           const tarjeta = Number(pedido.pago_tarjeta) || 0;
           const transferencia = Number(pedido.pago_transferencia) || 0;
+          const totalNoEfectivo = tarjeta + transferencia;
+          const efectivoEsperado = Math.max(totalPedido - totalNoEfectivo, 0);
+          let efectivo = obtenerPagoEfectivoAplicado(pedido);
 
-          const baseEfectivo = efectivoEntregado > 0 ? efectivoEntregado : efectivoRegistrado;
-          const efectivoNeto = Math.max(baseEfectivo - cambioRegistrado, 0);
-          let efectivo = efectivoNeto;
-
-          if (baseEfectivo + tarjeta + transferencia === 0) {
+          if (efectivo <= 0 && totalNoEfectivo === 0) {
             efectivo = totalPedido;
-          } else if (efectivo <= 0 && baseEfectivo > 0) {
-            efectivo = Math.min(baseEfectivo, totalPedido);
+          } else if (efectivo > 0) {
+            efectivo = Math.min(efectivo, efectivoEsperado);
           }
 
-          efectivo = Math.min(efectivo, totalPedido);
+          efectivo = Math.max(efectivo, 0);
 
           totalEfectivo += efectivo;
           totalTarjeta += tarjeta;
@@ -7652,7 +7730,7 @@ app.get('/api/productos', (req, res) => {
       }
 
       const sql = `
-        SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo, p.categoria_id,
+        SELECT p.id, p.nombre, p.image_url, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo, p.categoria_id,
                p.costo_base_sin_itbis, p.costo_promedio_actual, p.ultimo_costo_sin_itbis,
                p.actualiza_costo_con_compras, p.costo_unitario_real, p.costo_unitario_real_incluye_itbis,
                p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad,
@@ -14370,10 +14448,15 @@ const contabilizarVentas = async (empresaId, desde, hasta, cuentasMap) => {
     const propina = Number(row.propina_monto || 0);
     const pagoTarjeta = Number(row.pago_tarjeta || 0);
     const pagoTransferencia = Number(row.pago_transferencia || 0);
-    const baseEfectivo = Number(row.pago_efectivo_entregado || 0) || Number(row.pago_efectivo || 0);
-    const cambio = Number(row.pago_cambio || 0);
-    let efectivo = Math.max(baseEfectivo - cambio, 0);
-    let totalCobrado = Number((efectivo + pagoTarjeta + pagoTransferencia).toFixed(2));
+    const noEfectivo = Number((pagoTarjeta + pagoTransferencia).toFixed(2));
+    const efectivoEsperado = Math.max(total - noEfectivo, 0);
+    let efectivo = obtenerPagoEfectivoAplicado(row);
+    if (efectivo <= 0 && noEfectivo === 0 && total > 0) {
+      efectivo = total;
+    } else if (efectivo > 0) {
+      efectivo = Math.min(efectivo, efectivoEsperado);
+    }
+    let totalCobrado = Number((efectivo + noEfectivo).toFixed(2));
     if (totalCobrado <= 0 && total > 0) {
       efectivo = total;
       totalCobrado = total;
@@ -14384,7 +14467,6 @@ const contabilizarVentas = async (empresaId, desde, hasta, cuentasMap) => {
     if (efectivo > 0) {
       lineas.push({ cuenta_id: cuentaCaja.id, debe: efectivo, haber: 0, descripcion: 'Venta efectivo' });
     }
-    const noEfectivo = Number((pagoTarjeta + pagoTransferencia).toFixed(2));
     if (noEfectivo > 0) {
       lineas.push({ cuenta_id: cuentaBanco.id, debe: noEfectivo, haber: 0, descripcion: 'Venta no efectivo' });
     }
@@ -18886,7 +18968,7 @@ const obtenerCatalogoMenuPublico = async (negocioId) => {
 
   const rows = await db.all(
     `
-      SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo,
+      SELECT p.id, p.nombre, p.image_url, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo,
              p.tipo_producto, p.insumo_vendible, p.categoria_id,
              COALESCE(c.nombre, 'Menu') AS categoria_nombre,
              COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
@@ -18941,6 +19023,7 @@ const obtenerCatalogoMenuPublico = async (negocioId) => {
     const producto = {
       id: Number(row.id),
       nombre: row.nombre,
+      image_url: normalizarCampoTexto(row.image_url),
       precio: precioBase,
       precios: [{ label: 'Base', valor: precioBase }],
       disponible,
@@ -20201,6 +20284,7 @@ app.put('/api/categorias/:id', (req, res) => {
 app.post('/api/productos', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const { nombre, precio, stock, categoria_id } = req.body;
+    const imageUrlValidacion = validarUrlHttpPublica(req.body?.image_url ?? req.body?.imageUrl, 'La imagen del producto');
     const preciosEntrada = req.body.precios ?? req.body.preciosLista ?? req.body.precios_lista;
     const stockIndefinido = normalizarFlag(req.body.stock_indefinido ?? req.body.stockIndefinido, 0);
     const precioValor = Number(precio);
@@ -20245,6 +20329,9 @@ app.post('/api/productos', (req, res) => {
     if (!Number.isFinite(costoUnitarioRealValor) || costoUnitarioRealValor < 0) {
       return res.status(400).json({ error: 'El costo real debe ser un numero mayor o igual a 0' });
     }
+    if (!imageUrlValidacion.ok) {
+      return res.status(400).json({ error: imageUrlValidacion.error || 'La imagen del producto no es valida' });
+    }
     if (!Number.isFinite(contenidoPorUnidad) || contenidoPorUnidad <= 0) {
       return res.status(400).json({ error: 'El contenido por unidad debe ser mayor a 0' });
     }
@@ -20260,15 +20347,16 @@ app.post('/api/productos', (req, res) => {
 
     const sql = `
       INSERT INTO productos (
-        nombre, precio, precios, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
+        nombre, image_url, precio, precios, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
         actualiza_costo_con_compras, costo_unitario_real, costo_unitario_real_incluye_itbis,
         tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad,
         stock, stock_indefinido, categoria_id, activo, negocio_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
     `;
     const params = [
       nombre,
+      imageUrlValidacion.valor,
       precioValor,
       preciosJson,
       costoBaseValor,
@@ -20296,6 +20384,7 @@ app.post('/api/productos', (req, res) => {
       res.status(201).json({
         id: this.lastID,
         nombre,
+        image_url: imageUrlValidacion.valor,
         precio: precioValor,
         precios: preciosLista,
         costo_base_sin_itbis: costoBaseValor,
@@ -20321,6 +20410,11 @@ app.put('/api/productos/:id', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const { id } = req.params;
     const { nombre = null, precio = null, categoria_id = null, activo = null } = req.body;
+    const imageUrlEntrada =
+      Object.prototype.hasOwnProperty.call(req.body || {}, 'image_url') ||
+      Object.prototype.hasOwnProperty.call(req.body || {}, 'imageUrl')
+        ? (Object.prototype.hasOwnProperty.call(req.body || {}, 'image_url') ? req.body.image_url : req.body.imageUrl)
+        : undefined;
     const preciosKeys = ['precios', 'preciosLista', 'precios_lista'];
     const preciosKey = preciosKeys.find((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
     const preciosEntrada = preciosKey ? req.body[preciosKey] : undefined;
@@ -20341,10 +20435,10 @@ app.put('/api/productos/:id', (req, res) => {
       req.body.actualiza_costo_con_compras ?? req.body.actualizaCostoCompras;
 
     db.get(
-      `SELECT stock, stock_indefinido, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
-              actualiza_costo_con_compras, costo_unitario_real, costo_unitario_real_incluye_itbis,
-              tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad
-         FROM productos WHERE id = ? AND negocio_id = ?`,
+        `SELECT stock, stock_indefinido, image_url, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
+                actualiza_costo_con_compras, costo_unitario_real, costo_unitario_real_incluye_itbis,
+                tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad
+           FROM productos WHERE id = ? AND negocio_id = ?`,
       [id, usuarioSesion.negocio_id],
       async (productoErr, productoActual) => {
         if (productoErr) {
@@ -20475,6 +20569,17 @@ app.put('/api/productos/:id', (req, res) => {
           );
         }
 
+        let imageUrl = null;
+        let imageUrlProporcionada = false;
+        if (imageUrlEntrada !== undefined) {
+          imageUrlProporcionada = true;
+          const imageUrlValidacion = validarUrlHttpPublica(imageUrlEntrada, 'La imagen del producto');
+          if (!imageUrlValidacion.ok) {
+            return res.status(400).json({ error: imageUrlValidacion.error || 'La imagen del producto no es valida' });
+          }
+          imageUrl = imageUrlValidacion.valor;
+        }
+
         const campos = [
           'nombre = COALESCE(?, nombre)',
           'precio = COALESCE(?, precio)',
@@ -20489,6 +20594,11 @@ app.put('/api/productos/:id', (req, res) => {
           const preciosJson = preciosLista.length ? JSON.stringify(preciosLista) : null;
           campos.push('precios = ?');
           params.push(preciosJson);
+        }
+
+        if (imageUrlProporcionada) {
+          campos.push('image_url = ?');
+          params.push(imageUrl);
         }
 
         if (costoBaseProporcionado) {
