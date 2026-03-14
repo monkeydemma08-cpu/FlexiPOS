@@ -23,6 +23,8 @@ const pieSpan = document.getElementById('cotizacion-pie');
 const rncSpan = document.getElementById('cotizacion-rnc');
 
 const authApi = window.kanmAuth;
+let temaNegocio = window.APP_TEMA_NEGOCIO || null;
+let configuracionCotizacion = null;
 
 const obtenerAuthHeadersCotizacion = () => {
   try {
@@ -73,40 +75,47 @@ const formatDateOnly = (valor) => {
   }).format(fecha);
 };
 
-const aplicarConfig = (config) => {
-  if (!config) return;
-  const { logo, direccion, telefono, pie, rnc, nombre } = config;
+const obtenerNombreNegocio = () =>
+  configuracionCotizacion?.nombre ||
+  temaNegocio?.titulo ||
+  temaNegocio?.titulo_sistema ||
+  temaNegocio?.nombre ||
+  temaNegocio?.slug ||
+  '';
+
+const aplicarIdentidadCotizacion = () => {
+  const nombreNegocio = obtenerNombreNegocio() || 'Cotizacion';
+  const logoFuente =
+    (configuracionCotizacion?.logo || '').trim() || temaNegocio?.logoUrl || temaNegocio?.logo_url || '';
+  const tieneLogo = Boolean(logoFuente);
+
+  document.title = nombreNegocio ? `${nombreNegocio} - Cotizacion` : 'Cotizacion';
+
   if (logoImg) {
-    if (logo) {
-      logoImg.src = logo;
+    if (tieneLogo) {
+      logoImg.src = logoFuente;
       logoImg.style.display = 'block';
-      if (logoTexto) logoTexto.style.display = 'none';
+      logoImg.alt = `Logo de ${nombreNegocio}`;
     } else {
       logoImg.removeAttribute('src');
       logoImg.style.display = 'none';
-      if (logoTexto) {
-        const iniciales =
-          nombre && typeof nombre === 'string'
-            ? nombre
-                .trim()
-                .split(/\s+/)
-                .slice(0, 2)
-                .map((p) => p[0] || '')
-                .join('')
-                .toUpperCase()
-            : 'CT';
-        logoTexto.textContent = iniciales || 'CT';
-        logoTexto.style.display = 'flex';
-      }
     }
   }
-  if (logoTexto && nombre) {
-    logoTexto.textContent = nombre;
+
+  if (logoTexto) {
+    logoTexto.textContent = nombreNegocio || 'CT';
+    logoTexto.style.display = tieneLogo ? 'none' : 'flex';
   }
+};
+
+const aplicarConfig = (config) => {
+  configuracionCotizacion = config || null;
+  const { direccion, telefono, pie, rnc } = config || {};
   if (direccionSpan) direccionSpan.textContent = direccion || 'Republica Dominicana - ITBIS incluido';
   if (telefonoSpan) telefonoSpan.textContent = telefono || '';
   if (rncSpan) rncSpan.textContent = rnc ? `RNC: ${rnc}` : '';
   if (pieSpan) pieSpan.textContent = pie || 'Documento de cotizacion, no es un comprobante fiscal.';
+  aplicarIdentidadCotizacion();
 };
 
 const renderCotizacion = (data) => {
@@ -182,6 +191,36 @@ const renderCotizacion = (data) => {
   }
 };
 
+const obtenerTemaNegocio = async () => {
+  if (temaNegocio) {
+    aplicarIdentidadCotizacion();
+    return temaNegocio;
+  }
+
+  try {
+    const resp = await fetch('/api/negocios/mi-tema', {
+      headers: {
+        ...obtenerAuthHeadersCotizacion(),
+      },
+    });
+
+    if (!resp.ok) {
+      return null;
+    }
+
+    const data = await resp.json().catch(() => null);
+    const tema = data?.tema || data || null;
+    if (tema) {
+      temaNegocio = tema;
+      aplicarIdentidadCotizacion();
+    }
+    return tema;
+  } catch (error) {
+    console.warn('No se pudo cargar el tema del negocio para la cotizacion:', error);
+    return null;
+  }
+};
+
 const cargarCotizacion = async () => {
   if (!cotizacionId) {
     alert('No se encontro la cotizacion solicitada.');
@@ -200,6 +239,7 @@ const cargarCotizacion = async () => {
           ...obtenerAuthHeadersCotizacion(),
         },
       }),
+      obtenerTemaNegocio(),
     ]);
 
     if (!cotResp.ok) {
@@ -212,7 +252,11 @@ const cargarCotizacion = async () => {
       const configData = await configResp.json().catch(() => null);
       if (configData?.ok) {
         aplicarConfig(configData.configuracion);
+      } else {
+        aplicarIdentidadCotizacion();
       }
+    } else {
+      aplicarIdentidadCotizacion();
     }
   } catch (error) {
     console.error('Error al cargar la cotizacion:', error);
