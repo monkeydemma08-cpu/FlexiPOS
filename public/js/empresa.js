@@ -404,6 +404,7 @@
   const clienteFacturaClienteId = document.getElementById('empresa-cliente-factura-cliente-id');
   const clienteFacturaFechaInput = document.getElementById('empresa-cliente-factura-fecha');
   const clienteFacturaDescripcionInput = document.getElementById('empresa-cliente-factura-descripcion');
+  const clienteFacturaTipoComprobanteSelect = document.getElementById('empresa-cliente-factura-tipo-comprobante');
   const clienteFacturaProductoSelect = document.getElementById('empresa-cliente-factura-producto');
   const clienteFacturaCantidadInput = document.getElementById('empresa-cliente-factura-cantidad');
   const clienteFacturaAgregarBtn = document.getElementById('empresa-cliente-factura-agregar');
@@ -435,6 +436,7 @@
   const facturaEmpresaClienteSelect = document.getElementById('empresa-factura-cliente');
   const facturaEmpresaFechaInput = document.getElementById('empresa-factura-fecha');
   const facturaEmpresaDescripcionInput = document.getElementById('empresa-factura-descripcion');
+  const facturaEmpresaTipoComprobanteSelect = document.getElementById('empresa-factura-tipo-comprobante');
   const facturaEmpresaProductoSelect = document.getElementById('empresa-factura-producto');
   const facturaEmpresaCantidadInput = document.getElementById('empresa-factura-cantidad');
   const facturaEmpresaAgregarBtn = document.getElementById('empresa-factura-agregar');
@@ -525,6 +527,31 @@
     return local.toISOString().slice(0, 10);
   };
 
+  const normalizarTipoComprobanteCliente = (value, fallback = 'Sin comprobante') => {
+    if (value === undefined || value === null) return fallback;
+    const text = String(value).trim();
+    if (!text) return fallback;
+    const lower = text.toLowerCase();
+    if (['sin comprobante', 'sin_comprobante', 'sin'].includes(lower)) {
+      return 'Sin comprobante';
+    }
+    if (['b01', 'b02', 'b14'].includes(lower)) {
+      return lower.toUpperCase();
+    }
+    return fallback;
+  };
+
+  const esSinComprobanteCliente = (value) =>
+    normalizarTipoComprobanteCliente(value, 'Sin comprobante') === 'Sin comprobante';
+
+  const construirPayloadComprobanteCliente = (selectElement) => {
+    const tipoComprobante = normalizarTipoComprobanteCliente(selectElement?.value, 'Sin comprobante');
+    return {
+      tipo_comprobante: tipoComprobante,
+      generar_ncf: !esSinComprobanteCliente(tipoComprobante),
+    };
+  };
+
   const obtenerNegocioDefault = () => {
     const lista = Array.isArray(sucursalesCache) ? sucursalesCache : [];
     if (!lista.length) return null;
@@ -606,7 +633,7 @@
 
   const renderKpis = (kpis = {}) => {
     if (kpiNomina) kpiNomina.textContent = formatCurrency(kpis.nomina_total || 0);
-    const deudaValor = kpis.deudas_saldo ? kpis.deudas_total ? 0;
+    const deudaValor = Number(kpis.deudas_saldo || 0);
     if (kpiDeudas) kpiDeudas.textContent = formatCurrency(deudaValor || 0);
     if (kpiUsuarios) kpiUsuarios.textContent = formatNumber(kpis.usuarios_activos || 0);
   };
@@ -643,8 +670,8 @@
       if (productoTagsInput) productoTagsInput.value = producto.tags || '';
       if (productoUbicacionInput) productoUbicacionInput.value = producto.ubicacion || '';
       if (productoBodegaInput) productoBodegaInput.value = producto.bodega || '';
-      if (productoStockInput) productoStockInput.value = producto.stock ? '';
-      if (productoStockMinInput) productoStockMinInput.value = producto.stock_minimo ? '';
+      if (productoStockInput) productoStockInput.value = producto.stock ?? '';
+      if (productoStockMinInput) productoStockMinInput.value = producto.stock_minimo ?? '';
       if (productoStockIndefInput) productoStockIndefInput.checked = Number(producto.stock_indefinido || 0) === 1;
       if (productoSerializableInput) productoSerializableInput.checked = Number(producto.serializable || 0) === 1;
       if (productoTipoSelect) productoTipoSelect.value = producto.tipo_producto || 'FINAL';
@@ -741,7 +768,7 @@
         if (estadoStock !== 'indef') {
           const stock = Number(item.stock || 0);
           const costoBase = Number(item.costo_valoracion || item.costo_promedio_actual || item.costo_base || 0);
-          const valor = Number(item.valor_inventario ? stock * costoBase) || 0;
+          const valor = Number(item.valor_inventario ?? stock * costoBase) || 0;
           acc.valor += valor;
         }
         return acc;
@@ -1146,7 +1173,7 @@
       stock_indefinido: stockIndefinido ? 1 : 0,
       stock: stockIndefinido ? null : Number(item.stock || 0),
       serializable: Number(item.serializable || 0) === 1 ? 1 : 0,
-      atributos_json: item.atributos_json ? null,
+      atributos_json: item.atributos_json ?? null,
       ...overrides,
     };
   };
@@ -1533,10 +1560,18 @@
     const ingresos = resultados.ingresos || [];
     const costos = resultados.costos || [];
     const gastos = resultados.gastos || [];
-    const totalIngresos = resultados.total_ingresos ? ingresos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
-    const totalCostos = resultados.total_costos ? costos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
-    const totalGastos = resultados.total_gastos ? gastos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
-    const utilidad = resultados.utilidad ? Number((totalIngresos - totalCostos - totalGastos).toFixed(2));
+    const totalIngresos = Number(
+      resultados.total_ingresos ?? ingresos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0)
+    );
+    const totalCostos = Number(
+      resultados.total_costos ?? costos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0)
+    );
+    const totalGastos = Number(
+      resultados.total_gastos ?? gastos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0)
+    );
+    const utilidad = Number(
+      Number(resultados.utilidad ?? totalIngresos - totalCostos - totalGastos).toFixed(2)
+    );
 
     const rows = [];
     const pushGrupo = (label, items, total) => {
@@ -1565,14 +1600,18 @@
     const activos = balance.activos || [];
     const pasivos = balance.pasivos || [];
     const patrimonio = balance.patrimonio || [];
-    const totalActivos =
-      balance.total_activos ? activos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
-    const totalPasivos =
-      balance.total_pasivos ? pasivos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
-    const totalPatrimonio =
-      balance.total_patrimonio ? patrimonio.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0);
-    const totalPasivoPatrimonio =
-      balance.total_pasivo_patrimonio ? Number((totalPasivos + totalPatrimonio).toFixed(2));
+    const totalActivos = Number(
+      balance.total_activos ?? activos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0)
+    );
+    const totalPasivos = Number(
+      balance.total_pasivos ?? pasivos.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0)
+    );
+    const totalPatrimonio = Number(
+      balance.total_patrimonio ?? patrimonio.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0)
+    );
+    const totalPasivoPatrimonio = Number(
+      balance.total_pasivo_patrimonio ?? Number((totalPasivos + totalPatrimonio).toFixed(2))
+    );
 
     const rows = [];
     const pushGrupo = (label, items, total) => {
@@ -2505,19 +2544,19 @@
   };
 
   const iniciarSesionImpersonada = (data = {}, redirectUrl = '/admin.html') => {
-    const usuarioId = data.usuario_id ? data.id ? null;
+    const usuarioId = data.usuario_id || data.usuarioId || data.id || null;
     const sesion = {
       usuario: data.usuario,
       nombre: data.nombre,
       rol: data.rol || 'admin',
       id: usuarioId,
       usuarioId,
-      negocioId: data.negocio_id ? data.negocioId,
+      negocioId: data.negocio_id || data.negocioId || null,
       esSuperAdmin: false,
       forcePasswordChange: data.force_password_change === true,
       impersonated: true,
-      impersonated_by_role: data.impersonated_by_role ? data.impersonatedByRole ? 'empresa',
-      impersonatedByRole: data.impersonated_by_role ? data.impersonatedByRole ? 'empresa',
+      impersonated_by_role: data.impersonated_by_role || data.impersonatedByRole || 'empresa',
+      impersonatedByRole: data.impersonatedByRole || data.impersonated_by_role || 'empresa',
       token: data.token,
     };
 
@@ -3696,6 +3735,7 @@
     if (clienteFacturaClienteId) clienteFacturaClienteId.value = clienteActual.id || '';
     if (clienteFacturaFechaInput) clienteFacturaFechaInput.value = getLocalDateISO(new Date());
     if (clienteFacturaDescripcionInput) clienteFacturaDescripcionInput.value = '';
+    if (clienteFacturaTipoComprobanteSelect) clienteFacturaTipoComprobanteSelect.value = 'Sin comprobante';
     if (clienteFacturaNotasInput) clienteFacturaNotasInput.value = '';
     clienteFacturaImpuestoPorcentaje = 0;
     clienteFacturaProductosConImpuesto = false;
@@ -3813,6 +3853,7 @@
     const fecha = clienteFacturaFechaInput?.value || getLocalDateISO(new Date());
     const descripcion = clienteFacturaDescripcionInput?.value?.trim() || '';
     const notas = clienteFacturaNotasInput?.value?.trim() || '';
+    const comprobantePayload = construirPayloadComprobanteCliente(clienteFacturaTipoComprobanteSelect);
 
     try {
       setMensajeGenerico(clienteFacturaMensaje, 'Guardando factura...', 'info');
@@ -3824,6 +3865,7 @@
           fecha,
           descripcion,
           notas,
+          ...comprobantePayload,
           items: clienteFacturaItems,
           auto_pago: esClienteSucursal(clienteActual) ? 1 : 0,
         }),
@@ -4100,6 +4142,7 @@
     renderFacturaEmpresaItems();
     if (facturaEmpresaFechaInput) facturaEmpresaFechaInput.value = getLocalDateISO(new Date());
     if (facturaEmpresaDescripcionInput) facturaEmpresaDescripcionInput.value = '';
+    if (facturaEmpresaTipoComprobanteSelect) facturaEmpresaTipoComprobanteSelect.value = 'Sin comprobante';
     if (facturaEmpresaNotasInput) facturaEmpresaNotasInput.value = '';
     if (facturaEmpresaClienteSelect) facturaEmpresaClienteSelect.value = '';
     if (facturaEmpresaProductoSelect) facturaEmpresaProductoSelect.innerHTML = '<option value="">Selecciona producto</option>';
@@ -4195,6 +4238,7 @@
     const fecha = facturaEmpresaFechaInput?.value || getLocalDateISO(new Date());
     const descripcion = facturaEmpresaDescripcionInput?.value?.trim() || '';
     const notas = facturaEmpresaNotasInput?.value?.trim() || '';
+    const comprobantePayload = construirPayloadComprobanteCliente(facturaEmpresaTipoComprobanteSelect);
 
     try {
       let clienteId = Number(destino.cliente_id);
@@ -4227,6 +4271,7 @@
           fecha,
           descripcion,
           notas,
+          ...comprobantePayload,
           items: facturaEmpresaItems,
           auto_pago: autoPago ? 1 : 0,
         }),
@@ -4493,9 +4538,9 @@
     if (empleadoTipoSelect) empleadoTipoSelect.value = empleado.tipo_pago || 'MENSUAL';
     if (empleadoSueldoInput) empleadoSueldoInput.value = empleado.sueldo_base || '';
     if (empleadoTarifaInput) empleadoTarifaInput.value = empleado.tarifa_hora || '';
-    if (empleadoArsInput) empleadoArsInput.value = empleado.ars_porcentaje ? '';
-    if (empleadoAfpInput) empleadoAfpInput.value = empleado.afp_porcentaje ? '';
-    if (empleadoIsrInput) empleadoIsrInput.value = empleado.isr_porcentaje ? '';
+    if (empleadoArsInput) empleadoArsInput.value = empleado.ars_porcentaje ?? '';
+    if (empleadoAfpInput) empleadoAfpInput.value = empleado.afp_porcentaje ?? '';
+    if (empleadoIsrInput) empleadoIsrInput.value = empleado.isr_porcentaje ?? '';
     if (empleadoActivoInput) empleadoActivoInput.checked = !!empleado.activo;
     setMensajeGenerico(empleadoMensaje, 'Editando empleado.', 'info');
     mostrarTabEmpresa('nomina');

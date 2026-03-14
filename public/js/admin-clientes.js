@@ -43,6 +43,8 @@
   const inputDeudaId = document.getElementById('deuda-id');
   const inputDeudaDescripcion = document.getElementById('deuda-descripcion');
   const inputDeudaFecha = document.getElementById('deuda-fecha');
+  const selectDeudaTipoComprobante = document.getElementById('deuda-tipo-comprobante');
+  const inputDeudaNcf = document.getElementById('deuda-ncf');
   const inputDeudaMonto = document.getElementById('deuda-monto');
   const inputDeudaNotas = document.getElementById('deuda-notas');
   const btnDeudaNueva = document.getElementById('deuda-nueva');
@@ -157,6 +159,42 @@
     const tzOffset = date.getTimezoneOffset();
     const local = new Date(date.getTime() - tzOffset * 60000);
     return local.toISOString().slice(0, 10);
+  };
+
+  const normalizarTipoComprobante = (value, fallback = 'Sin comprobante') => {
+    if (value === undefined || value === null) return fallback;
+    const text = String(value).trim();
+    if (!text) return fallback;
+    const lower = text.toLowerCase();
+    if (['sin comprobante', 'sin_comprobante', 'sin'].includes(lower)) {
+      return 'Sin comprobante';
+    }
+    if (['b01', 'b02', 'b14'].includes(lower)) {
+      return lower.toUpperCase();
+    }
+    return fallback;
+  };
+
+  const esSinComprobante = (value) =>
+    normalizarTipoComprobante(value, 'Sin comprobante') === 'Sin comprobante';
+
+  const actualizarEstadoComprobanteDeuda = (bloquearTipo = false) => {
+    const tipo = normalizarTipoComprobante(selectDeudaTipoComprobante?.value, 'Sin comprobante');
+    if (selectDeudaTipoComprobante) {
+      const opciones = Array.from(selectDeudaTipoComprobante.options || []);
+      const existe = opciones.some((option) => option.value === tipo);
+      selectDeudaTipoComprobante.value = existe ? tipo : 'Sin comprobante';
+      selectDeudaTipoComprobante.disabled = bloquearTipo;
+    }
+    if (inputDeudaNcf) {
+      if (esSinComprobante(tipo) && !bloquearTipo) {
+        inputDeudaNcf.value = '';
+      }
+      inputDeudaNcf.readOnly = true;
+      inputDeudaNcf.placeholder = esSinComprobante(tipo)
+        ? 'Sin comprobante'
+        : 'Se genera automaticamente al guardar';
+    }
   };
 
   const formatDate = (value) => {
@@ -422,6 +460,8 @@
     if (inputDeudaDescripcion) inputDeudaDescripcion.value = '';
     if (inputDeudaNotas) inputDeudaNotas.value = '';
     if (inputDeudaFecha && !mantenerFecha) inputDeudaFecha.value = getLocalDateISO();
+    if (selectDeudaTipoComprobante) selectDeudaTipoComprobante.value = 'Sin comprobante';
+    if (inputDeudaNcf) inputDeudaNcf.value = '';
     if (selectDeudaProducto) selectDeudaProducto.value = '';
     if (inputDeudaCantidad) inputDeudaCantidad.value = '1';
     limpiarDeudaItems();
@@ -430,6 +470,7 @@
       inputDeudaMonto.dataset.auto = '';
       inputDeudaMonto.readOnly = false;
     }
+    actualizarEstadoComprobanteDeuda(false);
     setMessage(mensajeDeuda, '');
   };
 
@@ -568,9 +609,19 @@
       if (deudaActual?.id === deuda.id) {
         fila.classList.add('deuda-row--selected');
       }
+      const descripcion = [
+        deuda.descripcion || deuda.concepto || '--',
+        deuda.ncf
+          ? `NCF ${deuda.ncf}`
+          : deuda.tipo_comprobante && !esSinComprobante(deuda.tipo_comprobante)
+          ? deuda.tipo_comprobante
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
       fila.innerHTML = `
         <td>${formatDate(deuda.fecha)}</td>
-        <td>${deuda.descripcion || deuda.concepto || '--'}</td>
+        <td>${descripcion}</td>
         <td>${formatCurrency(total)}</td>
         <td>${formatCurrency(pagado)}</td>
         <td>${formatCurrency(saldo)}</td>
@@ -661,6 +712,7 @@
       }
       setMessage(mensajeDeudas, '');
       setFormEnabled(deudaForm, true);
+      actualizarEstadoComprobanteDeuda(Boolean((inputDeudaNcf?.value || '').trim()));
     } catch (error) {
       console.error('Error al cargar facturas:', error);
       setMessage(mensajeDeudas, 'No fue posible obtener las facturas.', 'error');
@@ -766,6 +818,14 @@
       setMoneyInputValue(inputDeudaMonto, deuda.monto_total ?? deuda.monto ?? 0);
       inputDeudaMonto.dataset.auto = '';
     }
+    if (selectDeudaTipoComprobante) {
+      selectDeudaTipoComprobante.value = normalizarTipoComprobante(
+        deuda.tipo_comprobante || deuda.ncf?.slice?.(0, 3),
+        deuda.ncf ? 'B02' : 'Sin comprobante'
+      );
+    }
+    if (inputDeudaNcf) inputDeudaNcf.value = deuda.ncf || '';
+    actualizarEstadoComprobanteDeuda(Boolean(deuda.ncf));
     cargarDetalleDeuda(deuda.id);
     setMessage(mensajeDeuda, '');
   };
@@ -797,10 +857,15 @@
 
     const descripcionManual = inputDeudaDescripcion?.value?.trim() || null;
     const descripcionFinal = descripcionManual || (tieneItems ? obtenerResumenDeudaItems() : null);
+    const tipoComprobante = normalizarTipoComprobante(selectDeudaTipoComprobante?.value, 'Sin comprobante');
+    const ncf = inputDeudaNcf?.value?.trim() || null;
     const payload = {
       descripcion: descripcionFinal,
       fecha: inputDeudaFecha?.value || null,
       monto,
+      tipo_comprobante: tipoComprobante,
+      generar_ncf: !esSinComprobante(tipoComprobante),
+      ncf,
       notas: inputDeudaNotas?.value?.trim() || null,
       items: tieneItems
         ? deudaItems.map((item) => ({
@@ -1067,6 +1132,10 @@
   deudaForm?.addEventListener('submit', (e) => {
     e.preventDefault();
     guardarDeuda();
+  });
+
+  selectDeudaTipoComprobante?.addEventListener('change', () => {
+    actualizarEstadoComprobanteDeuda(Boolean((inputDeudaNcf?.value || '').trim()));
   });
 
   abonoForm?.addEventListener('submit', (e) => {

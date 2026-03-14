@@ -1017,6 +1017,23 @@
                   <input type="text" id="deuda-descripcion" placeholder="Ej. Credito fiado" />
                 </div>
                 <div class="kanm-input-group">
+                  <label for="deuda-tipo-comprobante">Comprobante</label>
+                  <select id="deuda-tipo-comprobante">
+                    <option value="Sin comprobante">Sin comprobante</option>
+                    <option value="B02">B02</option>
+                    <option value="B01">B01</option>
+                  </select>
+                </div>
+                <div class="kanm-input-group">
+                  <label for="deuda-ncf">NCF</label>
+                  <input
+                    type="text"
+                    id="deuda-ncf"
+                    placeholder="Se genera automaticamente al guardar"
+                    readonly
+                  />
+                </div>
+                <div class="kanm-input-group">
                   <label for="deuda-monto">Total factura *</label>
                   <input
                     type="text"

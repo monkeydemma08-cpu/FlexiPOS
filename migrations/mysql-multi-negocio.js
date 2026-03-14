@@ -1193,8 +1193,11 @@ async function ensureTableClientesDeudas() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
+  await ensureColumn('clientes_deudas', 'tipo_comprobante VARCHAR(30) NULL');
+  await ensureColumn('clientes_deudas', 'ncf VARCHAR(30) NULL');
   await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_cliente', '(cliente_id)');
   await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_negocio', '(negocio_id)');
+  await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_ncf', '(ncf)');
 }
 
 async function ensureTableClientesDeudasDetalle() {
@@ -1884,8 +1887,11 @@ async function runMigrations() {
   await ensureTableClientesAbonos();
   await ensureColumn('clientes_deudas', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
   await ensureColumn('clientes_deudas', 'cierre_id INT NULL');
+  await ensureColumn('clientes_deudas', 'tipo_comprobante VARCHAR(30) NULL');
+  await ensureColumn('clientes_deudas', 'ncf VARCHAR(30) NULL');
   await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_cierre', '(cierre_id)');
   await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_origen', '(origen_caja)');
+  await ensureIndexByName('clientes_deudas', 'idx_clientes_deudas_ncf', '(ncf)');
   await modifyColumn('configuracion', 'valor LONGTEXT NOT NULL');
   await ensureColumn('salidas_caja', 'usuario_id INT NULL');
   await ensureColumn('negocios', 'slug VARCHAR(120) UNIQUE');

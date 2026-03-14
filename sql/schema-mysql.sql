@@ -83,6 +83,10 @@ CREATE TABLE IF NOT EXISTS clientes_deudas (
   fecha DATE NOT NULL,
   descripcion TEXT,
   monto_total DECIMAL(12,2) NOT NULL,
+  origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja',
+  cierre_id INT NULL,
+  tipo_comprobante VARCHAR(30) NULL,
+  ncf VARCHAR(30) NULL,
   notas TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -672,6 +676,7 @@ CREATE INDEX idx_cotizacion_items_cotizacion ON cotizacion_items (cotizacion_id)
 CREATE INDEX idx_clientes_activo_nombre ON clientes (negocio_id, activo, nombre);
 CREATE INDEX idx_clientes_deudas_cliente ON clientes_deudas (cliente_id);
 CREATE INDEX idx_clientes_deudas_negocio ON clientes_deudas (negocio_id);
+CREATE INDEX idx_clientes_deudas_ncf ON clientes_deudas (ncf);
 CREATE INDEX idx_clientes_deudas_detalle_deuda ON clientes_deudas_detalle (deuda_id);
 CREATE INDEX idx_clientes_deudas_detalle_producto ON clientes_deudas_detalle (producto_id);
 CREATE INDEX idx_clientes_deudas_detalle_negocio ON clientes_deudas_detalle (negocio_id);

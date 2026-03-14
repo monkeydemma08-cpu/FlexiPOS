@@ -3742,6 +3742,211 @@ const obtenerConfiguracionSecuenciasNegocio = async (negocioId) => {
   }
 };
 
+const inferirTipoComprobanteDesdeNCF = (ncf) => {
+  const valor = normalizarCampoTexto(ncf);
+  if (!valor) return null;
+  const prefijo = valor.slice(0, 3).toUpperCase();
+  return ['B01', 'B02', 'B14'].includes(prefijo) ? prefijo : null;
+};
+
+const normalizarTipoComprobanteVenta = (valor, fallback = null) => {
+  const texto = normalizarCampoTexto(valor);
+  if (!texto) return fallback;
+  const limpio = texto.toLowerCase();
+  if (['sin comprobante', 'sin_comprobante', 'sin'].includes(limpio)) {
+    return 'Sin comprobante';
+  }
+  if (['b01', 'b02', 'b14'].includes(limpio)) {
+    return limpio.toUpperCase();
+  }
+  return fallback;
+};
+
+const validarTipoComprobanteVentaEntrada = (valor) => {
+  const texto = normalizarCampoTexto(valor);
+  if (!texto) return null;
+  const tipo = normalizarTipoComprobanteVenta(texto, null);
+  if (!tipo) {
+    const error = new Error('Tipo de comprobante invalido. Usa Sin comprobante, B02 o B01.');
+    error.status = 400;
+    throw error;
+  }
+  return tipo;
+};
+
+const esTipoComprobanteSinRegistroFiscal = (valor) =>
+  normalizarTipoComprobanteVenta(valor, 'Sin comprobante') === 'Sin comprobante';
+
+const generarNCFAsync = (tipo, negocioId) =>
+  new Promise((resolve, reject) => {
+    generarNCF(tipo, negocioId, (error, ncf) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(ncf);
+    });
+  });
+
+const existeNCFVenta = async (ncf, negocioId, opciones = {}) => {
+  const valor = normalizarCampoTexto(ncf);
+  if (!valor || !negocioId) return false;
+
+  const excluirPedidoId = Number(opciones?.excluirPedidoId ?? opciones?.excluir_pedido_id);
+  const excluirDeudaId = Number(opciones?.excluirDeudaId ?? opciones?.excluir_deuda_id);
+
+  const paramsPedidos = [valor, negocioId];
+  const filtroPedido =
+    Number.isFinite(excluirPedidoId) && excluirPedidoId > 0 ? 'AND id <> ?' : '';
+  if (filtroPedido) {
+    paramsPedidos.push(excluirPedidoId);
+  }
+  const pedido = await db.get(
+    `SELECT id
+       FROM pedidos
+      WHERE ncf = ?
+        AND negocio_id = ?
+        ${filtroPedido}
+      LIMIT 1`,
+    paramsPedidos
+  );
+  if (pedido) {
+    return true;
+  }
+
+  const paramsDeudas = [valor, negocioId];
+  const filtroDeuda =
+    Number.isFinite(excluirDeudaId) && excluirDeudaId > 0 ? 'AND id <> ?' : '';
+  if (filtroDeuda) {
+    paramsDeudas.push(excluirDeudaId);
+  }
+  const deuda = await db.get(
+    `SELECT id
+       FROM clientes_deudas
+      WHERE ncf = ?
+        AND negocio_id = ?
+        ${filtroDeuda}
+      LIMIT 1`,
+    paramsDeudas
+  );
+  return Boolean(deuda);
+};
+
+const validarTipoComprobanteVentaNegocio = async (tipoComprobante, negocioId) => {
+  const tipo = normalizarTipoComprobanteVenta(tipoComprobante, 'Sin comprobante');
+  if (esTipoComprobanteSinRegistroFiscal(tipo)) {
+    return tipo;
+  }
+
+  const permisosSecuencias = await obtenerConfiguracionSecuenciasNegocio(negocioId);
+  if (tipo === 'B01' && Number(permisosSecuencias.permitir_b01) === 0) {
+    const error = new Error('B01 desactivado para este negocio');
+    error.status = 400;
+    throw error;
+  }
+  if (tipo === 'B02' && Number(permisosSecuencias.permitir_b02) === 0) {
+    const error = new Error('B02 desactivado para este negocio');
+    error.status = 400;
+    throw error;
+  }
+  if (tipo === 'B14' && Number(permisosSecuencias.permitir_b14) === 0) {
+    const error = new Error('B14 desactivado para este negocio');
+    error.status = 400;
+    throw error;
+  }
+  return tipo;
+};
+
+const resolverComprobanteVentaCliente = async ({
+  negocioId,
+  tipoComprobante,
+  generarNCF = true,
+  ncfManual,
+  tipoActual,
+  ncfActual,
+  deudaId,
+}) => {
+  const tipoActualNormalizado = normalizarTipoComprobanteVenta(
+    tipoActual || inferirTipoComprobanteDesdeNCF(ncfActual),
+    'Sin comprobante'
+  );
+  const tipoIngresado = validarTipoComprobanteVentaEntrada(tipoComprobante);
+  const tipoFinal = tipoIngresado || tipoActualNormalizado || 'Sin comprobante';
+  const ncfActualNormalizado = normalizarCampoTexto(ncfActual);
+  const ncfManualNormalizado = normalizarCampoTexto(ncfManual);
+  const deudaIdNumerico = Number(deudaId);
+
+  if (ncfActualNormalizado) {
+    if (esTipoComprobanteSinRegistroFiscal(tipoFinal)) {
+      const error = new Error('La factura ya tiene un NCF emitido y no puede quedar sin comprobante.');
+      error.status = 400;
+      throw error;
+    }
+    if (tipoFinal !== tipoActualNormalizado) {
+      const error = new Error('La factura ya tiene un NCF emitido. No se puede cambiar el tipo de comprobante.');
+      error.status = 400;
+      throw error;
+    }
+    if (ncfManualNormalizado && ncfManualNormalizado !== ncfActualNormalizado) {
+      const error = new Error('La factura ya tiene un NCF emitido. No se puede reemplazar.');
+      error.status = 400;
+      throw error;
+    }
+    return {
+      tipo_comprobante: tipoActualNormalizado,
+      ncf: ncfActualNormalizado,
+    };
+  }
+
+  if (esTipoComprobanteSinRegistroFiscal(tipoFinal)) {
+    return {
+      tipo_comprobante: 'Sin comprobante',
+      ncf: null,
+    };
+  }
+
+  const tipoValidado = await validarTipoComprobanteVentaNegocio(tipoFinal, negocioId);
+
+  if (ncfManualNormalizado) {
+    const ncfDuplicado = await existeNCFVenta(ncfManualNormalizado, negocioId, {
+      excluirDeudaId: deudaIdNumerico,
+    });
+    if (ncfDuplicado) {
+      const error = new Error('El NCF ingresado ya existe. Usa otro NCF.');
+      error.status = 400;
+      throw error;
+    }
+    return {
+      tipo_comprobante: tipoValidado,
+      ncf: ncfManualNormalizado,
+    };
+  }
+
+  if (generarNCF === false) {
+    return {
+      tipo_comprobante: tipoValidado,
+      ncf: null,
+    };
+  }
+
+  for (let intento = 0; intento < 3; intento += 1) {
+    const ncfGenerado = await generarNCFAsync(tipoValidado, negocioId);
+    const ncfDuplicado = await existeNCFVenta(ncfGenerado, negocioId, {
+      excluirDeudaId: deudaIdNumerico,
+    });
+    if (!ncfDuplicado) {
+      return {
+        tipo_comprobante: tipoValidado,
+        ncf: ncfGenerado,
+      };
+    }
+  }
+
+  const error = new Error('No fue posible generar un NCF unico');
+  error.status = 500;
+  throw error;
+};
+
 const esStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
 
 const ESTADOS_COTIZACION = ['borrador', 'enviada', 'aceptada', 'rechazada', 'facturada', 'vencida'];
@@ -17520,6 +17725,8 @@ app.get('/api/empresa/facturas', (req, res) => {
                d.descripcion,
                d.monto_total,
                d.notas,
+               d.tipo_comprobante,
+               d.ncf,
                d.cliente_id,
                d.negocio_id,
                c.nombre AS cliente_nombre,
@@ -17551,6 +17758,11 @@ app.get('/api/empresa/facturas', (req, res) => {
         const estado = saldo <= 0 ? 'PAGADO' : 'PENDIENTE';
         return {
           ...row,
+          tipo_comprobante: normalizarTipoComprobanteVenta(
+            row.tipo_comprobante || inferirTipoComprobanteDesdeNCF(row.ncf),
+            'Sin comprobante'
+          ),
+          ncf: normalizarCampoTexto(row.ncf),
           total_abonos: Number(abonos.toFixed(2)),
           saldo: Number(saldo.toFixed(2)),
           estado,
@@ -17638,7 +17850,8 @@ app.get('/api/empresa/clientes/:id/deudas', (req, res) => {
 
       const whereClause = `WHERE ${filtros.join(' AND ')}`;
       const rows = await db.all(
-        `SELECT d.id, d.fecha, d.descripcion, d.monto_total, d.notas, d.negocio_id, n.nombre AS sucursal_nombre,
+        `SELECT d.id, d.fecha, d.descripcion, d.monto_total, d.notas, d.tipo_comprobante, d.ncf,
+                d.negocio_id, n.nombre AS sucursal_nombre,
                 COALESCE(SUM(a.monto), 0) AS total_abonos
            FROM clientes_deudas d
            JOIN negocios n ON n.id = d.negocio_id
@@ -17658,6 +17871,11 @@ app.get('/api/empresa/clientes/:id/deudas', (req, res) => {
         const estado = saldo <= 0 ? 'saldada' : pagado > 0 ? 'parcial' : 'pendiente';
         return {
           ...row,
+          tipo_comprobante: normalizarTipoComprobanteVenta(
+            row.tipo_comprobante || inferirTipoComprobanteDesdeNCF(row.ncf),
+            'Sin comprobante'
+          ),
+          ncf: normalizarCampoTexto(row.ncf),
           monto_total: monto,
           total_abonos: pagado,
           pagado,
@@ -17752,6 +17970,11 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
     const fechaEntrada = normalizarCampoTexto(req.body?.fecha, null);
     const fecha = esFechaISOValida(fechaEntrada) ? fechaEntrada : obtenerFechaLocalISO(new Date());
     const origenCaja = normalizarOrigenCaja(req.body?.origen_caja ?? req.body?.origen, 'caja');
+    const tipoComprobanteEntrada = req.body?.tipo_comprobante ?? req.body?.tipoComprobante;
+    const generarNCFEntrada =
+      req.body?.generar_ncf ?? req.body?.generarNCF ?? req.body?.usar_secuencia_fiscal;
+    const ncfManualEntrada = req.body?.ncf ?? req.body?.ncf_manual ?? req.body?.ncfManual;
+    const autoPagoSolicitado = normalizarFlag(req.body?.auto_pago ?? req.body?.autoPago, 0) ? 1 : 0;
     const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
     const montoEntrada = normalizarNumero(req.body?.monto_total ?? req.body?.montoTotal, null);
 
@@ -17760,6 +17983,11 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
       if (!cliente) {
         return res.status(404).json({ ok: false, error: 'Cliente no encontrado.' });
       }
+      const tagsCliente = String(cliente.tags || '').toUpperCase();
+      const tipoCliente = String(cliente.tipo_cliente || '').toUpperCase();
+      const esSucursalInterna =
+        Number(cliente.negocio_id) > 0 && (tagsCliente.includes('SUCURSAL') || tipoCliente === 'EMPRESA');
+      const autoPago = autoPagoSolicitado || esSucursalInterna;
 
       const negocio = await obtenerNegocioEmpresa(empresaId, negocioId);
       if (!negocio) {
@@ -17928,15 +18156,37 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
       const montoTotal = totalesDeuda.total;
 
       let deudaId = null;
+      let comprobante = {
+        tipo_comprobante: 'Sin comprobante',
+        ncf: null,
+      };
       try {
+        comprobante = await resolverComprobanteVentaCliente({
+          negocioId,
+          tipoComprobante: tipoComprobanteEntrada,
+          generarNCF: generarNCFEntrada !== undefined ? normalizarFlag(generarNCFEntrada, 1) === 1 : true,
+          ncfManual: ncfManualEntrada,
+        });
         await db.run('BEGIN');
         const result = await db.run(
-          `INSERT INTO clientes_deudas (cliente_id, negocio_id, fecha, descripcion, monto_total, origen_caja, notas)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [clienteId, negocioId, fecha, descripcion, montoTotal, origenCaja, notas]
+          `INSERT INTO clientes_deudas (
+             cliente_id, negocio_id, fecha, descripcion, monto_total, origen_caja, tipo_comprobante, ncf, notas
+           )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            clienteId,
+            negocioId,
+            fecha,
+            descripcion,
+            montoTotal,
+            origenCaja,
+            comprobante.tipo_comprobante,
+            comprobante.ncf,
+            notas,
+          ]
         );
 
-        deudaId = result?.id;
+        deudaId = result?.lastID || result?.id || null;
         if (deudaId && itemsProcesados.length) {
           for (const item of itemsProcesados) {
             const totalLinea = Number((item.cantidad * item.precio_unitario).toFixed(2));
@@ -18048,7 +18298,20 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
       }
 
       limpiarCacheAnalitica(negocioId);
-      res.status(201).json({ ok: true, deuda_id: deudaId });
+      res.status(201).json({
+        ok: true,
+        deuda_id: deudaId,
+        deuda: {
+          id: deudaId,
+          cliente_id: clienteId,
+          fecha,
+          descripcion,
+          monto_total: montoTotal,
+          tipo_comprobante: comprobante.tipo_comprobante,
+          ncf: comprobante.ncf,
+          notas,
+        },
+      });
     } catch (error) {
       console.error('Error al crear deuda empresa:', error?.message || error);
       if (error?.status) {
@@ -18280,6 +18543,7 @@ app.get('/api/empresa/clientes/deudas/:deudaId/factura', (req, res) => {
     try {
       const deuda = await db.get(
         `SELECT d.id, d.fecha, d.descripcion, d.monto_total, d.notas, d.negocio_id,
+                d.tipo_comprobante, d.ncf,
                 c.nombre AS cliente_nombre, c.documento AS cliente_documento, c.telefono AS cliente_telefono,
                 c.direccion AS cliente_direccion, c.email AS cliente_email,
                 n.nombre AS sucursal_nombre, n.rnc AS sucursal_rnc, n.direccion AS sucursal_direccion, n.telefono AS sucursal_telefono
@@ -18347,6 +18611,11 @@ app.get('/api/empresa/clientes/deudas/:deudaId/factura', (req, res) => {
           numero: deuda.id,
           fecha: deuda.fecha,
           condicion: 'CREDITO',
+          tipo_comprobante: normalizarTipoComprobanteVenta(
+            deuda.tipo_comprobante || inferirTipoComprobanteDesdeNCF(deuda.ncf),
+            'Sin comprobante'
+          ),
+          ncf: normalizarCampoTexto(deuda.ncf),
           emisor: {
             nombre: deuda.sucursal_nombre,
             rnc: config?.rnc || deuda.sucursal_rnc || '',
@@ -19458,6 +19727,8 @@ app.get('/api/clientes/:id/deudas', (req, res) => {
                 d.descripcion,
                 d.monto_total,
                 d.notas,
+                d.tipo_comprobante,
+                d.ncf,
                 COALESCE(SUM(a.monto), 0) AS total_abonos
            FROM clientes_deudas d
            LEFT JOIN clientes_abonos a
@@ -19479,6 +19750,11 @@ app.get('/api/clientes/:id/deudas', (req, res) => {
           id: row.id,
           fecha: row.fecha,
           descripcion: row.descripcion,
+          tipo_comprobante: normalizarTipoComprobanteVenta(
+            row.tipo_comprobante || inferirTipoComprobanteDesdeNCF(row.ncf),
+            'Sin comprobante'
+          ),
+          ncf: normalizarCampoTexto(row.ncf),
           monto_total: monto,
           notas: row.notas,
           total_abonos: pagado,
@@ -19564,6 +19840,10 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
     const fecha = esFechaISOValida(fechaEntrada) ? fechaEntrada : obtenerFechaLocalISO(new Date());
     const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
     const usaItems = itemsEntrada.length > 0;
+    const tipoComprobanteEntrada = req.body?.tipo_comprobante ?? req.body?.tipoComprobante;
+    const generarNCFEntrada =
+      req.body?.generar_ncf ?? req.body?.generarNCF ?? req.body?.usar_secuencia_fiscal;
+    const ncfManualEntrada = req.body?.ncf ?? req.body?.ncf_manual ?? req.body?.ncfManual;
 
     try {
       const cliente = await db.get(
@@ -19605,13 +19885,31 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
 
       const descripcion =
         descripcionEntrada || (usaItems ? construirResumenDeudaProductos(itemsProcesados) : null);
+      const comprobante = await resolverComprobanteVentaCliente({
+        negocioId,
+        tipoComprobante: tipoComprobanteEntrada,
+        generarNCF: generarNCFEntrada !== undefined ? normalizarFlag(generarNCFEntrada, 1) === 1 : true,
+        ncfManual: ncfManualEntrada,
+      });
 
       await db.run('BEGIN');
 
       const insert = await db.run(
-        `INSERT INTO clientes_deudas (cliente_id, negocio_id, fecha, descripcion, monto_total, origen_caja, notas)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [clienteId, negocioId, fecha, descripcion, montoTotal, origenCaja, notas]
+        `INSERT INTO clientes_deudas (
+           cliente_id, negocio_id, fecha, descripcion, monto_total, origen_caja, tipo_comprobante, ncf, notas
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          clienteId,
+          negocioId,
+          fecha,
+          descripcion,
+          montoTotal,
+          origenCaja,
+          comprobante.tipo_comprobante,
+          comprobante.ncf,
+          notas,
+        ]
       );
 
       const deudaId = insert.lastID;
@@ -19680,6 +19978,8 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
           fecha,
           descripcion,
           monto_total: montoTotal,
+          tipo_comprobante: comprobante.tipo_comprobante,
+          ncf: comprobante.ncf,
           notas,
         },
         advertencias: advertenciasInsumos.length ? advertenciasInsumos : undefined,
@@ -19712,10 +20012,19 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
     const fecha = esFechaISOValida(fechaEntrada) ? fechaEntrada : obtenerFechaLocalISO(new Date());
     const itemsEntrada = Array.isArray(req.body?.items) ? req.body.items : [];
     const usaItems = itemsEntrada.length > 0;
+    const tipoComprobanteEntrada = req.body?.tipo_comprobante ?? req.body?.tipoComprobante;
+    const generarNCFEntrada =
+      req.body?.generar_ncf ?? req.body?.generarNCF ?? req.body?.usar_secuencia_fiscal;
+    const ncfManualEntrada = req.body?.ncf ?? req.body?.ncf_manual ?? req.body?.ncfManual;
 
     try {
       const deuda = await db.get(
-        'SELECT id FROM clientes_deudas WHERE id = ? AND cliente_id = ? AND negocio_id = ? LIMIT 1',
+        `SELECT id, tipo_comprobante, ncf
+           FROM clientes_deudas
+          WHERE id = ?
+            AND cliente_id = ?
+            AND negocio_id = ?
+          LIMIT 1`,
         [deudaId, clienteId, negocioId]
       );
       if (!deuda) {
@@ -19756,6 +20065,15 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
 
       const descripcion =
         descripcionEntrada || (usaItems ? construirResumenDeudaProductos(itemsProcesados) : null);
+      const comprobante = await resolverComprobanteVentaCliente({
+        negocioId,
+        tipoComprobante: tipoComprobanteEntrada,
+        generarNCF: generarNCFEntrada !== undefined ? normalizarFlag(generarNCFEntrada, 1) === 1 : true,
+        ncfManual: ncfManualEntrada,
+        tipoActual: deuda.tipo_comprobante,
+        ncfActual: deuda.ncf,
+        deudaId,
+      });
 
       if (!usaItems) {
         const detalleExistente = await db.get(
@@ -19774,10 +20092,22 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
               SET fecha = ?,
                   descripcion = ?,
                   monto_total = ?,
+                  tipo_comprobante = ?,
+                  ncf = ?,
                   notas = ?,
                   updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND cliente_id = ? AND negocio_id = ?`,
-          [fecha, descripcion, montoTotal, notas, deudaId, clienteId, negocioId]
+             WHERE id = ? AND cliente_id = ? AND negocio_id = ?`,
+          [
+            fecha,
+            descripcion,
+            montoTotal,
+            comprobante.tipo_comprobante,
+            comprobante.ncf,
+            notas,
+            deudaId,
+            clienteId,
+            negocioId,
+          ]
         );
 
         if (result.changes === 0) {
@@ -19785,7 +20115,19 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
         }
 
         limpiarCacheAnalitica(negocioId);
-        return res.json({ ok: true });
+        return res.json({
+          ok: true,
+          deuda: {
+            id: deudaId,
+            cliente_id: clienteId,
+            fecha,
+            descripcion,
+            monto_total: montoTotal,
+            tipo_comprobante: comprobante.tipo_comprobante,
+            ncf: comprobante.ncf,
+            notas,
+          },
+        });
       }
 
       const prevRows = await db.all(
@@ -19877,10 +20219,22 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
             SET fecha = ?,
                 descripcion = ?,
                 monto_total = ?,
+                tipo_comprobante = ?,
+                ncf = ?,
                 notas = ?,
                 updated_at = CURRENT_TIMESTAMP
           WHERE id = ? AND cliente_id = ? AND negocio_id = ?`,
-        [fecha, descripcion, montoTotal, notas, deudaId, clienteId, negocioId]
+        [
+          fecha,
+          descripcion,
+          montoTotal,
+          comprobante.tipo_comprobante,
+          comprobante.ncf,
+          notas,
+          deudaId,
+          clienteId,
+          negocioId,
+        ]
       );
 
       if (result.changes === 0) {
@@ -19968,7 +20322,20 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
       await db.run('COMMIT');
       limpiarCacheAnalitica(negocioId);
 
-      res.json({ ok: true, advertencias: advertenciasInsumos.length ? advertenciasInsumos : undefined });
+      res.json({
+        ok: true,
+        deuda: {
+          id: deudaId,
+          cliente_id: clienteId,
+          fecha,
+          descripcion,
+          monto_total: montoTotal,
+          tipo_comprobante: comprobante.tipo_comprobante,
+          ncf: comprobante.ncf,
+          notas,
+        },
+        advertencias: advertenciasInsumos.length ? advertenciasInsumos : undefined,
+      });
     } catch (error) {
       await db.run('ROLLBACK').catch(() => {});
       console.error('Error al actualizar deuda:', error?.message || error);
@@ -20095,6 +20462,7 @@ app.get('/api/clientes/deudas/:deudaId/factura', (req, res) => {
     try {
       const deuda = await db.get(
         `SELECT d.id, d.fecha, d.descripcion, d.monto_total, d.notas, d.negocio_id,
+                d.tipo_comprobante, d.ncf,
                 c.nombre AS cliente_nombre, c.documento AS cliente_documento, c.telefono AS cliente_telefono,
                 c.direccion AS cliente_direccion, c.email AS cliente_email,
                 n.nombre AS sucursal_nombre, n.rnc AS sucursal_rnc, n.direccion AS sucursal_direccion, n.telefono AS sucursal_telefono
@@ -20163,6 +20531,11 @@ app.get('/api/clientes/deudas/:deudaId/factura', (req, res) => {
           numero: deuda.id,
           fecha: deuda.fecha,
           condicion: 'CREDITO',
+          tipo_comprobante: normalizarTipoComprobanteVenta(
+            deuda.tipo_comprobante || inferirTipoComprobanteDesdeNCF(deuda.ncf),
+            'Sin comprobante'
+          ),
+          ncf: normalizarCampoTexto(deuda.ncf),
           emisor: {
             nombre: deuda.sucursal_nombre,
             rnc: config?.rnc || deuda.sucursal_rnc || '',

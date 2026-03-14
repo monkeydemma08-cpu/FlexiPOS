@@ -11,6 +11,8 @@
     emisorDireccion: document.getElementById('cliente-factura-emisor-direccion'),
     emisorTelefono: document.getElementById('cliente-factura-emisor-telefono'),
     numero: document.getElementById('cliente-factura-numero'),
+    tipoComprobante: document.getElementById('cliente-factura-tipo-comprobante'),
+    ncf: document.getElementById('cliente-factura-ncf'),
     fecha: document.getElementById('cliente-factura-fecha'),
     condicion: document.getElementById('cliente-factura-condicion'),
     clienteNombre: document.getElementById('cliente-factura-cliente-nombre'),
@@ -53,7 +55,11 @@
       .replace(/^_+|_+$/g, '');
 
   const obtenerNombreArchivoPdf = () => {
-    const numero = normalizarNombreArchivo(dom.numero?.textContent || 'factura');
+    const referencia =
+      (dom.ncf?.textContent || '').trim().toLowerCase() === 'sin comprobante'
+        ? dom.numero?.textContent
+        : dom.ncf?.textContent || dom.numero?.textContent;
+    const numero = normalizarNombreArchivo(referencia || 'factura');
     const cliente = normalizarNombreArchivo(dom.clienteNombre?.textContent || 'cliente');
     const base = [numero, cliente].filter(Boolean).join('_') || 'factura_cliente';
     return `${base}.pdf`;
@@ -84,6 +90,15 @@
     }
 
     if (dom.numero) dom.numero.textContent = factura.numero || '-';
+    if (dom.tipoComprobante) {
+      dom.tipoComprobante.textContent = factura.tipo_comprobante || 'Sin comprobante';
+    }
+    if (dom.ncf) {
+      dom.ncf.textContent =
+        factura.ncf || (factura.tipo_comprobante && factura.tipo_comprobante !== 'Sin comprobante'
+          ? 'Pendiente'
+          : 'Sin comprobante');
+    }
     if (dom.fecha) dom.fecha.textContent = formatDate(factura.fecha);
     if (dom.condicion) dom.condicion.textContent = factura.condicion || 'CREDITO';
 
