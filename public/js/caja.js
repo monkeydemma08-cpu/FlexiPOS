@@ -3607,6 +3607,14 @@ const renderDetalleCuadreActual = () => {
 
   });
 
+  fragment.querySelectorAll('[data-cambiar-metodo]').forEach((control) => {
+    ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'click'].forEach((eventName) => {
+      control.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+      });
+    });
+  });
+
 
 
   cuadreDetalleBody.appendChild(fragment);
@@ -3626,7 +3634,6 @@ const actualizarMetodoPagoCuadre = async (cuentaId, metodo, control = null) => {
   }
 
   const metodoAnterior = control?.dataset?.metodoActual || '';
-  const fechaSeleccionada = cuadreFechaInput?.value || resumenCuadre.fecha || obtenerFechaLocalHoy();
 
   if (control) {
     control.disabled = true;
@@ -3642,7 +3649,7 @@ const actualizarMetodoPagoCuadre = async (cuentaId, metodo, control = null) => {
       },
       body: JSON.stringify({
         metodo_pago: metodoNormalizado,
-        fecha: fechaSeleccionada,
+        turno: '1',
         origen_caja: 'caja',
       }),
     });
@@ -5368,8 +5375,15 @@ const inicializarCuadre = () => {
   });
 
   cuadreDetalleBody?.addEventListener('click', (event) => {
-    const selectorMetodo = event.target.closest('[data-cambiar-metodo]');
+    const target = event.target;
+    const selectorMetodo =
+      target instanceof Element ? target.closest('[data-cambiar-metodo], .cuadre-metodo-cell') : null;
+    const esOpcionMetodo = target instanceof HTMLOptionElement;
     if (selectorMetodo) {
+      event.stopPropagation();
+      return;
+    }
+    if (esOpcionMetodo) {
       event.stopPropagation();
       return;
     }

@@ -6379,6 +6379,15 @@ const obtenerPedidosDetalleCierre = (cierreId, negocioId, origen, callback) => {
       MAX(cuenta_id) AS cuenta_id,
       MAX(mesa) AS mesa,
       MAX(cliente) AS cliente,
+      SUM(subtotal) AS subtotal,
+      SUM(impuesto) AS impuesto,
+      SUM(COALESCE(descuento_monto, 0)) AS descuento_monto,
+      SUM(COALESCE(propina_monto, 0)) AS propina_monto,
+      SUM(COALESCE(pago_efectivo_entregado, 0)) AS pago_efectivo_entregado,
+      SUM(COALESCE(pago_efectivo, 0)) AS pago_efectivo,
+      SUM(COALESCE(pago_tarjeta, 0)) AS pago_tarjeta,
+      SUM(COALESCE(pago_transferencia, 0)) AS pago_transferencia,
+      SUM(COALESCE(pago_cambio, 0)) AS pago_cambio,
       SUM(total) AS total,
       MIN(fecha_cierre) AS fecha_cierre,
       MIN(fecha_listo) AS fecha_listo
@@ -8423,6 +8432,171 @@ app.get('/api/caja/cuadre/:id/detalle', (req, res) => {
   });
 });
 
+const normalizarMetodoPagoCuadreServidor = (valor) => {
+  const metodoRaw = (valor ?? '').toString().trim().toLowerCase();
+  return metodoRaw === 'efectivo' || metodoRaw === 'tarjeta' || metodoRaw === 'transferencia' ? metodoRaw : null;
+};
+
+const construirCamposPagoCuadre = (pedido = {}, metodo = '') => {
+  const subtotal = Number(pedido.subtotal) || 0;
+  const impuesto = Number(pedido.impuesto) || 0;
+  const descuento = Number(pedido.descuento_monto) || 0;
+  const propina = Number(pedido.propina_monto) || 0;
+  const totalPedido = Math.max(subtotal + impuesto - descuento + propina, 0);
+
+  let pagoEfectivo = 0;
+  let pagoEfectivoEntregado = 0;
+  let pagoTarjeta = 0;
+  let pagoTransferencia = 0;
+
+  if (metodo === 'efectivo') {
+    pagoEfectivo = totalPedido;
+    pagoEfectivoEntregado = totalPedido;
+  } else if (metodo === 'tarjeta') {
+    pagoTarjeta = totalPedido;
+  } else if (metodo === 'transferencia') {
+    pagoTransferencia = totalPedido;
+  }
+
+  return {
+    pago_efectivo: Number(pagoEfectivo.toFixed(2)),
+    pago_efectivo_entregado: Number(pagoEfectivoEntregado.toFixed(2)),
+    pago_tarjeta: Number(pagoTarjeta.toFixed(2)),
+    pago_transferencia: Number(pagoTransferencia.toFixed(2)),
+    pago_cambio: 0,
+  };
+};
+
+const actualizarMetodoPagoPedidosCuadre = async (pedidos = [], negocioId, metodo) => {
+  for (const pedido of pedidos) {
+    const pagos = construirCamposPagoCuadre(pedido, metodo);
+    await db.run(
+      `UPDATE pedidos
+          SET pago_efectivo = ?,
+              pago_efectivo_entregado = ?,
+              pago_tarjeta = ?,
+              pago_transferencia = ?,
+              pago_cambio = ?
+        WHERE id = ? AND negocio_id = ?`,
+      [
+        pagos.pago_efectivo,
+        pagos.pago_efectivo_entregado,
+        pagos.pago_tarjeta,
+        pagos.pago_transferencia,
+        pagos.pago_cambio,
+        Number(pedido.id),
+        negocioId,
+      ]
+    );
+  }
+};
+
+const recalcularCierreCajaRegistrado = async (cierreId, negocioId, origenPreferido = null) => {
+  const cierre = await db.get(
+    `SELECT id, fecha_operacion, fecha_cierre, origen_caja, fondo_inicial, total_declarado
+       FROM cierres_caja
+      WHERE id = ? AND negocio_id = ?`,
+    [cierreId, negocioId]
+  );
+
+  if (!cierre) {
+    const error = new Error('Cierre no encontrado.');
+    error.status = 404;
+    throw error;
+  }
+
+  const origenCaja = normalizarOrigenCaja(origenPreferido ?? cierre.origen_caja, 'caja');
+  const paramsPedidos = [cierreId, negocioId];
+  const filtroOrigenPedidos = construirFiltroOrigenCaja(origenCaja, paramsPedidos, 'origen_caja');
+  const pedidos = await db.all(
+    `SELECT subtotal, impuesto, descuento_monto, propina_monto,
+            pago_efectivo, pago_efectivo_entregado, pago_tarjeta, pago_transferencia, pago_cambio
+       FROM pedidos
+      WHERE cierre_id = ?
+        AND negocio_id = ?
+        AND estado = 'pagado'
+        AND ${filtroOrigenPedidos}`,
+    paramsPedidos
+  );
+
+  let totalEfectivo = 0;
+  let totalTarjeta = 0;
+  let totalTransferencia = 0;
+  for (const pedido of pedidos || []) {
+    totalEfectivo += obtenerPagoEfectivoAplicado(pedido);
+    totalTarjeta += Number(pedido.pago_tarjeta) || 0;
+    totalTransferencia += Number(pedido.pago_transferencia) || 0;
+  }
+
+  const fechaHasta =
+    (typeof cierre.fecha_cierre === 'string' && cierre.fecha_cierre.trim()) ||
+    `${normalizarFechaOperacion(cierre.fecha_operacion)} 23:59:59`;
+
+  const paramsCierreAnterior = [negocioId, cierreId];
+  const filtroOrigenAnterior = construirFiltroOrigenCaja(origenCaja, paramsCierreAnterior, 'origen_caja');
+  paramsCierreAnterior.push(fechaHasta);
+  const cierreAnterior = await db.get(
+    `SELECT fecha_cierre
+       FROM cierres_caja
+      WHERE negocio_id = ?
+        AND id <> ?
+        AND ${filtroOrigenAnterior}
+        AND fecha_cierre < ?
+      ORDER BY fecha_cierre DESC
+      LIMIT 1`,
+    paramsCierreAnterior
+  );
+
+  const salidasData = await new Promise((resolve, reject) => {
+    obtenerSalidasPorFecha(
+      null,
+      negocioId,
+      {
+        ignorarFecha: true,
+        desde: cierreAnterior?.fecha_cierre || null,
+        hasta: fechaHasta,
+        origen_caja: origenCaja,
+      },
+      (err, data) => {
+        if (err) return reject(err);
+        resolve(data || {});
+      }
+    );
+  });
+
+  const fondoInicial = Number(cierre.fondo_inicial) || 0;
+  const totalDeclarado = Number(cierre.total_declarado) || 0;
+  const totalSalidas = Number(salidasData?.total) || 0;
+  const esperado = Number((fondoInicial + totalEfectivo - totalSalidas).toFixed(2));
+  const diferencia = Number((totalDeclarado - esperado).toFixed(2));
+  const totalEfectivoRedondeado = Number(totalEfectivo.toFixed(2));
+  const totalTarjetaRedondeado = Number(totalTarjeta.toFixed(2));
+  const totalTransferenciaRedondeado = Number(totalTransferencia.toFixed(2));
+
+  await db.run(
+    `UPDATE cierres_caja
+        SET total_sistema = ?,
+            diferencia = ?
+      WHERE id = ? AND negocio_id = ?`,
+    [esperado, diferencia, cierreId, negocioId]
+  );
+
+  return {
+    id: cierreId,
+    fecha_operacion: cierre.fecha_operacion,
+    fecha_cierre: cierre.fecha_cierre,
+    origen_caja: origenCaja,
+    fondo_inicial: fondoInicial,
+    total_sistema: esperado,
+    total_declarado: Number(totalDeclarado.toFixed(2)),
+    diferencia,
+    total_efectivo: totalEfectivoRedondeado,
+    total_tarjeta: totalTarjetaRedondeado,
+    total_transferencia: totalTransferenciaRedondeado,
+    total_salidas: Number(totalSalidas.toFixed(2)),
+  };
+};
+
 app.put('/api/caja/cuadre/:id/metodo-pago', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const cuentaId = Number(req.params.id);
@@ -8430,16 +8604,17 @@ app.put('/api/caja/cuadre/:id/metodo-pago', (req, res) => {
       return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
     }
 
-    const metodoRaw = (req.body?.metodo_pago ?? req.body?.metodo ?? '').toString().trim().toLowerCase();
-    const metodo =
-      metodoRaw === 'efectivo' || metodoRaw === 'tarjeta' || metodoRaw === 'transferencia'
-        ? metodoRaw
-        : null;
+    const metodo = normalizarMetodoPagoCuadreServidor(req.body?.metodo_pago ?? req.body?.metodo);
     if (!metodo) {
       return res.status(400).json({ ok: false, error: 'Metodo de pago invalido.' });
     }
 
-    const fecha = req.body?.fecha ?? req.query?.fecha;
+    const modoTurno =
+      req.body?.turno === '1' ||
+      req.query?.turno === '1' ||
+      req.body?.ignorar_fecha === '1' ||
+      req.query?.ignorar_fecha === '1';
+    const fecha = modoTurno ? null : req.body?.fecha ?? req.query?.fecha;
     if (fecha && !esFechaISOValida(fecha)) {
       return res.status(400).json({ ok: false, error: 'Fecha invalida.' });
     }
@@ -8478,47 +8653,7 @@ app.put('/api/caja/cuadre/:id/metodo-pago', (req, res) => {
       }
 
       await db.run('BEGIN');
-      for (const pedido of pedidos) {
-        const subtotal = Number(pedido.subtotal) || 0;
-        const impuesto = Number(pedido.impuesto) || 0;
-        const descuento = Number(pedido.descuento_monto) || 0;
-        const propina = Number(pedido.propina_monto) || 0;
-        const totalPedido = Math.max(subtotal + impuesto - descuento + propina, 0);
-
-        let pagoEfectivo = 0;
-        let pagoEfectivoEntregado = 0;
-        let pagoTarjeta = 0;
-        let pagoTransferencia = 0;
-        const pagoCambio = 0;
-
-        if (metodo === 'efectivo') {
-          pagoEfectivo = totalPedido;
-          pagoEfectivoEntregado = totalPedido;
-        } else if (metodo === 'tarjeta') {
-          pagoTarjeta = totalPedido;
-        } else if (metodo === 'transferencia') {
-          pagoTransferencia = totalPedido;
-        }
-
-        await db.run(
-          `UPDATE pedidos
-              SET pago_efectivo = ?,
-                  pago_efectivo_entregado = ?,
-                  pago_tarjeta = ?,
-                  pago_transferencia = ?,
-                  pago_cambio = ?
-            WHERE id = ? AND negocio_id = ?`,
-          [
-            Number(pagoEfectivo.toFixed(2)),
-            Number(pagoEfectivoEntregado.toFixed(2)),
-            Number(pagoTarjeta.toFixed(2)),
-            Number(pagoTransferencia.toFixed(2)),
-            pagoCambio,
-            Number(pedido.id),
-            negocioId,
-          ]
-        );
-      }
+      await actualizarMetodoPagoPedidosCuadre(pedidos, negocioId, metodo);
       await db.run('COMMIT');
 
       return res.json({
@@ -8531,6 +8666,93 @@ app.put('/api/caja/cuadre/:id/metodo-pago', (req, res) => {
       await db.run('ROLLBACK').catch(() => {});
       console.error('Error al actualizar metodo de pago del cuadre:', error?.message || error);
       return res.status(500).json({ ok: false, error: 'No se pudo actualizar el metodo de pago.' });
+    }
+  });
+});
+
+app.put('/api/caja/cierres/:id/metodo-pago', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso denegado.' });
+    }
+
+    const cierreId = Number(req.params.id);
+    if (!Number.isInteger(cierreId) || cierreId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cierre invalido.' });
+    }
+
+    const cuentaId = Number(req.body?.cuenta_id ?? req.body?.cuentaId ?? req.body?.id);
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
+    }
+
+    const metodo = normalizarMetodoPagoCuadreServidor(req.body?.metodo_pago ?? req.body?.metodo);
+    if (!metodo) {
+      return res.status(400).json({ ok: false, error: 'Metodo de pago invalido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    try {
+      const cierreActual = await db.get(
+        `SELECT id, origen_caja
+           FROM cierres_caja
+          WHERE id = ? AND negocio_id = ?`,
+        [cierreId, negocioId]
+      );
+
+      if (!cierreActual) {
+        return res.status(404).json({ ok: false, error: 'Cierre no encontrado.' });
+      }
+
+      const origenCaja = normalizarOrigenCaja(
+        req.body?.origen_caja ?? req.body?.origen ?? req.query?.origen ?? req.query?.origen_caja ?? cierreActual.origen_caja,
+        'caja'
+      );
+      const params = [cuentaId, cuentaId, cierreId, negocioId];
+      const filtroOrigen = construirFiltroOrigenCaja(origenCaja, params, 'origen_caja');
+      const pedidos = await db.all(
+        `
+          SELECT id, subtotal, impuesto, descuento_monto, propina_monto
+          FROM pedidos
+          WHERE (cuenta_id = ? OR id = ?)
+            AND cierre_id = ?
+            AND estado = 'pagado'
+            AND negocio_id = ?
+            AND ${filtroOrigen}
+          ORDER BY fecha_creacion ASC
+        `,
+        params
+      );
+
+      if (!pedidos.length) {
+        return res.status(404).json({
+          ok: false,
+          error: 'No se encontraron ventas asociadas a esa cuenta dentro del cierre.',
+        });
+      }
+
+      await db.run('BEGIN');
+      await actualizarMetodoPagoPedidosCuadre(pedidos, negocioId, metodo);
+      const cierre = await recalcularCierreCajaRegistrado(cierreId, negocioId, origenCaja);
+      await db.run('COMMIT');
+
+      return res.json({
+        ok: true,
+        cierre_id: cierreId,
+        cuenta_id: cuentaId,
+        metodo_pago: metodo,
+        pedidos_actualizados: pedidos.length,
+        cierre,
+      });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      const status = error?.status || 500;
+      console.error('Error al actualizar metodo de pago del cierre:', error?.message || error);
+      return res.status(status).json({
+        ok: false,
+        error: error?.message || 'No se pudo actualizar el metodo de pago del cierre.',
+      });
     }
   });
 });

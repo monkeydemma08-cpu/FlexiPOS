@@ -1078,6 +1078,65 @@ const formatCurrencySigned = (value) => {
   return `${prefix}${formatCurrency(Math.abs(number))}`;
 };
 
+const METODOS_PAGO_CUADRE = [
+  { value: 'efectivo', label: 'Efectivo' },
+  { value: 'tarjeta', label: 'Tarjeta' },
+  { value: 'transferencia', label: 'Transferencia/Deposito' },
+];
+
+const obtenerEfectivoAplicadoCuadre = (pedido = {}) => {
+  const efectivoRegistrado = Number(pedido.pago_efectivo) || 0;
+  if (efectivoRegistrado > 0) return efectivoRegistrado;
+
+  const efectivoEntregado = Number(pedido.pago_efectivo_entregado) || 0;
+  const cambioRegistrado = Number(pedido.pago_cambio) || 0;
+  const efectivoInferido = Math.max(efectivoEntregado - cambioRegistrado, 0);
+  if (efectivoInferido > 0) return efectivoInferido;
+
+  const tarjeta = Number(pedido.pago_tarjeta) || 0;
+  const transferencia = Number(pedido.pago_transferencia) || 0;
+  const totalPedido = Math.max(
+    (Number(pedido.subtotal) || 0) +
+      (Number(pedido.impuesto) || 0) -
+      (Number(pedido.descuento_monto) || 0) +
+      (Number(pedido.propina_monto) || 0),
+    0
+  );
+  if (tarjeta <= 0 && transferencia <= 0 && totalPedido > 0) {
+    return totalPedido;
+  }
+
+  return 0;
+};
+
+const obtenerMetodoPagoLabelCuadre = (pedido = {}) => {
+  const efectivoAplicado = obtenerEfectivoAplicadoCuadre(pedido);
+  const tarjeta = Number(pedido.pago_tarjeta) || 0;
+  const transferencia = Number(pedido.pago_transferencia) || 0;
+  const partes = [];
+
+  if (efectivoAplicado > 0) partes.push('Efectivo');
+  if (tarjeta > 0) partes.push('Tarjeta');
+  if (transferencia > 0) partes.push('Transferencia/Deposito');
+
+  return partes.length ? partes.join(' + ') : 'Sin registrar';
+};
+
+const obtenerMetodoPagoValorCuadre = (pedido = {}) => {
+  const efectivoAplicado = obtenerEfectivoAplicadoCuadre(pedido);
+  const tarjeta = Number(pedido.pago_tarjeta) || 0;
+  const transferencia = Number(pedido.pago_transferencia) || 0;
+  const activos = [
+    efectivoAplicado > 0 ? 'efectivo' : null,
+    tarjeta > 0 ? 'tarjeta' : null,
+    transferencia > 0 ? 'transferencia' : null,
+  ].filter(Boolean);
+
+  if (!activos.length) return 'sin_registrar';
+  if (activos.length > 1) return 'mixto';
+  return activos[0];
+};
+
 const obtenerInicialesProducto = (value, fallback = 'KM') => {
   const iniciales = String(value || '')
     .trim()
@@ -6508,6 +6567,56 @@ const renderCierresCaja = () => {
   cierresTabla.appendChild(fragment);
 };
 
+const crearControlMetodoPagoCierre = (pedido, cierreId) => {
+  const esFacturaCliente = String(pedido?.tipo_registro || '').toLowerCase() === 'factura_cliente';
+  if (esFacturaCliente) {
+    const texto = document.createElement('span');
+    texto.textContent = 'No editable';
+    return texto;
+  }
+
+  const cuentaId = Number(pedido?.cuenta_id || pedido?.id);
+  if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+    const texto = document.createElement('span');
+    texto.textContent = 'No disponible';
+    return texto;
+  }
+
+  const metodoLabel = obtenerMetodoPagoLabelCuadre(pedido);
+  const metodoValor = obtenerMetodoPagoValorCuadre(pedido);
+  const wrapper = document.createElement('div');
+  wrapper.className = 'cuadre-metodo-cell';
+
+  const select = document.createElement('select');
+  select.className = 'cuadre-metodo-select';
+  select.dataset.cambiarMetodoCierre = '1';
+  select.dataset.cierreId = String(cierreId);
+  select.dataset.cuentaId = String(cuentaId);
+  select.dataset.metodoActual = metodoValor;
+  select.setAttribute('aria-label', `Metodo de pago para cuenta #${cuentaId}`);
+  select.title = `Metodo de pago actual: ${metodoLabel}`;
+
+  if (metodoValor === 'mixto' || metodoValor === 'sin_registrar') {
+    const opcionActual = document.createElement('option');
+    opcionActual.value = '';
+    opcionActual.disabled = true;
+    opcionActual.selected = true;
+    opcionActual.textContent = metodoValor === 'mixto' ? 'Mixto' : 'Sin registrar';
+    select.appendChild(opcionActual);
+  }
+
+  METODOS_PAGO_CUADRE.forEach((metodo) => {
+    const opcion = document.createElement('option');
+    opcion.value = metodo.value;
+    opcion.textContent = metodo.label;
+    opcion.selected = metodo.value === metodoValor;
+    select.appendChild(opcion);
+  });
+
+  wrapper.appendChild(select);
+  return wrapper;
+};
+
 const renderDetalleCierre = (pedidos, cierreId) => {
   if (!cierresDetalleTabla || !cierresDetalleWrapper) return;
 
@@ -6517,7 +6626,7 @@ const renderDetalleCierre = (pedidos, cierreId) => {
   if (!pedidos.length) {
     const fila = document.createElement('tr');
     const celda = document.createElement('td');
-    celda.colSpan = 5;
+    celda.colSpan = 6;
     celda.textContent = 'El cierre no tiene ventas o facturas asociadas.';
     fila.appendChild(celda);
     cierresDetalleTabla.appendChild(fila);
@@ -6542,6 +6651,10 @@ const renderDetalleCierre = (pedidos, cierreId) => {
     const celdaTotal = document.createElement('td');
     celdaTotal.textContent = formatCurrency(pedido.total);
     fila.appendChild(celdaTotal);
+
+    const celdaMetodo = document.createElement('td');
+    celdaMetodo.appendChild(crearControlMetodoPagoCierre(pedido, cierreId));
+    fila.appendChild(celdaMetodo);
 
     const celdaFecha = document.createElement('td');
     celdaFecha.textContent = formatDateTime(pedido.fecha_cierre || pedido.fecha_listo);
@@ -6596,6 +6709,70 @@ const cargarDetalleCierre = async (cierreId) => {
     console.error('Error al cargar detalle de cierre:', error);
     setMessage(cierresMensaje, error.message || 'No se pudo cargar el detalle.', 'error');
     limpiarDetalleCierre();
+  }
+};
+
+const actualizarMetodoPagoCierre = async (cierreId, cuentaId, metodo, control = null) => {
+  if (!Number.isFinite(Number(cierreId)) || Number(cierreId) <= 0) {
+    setMessage(cierresMensaje, 'Cierre invalido para actualizar metodo de pago.', 'error');
+    return;
+  }
+
+  if (!Number.isFinite(Number(cuentaId)) || Number(cuentaId) <= 0) {
+    setMessage(cierresMensaje, 'Cuenta invalida para actualizar metodo de pago.', 'error');
+    return;
+  }
+
+  const metodoNormalizado = String(metodo || '')
+    .trim()
+    .toLowerCase();
+  if (!METODOS_PAGO_CUADRE.some((item) => item.value === metodoNormalizado)) {
+    setMessage(cierresMensaje, 'Selecciona un metodo de pago valido.', 'error');
+    return;
+  }
+
+  const metodoAnterior = control?.dataset?.metodoActual || '';
+  if (control) {
+    control.disabled = true;
+  }
+
+  try {
+    setMessage(cierresMensaje, 'Actualizando metodo de pago del cierre...', 'info');
+    const respuesta = await fetchConAutorizacion(`/api/caja/cierres/${Number(cierreId)}/metodo-pago`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        cuenta_id: Number(cuentaId),
+        metodo_pago: metodoNormalizado,
+      }),
+    });
+
+    const data = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok || !data?.ok) {
+      throw new Error(data?.error || 'No se pudo actualizar el metodo de pago del cierre.');
+    }
+
+    if (control) {
+      control.dataset.metodoActual = metodoNormalizado;
+    }
+
+    await consultarCierresCaja(false);
+    if (Number(detalleCierreActivo) === Number(cierreId)) {
+      await cargarDetalleCierre(cierreId);
+    }
+    setMessage(cierresMensaje, 'Metodo de pago actualizado correctamente.', 'info');
+  } catch (error) {
+    if (control) {
+      control.value =
+        metodoAnterior && metodoAnterior !== 'mixto' && metodoAnterior !== 'sin_registrar' ? metodoAnterior : '';
+    }
+    setMessage(cierresMensaje, error.message || 'No se pudo actualizar el metodo de pago del cierre.', 'error');
+  } finally {
+    if (control) {
+      control.disabled = false;
+    }
   }
 };
 
@@ -8662,6 +8839,16 @@ cierresTabla?.addEventListener('click', (event) => {
     }
     return;
   }
+});
+
+cierresDetalleTabla?.addEventListener('change', (event) => {
+  const selectorMetodo = event.target.closest('[data-cambiar-metodo-cierre]');
+  if (!selectorMetodo) return;
+
+  const cierreId = Number(selectorMetodo.dataset.cierreId);
+  const cuentaId = Number(selectorMetodo.dataset.cuentaId);
+  const metodo = selectorMetodo.value;
+  actualizarMetodoPagoCierre(cierreId, cuentaId, metodo, selectorMetodo);
 });
 
 cierresDetalleTabla?.addEventListener('click', (event) => {
