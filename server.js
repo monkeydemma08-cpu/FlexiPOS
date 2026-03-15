@@ -6394,9 +6394,13 @@ const obtenerPedidosDetalleCierre = (cierreId, negocioId, origen, callback) => {
   const negocio = negocioId || NEGOCIO_ID_DEFAULT;
   const params = [cierreId, negocio];
   const filtroOrigen = construirFiltroOrigenCaja(origen, params, 'origen_caja');
+  const identificadorCuentaSql = 'COALESCE(cuenta_id, id)';
+  const totalCalculadoSql =
+    'COALESCE(subtotal, 0) + COALESCE(impuesto, 0) - COALESCE(descuento_monto, 0) + COALESCE(propina_monto, 0)';
   const sql = `
     SELECT
-      COALESCE(cuenta_id, id) AS id,
+      ${identificadorCuentaSql} AS id,
+      MIN(id) AS factura_pedido_id,
       MAX(cuenta_id) AS cuenta_id,
       MAX(mesa) AS mesa,
       MAX(cliente) AS cliente,
@@ -6409,15 +6413,15 @@ const obtenerPedidosDetalleCierre = (cierreId, negocioId, origen, callback) => {
       SUM(COALESCE(pago_tarjeta, 0)) AS pago_tarjeta,
       SUM(COALESCE(pago_transferencia, 0)) AS pago_transferencia,
       SUM(COALESCE(pago_cambio, 0)) AS pago_cambio,
-      SUM(total) AS total,
+      SUM(${totalCalculadoSql}) AS total,
       MIN(fecha_cierre) AS fecha_cierre,
       MIN(fecha_listo) AS fecha_listo
     FROM pedidos
     WHERE cierre_id = ?
       AND negocio_id = ?
       AND ${filtroOrigen}
-    GROUP BY id
-    ORDER BY fecha_cierre DESC, id ASC
+    GROUP BY ${identificadorCuentaSql}
+    ORDER BY MIN(fecha_cierre) DESC, ${identificadorCuentaSql} ASC
   `;
   db.all(sql, params, (err, rows) => {
     if (err) {

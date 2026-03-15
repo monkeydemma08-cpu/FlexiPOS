@@ -6639,6 +6639,18 @@ const renderDetalleCierre = (pedidos, cierreId) => {
     const fila = document.createElement('tr');
     const esFacturaCliente = String(pedido?.tipo_registro || '').toLowerCase() === 'factura_cliente';
     const idFacturaCliente = Number(pedido?.factura_deuda_id || pedido?.id);
+    const facturaPedidoId = Number(pedido?.factura_pedido_id || pedido?.id);
+    const totalPedido = esFacturaCliente
+      ? Number(pedido?.total) || 0
+      : Number(
+          Math.max(
+            (Number(pedido?.subtotal) || 0) +
+              (Number(pedido?.impuesto) || 0) -
+              (Number(pedido?.descuento_monto) || 0) +
+              (Number(pedido?.propina_monto) || 0),
+            0
+          ).toFixed(2)
+        );
 
     const celdaId = document.createElement('td');
     celdaId.textContent = esFacturaCliente ? `F-${idFacturaCliente || '--'}` : pedido.id;
@@ -6649,7 +6661,7 @@ const renderDetalleCierre = (pedidos, cierreId) => {
     fila.appendChild(celdaMesa);
 
     const celdaTotal = document.createElement('td');
-    celdaTotal.textContent = formatCurrency(pedido.total);
+    celdaTotal.textContent = formatCurrency(totalPedido);
     fila.appendChild(celdaTotal);
 
     const celdaMetodo = document.createElement('td');
@@ -6661,7 +6673,7 @@ const renderDetalleCierre = (pedidos, cierreId) => {
     fila.appendChild(celdaFecha);
 
     const celdaFactura = document.createElement('td');
-    const facturaId = esFacturaCliente ? idFacturaCliente : Number(pedido.id);
+    const facturaId = esFacturaCliente ? idFacturaCliente : facturaPedidoId;
     const botonFactura = document.createElement('button');
     botonFactura.type = 'button';
     botonFactura.className = 'kanm-button ghost';
