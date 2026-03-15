@@ -5705,6 +5705,23 @@ const normalizarFechaOperacion = (valor) => {
   if (esFechaISOValida(valor)) {
     return valor;
   }
+  if (valor instanceof Date) {
+    return Number.isNaN(valor.getTime()) ? obtenerFechaLocalISO(new Date()) : valor.toISOString().slice(0, 10);
+  }
+  if (typeof valor === 'string') {
+    const match = valor.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) {
+      return match[1];
+    }
+    const fecha = new Date(valor);
+    if (!Number.isNaN(fecha.getTime())) {
+      return fecha.toISOString().slice(0, 10);
+    }
+  }
+  const fecha = new Date(valor);
+  if (!Number.isNaN(fecha.getTime())) {
+    return fecha.toISOString().slice(0, 10);
+  }
   return obtenerFechaLocalISO(new Date());
 };
 
@@ -6365,7 +6382,11 @@ const obtenerCierresCaja = (desde, hasta, negocioId, origen, callback) => {
     if (err) {
       return callback(err);
     }
-    callback(null, rows || []);
+    const cierres = (rows || []).map((row) => ({
+      ...row,
+      fecha_operacion: normalizarFechaOperacion(row?.fecha_operacion),
+    }));
+    callback(null, cierres);
   });
 };
 
@@ -7018,20 +7039,7 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
       return String(valor).trim().toLowerCase().replace(/\s+/g, ' ');
     };
 
-    const normalizarFechaConsulta = (valor) => {
-      if (!valor) return obtenerFechaLocalISO(new Date());
-      if (typeof valor === 'string') {
-        const match = valor.trim().match(/^(\d{4}-\d{2}-\d{2})/);
-        if (match) return match[1];
-        const fecha = new Date(valor);
-        return Number.isNaN(fecha.getTime()) ? obtenerFechaLocalISO(new Date()) : obtenerFechaLocalISO(fecha);
-      }
-      if (valor instanceof Date) {
-        return obtenerFechaLocalISO(valor);
-      }
-      const fecha = new Date(valor);
-      return Number.isNaN(fecha.getTime()) ? obtenerFechaLocalISO(new Date()) : obtenerFechaLocalISO(fecha);
-    };
+    const normalizarFechaConsulta = (valor) => normalizarFechaOperacion(valor);
 
     try {
       const paramsCierre = [cierreId, negocioId];
@@ -7048,6 +7056,7 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
       }
 
       const fechaOperacion = normalizarFechaConsulta(cierre.fecha_operacion || cierre.fecha_cierre);
+      cierre.fecha_operacion = fechaOperacion;
 
       const paramsVentas = [negocioId, cierreId];
       const filtroOrigenPedidos = construirFiltroOrigenCaja(origenCaja, paramsVentas, 'p.origen_caja');

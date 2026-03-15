@@ -1264,9 +1264,9 @@ const formatDate = (value) => {
   if (!value) return 'N/D';
   const texto = String(value).trim();
   let fecha = null;
-  const matchIso = texto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const matchIso = texto.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/);
   if (matchIso) {
-    // Evita desfase de zona horaria al mostrar fechas sin hora (YYYY-MM-DD).
+    // Evita desfase de zona horaria usando la fecha literal recibida.
     const anio = Number(matchIso[1]);
     const mes = Number(matchIso[2]);
     const dia = Number(matchIso[3]);

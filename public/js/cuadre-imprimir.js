@@ -89,6 +89,20 @@ const formatDateTime = (valor) => {
 };
 
 const formatDate = (valor) => {
+  if (typeof valor === 'string') {
+    const match = valor.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/);
+    if (match) {
+      const fechaLocal = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      if (!Number.isNaN(fechaLocal.getTime())) {
+        return new Intl.DateTimeFormat('es-DO', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          timeZone: 'America/Santo_Domingo',
+        }).format(fechaLocal);
+      }
+    }
+  }
   const fecha = parseFecha(valor);
   if (!fecha) return '--';
   return new Intl.DateTimeFormat('es-DO', {
