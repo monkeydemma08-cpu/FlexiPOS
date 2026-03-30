@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs/promises');
 const path = require('path');
+const { buildEcfXml, buildResumenFcXml, cleanPayloadEntries } = require('./dgii-paso2.xml');
 let XLSX = null;
 let forge = null;
 let SignedXml = null;
@@ -27,6 +28,7 @@ const DGII_DEFAULT_ENDPOINTS = Object.freeze({
   recepcion: 'https://eCF.dgii.gov.do/CerteCF/Recepcion',
   consultaResultado: 'https://eCF.dgii.gov.do/CerteCF/ConsultaResultado',
   recepcionFc: 'https://fc.dgii.gov.do/CerteCF/RecepcionFC',
+  consultaRfce: 'https://fc.dgii.gov.do/CerteCF/ConsultaRFCe',
 });
 
 const EMPTY_MARKERS = new Set([
@@ -214,16 +216,53 @@ const formatTimestampCompact = (date = new Date()) => {
 
 const formatMoney = (n) => Number(Number(n || 0).toFixed(2));
 
-const normalizeDateIso = (value) => {
-  if (!value) return new Date().toISOString().slice(0, 10);
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+const formatDateDgii = (date = new Date()) => {
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getFullYear()).padStart(4, '0');
+  return `${dd}-${mm}-${yyyy}`;
+};
+
+const formatDateTimeDgii = (date = new Date()) => {
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getFullYear()).padStart(4, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mi = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${dd}-${mm}-${yyyy} ${hh}:${mi}:${ss}`;
+};
+
+const normalizeDateDgii = (value, { fallbackToday = false } = {}) => {
+  if (value == null || value === '') return fallbackToday ? formatDateDgii(new Date()) : '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return formatDateDgii(value);
   const text = String(value).trim();
-  if (!text) return new Date().toISOString().slice(0, 10);
-  const candidate = text.length >= 10 ? text.slice(0, 10) : text;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return candidate;
-  const d = new Date(text);
-  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  return new Date().toISOString().slice(0, 10);
+  if (!text) return fallbackToday ? formatDateDgii(new Date()) : '';
+  if (/^\d{2}-\d{2}-\d{4}$/.test(text)) return text;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const [yyyy, mm, dd] = text.split('-');
+    return `${dd}-${mm}-${yyyy}`;
+  }
+  const match = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+  if (match) {
+    const [, a, b, c] = match;
+    const yyyy = c.length === 2 ? `20${c}` : c;
+    return `${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}-${yyyy}`;
+  }
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) return formatDateDgii(parsed);
+  return fallbackToday ? formatDateDgii(new Date()) : text;
+};
+
+const normalizeDateTimeDgii = (value) => {
+  if (value == null || value === '') return formatDateTimeDgii(new Date());
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return formatDateTimeDgii(value);
+  const text = String(value).trim();
+  if (!text) return formatDateTimeDgii(new Date());
+  if (/^\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}$/.test(text)) return text;
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) return formatDateTimeDgii(parsed);
+  return formatDateTimeDgii(new Date());
 };
 
 const escapeXml = (value) =>
@@ -234,142 +273,8 @@ const escapeXml = (value) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
 
-const stripPem = (pem = '') =>
-  String(pem)
-    .replace(/-----BEGIN[^-]+-----/g, '')
-    .replace(/-----END[^-]+-----/g, '')
-    .replace(/\s+/g, '');
-
-const buildItems = (payload = {}) => {
-  const itemsRaw =
-    payload.items ||
-    payload.detalle_items ||
-    payload.detalle ||
-    payload.productos ||
-    payload.lineas ||
-    payload.lines ||
-    null;
-
-  const list = Array.isArray(itemsRaw) ? itemsRaw : [];
-  if (list.length) {
-    return list.map((item, idx) => {
-      const cantidad = parseNumberLike(item.cantidad) || 1;
-      const precio = parseNumberLike(item.precio_unitario ?? item.precio) || 0;
-      const subtotal = parseNumberLike(item.subtotal) ?? cantidad * precio;
-      const itbis = parseNumberLike(item.itbis) ?? 0;
-      return {
-        linea: idx + 1,
-        descripcion: item.descripcion || item.nombre || `Item ${idx + 1}`,
-        cantidad,
-        precio,
-        subtotal: formatMoney(subtotal),
-        itbis: formatMoney(itbis),
-      };
-    });
-  }
-
-  const monto = parseNumberLike(payload.monto_total ?? payload.total ?? payload.total_factura ?? payload.total_documento);
-  return [
-    {
-      linea: 1,
-      descripcion: payload.descripcion || payload.concepto || 'Servicio POSIUM',
-      cantidad: 1,
-      precio: formatMoney(monto || 0),
-      subtotal: formatMoney(monto || 0),
-      itbis: 0,
-    },
-  ];
-};
-const buildEcfXml = ({ payload = {}, flujo = 'ECF_NORMAL', rncEmisorFallback = '' }) => {
-  const tipoeCF =
-    payload.tipo_ecf ||
-    payload.tipoe_cf ||
-    payload.tipo_comprobante ||
-    payload.tipo ||
-    (flujo === 'FC_MENOR_250K' ? '32' : '31');
-  const eNCF = payload.encf || payload.e_ncf || payload.ncf || payload.comprobante || '';
-  const fecha = normalizeDateIso(payload.fecha_emision || payload.fecha || payload.fecha_documento);
-  const rncEmisor = payload.rnc_emisor || payload.rnc || rncEmisorFallback || '';
-  const razonEmisor = payload.razon_social_emisor || payload.emisor || payload.nombre_emisor || 'EMISOR';
-  const rncComprador = payload.rnc_comprador || payload.rnc_receptor || payload.rnc_cliente || '';
-  const razonComprador = payload.razon_social_comprador || payload.receptor || payload.cliente || '';
-  const moneda = payload.moneda || payload.codigo_moneda || 'DOP';
-  const items = buildItems(payload);
-  const subtotalItems = formatMoney(items.reduce((acc, item) => acc + (item.subtotal || 0), 0));
-  const itbisItems = formatMoney(items.reduce((acc, item) => acc + (item.itbis || 0), 0));
-  const totalDoc = formatMoney(parseNumberLike(payload.total) ?? parseNumberLike(payload.monto_total) ?? subtotalItems + itbisItems);
-
-  const itemsXml = items
-    .map(
-      (item) => `
-      <Item>
-        <NumeroLinea>${item.linea}</NumeroLinea>
-        <IndicadorFacturacion>1</IndicadorFacturacion>
-        <NombreItem>${escapeXml(item.descripcion)}</NombreItem>
-        <CantidadItem>${Number(item.cantidad || 1).toFixed(2)}</CantidadItem>
-        <PrecioUnitarioItem>${Number(item.precio || 0).toFixed(2)}</PrecioUnitarioItem>
-        <MontoItem>${Number(item.subtotal || 0).toFixed(2)}</MontoItem>
-      </Item>`
-    )
-    .join('');
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<ECF xmlns="https://dgii.gov.do/ecf">
-  <Encabezado>
-    <Version>1.0</Version>
-    <IdDoc>
-      <TipoeCF>${escapeXml(tipoeCF)}</TipoeCF>
-      <eNCF>${escapeXml(eNCF)}</eNCF>
-      <FechaEmision>${escapeXml(fecha)}</FechaEmision>
-      <TipoIngresos>01</TipoIngresos>
-      <TipoMoneda>${escapeXml(moneda)}</TipoMoneda>
-    </IdDoc>
-    <Emisor>
-      <RNCEmisor>${escapeXml(rncEmisor)}</RNCEmisor>
-      <RazonSocialEmisor>${escapeXml(razonEmisor)}</RazonSocialEmisor>
-    </Emisor>
-    <Comprador>
-      <RNCComprador>${escapeXml(rncComprador)}</RNCComprador>
-      <RazonSocialComprador>${escapeXml(razonComprador)}</RazonSocialComprador>
-    </Comprador>
-    <Totales>
-      <MontoGravadoTotal>${subtotalItems.toFixed(2)}</MontoGravadoTotal>
-      <MontoITBIS>${itbisItems.toFixed(2)}</MontoITBIS>
-      <MontoTotal>${totalDoc.toFixed(2)}</MontoTotal>
-    </Totales>
-  </Encabezado>
-  <DetallesItems>${itemsXml}
-  </DetallesItems>
-</ECF>`;
-};
-
-const buildResumenFcXml = ({ payload = {}, rncEmisorFallback = '' }) => {
-  const fecha = normalizeDateIso(payload.fecha || payload.fecha_emision || payload.fecha_resumen);
-  const rncEmisor = payload.rnc_emisor || payload.rnc || rncEmisorFallback || '';
-  const cantidad =
-    parseNumberLike(
-      payload.cantidad_facturas ??
-        payload.cantidad ??
-        payload.total_facturas ??
-        payload.facturas_total ??
-        payload.cantidad_documentos
-    ) || 1;
-  const montoTotal =
-    formatMoney(parseNumberLike(payload.monto_total ?? payload.total ?? payload.total_facturas ?? payload.total_documentos) || 0);
-  const montoItbis = formatMoney(parseNumberLike(payload.itbis ?? payload.monto_itbis) || 0);
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<ResumenFacturaConsumo xmlns="https://dgii.gov.do/ecf">
-  <RNCEmisor>${escapeXml(rncEmisor)}</RNCEmisor>
-  <FechaResumen>${escapeXml(fecha)}</FechaResumen>
-  <CantidadFacturas>${Math.max(1, Math.round(cantidad))}</CantidadFacturas>
-  <MontoTotalFacturas>${montoTotal.toFixed(2)}</MontoTotalFacturas>
-  <MontoITBISTotal>${montoItbis.toFixed(2)}</MontoITBISTotal>
-</ResumenFacturaConsumo>`;
-};
-
 const buildSetFieldsXml = ({ payload = {}, casoCodigo = '', flujo = '', tipoDocumento = '', hoja = '', filaExcel = 0 }) => {
-  const entries = Object.entries(payload || {});
+  const entries = cleanPayloadEntries(payload || {});
   const fieldsXml = entries
     .map(([key, value], index) => {
       const isEmpty = value === null || value === undefined || String(value).trim() === '';
@@ -424,13 +329,17 @@ const extractDgiiPayload = (jsonObj, rawText = '') => {
     return null;
   };
 
-  const statusTextRaw = pick('estado', 'estatus', 'status', 'resultado', 'message', 'mensaje') || rawText;
+  const statusTextRaw =
+    pick('estado', 'estatus', 'status', 'resultado', 'message', 'mensaje') ||
+    (jsonObj && typeof jsonObj === 'object' ? '' : rawText);
   const statusText = String(statusTextRaw || '').toLowerCase();
   const accepted = /aceptad|aprobad|valido|validado|recibido|ok|success/.test(statusText) && !/rechaz|error|invalid/.test(statusText);
   const rejected = /rechaz|error|invalid|fallo|deneg/.test(statusText);
 
   const code = pick('codigo', 'code', 'codigorespuesta', 'idrespuesta', 'idestado') || (rawText.match(/<Codigo>([^<]+)<\/Codigo>/i)?.[1] || null);
-  const message = pick('mensaje', 'message', 'descripcion', 'detalle', 'observacion') || (rawText.match(/<Mensaje>([^<]+)<\/Mensaje>/i)?.[1] || null);
+  const message =
+    pick('mensaje', 'message', 'descripcion', 'detalle', 'observacion', 'valor') ||
+    (jsonObj && typeof jsonObj === 'object' ? null : rawText.match(/<Mensaje>([^<]+)<\/Mensaje>/i)?.[1] || null);
   const trackId = pick('trackid', 'track_id', 'idtrack', 'idseguimiento', 'ticket', 'id') || (rawText.match(/<TrackId>([^<]+)<\/TrackId>/i)?.[1] || null);
 
   return {
@@ -519,6 +428,18 @@ const extractSignedXmlFromBody = (body = {}) => {
   return looksLikeXml(textRaw) ? textRaw : '';
 };
 
+const extractXmlTagValue = (xml = '', tagName = '') => {
+  if (!xml || !tagName) return '';
+  const escaped = String(tagName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = String(xml).match(new RegExp(`<${escaped}[^>]*>([\\s\\S]*?)<\\/${escaped}>`, 'i'));
+  return String(match?.[1] || '').trim();
+};
+
+const detectRootTagName = (xml = '') => {
+  const match = String(xml).match(/<([A-Za-z_][\w:.-]*)\b[^>]*>/);
+  return String(match?.[1] || '').trim();
+};
+
 const createTimeoutSignal = (timeoutMs = DEFAULT_TIMEOUT_MS) => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(new Error('Timeout DGII')), timeoutMs);
@@ -537,6 +458,11 @@ const fetchWithTimeout = async (url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
     timer.done();
   }
 };
+
+const sleepMs = (ms = 0) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, Number(ms) || 0));
+  });
 
 const extractPemFromP12 = ({ p12Base64, p12Password = '' }) => {
   const binary = Buffer.from(p12Base64, 'base64').toString('binary');
@@ -558,26 +484,42 @@ const extractPemFromP12 = ({ p12Base64, p12Password = '' }) => {
   };
 };
 
-const signXmlDocument = ({ xml, privateKeyPem, certPem }) => {
-  const sig = new SignedXml();
-  sig.privateKey = privateKeyPem;
-  sig.signatureAlgorithm = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256';
-  sig.canonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#';
+const signXmlDocument = ({
+  xml,
+  privateKeyPem,
+  certPem,
+  signatureLocation = { reference: '/*', action: 'append' },
+}) => {
+  const sig = new SignedXml({
+    privateKey: privateKeyPem,
+    publicCert: certPem,
+    signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+    canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+    getKeyInfoContent: SignedXml.getKeyInfoContent,
+  });
   sig.addReference({
     xpath: '/*',
-    transforms: [
-      'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
-      'http://www.w3.org/2001/10/xml-exc-c14n#',
-    ],
+    transforms: ['http://www.w3.org/2000/09/xmldsig#enveloped-signature'],
     digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
     isEmptyUri: true,
   });
-  sig.keyInfoProvider = {
-    getKeyInfo: () => `<X509Data><X509Certificate>${stripPem(certPem)}</X509Certificate></X509Data>`,
-    getKey: () => null,
-  };
-  sig.computeSignature(xml, { location: { reference: '/*', action: 'append' } });
-  return sig.getSignedXml();
+  sig.computeSignature(xml, { location: signatureLocation });
+  const signedXml = sig.getSignedXml();
+  const signatureValue = String(signedXml.match(/<SignatureValue[^>]*>([\s\S]*?)<\/SignatureValue>/i)?.[1] || '').replace(/\s+/g, '');
+  return { xml: signedXml, signatureValue };
+};
+
+const extractSignatureValueFromXml = (xml = '') =>
+  String(xml.match(/<SignatureValue[^>]*>([\s\S]*?)<\/SignatureValue>/i)?.[1] || '').replace(/\s+/g, '');
+
+const computeCodigoSeguridadeCF = (signatureValue = '') => {
+  const clean = String(signatureValue || '').replace(/\s+/g, '');
+  if (!clean) return '';
+  return crypto
+    .createHash('sha256')
+    .update(clean, 'utf8')
+    .digest('base64')
+    .slice(0, 6);
 };
 const parseXlsxCases = ({ fileBuffer, fileName }) => {
   const workbook = XLSX.read(fileBuffer, {
@@ -602,32 +544,36 @@ const parseXlsxCases = ({ fileBuffer, fileName }) => {
 
     const headerRowIndex = detectHeaderRowIndex(rows);
     const headerRow = Array.isArray(rows[headerRowIndex]) ? rows[headerRowIndex] : [];
-    const headers = headerRow.map((v, idx) => normalizeHeader(v, idx));
+    const rawHeaders = headerRow.map((v, idx) => String(v ?? '').trim() || `col_${idx + 1}`);
+    const normalizedHeaders = rawHeaders.map((v, idx) => normalizeHeader(v, idx));
 
     for (let i = headerRowIndex + 1; i < rows.length; i += 1) {
       const sourceRow = Array.isArray(rows[i]) ? rows[i] : [];
       if (!sourceRow.length) continue;
       const rowObj = {};
+      const normalizedRowObj = {};
       let hasData = false;
-      const maxCols = Math.max(headers.length, sourceRow.length);
+      const maxCols = Math.max(rawHeaders.length, sourceRow.length);
       for (let col = 0; col < maxCols; col += 1) {
-        const key = headers[col] || `col_${col + 1}`;
+        const rawKey = rawHeaders[col] || `col_${col + 1}`;
+        const normalizedKey = normalizedHeaders[col] || `col_${col + 1}`;
         const sanitized = sanitizeCellValue(sourceRow[col]);
-        rowObj[key] = sanitized;
+        rowObj[rawKey] = sanitized;
+        normalizedRowObj[normalizedKey] = sanitized;
         if (sanitized !== null && sanitized !== '') hasData = true;
       }
       if (!hasData) continue;
 
       const montoTotalRaw = parseNumberLike(
-        pickByPatterns(rowObj, [/monto_?total/i, /total_?monto/i, /^total$/i, /importe/i, /monto/i])
+        pickByPatterns(normalizedRowObj, [/monto_?total/i, /total_?monto/i, /^total$/i, /importe/i, /monto/i])
       );
 
-      const caseCodeRaw = pickByPatterns(rowObj, [/caso/i, /id_?prueba/i, /codigo/i]);
-      const ordenEnvioRaw = parseNumberLike(pickByPatterns(rowObj, [/orden/i, /secuencia/i, /prioridad/i]));
-      const tipoDocumento = pickByPatterns(rowObj, [/tipo_?comprobante/i, /tipo_?ecf/i, /^tipo$/i]);
-      const encf = pickByPatterns(rowObj, [/e_?ncf/i, /encf/i]);
-      const ncf = pickByPatterns(rowObj, [/\bncf\b/i]);
-      const flujo = inferFlow({ row: rowObj, sheetName, montoTotal: montoTotalRaw, tipoDocumento });
+      const caseCodeRaw = pickByPatterns(normalizedRowObj, [/caso/i, /id_?prueba/i, /codigo/i]);
+      const ordenEnvioRaw = parseNumberLike(pickByPatterns(normalizedRowObj, [/orden/i, /secuencia/i, /prioridad/i]));
+      const tipoDocumento = pickByPatterns(normalizedRowObj, [/tipo_?comprobante/i, /tipo_?ecf/i, /^tipo$/i]);
+      const encf = pickByPatterns(normalizedRowObj, [/e_?ncf/i, /encf/i]);
+      const ncf = pickByPatterns(normalizedRowObj, [/\bncf\b/i]);
+      const flujo = inferFlow({ row: normalizedRowObj, sheetName, montoTotal: montoTotalRaw, tipoDocumento });
 
       cases.push({
         sheetName,
@@ -692,6 +638,16 @@ const withApiPath = (baseUrl, apiPath = '') => {
   return `${cleanBase}${cleanPath.startsWith('/') ? '' : '/'}${cleanPath}`;
 };
 
+const normalizeDgiiServiceBase = (baseUrl = '') =>
+  String(baseUrl || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/Autenticacion$/i, '/autenticacion')
+    .replace(/\/Recepcion$/i, '/recepcion')
+    .replace(/\/ConsultaResultado$/i, '/consultaresultado')
+    .replace(/\/RecepcionFC$/i, '/recepcionfc')
+    .replace(/\/ConsultaRFCe$/i, '/consultarfce');
+
 const isOfficialDgiiAuthBase = (baseUrl = '') =>
   String(baseUrl || '')
     .toLowerCase()
@@ -753,6 +709,20 @@ const extractToken = (raw, jsonObj = null) => {
   return '';
 };
 
+const decodeJwtExpMs = (token = '') => {
+  try {
+    const payload = String(token || '').split('.')[1] || '';
+    if (!payload) return 0;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const decoded = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+    const exp = Number(decoded?.exp || 0);
+    return Number.isFinite(exp) && exp > 0 ? exp * 1000 : 0;
+  } catch (_) {
+    return 0;
+  }
+};
+
 const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, obtenerNegocioIdUsuario } = {}) => {
   if (!db || !requireUsuarioSesion || !tienePermisoAdmin || !obtenerNegocioIdUsuario) {
     throw new Error('createDgiiPaso2Router requiere db y middlewares de sesion.');
@@ -774,10 +744,11 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
   const resolveEndpoints = (row) => {
     const custom = toSafeJson(row?.endpoints_json, {});
     return {
-      autenticacion: custom.autenticacion || DGII_DEFAULT_ENDPOINTS.autenticacion,
-      recepcion: custom.recepcion || DGII_DEFAULT_ENDPOINTS.recepcion,
-      consultaResultado: custom.consultaResultado || DGII_DEFAULT_ENDPOINTS.consultaResultado,
-      recepcionFc: custom.recepcionFc || custom.recepcionFC || DGII_DEFAULT_ENDPOINTS.recepcionFc,
+      autenticacion: normalizeDgiiServiceBase(custom.autenticacion || DGII_DEFAULT_ENDPOINTS.autenticacion),
+      recepcion: normalizeDgiiServiceBase(custom.recepcion || DGII_DEFAULT_ENDPOINTS.recepcion),
+      consultaResultado: normalizeDgiiServiceBase(custom.consultaResultado || DGII_DEFAULT_ENDPOINTS.consultaResultado),
+      recepcionFc: normalizeDgiiServiceBase(custom.recepcionFc || custom.recepcionFC || DGII_DEFAULT_ENDPOINTS.recepcionFc),
+      consultaRfce: normalizeDgiiServiceBase(custom.consultaRfce || custom.consultaRFCE || custom.consulta_rfce || DGII_DEFAULT_ENDPOINTS.consultaRfce),
     };
   };
 
@@ -1047,7 +1018,7 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
             xml: semillaText,
             privateKeyPem: cert.privateKeyPem,
             certPem: cert.certPem,
-          });
+          }).xml;
 
           const formData = new FormData();
           formData.append('xml', new Blob([semillaFirmada], { type: 'application/xml' }), 'semilla_firmada.xml');
@@ -1090,10 +1061,16 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
   const getTokenFromCache = async (configRow) => {
     const tokenCache = toSafeJson(configRow?.token_cache, null);
     if (!tokenCache?.token) return '';
-    if (!configRow?.token_expira_en) return '';
-    const exp = new Date(configRow.token_expira_en);
-    if (Number.isNaN(exp.getTime())) return '';
-    if (Date.now() >= exp.getTime() - 60 * 1000) return '';
+    const candidates = [];
+    if (configRow?.token_expira_en) {
+      const exp = new Date(configRow.token_expira_en);
+      if (!Number.isNaN(exp.getTime())) candidates.push(exp.getTime());
+    }
+    const jwtExp = decodeJwtExpMs(tokenCache.token);
+    if (jwtExp) candidates.push(jwtExp);
+    if (!candidates.length) return '';
+    const effectiveExpMs = Math.min(...candidates);
+    if (Date.now() >= effectiveExpMs - 60 * 1000) return '';
     return String(tokenCache.token);
   };
 
@@ -1139,10 +1116,17 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
     return auth.token;
   };
 
-  const sendXmlToDgii = async ({ endpoint, apiPath, xmlPayload, token }) => {
+  const buildDgiiXmlFileName = ({ rncEmisor = '', encf = '', fallback = 'ecf.xml' }) => {
+    const rnc = String(rncEmisor || '').replace(/[^0-9]/g, '');
+    const comprobante = String(encf || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (!rnc || !comprobante) return sanitizeForFileName(fallback, fallback);
+    return `${rnc}${comprobante}.xml`;
+  };
+
+  const sendXmlToDgii = async ({ endpoint, apiPath, xmlPayload, token, fileName = 'ecf.xml' }) => {
     const endpointFinal = withApiPath(endpoint, apiPath);
     const formData = new FormData();
-    formData.append('xml', new Blob([String(xmlPayload || '')], { type: 'application/xml' }), 'ecf.xml');
+    formData.append('xml', new Blob([String(xmlPayload || '')], { type: 'text/xml' }), sanitizeForFileName(fileName, 'ecf.xml'));
     const headers = {
       Accept: 'application/json, text/xml, application/xml, text/plain, */*',
       Authorization: `Bearer ${token}`,
@@ -1227,6 +1211,175 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
     return last || { ok: false, status: 500, raw: '', extracted: {} };
   };
 
+  const remoteResultIsPending = (extracted = {}) => {
+    const code = String(extracted.code || '').trim();
+    const status = String(extracted.statusText || extracted.message || '').toLowerCase();
+    return code === '3' || /en proceso|procesando|pendiente|recibid/.test(status);
+  };
+
+  const consultDgiiResultUntilSettled = async (
+    { endpoint, token, trackId, encf, rncEmisor },
+    { maxAttempts = 5, delayMs = 1200 } = {}
+  ) => {
+    let last = await consultDgiiResult({ endpoint, token, trackId, encf, rncEmisor });
+    for (let attempt = 1; attempt < Math.max(1, Number(maxAttempts) || 1); attempt += 1) {
+      if (!last?.ok || !remoteResultIsPending(last.extracted)) break;
+      await sleepMs(delayMs);
+      last = await consultDgiiResult({ endpoint, token, trackId, encf, rncEmisor });
+    }
+    return last;
+  };
+
+  const consultRfceResult = async ({ endpoint, token, rncEmisor, encf, codigoSeguridadeCF }) => {
+    const endpointFinal = withApiPath(endpoint, '/api/Consultas/Consulta');
+    const paramsVariants = [
+      {
+        RNC_Emisor: String(rncEmisor || '').trim(),
+        ENCF: String(encf || '').trim(),
+        Cod_Seguridad_eCF: String(codigoSeguridadeCF || '').trim(),
+      },
+      {
+        RncEmisor: String(rncEmisor || '').trim(),
+        eNCF: String(encf || '').trim(),
+        CodigoSeguridadeCF: String(codigoSeguridadeCF || '').trim(),
+      },
+      {
+        RncEmisor: String(rncEmisor || '').trim(),
+        ENCF: String(encf || '').trim(),
+        CodSeguridadeCF: String(codigoSeguridadeCF || '').trim(),
+      },
+    ].filter((params) => params.ENCF || params.eNCF);
+
+    const attempts = paramsVariants.flatMap((params) => {
+      const query = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value) query.set(key, value);
+      });
+      return [
+        { method: 'GET', url: `${endpointFinal}?${query.toString()}` },
+        { method: 'GET', url: `${endpoint}?${query.toString()}` },
+      ];
+    });
+
+    let last = null;
+    for (const attempt of attempts) {
+      const headers = {
+        Accept: 'application/json, text/xml, application/xml, text/plain, */*',
+        Authorization: `Bearer ${token}`,
+      };
+      const resp = await fetchWithTimeout(
+        attempt.url,
+        {
+          method: attempt.method,
+          headers,
+        },
+        DEFAULT_TIMEOUT_MS
+      );
+      const text = await resp.text();
+      const parsed = parseTextResponse(text);
+      const contentType = String(resp.headers.get('content-type') || '').toLowerCase();
+      const looksHtml =
+        contentType.includes('text/html') || /^\s*<!doctype html/i.test(text) || /^\s*<html/i.test(text);
+      const result = {
+        ok: resp.ok,
+        status: resp.status,
+        headers: Object.fromEntries(resp.headers.entries()),
+        raw: text,
+        extracted: parsed.extracted,
+        requestHeaders: headers,
+        requestBody: '',
+        endpoint: attempt.url,
+      };
+      if (resp.ok && !looksHtml) return result;
+      last = result;
+    }
+
+    return last || { ok: false, status: 500, raw: '', extracted: {} };
+  };
+
+  const getSigningCredentials = (config) => {
+    if (!config?.p12_base64 || config?.p12_password == null) {
+      throw new Error('Carga el certificado P12/PFX y su clave en la configuracion DGII antes de procesar el Paso 2.');
+    }
+    if (!config.__signingCredentials) {
+      config.__signingCredentials = extractPemFromP12({
+        p12Base64: config.p12_base64,
+        p12Password: config.p12_password || '',
+      });
+    }
+    return config.__signingCredentials;
+  };
+
+  const signCaseXml = ({ xml, config, signatureLocation } = {}) => {
+    const cert = getSigningCredentials(config);
+    return signXmlDocument({
+      xml,
+      privateKeyPem: cert.privateKeyPem,
+      certPem: cert.certPem,
+      signatureLocation,
+    });
+  };
+
+  const findRelatedCaso = async ({ negocioId, setId, flujo, encf, ncf }) =>
+    db.get(
+      `SELECT *
+         FROM dgii_paso2_casos
+        WHERE negocio_id = ? AND set_id = ? AND flujo = ?
+          AND (
+            (encf IS NOT NULL AND encf <> '' AND encf = ?)
+            OR (ncf IS NOT NULL AND ncf <> '' AND ncf = ?)
+          )
+        ORDER BY id ASC
+        LIMIT 1`,
+      [negocioId, setId, flujo, encf || '', ncf || '']
+    );
+
+  const buildAndSignEcfForCase = ({ caso, payload, config }) => {
+    const xmlGenerado = buildEcfXml({
+      payload,
+      flujo: caso.flujo || 'ECF_NORMAL',
+      rncEmisorFallback: config.rnc_emisor || '',
+      fechaHoraFirma: normalizeDateTimeDgii(new Date()),
+    });
+    const signed = signCaseXml({ xml: xmlGenerado, config });
+    return {
+      xmlGenerado,
+      xmlFirmado: signed.xml,
+      signatureValue: signed.signatureValue,
+      codigoSeguridadeCF: computeCodigoSeguridadeCF(signed.signatureValue),
+    };
+  };
+
+  const resolveRemoteCaseState = (extracted = {}, fallback = 'ENVIADO') => {
+    const code = String(extracted.code || '').trim();
+    if (extracted.accepted || code === '1' || code === '4') return 'ACEPTADO';
+    if (extracted.rejected || code === '2' || code === '5') return 'RECHAZADO';
+    const status = String(extracted.statusText || extracted.message || '').toLowerCase();
+    if (code === '3' || /en proceso|procesando|pendiente|recibid/.test(status)) return 'ENVIADO';
+    return fallback;
+  };
+
+  const ensureSignedFcMenor250k = async ({ caso, payload, config }) => {
+    let xmlGenerado = caso.xml_generado || '';
+    let xmlFirmado = caso.xml_firmado || '';
+    let signatureValue = extractSignatureValueFromXml(xmlFirmado);
+
+    if (!xmlGenerado || !signatureValue) {
+      const firmado = buildAndSignEcfForCase({ caso, payload, config });
+      xmlGenerado = firmado.xmlGenerado;
+      xmlFirmado = firmado.xmlFirmado;
+      signatureValue = firmado.signatureValue;
+      await actualizarCaso({ casoId: caso.id, xmlGenerado, xmlFirmado });
+    }
+
+    const codigoSeguridadeCF = computeCodigoSeguridadeCF(signatureValue);
+    if (!codigoSeguridadeCF) {
+      throw new Error('No fue posible derivar CodigoSeguridadeCF desde la factura 32 firmada.');
+    }
+
+    return { xmlGenerado, xmlFirmado, codigoSeguridadeCF };
+  };
+
   const calcularResumenSet = async (setId, negocioId) => {
     const totals = await db.get(
       `SELECT
@@ -1264,39 +1417,218 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
     const payload = toSafeJson(caso.payload_json, {});
     const endpoints = config.endpoints;
     const token = await resolveToken({ config, configRow, negocioId });
+    const encfCaso = caso.encf || pickByPatterns(payload, [/e_?ncf/i, /encf/i]) || '';
+    const ncfCaso = caso.ncf || pickByPatterns(payload, [/\bncf\b/i]) || '';
+    const rncEmisor = config.rnc_emisor || pickByPatterns(payload, [/rnc_?emisor/i, /^rnc$/i]) || '';
+    const rfceSignatureLocation = { reference: "//*[local-name()='CodigoSeguridadeCF']", action: 'before' };
+    const remoteLooksPending =
+      String(caso.dgii_codigo || '').trim() === '3' || /en proceso|procesando|pendiente/i.test(String(caso.dgii_mensaje || ''));
 
-    let xmlGenerado = '';
+    if (caso.flujo === 'FC_MENOR_250K') {
+      const firmado = await ensureSignedFcMenor250k({ caso, payload, config });
+      await actualizarCaso({
+        casoId: caso.id,
+        xmlGenerado: firmado.xmlGenerado,
+        xmlFirmado: firmado.xmlFirmado,
+        estadoLocal: 'PROCESANDO',
+        incrementarIntentos: true,
+      });
+
+      const resumenRelacionado = await findRelatedCaso({
+        negocioId,
+        setId: caso.set_id,
+        flujo: 'RESUMEN_FC',
+        encf: encfCaso,
+        ncf: ncfCaso,
+      });
+      if (!resumenRelacionado) {
+        const message = 'No se encontro el RFCE relacionado para esta factura 32 menor a 250k.';
+        await actualizarCaso({
+          casoId: caso.id,
+          xmlGenerado: firmado.xmlGenerado,
+          xmlFirmado: firmado.xmlFirmado,
+          estadoLocal: 'RECHAZADO',
+          dgiiEstado: 'RECHAZADO',
+          dgiiMensaje: message,
+        });
+        return { casoId: caso.id, estado: 'RECHAZADO', codigo: null, mensaje: message, trackId: null };
+      }
+
+      if (resumenRelacionado.estado_local !== 'ACEPTADO') {
+        const resResumen = await procesarCasoInterno({ caso: resumenRelacionado, config, configRow, negocioId });
+        if (resResumen.estado !== 'ACEPTADO') {
+          const message = 'El RFCE relacionado aun no fue aceptado por DGII.';
+          await actualizarCaso({
+            casoId: caso.id,
+            xmlGenerado: firmado.xmlGenerado,
+            xmlFirmado: firmado.xmlFirmado,
+            estadoLocal: 'PENDIENTE',
+            dgiiEstado: 'PENDIENTE',
+            dgiiMensaje: message,
+          });
+          return { casoId: caso.id, estado: 'BLOQUEADO', codigo: resResumen.codigo || null, mensaje: message, trackId: null };
+        }
+      }
+
+      const consulta = await consultRfceResult({
+        endpoint: endpoints.consultaRfce,
+        token,
+        rncEmisor,
+        encf: encfCaso,
+        codigoSeguridadeCF: firmado.codigoSeguridadeCF,
+      });
+      const finalState = resolveRemoteCaseState(consulta.extracted, 'ENVIADO');
+
+      await registrarIntento({
+        casoId: caso.id,
+        negocioId,
+        tipoEnvio: 'CONSULTA_RFCE',
+        endpoint: consulta.endpoint || endpoints.consultaRfce,
+        requestHeaders: consulta.requestHeaders,
+        requestBody: consulta.requestBody || '',
+        responseStatus: consulta.status,
+        responseHeaders: consulta.headers,
+        responseBody: consulta.raw,
+        resultado: finalState,
+        codigo: consulta.extracted.code,
+        mensaje: consulta.extracted.message || consulta.extracted.statusText,
+        trackId: null,
+      });
+
+      await actualizarCaso({
+        casoId: caso.id,
+        xmlGenerado: firmado.xmlGenerado,
+        xmlFirmado: firmado.xmlFirmado,
+        estadoLocal: finalState,
+        dgiiEstado: finalState,
+        dgiiCodigo: consulta.extracted.code,
+        dgiiMensaje: consulta.extracted.message || consulta.extracted.statusText,
+        dgiiTrackId: null,
+      });
+
+      return {
+        casoId: caso.id,
+        estado: finalState,
+        codigo: consulta.extracted.code || null,
+        mensaje: consulta.extracted.message || consulta.extracted.statusText || null,
+        trackId: null,
+      };
+    }
+
     if (caso.flujo === 'RESUMEN_FC') {
-      xmlGenerado = buildResumenFcXml({ payload, rncEmisorFallback: config.rnc_emisor || '' });
-    } else {
-      xmlGenerado = buildEcfXml({ payload, flujo: caso.flujo || 'ECF_NORMAL', rncEmisorFallback: config.rnc_emisor || '' });
+      const facturaRelacionada = await findRelatedCaso({
+        negocioId,
+        setId: caso.set_id,
+        flujo: 'FC_MENOR_250K',
+        encf: encfCaso,
+        ncf: ncfCaso,
+      });
+      if (!facturaRelacionada) {
+        throw new Error('No se encontro la factura 32 menor a 250k relacionada para construir el RFCE.');
+      }
+
+      const payloadFactura = toSafeJson(facturaRelacionada.payload_json, {});
+      const firmadoFactura = await ensureSignedFcMenor250k({ caso: facturaRelacionada, payload: payloadFactura, config });
+      const xmlGenerado = buildResumenFcXml({
+        payload,
+        rncEmisorFallback: config.rnc_emisor || '',
+        codigoSeguridadeCF: firmadoFactura.codigoSeguridadeCF,
+      });
+
+      const message =
+        'RFCE pendiente de firma externa. Usa el boton "XML firmado" para subir el resumen firmado antes de enviar la factura 32 menor a 250k.';
+
+      await actualizarCaso({
+        casoId: caso.id,
+        xmlGenerado,
+        xmlFirmado: null,
+        estadoLocal: 'PENDIENTE',
+        dgiiEstado: 'PENDIENTE',
+        dgiiCodigo: null,
+        dgiiMensaje: message,
+      });
+
+      return {
+        casoId: caso.id,
+        estado: 'PENDIENTE',
+        codigo: null,
+        mensaje: message,
+        trackId: null,
+      };
     }
 
-    let xmlFirmado = xmlGenerado;
-    if (config.p12_base64 && config.p12_password != null) {
-      const cert = extractPemFromP12({ p12Base64: config.p12_base64, p12Password: config.p12_password || '' });
-      xmlFirmado = signXmlDocument({ xml: xmlGenerado, privateKeyPem: cert.privateKeyPem, certPem: cert.certPem });
+    if (caso.dgii_track_id && endpoints.consultaResultado && remoteLooksPending) {
+      const consulta = await consultDgiiResultUntilSettled({
+        endpoint: endpoints.consultaResultado,
+        token,
+        trackId: caso.dgii_track_id,
+        encf: encfCaso,
+        rncEmisor,
+      });
+      const consultaState = resolveRemoteCaseState(consulta.extracted, 'ENVIADO');
+      const finalTrackId = consulta.extracted.trackId || caso.dgii_track_id;
+
+      await registrarIntento({
+        casoId: caso.id,
+        negocioId,
+        tipoEnvio: 'CONSULTA',
+        endpoint: consulta.endpoint || endpoints.consultaResultado,
+        requestHeaders: consulta.requestHeaders,
+        requestBody: consulta.requestBody || '',
+        responseStatus: consulta.status,
+        responseHeaders: consulta.headers,
+        responseBody: consulta.raw,
+        resultado: consultaState,
+        codigo: consulta.extracted.code,
+        mensaje: consulta.extracted.message || consulta.extracted.statusText,
+        trackId: finalTrackId,
+      });
+
+      await actualizarCaso({
+        casoId: caso.id,
+        estadoLocal: consultaState,
+        dgiiEstado: consultaState,
+        dgiiCodigo: consulta.extracted.code,
+        dgiiMensaje: consulta.extracted.message || consulta.extracted.statusText,
+        dgiiTrackId: finalTrackId,
+      });
+
+      return {
+        casoId: caso.id,
+        estado: consultaState,
+        codigo: consulta.extracted.code || null,
+        mensaje: consulta.extracted.message || consulta.extracted.statusText || null,
+        trackId: finalTrackId,
+      };
     }
 
-    await actualizarCaso({ casoId: caso.id, xmlGenerado, xmlFirmado, estadoLocal: 'PROCESANDO', incrementarIntentos: true });
+    const firmado = buildAndSignEcfForCase({ caso, payload, config });
+    await actualizarCaso({
+      casoId: caso.id,
+      xmlGenerado: firmado.xmlGenerado,
+      xmlFirmado: firmado.xmlFirmado,
+      estadoLocal: 'PROCESANDO',
+      incrementarIntentos: true,
+    });
 
-    const esResumen = caso.flujo === 'RESUMEN_FC';
-    const endpoint = esResumen ? endpoints.recepcionFc : endpoints.recepcion;
-    const apiPath = esResumen ? '/api/recepcion/ecf' : '/api/FacturasElectronicas';
-    const envio = await sendXmlToDgii({ endpoint, apiPath, xmlPayload: xmlFirmado, token });
+    const envio = await sendXmlToDgii({
+      endpoint: endpoints.recepcion,
+      apiPath: '/api/FacturasElectronicas',
+      xmlPayload: firmado.xmlFirmado,
+      token,
+      fileName: buildDgiiXmlFileName({ rncEmisor, encf: encfCaso, fallback: 'ecf.xml' }),
+    });
 
-    const envioAccepted = envio.extracted.accepted || false;
-    const envioRejected = envio.extracted.rejected || (!envio.ok && !envio.extracted.accepted);
-    const envioState = envioAccepted ? 'ACEPTADO' : envioRejected ? 'RECHAZADO' : 'ENVIADO';
+    const envioState = resolveRemoteCaseState(envio.extracted, !envio.ok ? 'RECHAZADO' : 'ENVIADO');
     const trackId = envio.extracted.trackId || caso.dgii_track_id || null;
 
     await registrarIntento({
       casoId: caso.id,
       negocioId,
-      tipoEnvio: esResumen ? 'RESUMEN' : 'ECF',
-      endpoint: envio.endpoint || endpoint,
+      tipoEnvio: 'ECF',
+      endpoint: envio.endpoint || endpoints.recepcion,
       requestHeaders: envio.requestHeaders,
-      requestBody: xmlFirmado,
+      requestBody: firmado.xmlFirmado,
       responseStatus: envio.status,
       responseHeaders: envio.headers,
       responseBody: envio.raw,
@@ -1312,15 +1644,15 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
     let finalTrackId = trackId;
 
     if (trackId && endpoints.consultaResultado) {
-      const consulta = await consultDgiiResult({
+      const consulta = await consultDgiiResultUntilSettled({
         endpoint: endpoints.consultaResultado,
         token,
         trackId,
-        encf: caso.encf || payload.encf || payload.ncf || '',
-        rncEmisor: config.rnc_emisor || payload.rnc_emisor || '',
+        encf: encfCaso,
+        rncEmisor,
       });
 
-      const consultaState = consulta.extracted.accepted ? 'ACEPTADO' : consulta.extracted.rejected ? 'RECHAZADO' : finalState;
+      const consultaState = resolveRemoteCaseState(consulta.extracted, finalState);
 
       await registrarIntento({
         casoId: caso.id,
@@ -1346,8 +1678,8 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
 
     await actualizarCaso({
       casoId: caso.id,
-      xmlGenerado,
-      xmlFirmado,
+      xmlGenerado: firmado.xmlGenerado,
+      xmlFirmado: firmado.xmlFirmado,
       estadoLocal: finalState,
       dgiiEstado: finalState,
       dgiiCodigo: finalCode,
@@ -1632,10 +1964,12 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
         const incluirCamposSet = body.incluir_campos_set !== undefined ? Boolean(body.incluir_campos_set) : true;
 
         let rncFallback = '';
+        let exportConfig = null;
         try {
-          const config = await loadConfig(negocioId);
-          rncFallback = config?.rnc_emisor || '';
+          exportConfig = await loadConfig(negocioId);
+          rncFallback = exportConfig?.rnc_emisor || '';
         } catch (error) {
+          exportConfig = null;
           rncFallback = '';
         }
 
@@ -1648,9 +1982,38 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
         for (let index = 0; index < casosOrdenados.length; index += 1) {
           const caso = casosOrdenados[index];
           const payload = toSafeJson(caso.payload_json, {});
+          let resumenCodigoSeguridad = pickByPatterns(payload, [/codigoseguridad/i]) || '';
+
+          if (caso.flujo === 'RESUMEN_FC' && !resumenCodigoSeguridad && exportConfig?.p12_base64 && exportConfig?.p12_password != null) {
+            try {
+              const facturaRelacionada = await findRelatedCaso({
+                negocioId,
+                setId,
+                flujo: 'FC_MENOR_250K',
+                encf: caso.encf || '',
+                ncf: caso.ncf || '',
+              });
+              if (facturaRelacionada) {
+                const payloadFactura = toSafeJson(facturaRelacionada.payload_json, {});
+                const firmadoFactura = await ensureSignedFcMenor250k({
+                  caso: facturaRelacionada,
+                  payload: payloadFactura,
+                  config: exportConfig,
+                });
+                resumenCodigoSeguridad = firmadoFactura.codigoSeguridadeCF || resumenCodigoSeguridad;
+              }
+            } catch (error) {
+              resumenCodigoSeguridad = resumenCodigoSeguridad || '';
+            }
+          }
+
           const xmlBase =
             caso.flujo === 'RESUMEN_FC'
-              ? buildResumenFcXml({ payload, rncEmisorFallback: rncFallback })
+              ? buildResumenFcXml({
+                  payload,
+                  rncEmisorFallback: rncFallback,
+                  codigoSeguridadeCF: resumenCodigoSeguridad || '000000',
+                })
               : buildEcfXml({ payload, flujo: caso.flujo || 'ECF_NORMAL', rncEmisorFallback: rncFallback });
 
           const emission = resolveEmissionPhase({
@@ -1717,6 +2080,7 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
           'Notas:',
           '- Estos XML se generan sin firma digital.',
           '- Firma los XML con la app oficial DGII antes de enviarlos.',
+          '- Los RFCE exportados usan CodigoSeguridadeCF temporal si la factura 32 aun no ha sido firmada.',
           '- Si deseas verificar campos y orden del set, usa los archivos *__campos_set.xml.',
         ];
 
@@ -1800,6 +2164,9 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
         const cachedToken = await getTokenFromCache(configRow);
         const authConfigError = validarConfiguracionAutenticacion(config, { hasTokenCache: Boolean(cachedToken) });
         if (authConfigError) return res.status(400).json({ ok: false, error: authConfigError });
+        if (!config?.p12_base64 || config?.p12_password == null) {
+          return res.status(400).json({ ok: false, error: 'Para procesar el Paso 2 debes cargar el certificado P12/PFX y su clave.' });
+        }
 
         const body = req.body || {};
         const reprocesarRechazados = Boolean(body.reprocesar_rechazados ?? body.reprocesarRechazados ?? false);
@@ -1841,40 +2208,6 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
         const resultados = [];
         for (const caso of casosOrdenados) {
           try {
-            if (caso.flujo === 'FC_MENOR_250K') {
-              const resumenRelacionado = await db.get(
-                `SELECT id, estado_local
-                   FROM dgii_paso2_casos
-                  WHERE negocio_id = ? AND set_id = ? AND flujo = 'RESUMEN_FC'
-                    AND (
-                      (encf IS NOT NULL AND encf <> '' AND encf = ?)
-                      OR (ncf IS NOT NULL AND ncf <> '' AND ncf = ?)
-                    )
-                  ORDER BY id ASC
-                  LIMIT 1`,
-                [negocioId, setId, caso.encf || '', caso.ncf || '']
-              );
-
-              if (resumenRelacionado && resumenRelacionado.estado_local !== 'ACEPTADO') {
-                const resumenCaso = await db.get('SELECT * FROM dgii_paso2_casos WHERE id = ? AND negocio_id = ? LIMIT 1', [
-                  resumenRelacionado.id,
-                  negocioId,
-                ]);
-                if (resumenCaso) {
-                  const resResumen = await procesarCasoInterno({ caso: resumenCaso, config, configRow, negocioId });
-                  resultados.push({ ...resResumen, precondicion_para: caso.id });
-                  if (resResumen.estado !== 'ACEPTADO') {
-                    resultados.push({
-                      casoId: caso.id,
-                      estado: 'BLOQUEADO',
-                      mensaje: 'No se envio factura <250k porque su resumen fue rechazado o no aceptado.',
-                    });
-                    continue;
-                  }
-                }
-              }
-            }
-
             const result = await procesarCasoInterno({ caso, config, configRow, negocioId });
             resultados.push(result);
           } catch (error) {
@@ -1925,11 +2258,287 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
         const cachedToken = await getTokenFromCache(configRow);
         const authConfigError = validarConfiguracionAutenticacion(config, { hasTokenCache: Boolean(cachedToken) });
         if (authConfigError) return res.status(400).json({ ok: false, error: authConfigError });
+        if (!config?.p12_base64 || config?.p12_password == null) {
+          return res.status(400).json({ ok: false, error: 'Para procesar el Paso 2 debes cargar el certificado P12/PFX y su clave.' });
+        }
         const result = await procesarCasoInterno({ caso, config, configRow, negocioId });
         return res.json({ ok: true, resultado: result });
       } catch (error) {
         console.error('DGII Paso2: error procesando caso:', error?.message || error);
         return res.status(500).json({ ok: false, error: error?.message || 'Error procesando el caso.' });
+      }
+    });
+  });
+
+  router.post('/casos/:casoId/guardar-xml-firmado-base', (req, res) => {
+    ensureCanAdmin(req, res, async (usuarioSesion) => {
+      const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+      const casoId = Number(req.params.casoId);
+      if (!Number.isFinite(casoId) || casoId <= 0) return res.status(400).json({ ok: false, error: 'casoId invalido.' });
+
+      try {
+        const caso = await db.get('SELECT * FROM dgii_paso2_casos WHERE id = ? AND negocio_id = ? LIMIT 1', [casoId, negocioId]);
+        if (!caso) return res.status(404).json({ ok: false, error: 'Caso no encontrado.' });
+        if (caso.flujo !== 'FC_MENOR_250K') {
+          return res.status(400).json({
+            ok: false,
+            error: 'Este flujo de XML firmado base solo esta habilitado para Facturas de Consumo < 250k.',
+          });
+        }
+
+        const xmlFirmado = extractSignedXmlFromBody(req.body || {});
+        if (!xmlFirmado) {
+          return res.status(400).json({
+            ok: false,
+            error: 'Debes enviar un XML firmado valido (xml_firmada/xml_firmada_base64).',
+          });
+        }
+
+        const payload = toSafeJson(caso.payload_json, {});
+        const encfCaso = caso.encf || pickByPatterns(payload, [/e_?ncf/i, /encf/i]) || '';
+        const rncEsperado = pickByPatterns(payload, [/rnc_?emisor/i, /^rnc$/i]) || '';
+        const rootTag = detectRootTagName(xmlFirmado);
+        const tipoeCFXml = extractXmlTagValue(xmlFirmado, 'TipoeCF');
+        const encfXml = extractXmlTagValue(xmlFirmado, 'eNCF');
+        const rncXml = extractXmlTagValue(xmlFirmado, 'RNCEmisor');
+        const signatureValue = extractSignatureValueFromXml(xmlFirmado);
+
+        if (rootTag.toUpperCase() !== 'ECF') {
+          return res.status(400).json({
+            ok: false,
+            error: `El XML firmado base no es un ECF valido. Raiz recibida: ${rootTag || 'desconocida'}.`,
+          });
+        }
+        if (String(tipoeCFXml || '').trim() !== '32') {
+          return res.status(400).json({
+            ok: false,
+            error: `El XML firmado base corresponde al tipo ${tipoeCFXml || '--'}, pero este flujo espera una Factura de Consumo Electronica (32).`,
+          });
+        }
+        if (encfCaso && encfXml && String(encfXml).trim() !== String(encfCaso).trim()) {
+          return res.status(400).json({
+            ok: false,
+            error: `El XML firmado base corresponde al eNCF ${encfXml}, pero este caso espera ${encfCaso}.`,
+          });
+        }
+        if (rncEsperado && rncXml && String(rncXml).trim() !== String(rncEsperado).trim()) {
+          return res.status(400).json({
+            ok: false,
+            error: `El XML firmado base corresponde al RNC ${rncXml}, pero este caso espera ${rncEsperado}.`,
+          });
+        }
+        if (!signatureValue) {
+          return res.status(400).json({
+            ok: false,
+            error: 'El XML firmado base no contiene una firma digital valida (SignatureValue).',
+          });
+        }
+
+        const codigoSeguridadeCF = computeCodigoSeguridadeCF(signatureValue);
+        if (!codigoSeguridadeCF) {
+          return res.status(400).json({
+            ok: false,
+            error: 'No se pudo derivar CodigoSeguridadeCF desde la factura 32 firmada.',
+          });
+        }
+
+        const firmaBaseMessage =
+          `Factura 32 firmada externamente cargada. CodigoSeguridadeCF derivado: ${codigoSeguridadeCF}. ` +
+          'Regenera los XML sin firma para obtener los RFCE actualizados.';
+
+        await actualizarCaso({
+          casoId,
+          xmlFirmado,
+          estadoLocal: caso.estado_local === 'ACEPTADO' ? caso.estado_local : 'PENDIENTE',
+          dgiiMensaje: firmaBaseMessage,
+        });
+
+        await registrarIntento({
+          casoId,
+          negocioId,
+          tipoEnvio: 'FIRMA_BASE_EXTERNA',
+          endpoint: null,
+          requestHeaders: null,
+          requestBody: xmlFirmado,
+          responseStatus: 0,
+          responseHeaders: null,
+          responseBody: firmaBaseMessage,
+          resultado: 'PENDIENTE',
+          codigo: null,
+          mensaje: firmaBaseMessage,
+          trackId: null,
+        });
+
+        const resumenRelacionado = await findRelatedCaso({
+          negocioId,
+          setId: caso.set_id,
+          flujo: 'RESUMEN_FC',
+          encf: encfCaso,
+          ncf: caso.ncf || pickByPatterns(payload, [/\bncf\b/i]) || '',
+        });
+
+        if (resumenRelacionado && resumenRelacionado.estado_local !== 'ACEPTADO') {
+          const payloadResumen = toSafeJson(resumenRelacionado.payload_json, {});
+          let config = null;
+          try {
+            config = await loadConfig(negocioId);
+          } catch (_) {
+            config = null;
+          }
+          const xmlGeneradoResumen = buildResumenFcXml({
+            payload: payloadResumen,
+            rncEmisorFallback: config?.rnc_emisor || rncEsperado || '',
+            codigoSeguridadeCF,
+          });
+
+          await actualizarCaso({
+            casoId: resumenRelacionado.id,
+            xmlGenerado: xmlGeneradoResumen,
+            xmlFirmado: null,
+            estadoLocal: 'PENDIENTE',
+            dgiiEstado: 'PENDIENTE',
+            dgiiCodigo: null,
+            dgiiMensaje:
+              `RFCE actualizado con CodigoSeguridadeCF ${codigoSeguridadeCF} derivado desde la factura 32 firmada externamente. ` +
+              'Regenera los XML sin firma y vuelve a firmar este resumen.',
+            dgiiTrackId: null,
+          });
+        }
+
+        return res.json({
+          ok: true,
+          resultado: {
+            casoId,
+            estado: caso.estado_local === 'ACEPTADO' ? caso.estado_local : 'PENDIENTE',
+            codigoSeguridadeCF,
+            resumenCasoId: resumenRelacionado?.id || null,
+            resumenActualizado: Boolean(resumenRelacionado && resumenRelacionado.estado_local !== 'ACEPTADO'),
+          },
+        });
+      } catch (error) {
+        console.error('DGII Paso2: error guardando XML firmado base:', error?.message || error);
+        return res.status(500).json({ ok: false, error: error?.message || 'No se pudo guardar el XML firmado base.' });
+      }
+    });
+  });
+
+  router.post('/casos/:casoId/procesar-xml-firmado', (req, res) => {
+    ensureCanAdmin(req, res, async (usuarioSesion) => {
+      const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+      const casoId = Number(req.params.casoId);
+      if (!Number.isFinite(casoId) || casoId <= 0) return res.status(400).json({ ok: false, error: 'casoId invalido.' });
+
+      try {
+        const caso = await db.get('SELECT * FROM dgii_paso2_casos WHERE id = ? AND negocio_id = ? LIMIT 1', [casoId, negocioId]);
+        if (!caso) return res.status(404).json({ ok: false, error: 'Caso no encontrado.' });
+        if (caso.flujo !== 'RESUMEN_FC') {
+          return res.status(400).json({ ok: false, error: 'El XML firmado externo por ahora solo esta habilitado para RFCE.' });
+        }
+
+        const configRow = await db.get('SELECT * FROM dgii_paso2_config WHERE negocio_id = ? LIMIT 1', [negocioId]);
+        if (!configRow) return res.status(400).json({ ok: false, error: 'Configura DGII antes de procesar XML firmado.' });
+
+        const config = await loadConfig(negocioId);
+        const cachedToken = await getTokenFromCache(configRow);
+        const authConfigError = validarConfiguracionAutenticacion(config, { hasTokenCache: Boolean(cachedToken) });
+        if (authConfigError) return res.status(400).json({ ok: false, error: authConfigError });
+
+        const xmlFirmado = extractSignedXmlFromBody(req.body || {});
+        if (!xmlFirmado) {
+          return res.status(400).json({
+            ok: false,
+            error: 'Debes enviar un XML firmado valido (xml_firmada/xml_firmada_base64).',
+          });
+        }
+
+        const token = await resolveToken({ config, configRow, negocioId });
+        const payload = toSafeJson(caso.payload_json, {});
+        const encfCaso = caso.encf || pickByPatterns(payload, [/e_?ncf/i, /encf/i]) || '';
+        const rncEmisor = config.rnc_emisor || pickByPatterns(payload, [/rnc_?emisor/i, /^rnc$/i]) || '';
+        const rootTag = detectRootTagName(xmlFirmado);
+        const encfXml = extractXmlTagValue(xmlFirmado, 'eNCF');
+        const codigoSeguridadXml = extractXmlTagValue(xmlFirmado, 'CodigoSeguridadeCF');
+        const codigoEsperado = extractXmlTagValue(caso.xml_generado || '', 'CodigoSeguridadeCF');
+
+        if (rootTag.toUpperCase() !== 'RFCE') {
+          return res.status(400).json({
+            ok: false,
+            error: `El XML firmado no es un RFCE valido. Raiz recibida: ${rootTag || 'desconocida'}. Firma el archivo principal del resumen, no el __campos_set.xml.`,
+          });
+        }
+        if (encfCaso && encfXml && String(encfXml).trim() !== String(encfCaso).trim()) {
+          return res.status(400).json({
+            ok: false,
+            error: `El XML firmado corresponde al eNCF ${encfXml}, pero este caso espera ${encfCaso}.`,
+          });
+        }
+        if (codigoEsperado && codigoSeguridadXml && String(codigoSeguridadXml).trim() !== String(codigoEsperado).trim()) {
+          return res.status(400).json({
+            ok: false,
+            error:
+              `El CodigoSeguridadeCF del XML firmado (${codigoSeguridadXml}) no coincide con el esperado (${codigoEsperado}). ` +
+              'Regenera los XML y firma el archivo principal del resumen actualizado.',
+          });
+        }
+
+        await actualizarCaso({
+          casoId,
+          xmlFirmado,
+          estadoLocal: 'PROCESANDO',
+          incrementarIntentos: true,
+        });
+
+        const envio = await sendXmlToDgii({
+          endpoint: config.endpoints.recepcionFc,
+          apiPath: '/api/recepcion/ecf',
+          xmlPayload: xmlFirmado,
+          token,
+          fileName: buildDgiiXmlFileName({ rncEmisor, encf: encfCaso, fallback: 'rfce.xml' }),
+        });
+
+        const finalState = resolveRemoteCaseState(envio.extracted, !envio.ok ? 'RECHAZADO' : 'ENVIADO');
+        const finalCode = envio.extracted.code || null;
+        const finalMessage = envio.extracted.message || envio.extracted.statusText || null;
+
+        await registrarIntento({
+          casoId,
+          negocioId,
+          tipoEnvio: 'RESUMEN_EXTERNO',
+          endpoint: envio.endpoint || config.endpoints.recepcionFc,
+          requestHeaders: envio.requestHeaders,
+          requestBody: xmlFirmado,
+          responseStatus: envio.status,
+          responseHeaders: envio.headers,
+          responseBody: envio.raw,
+          resultado: finalState,
+          codigo: finalCode,
+          mensaje: finalMessage,
+          trackId: null,
+        });
+
+        await actualizarCaso({
+          casoId,
+          xmlFirmado,
+          estadoLocal: finalState,
+          dgiiEstado: finalState,
+          dgiiCodigo: finalCode,
+          dgiiMensaje: finalMessage,
+          dgiiTrackId: null,
+        });
+
+        return res.json({
+          ok: true,
+          resultado: {
+            casoId,
+            estado: finalState,
+            codigo: finalCode,
+            mensaje: finalMessage,
+            trackId: null,
+          },
+        });
+      } catch (error) {
+        console.error('DGII Paso2: error procesando XML firmado externo:', error?.message || error);
+        return res.status(500).json({ ok: false, error: error?.message || 'No se pudo procesar el XML firmado externo.' });
       }
     });
   });
@@ -1943,7 +2552,6 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
       try {
         const caso = await db.get('SELECT * FROM dgii_paso2_casos WHERE id = ? AND negocio_id = ? LIMIT 1', [casoId, negocioId]);
         if (!caso) return res.status(404).json({ ok: false, error: 'Caso no encontrado.' });
-        if (!caso.dgii_track_id) return res.status(400).json({ ok: false, error: 'El caso no tiene trackId para consulta.' });
 
         const configRow = await db.get('SELECT * FROM dgii_paso2_config WHERE negocio_id = ? LIMIT 1', [negocioId]);
         if (!configRow) return res.status(400).json({ ok: false, error: 'Configura DGII antes de consultar.' });
@@ -1953,7 +2561,75 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
         const authConfigError = validarConfiguracionAutenticacion(config, { hasTokenCache: Boolean(cachedToken) });
         if (authConfigError) return res.status(400).json({ ok: false, error: authConfigError });
         const token = await resolveToken({ config, configRow, negocioId });
-        const consulta = await consultDgiiResult({
+
+        if (caso.flujo === 'FC_MENOR_250K' || caso.flujo === 'RESUMEN_FC') {
+          const casoFactura =
+            caso.flujo === 'FC_MENOR_250K'
+              ? caso
+              : await findRelatedCaso({
+                  negocioId,
+                  setId: caso.set_id,
+                  flujo: 'FC_MENOR_250K',
+                  encf: caso.encf || '',
+                  ncf: caso.ncf || '',
+                });
+          if (!casoFactura) {
+            return res.status(400).json({ ok: false, error: 'No se encontro la factura 32 menor a 250k relacionada.' });
+          }
+
+          const payloadFactura = toSafeJson(casoFactura.payload_json, {});
+          const firmado = await ensureSignedFcMenor250k({ caso: casoFactura, payload: payloadFactura, config });
+          const consulta = await consultRfceResult({
+            endpoint: config.endpoints.consultaRfce,
+            token,
+            rncEmisor: config.rnc_emisor || pickByPatterns(payloadFactura, [/rnc_?emisor/i]) || '',
+            encf: casoFactura.encf || pickByPatterns(payloadFactura, [/e_?ncf/i, /encf/i]) || '',
+            codigoSeguridadeCF: firmado.codigoSeguridadeCF,
+          });
+
+          const estadoFinal = consulta.extracted.accepted
+            ? 'ACEPTADO'
+            : consulta.extracted.rejected
+              ? 'RECHAZADO'
+              : caso.estado_local || 'ENVIADO';
+
+          await registrarIntento({
+            casoId,
+            negocioId,
+            tipoEnvio: 'CONSULTA_RFCE',
+            endpoint: consulta.endpoint || config.endpoints.consultaRfce,
+            requestHeaders: consulta.requestHeaders,
+            requestBody: consulta.requestBody || '',
+            responseStatus: consulta.status,
+            responseHeaders: consulta.headers,
+            responseBody: consulta.raw,
+            resultado: estadoFinal,
+            codigo: consulta.extracted.code,
+            mensaje: consulta.extracted.message || consulta.extracted.statusText,
+            trackId: null,
+          });
+
+          await actualizarCaso({
+            casoId,
+            estadoLocal: estadoFinal,
+            dgiiEstado: estadoFinal,
+            dgiiCodigo: consulta.extracted.code,
+            dgiiMensaje: consulta.extracted.message || consulta.extracted.statusText,
+            dgiiTrackId: null,
+          });
+
+          return res.json({
+            ok: true,
+            estado: estadoFinal,
+            codigo: consulta.extracted.code,
+            mensaje: consulta.extracted.message || consulta.extracted.statusText,
+            trackId: null,
+          });
+        }
+
+        if (!caso.dgii_track_id) return res.status(400).json({ ok: false, error: 'El caso no tiene trackId para consulta.' });
+
+        const consulta = await consultDgiiResultUntilSettled({
           endpoint: config.endpoints.consultaResultado,
           token,
           trackId: caso.dgii_track_id,
@@ -2028,6 +2704,57 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
       } catch (error) {
         console.error('DGII Paso2: error en prueba auth:', error?.message || error);
         return res.status(500).json({ ok: false, error: error?.message || 'No se pudo autenticar en DGII.' });
+      }
+    });
+  });
+
+  router.post('/autenticacion/descargar-semilla', (req, res) => {
+    ensureCanAdmin(req, res, async (usuarioSesion) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuarioSesion);
+        const configRow = await db.get('SELECT * FROM dgii_paso2_config WHERE negocio_id = ? LIMIT 1', [negocioId]);
+        if (!configRow) return res.status(400).json({ ok: false, error: 'Configura DGII antes de descargar la semilla.' });
+
+        const config = await loadConfig(negocioId);
+        const endpoints = config?.endpoints || DGII_DEFAULT_ENDPOINTS;
+        const candidates = buildAuthCandidates(endpoints.autenticacion, 'SEMILLA');
+        const candidate = candidates.find((item) => item.mode === 'SEMILLA' && item.semillaUrl);
+        if (!candidate?.semillaUrl) {
+          return res.status(400).json({ ok: false, error: 'No hay endpoint de semilla configurado.' });
+        }
+
+        const semillaResp = await fetchWithTimeout(
+          candidate.semillaUrl,
+          {
+            method: 'GET',
+            headers: { Accept: 'application/xml,text/xml,*/*' },
+          },
+          DEFAULT_TIMEOUT_MS
+        );
+        const semillaText = await semillaResp.text();
+        if (!semillaResp.ok) {
+          const parsedSemilla = parseTextResponse(semillaText);
+          return res.status(502).json({
+            ok: false,
+            error:
+              `Semilla DGII fallida en ${candidate.semillaUrl} (${semillaResp.status}): ` +
+              `${parsedSemilla.extracted.message || parsedSemilla.raw || 'sin detalle'}`,
+          });
+        }
+        if (!looksLikeXml(semillaText)) {
+          return res.status(502).json({ ok: false, error: 'DGII devolvio una semilla con formato inesperado.' });
+        }
+
+        const fileName = `semilla_${Date.now()}.xml`;
+        return res.json({
+          ok: true,
+          endpoint: candidate.semillaUrl,
+          nombre_archivo: fileName,
+          xml_base64: Buffer.from(semillaText, 'utf8').toString('base64'),
+        });
+      } catch (error) {
+        console.error('DGII Paso2: error descargando semilla:', error?.message || error);
+        return res.status(500).json({ ok: false, error: error?.message || 'No se pudo descargar la semilla DGII.' });
       }
     });
   });

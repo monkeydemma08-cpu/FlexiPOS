@@ -34,6 +34,8 @@ const botonVistaPrevia = document.getElementById('caja-vista-previa');
 
 const botonCobrar = document.getElementById('caja-cobrar');
 
+const botonCobroAdelantado = document.getElementById('caja-cobro-adelantado');
+
 const resumenSubtotal = document.getElementById('caja-resumen-subtotal');
 
 const resumenImpuesto = document.getElementById('caja-resumen-impuesto');
@@ -43,6 +45,10 @@ const resumenPropina = document.getElementById('caja-resumen-propina');
 const resumenDescuento = document.getElementById('caja-resumen-descuento');
 
 const resumenTotal = document.getElementById('caja-resumen-total');
+
+const resumenPagado = document.getElementById('caja-resumen-pagado');
+
+const resumenRestante = document.getElementById('caja-resumen-restante');
 
 const facturaAcciones = document.getElementById('caja-factura-acciones');
 
@@ -140,6 +146,8 @@ const pagoCambioDisplay = document.getElementById('pago-cambio');
 const selectMetodoPago = document.getElementById('pago-metodo');
 
 const camposPago = Array.from(document.querySelectorAll('[data-metodo]'));
+
+const toggleCobroAdelantado = document.getElementById('caja-cobro-adelantado-toggle');
 
 const tabsContainer = document.querySelector('.caja-tabs');
 
@@ -613,6 +621,7 @@ const expandirPedidosAgrupados = (grupos = []) =>
 let cuentas = [];
 
 let cuentaSeleccionada = null;
+let modoCobroAdelantado = false;
 let splitItems = [];
 let splitItemsMap = new Map();
 const splitSeleccion = new Map();
@@ -1346,6 +1355,150 @@ const totalesBaseCuenta = (cuenta) => {
 
 const redondearMonedaCaja = (valor) => Number((Number(valor) || 0).toFixed(2));
 
+const deduplicarPedidosCaja = (pedidos = []) => {
+  const mapa = new Map();
+  (pedidos || []).forEach((pedido) => {
+    const pedidoId = Number(pedido?.id);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) return;
+    mapa.set(pedidoId, { ...(mapa.get(pedidoId) || {}), ...pedido });
+  });
+  return Array.from(mapa.values()).sort((a, b) => {
+    const fechaA = new Date(a?.fecha_creacion || 0).getTime();
+    const fechaB = new Date(b?.fecha_creacion || 0).getTime();
+    return fechaA - fechaB;
+  });
+};
+
+const calcularEstadoCuentaCajaUI = (pedidos = []) => {
+  const estados = new Set(
+    (pedidos || [])
+      .map((pedido) => (pedido?.estado || '').toString().trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (!estados.size) return 'listo';
+  if (estados.has('preparando') || (estados.has('pendiente') && estados.has('listo'))) {
+    return 'preparando';
+  }
+  if (estados.size === 1) return Array.from(estados)[0];
+  if (estados.has('pendiente')) return 'pendiente';
+  if (estados.has('listo')) return 'listo';
+  return 'preparando';
+};
+
+const obtenerPagosRegistradosCuenta = (cuenta = null) => {
+  const cuentaObjetivo = cuenta || cuentaSeleccionada;
+  if (!cuentaObjetivo) {
+    return {
+      efectivo: 0,
+      efectivoEntregado: 0,
+      tarjeta: 0,
+      transferencia: 0,
+      cambio: 0,
+      total: 0,
+    };
+  }
+
+  if (cuentaObjetivo?.pagos_registrados && typeof cuentaObjetivo.pagos_registrados === 'object') {
+    const pagos = cuentaObjetivo.pagos_registrados;
+    const efectivo = Number(pagos.efectivo) || 0;
+    const efectivoEntregado = Number(pagos.efectivo_entregado ?? pagos.efectivoEntregado) || 0;
+    const tarjeta = Number(pagos.tarjeta) || 0;
+    const transferencia = Number(pagos.transferencia) || 0;
+    const cambio = Number(pagos.cambio) || 0;
+    return {
+      efectivo: redondearMonedaCaja(efectivo),
+      efectivoEntregado: redondearMonedaCaja(efectivoEntregado),
+      tarjeta: redondearMonedaCaja(tarjeta),
+      transferencia: redondearMonedaCaja(transferencia),
+      cambio: redondearMonedaCaja(cambio),
+      total: redondearMonedaCaja(
+        Number(pagos.total) || redondearMonedaCaja(efectivo + tarjeta + transferencia)
+      ),
+    };
+  }
+
+  const pedidosCuenta = Array.isArray(cuentaObjetivo.pedidos) ? cuentaObjetivo.pedidos : [];
+  let efectivo = 0;
+  let efectivoEntregado = 0;
+  let tarjeta = 0;
+  let transferencia = 0;
+  let cambio = 0;
+
+  pedidosCuenta.forEach((pedido) => {
+    const efectivoPedido = Number(pedido?.pago_efectivo) || 0;
+    const efectivoEntregadoPedido = Number(pedido?.pago_efectivo_entregado) || 0;
+    const cambioPedido = Number(pedido?.pago_cambio) || 0;
+    efectivo += efectivoPedido > 0 ? efectivoPedido : Math.max(efectivoEntregadoPedido - cambioPedido, 0);
+    efectivoEntregado += efectivoEntregadoPedido;
+    tarjeta += Number(pedido?.pago_tarjeta) || 0;
+    transferencia += Number(pedido?.pago_transferencia) || 0;
+    cambio += cambioPedido;
+  });
+
+  return {
+    efectivo: redondearMonedaCaja(efectivo),
+    efectivoEntregado: redondearMonedaCaja(efectivoEntregado),
+    tarjeta: redondearMonedaCaja(tarjeta),
+    transferencia: redondearMonedaCaja(transferencia),
+    cambio: redondearMonedaCaja(cambio),
+    total: redondearMonedaCaja(efectivo + tarjeta + transferencia),
+  };
+};
+
+const obtenerSaldoPendienteCuenta = (cuenta = null, totalCuenta = null) => {
+  const cuentaObjetivo = cuenta || cuentaSeleccionada;
+  const totalBase = totalCuenta === null ? Number(calculo.total || 0) : Number(totalCuenta) || 0;
+  const pagosRegistrados = obtenerPagosRegistradosCuenta(cuentaObjetivo);
+  return redondearMonedaCaja(Math.max(totalBase - pagosRegistrados.total, 0));
+};
+
+const cuentaTienePagosRegistrados = (cuenta = null) => obtenerPagosRegistradosCuenta(cuenta).total > 0.009;
+
+const cuentaEstaListaParaCobro = (cuenta = null) => {
+  const cuentaObjetivo = cuenta || cuentaSeleccionada;
+  if (!cuentaObjetivo) return false;
+  if (typeof cuentaObjetivo.puedeCobrar === 'boolean') return cuentaObjetivo.puedeCobrar;
+  const pedidosCuenta = Array.isArray(cuentaObjetivo.pedidos) ? cuentaObjetivo.pedidos : [];
+  return pedidosCuenta.every((pedido) => pedido?.estado === 'listo');
+};
+
+const cuentaPermiteCambiosEstructurales = (cuenta = null) => {
+  const cuentaObjetivo = cuenta || cuentaSeleccionada;
+  return Boolean(cuentaObjetivo) && cuentaEstaListaParaCobro(cuentaObjetivo) && !cuentaTienePagosRegistrados(cuentaObjetivo);
+};
+
+const combinarCuentasCaja = (...listas) => {
+  const mapa = new Map();
+  listas.flat().forEach((cuenta) => {
+    if (!cuenta) return;
+    const cuentaId = Number(cuenta.cuenta_id || cuenta.id);
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) return;
+    if (!mapa.has(cuentaId)) {
+      mapa.set(cuentaId, {
+        ...cuenta,
+        cuenta_id: cuentaId,
+        id: cuentaId,
+        pedidos: [],
+      });
+    }
+
+    const acumulada = mapa.get(cuentaId);
+    if (!acumulada.mesa && cuenta.mesa) acumulada.mesa = cuenta.mesa;
+    if (!acumulada.cliente && cuenta.cliente) acumulada.cliente = cuenta.cliente;
+    if (!acumulada.modo_servicio && cuenta.modo_servicio) acumulada.modo_servicio = cuenta.modo_servicio;
+    acumulada.pedidos = deduplicarPedidosCaja([...(acumulada.pedidos || []), ...(cuenta.pedidos || [])]);
+    acumulada.estado = calcularEstadoCuentaCajaUI(acumulada.pedidos);
+    acumulada.estado_cuenta = acumulada.estado;
+    acumulada.puedeCobrar = acumulada.pedidos.every((pedido) => pedido?.estado === 'listo');
+  });
+
+  return Array.from(mapa.values()).sort((a, b) => {
+    const fechaA = new Date(a?.pedidos?.[0]?.fecha_creacion || 0).getTime();
+    const fechaB = new Date(b?.pedidos?.[0]?.fecha_creacion || 0).getTime();
+    return fechaA - fechaB;
+  });
+};
+
 const esCuentaConImpuestoIncluidoEnSplit = (subtotalItems, totalesCuenta) => {
   const subtotalCuenta = Math.max(Number(totalesCuenta?.subtotal) || 0, 0);
   const impuestoCuenta = Math.max(Number(totalesCuenta?.impuesto) || 0, 0);
@@ -1489,6 +1642,46 @@ const limpiarDescuentosItems = () => {
 
   descuentosPorItem = [];
 
+};
+
+const inicializarDescuentosDesdeCuenta = (cuenta = null) => {
+  limpiarDescuentosItems();
+  const cuentaObjetivo = cuenta || cuentaSeleccionada;
+  const items = Array.isArray(cuentaObjetivo?.items_agregados) ? cuentaObjetivo.items_agregados : [];
+
+  items.forEach((item, itemIndex) => {
+    const descuentoPorcentaje = Math.max(Number(item?.descuento_porcentaje) || 0, 0);
+    const descuentoMonto = Math.max(Number(item?.descuento_monto) || 0, 0);
+    if (descuentoPorcentaje <= 0 && descuentoMonto <= 0) return;
+
+    const detalles = Array.isArray(item?.detalles) ? item.detalles : [];
+    const cantidadTotal = Math.max(Number(item?.cantidad) || 0, 0);
+    const cantidadAplicada = detalles.reduce((acc, detalle) => {
+      const cantidadDetalle = Number(detalle?.cantidad_descuento);
+      return acc + (Number.isFinite(cantidadDetalle) && cantidadDetalle > 0 ? cantidadDetalle : Number(detalle?.cantidad) || 0);
+    }, 0) || cantidadTotal;
+
+    const key = obtenerKeyItem(item, itemIndex);
+    registrarDescuentoItem({
+      key,
+      tipo: descuentoPorcentaje > 0 ? 'porcentaje' : 'monto',
+      valor:
+        descuentoPorcentaje > 0
+          ? descuentoPorcentaje
+          : cantidadAplicada > 0
+          ? redondearMonedaCaja(descuentoMonto / cantidadAplicada)
+          : redondearMonedaCaja(descuentoMonto),
+      cantidad: Math.min(cantidadAplicada, cantidadTotal) || cantidadTotal || 1,
+      cantidad_total: cantidadTotal || 1,
+      montoCalculado: descuentoMonto,
+      precioUnitario: Number(item?.precio_unitario) || 0,
+      detalle_ids: detalles.map((detalle) => ({
+        detalle_id: Number(detalle?.detalle_id ?? detalle?.detalleId ?? detalle?.id),
+        cantidad: Number(detalle?.cantidad) || 0,
+        precio_unitario: Number(detalle?.precio_unitario) || 0,
+      })),
+    });
+  });
 };
 
 
@@ -1950,7 +2143,7 @@ const limpiarSeleccion = () => {
 
     seleccionPlaceholder.hidden = false;
 
-    seleccionPlaceholder.textContent = 'Selecciona un pedido para ver los detalles.';
+    seleccionPlaceholder.textContent = 'Selecciona una cuenta para ver el detalle de cobro.';
 
   }
 
@@ -1974,6 +2167,8 @@ const limpiarSeleccion = () => {
   if (inputNcfManual) inputNcfManual.value = '';
 
   if (inputComentarios) inputComentarios.value = '';
+  if (inputDescuento) inputDescuento.disabled = false;
+  if (inputPropina) inputPropina.disabled = false;
 
   if (facturaAcciones) {
 
@@ -1991,6 +2186,12 @@ const limpiarSeleccion = () => {
 
     botonCobrar.classList.remove('is-loading');
 
+  }
+  if (botonCobroAdelantado) {
+    botonCobroAdelantado.hidden = true;
+    botonCobroAdelantado.disabled = false;
+    botonCobroAdelantado.textContent = 'Cobrar por adelantado';
+    botonCobroAdelantado.classList.remove('is-loading');
   }
   if (botonSepararCuenta) botonSepararCuenta.disabled = true;
   if (botonJuntarCuentas) botonJuntarCuentas.disabled = true;
@@ -2295,6 +2496,10 @@ const abrirSplitModal = () => {
     setMensajeDetalle('Selecciona una cuenta para separar.', 'error');
     return;
   }
+  if (!cuentaPermiteCambiosEstructurales(cuentaSeleccionada)) {
+    setMensajeDetalle('Esta cuenta no permite separaciones porque esta en curso o ya tiene pagos registrados.', 'error');
+    return;
+  }
 
   prepararSplitItems();
   splitSeleccion.clear();
@@ -2390,9 +2595,11 @@ const confirmarSeparacion = async () => {
 
 const obtenerCuentasDisponiblesMerge = () => {
   if (!cuentaSeleccionada) return [];
+  if (!cuentaPermiteCambiosEstructurales(cuentaSeleccionada)) return [];
   const mesaBase = (cuentaSeleccionada.mesa || '').toString().trim();
   return (cuentas || []).filter((cuenta) => {
     if (cuenta.cuenta_id === cuentaSeleccionada.cuenta_id) return false;
+    if (!cuentaPermiteCambiosEstructurales(cuenta)) return false;
     if (!mesaBase) return true;
     const mesaCuenta = (cuenta.mesa || '').toString().trim();
     return !mesaCuenta || mesaCuenta === mesaBase;
@@ -2471,6 +2678,10 @@ const abrirMergeModal = () => {
     setMensajeDetalle('Selecciona una cuenta para juntar.', 'error');
     return;
   }
+  if (!cuentaPermiteCambiosEstructurales(cuentaSeleccionada)) {
+    setMensajeDetalle('Esta cuenta no permite juntar pedidos porque esta en curso o ya tiene pagos registrados.', 'error');
+    return;
+  }
 
   mergeSeleccion.clear();
   setMensajeMerge('');
@@ -2544,16 +2755,40 @@ const confirmarMerge = async () => {
 };
 
 const actualizarAccionesCuenta = () => {
+  const cuentaEditable = cuentaPermiteCambiosEstructurales(cuentaSeleccionada);
   if (botonSepararCuenta) {
     prepararSplitItems();
-    botonSepararCuenta.disabled = !cuentaSeleccionada || splitItems.length === 0;
+    botonSepararCuenta.disabled = !cuentaEditable || splitItems.length === 0;
   }
   if (botonJuntarCuentas) {
     const disponibles = obtenerCuentasDisponiblesMerge();
-    botonJuntarCuentas.disabled = !cuentaSeleccionada || disponibles.length === 0;
+    botonJuntarCuentas.disabled = !cuentaEditable || disponibles.length === 0;
   }
   if (botonEliminarCuenta) {
-    botonEliminarCuenta.disabled = !cuentaSeleccionada;
+    botonEliminarCuenta.disabled = !cuentaEditable;
+  }
+  const hayPagosRegistrados = cuentaTienePagosRegistrados(cuentaSeleccionada);
+  if (inputDescuento) inputDescuento.disabled = hayPagosRegistrados;
+  if (inputPropina) inputPropina.disabled = hayPagosRegistrados;
+  if (botonCobrar) {
+    const puedeCobrar = cuentaEstaListaParaCobro(cuentaSeleccionada);
+    const saldoPendiente = cuentaSeleccionada ? obtenerSaldoPendienteActual() : 0;
+    botonCobrar.hidden = !cuentaSeleccionada || !puedeCobrar;
+    botonCobrar.disabled = !cuentaSeleccionada || !puedeCobrar;
+    botonCobrar.textContent =
+      saldoPendiente <= 0.009 && hayPagosRegistrados ? 'Cerrar cuenta prepagada' : hayPagosRegistrados ? 'Cobrar restante' : 'Confirmar pago';
+  }
+  if (botonCobroAdelantado) {
+    const cuentaEnCurso = cuentaSeleccionada && !cuentaEstaListaParaCobro(cuentaSeleccionada);
+    const saldoPendiente = cuentaSeleccionada ? obtenerSaldoPendienteActual() : 0;
+    botonCobroAdelantado.hidden = !cuentaEnCurso;
+    botonCobroAdelantado.disabled = !cuentaEnCurso || saldoPendiente <= 0.009;
+    botonCobroAdelantado.textContent =
+      saldoPendiente <= 0.009
+        ? 'Pago adelantado completado'
+        : hayPagosRegistrados
+        ? 'Cobrar restante por adelantado'
+        : 'Cobrar por adelantado';
   }
 };
 
@@ -2573,7 +2808,9 @@ const renderPedidos = () => {
 
     vacio.className = 'caja-empty';
 
-    vacio.textContent = 'No hay pedidos listos para cobrar.';
+    vacio.textContent = modoCobroAdelantado
+      ? 'No hay cuentas en curso ni listas para cobrar.'
+      : 'No hay pedidos listos para cobrar.';
 
     pedidosContainer.appendChild(vacio);
 
@@ -2607,6 +2844,15 @@ const renderPedidos = () => {
 
     header.className = 'flex-between';
 
+    const estadoCuenta = (cuenta.estado_cuenta || cuenta.estado || 'listo').toString().toLowerCase();
+    const pagosRegistrados = obtenerPagosRegistradosCuenta(cuenta);
+    const badges = [
+      `<span class="kanm-badge estado-${estadoCuenta}">${estadoCuenta === 'listo' ? 'Listo' : estadoCuenta}</span>`,
+    ];
+    if (pagosRegistrados.total > 0.009) {
+      badges.push('<span class="badge-prepago">Prepago</span>');
+    }
+
     header.innerHTML = `
 
       <div>
@@ -2621,7 +2867,7 @@ const renderPedidos = () => {
 
       </div>
 
-      <span class="badge-listo">Listo</span>
+      <div class="caja-cuenta-badges">${badges.join('')}</div>
 
     `;
 
@@ -2749,6 +2995,8 @@ const renderDetallePedido = () => {
   const pedidosCuenta = cuentaSeleccionada.pedidos || [];
 
   const encabezado = pedidosCuenta[0];
+  const pagosRegistrados = obtenerPagosRegistradosCuenta(cuentaSeleccionada);
+  const estadoCuenta = (cuentaSeleccionada.estado_cuenta || cuentaSeleccionada.estado || 'listo').toString();
   reiniciarLookupDgii();
 
 
@@ -2817,6 +3065,22 @@ const renderDetallePedido = () => {
 
       </div>
 
+      <div class="caja-detalle-linea">
+
+        <span class="caja-detalle-etiqueta">Estado</span>
+
+        <span>${estadoCuenta}</span>
+
+      </div>
+
+      <div class="caja-detalle-linea">
+
+        <span class="caja-detalle-etiqueta">Pagado por adelantado</span>
+
+        <span>${formatCurrency(pagosRegistrados.total)}</span>
+
+      </div>
+
     `;
 
   }
@@ -2832,6 +3096,8 @@ const renderDetallePedido = () => {
 
 
   const itemsAgrupados = cuentaSeleccionada.items_agregados || [];
+  const bloquearDescuentos = cuentaTienePagosRegistrados(cuentaSeleccionada);
+  const bloquearCambiosEstructurales = !cuentaPermiteCambiosEstructurales(cuentaSeleccionada);
 
   if (!itemsAgrupados.length) {
 
@@ -2904,6 +3170,7 @@ const renderDetallePedido = () => {
             data-item-key="${key}"
 
             ${descuentoActual ? 'checked' : ''}
+            ${bloquearDescuentos ? 'disabled' : ''}
 
             style="margin-top: 4px;"
 
@@ -2932,6 +3199,7 @@ const renderDetallePedido = () => {
             min="0"
             step="0.01"
             value="${Number(precioLinea).toFixed(2)}"
+            ${bloquearCambiosEstructurales ? 'disabled' : ''}
           />
         </div>
         <div class="caja-acciones caja-item-tools-actions">
@@ -2939,6 +3207,7 @@ const renderDetallePedido = () => {
             type="button"
             class="kanm-button ghost caja-item-actualizar-precio"
             data-item-index="${itemIndex}"
+            ${bloquearCambiosEstructurales ? 'disabled' : ''}
           >
             Guardar precio
           </button>
@@ -2947,6 +3216,7 @@ const renderDetallePedido = () => {
             class="kanm-button ghost-danger caja-item-eliminar"
             data-item-index="${itemIndex}"
             data-nombre="${nombreSeguro}"
+            ${bloquearCambiosEstructurales ? 'disabled' : ''}
           >
             Eliminar producto
           </button>
@@ -2982,6 +3252,7 @@ const renderDetallePedido = () => {
               max="${cantidad}"
 
               value="${cantidadAplicada}"
+              ${bloquearDescuentos ? 'disabled' : ''}
 
             />
 
@@ -2991,7 +3262,7 @@ const renderDetallePedido = () => {
 
             <label>Tipo de descuento</label>
 
-            <select class="caja-item-descuento-tipo" data-item-key="${key}">
+            <select class="caja-item-descuento-tipo" data-item-key="${key}" ${bloquearDescuentos ? 'disabled' : ''}>
 
               <option value="porcentaje" ${tipoActual === 'porcentaje' ? 'selected' : ''}>Porcentaje (%)</option>
 
@@ -3020,6 +3291,7 @@ const renderDetallePedido = () => {
               value="${valorActual !== '' ? valorActual : ''}"
 
               placeholder="0.00"
+              ${bloquearDescuentos ? 'disabled' : ''}
 
             />
 
@@ -3046,6 +3318,7 @@ const renderDetallePedido = () => {
             data-max="${cantidad}"
 
             data-nombre="${nombreSeguro}"
+            ${bloquearDescuentos ? 'disabled' : ''}
 
           >
 
@@ -3228,6 +3501,8 @@ const calcularTotales = () => {
 const actualizarResumenUI = () => {
 
   calcularTotales();
+  const pagosRegistrados = obtenerPagosRegistradosCuenta(cuentaSeleccionada);
+  const saldoPendiente = obtenerSaldoPendienteCuenta(cuentaSeleccionada, calculo.total);
 
   if (resumenSubtotal) resumenSubtotal.textContent = formatCurrency(calculo.subtotal);
 
@@ -3239,9 +3514,16 @@ const actualizarResumenUI = () => {
 
   if (resumenTotal) resumenTotal.textContent = formatCurrency(calculo.total);
 
+  if (resumenPagado) resumenPagado.textContent = formatCurrency(pagosRegistrados.total);
+
+  if (resumenRestante) resumenRestante.textContent = formatCurrency(saldoPendiente);
+
   recalcularCambio();
+  actualizarAccionesCuenta();
 
 };
+
+const obtenerSaldoPendienteActual = () => obtenerSaldoPendienteCuenta(cuentaSeleccionada, calculo.total);
 
 
 
@@ -3249,7 +3531,11 @@ const obtenerPagosFormulario = () => {
 
   const metodo = selectMetodoPago?.value || 'efectivo';
 
-  const total = calculo.total;
+  const total = obtenerSaldoPendienteActual();
+
+  if (total <= 0.009) {
+    return { efectivo: 0, efectivoEntregado: 0, tarjeta: 0, transferencia: 0, metodo };
+  }
 
 
 
@@ -3299,7 +3585,7 @@ const recalcularCambio = () => {
 
   const pagos = obtenerPagosFormulario();
 
-  const total = calculo.total;
+  const total = obtenerSaldoPendienteActual();
 
   const totalNoEfectivo = pagos.tarjeta + pagos.transferencia;
 
@@ -3348,6 +3634,7 @@ const resetPagosFormulario = (total = 0) => {
 const toggleCamposPago = () => {
 
   const metodo = selectMetodoPago?.value || 'efectivo';
+  const totalPendiente = obtenerSaldoPendienteActual();
 
   camposPago.forEach((campo) => {
 
@@ -3369,11 +3656,11 @@ const toggleCamposPago = () => {
 
 
 
-  if (metodo !== 'combinado' && calculo.total) {
+  if (metodo !== 'combinado' && totalPendiente) {
 
     if (metodo === 'efectivo') {
 
-      if (inputPagoEfectivoEntregado) setMoneyInputValueCaja(inputPagoEfectivoEntregado, calculo.total);
+      if (inputPagoEfectivoEntregado) setMoneyInputValueCaja(inputPagoEfectivoEntregado, totalPendiente);
 
       if (inputPagoTarjeta) setMoneyInputValueCaja(inputPagoTarjeta, 0);
 
@@ -3381,7 +3668,7 @@ const toggleCamposPago = () => {
 
     } else if (metodo === 'tarjeta') {
 
-      if (inputPagoTarjeta) setMoneyInputValueCaja(inputPagoTarjeta, calculo.total);
+      if (inputPagoTarjeta) setMoneyInputValueCaja(inputPagoTarjeta, totalPendiente);
 
       if (inputPagoEfectivoEntregado) setMoneyInputValueCaja(inputPagoEfectivoEntregado, 0);
 
@@ -3389,13 +3676,21 @@ const toggleCamposPago = () => {
 
     } else if (metodo === 'transferencia') {
 
-      if (inputPagoTransferencia) setMoneyInputValueCaja(inputPagoTransferencia, calculo.total);
+      if (inputPagoTransferencia) setMoneyInputValueCaja(inputPagoTransferencia, totalPendiente);
 
       if (inputPagoEfectivoEntregado) setMoneyInputValueCaja(inputPagoEfectivoEntregado, 0);
 
       if (inputPagoTarjeta) setMoneyInputValueCaja(inputPagoTarjeta, 0);
 
     }
+
+  } else if (metodo !== 'combinado') {
+
+    if (inputPagoEfectivoEntregado) setMoneyInputValueCaja(inputPagoEfectivoEntregado, 0);
+
+    if (inputPagoTarjeta) setMoneyInputValueCaja(inputPagoTarjeta, 0);
+
+    if (inputPagoTransferencia) setMoneyInputValueCaja(inputPagoTransferencia, 0);
 
   } else if (metodo === 'combinado') {
 
@@ -4120,7 +4415,12 @@ const seleccionarCuenta = async (cuentaId) => {
 
     setMensajeDetalle('Cargando detalle de la cuenta...', 'info');
 
-    const respuesta = await fetchAutorizadoCaja(`/api/cuentas/${cuentaId}/detalle`);
+    const permitirEnCurso = modoCobroAdelantado || !cuentaEstaListaParaCobro(cuentaBase);
+    const detalleUrl = new URL(`/api/cuentas/${cuentaId}/detalle`, window.location.origin);
+    if (permitirEnCurso) {
+      detalleUrl.searchParams.set('permitir_en_curso', '1');
+    }
+    const respuesta = await fetchAutorizadoCaja(`${detalleUrl.pathname}${detalleUrl.search}`);
 
     if (!respuesta.ok) {
 
@@ -4148,7 +4448,7 @@ const seleccionarCuenta = async (cuentaId) => {
 
     };
 
-    limpiarDescuentosItems();
+    inicializarDescuentosDesdeCuenta(cuentaSeleccionada);
 
 
 
@@ -4168,9 +4468,17 @@ const seleccionarCuenta = async (cuentaId) => {
 
 
 
-    if (inputDescuento) inputDescuento.value = '0';
+    const pedidoBase = cuentaSeleccionada?.pedidos?.[0] || {};
+    if (inputDescuento) {
+      inputDescuento.value = String(Math.max(Number(pedidoBase?.descuento_porcentaje) || 0, 0));
+    }
 
-    aplicarPropinaPreferida({ force: true });
+    const propinaGuardada = Number(pedidoBase?.propina_porcentaje);
+    if (Number.isFinite(propinaGuardada) && propinaGuardada >= 0) {
+      if (inputPropina) inputPropina.value = String(propinaGuardada);
+    } else {
+      aplicarPropinaPreferida({ force: true });
+    }
 
 
 
@@ -4181,7 +4489,12 @@ const seleccionarCuenta = async (cuentaId) => {
 
     actualizarResumenUI();
 
-    resetPagosFormulario(calculo.total || totales.total || totales.subtotalBruto + totales.impuesto);
+    resetPagosFormulario(
+      obtenerSaldoPendienteCuenta(
+        cuentaSeleccionada,
+        calculo.total || totales.total || totales.subtotalBruto + totales.impuesto
+      )
+    );
 
     recalcularCambio();
 
@@ -4211,21 +4524,50 @@ const cargarPedidos = async (mostrarCarga = true) => {
 
     }
 
-    const respuesta = await fetchAutorizadoCaja('/api/pedidos?estado=listo&origen=caja');
+    if (modoCobroAdelantado) {
+      const [pendientesResp, preparandoResp, listosResp] = await Promise.all([
+        fetchAutorizadoCaja('/api/pedidos?estado=pendiente&origen=caja'),
+        fetchAutorizadoCaja('/api/pedidos?estado=preparando&origen=caja'),
+        fetchAutorizadoCaja('/api/pedidos?estado=listo&origen=caja'),
+      ]);
 
-    if (!respuesta.ok) {
+      if (!pendientesResp.ok || !preparandoResp.ok || !listosResp.ok) {
+        throw new Error('No se pudieron obtener las cuentas para cobro adelantado.');
+      }
 
-      throw new Error('No se pudieron obtener los pedidos listos.');
+      const [pendientesData, preparandoData, listosData] = await Promise.all([
+        pendientesResp.json(),
+        preparandoResp.json(),
+        listosResp.json(),
+      ]);
 
+      cuentas = combinarCuentasCaja(
+        Array.isArray(pendientesData) ? pendientesData : [],
+        Array.isArray(preparandoData) ? preparandoData : [],
+        Array.isArray(listosData) ? listosData : []
+      );
+    } else {
+      const respuesta = await fetchAutorizadoCaja('/api/pedidos?estado=listo&origen=caja');
+
+      if (!respuesta.ok) {
+
+        throw new Error('No se pudieron obtener los pedidos listos.');
+
+      }
+
+      const data = await respuesta.json();
+
+      cuentas = Array.isArray(data) ? data : [];
     }
-
-    const data = await respuesta.json();
-
-    cuentas = Array.isArray(data) ? data : [];
 
     if (!cuentas.length) {
 
-      setMensajeLista('Sin pedidos listos para cobrar en este momento.', 'info');
+      setMensajeLista(
+        modoCobroAdelantado
+          ? 'Sin cuentas en curso ni listas para cobrar en este momento.'
+          : 'Sin pedidos listos para cobrar en este momento.',
+        'info'
+      );
 
     } else {
 
@@ -4255,7 +4597,12 @@ const cargarPedidos = async (mostrarCarga = true) => {
       return;
     }
 
-    setMensajeLista('Error al cargar los pedidos listos. Intenta nuevamente.', 'error');
+    setMensajeLista(
+      modoCobroAdelantado
+        ? 'Error al cargar las cuentas para cobro adelantado. Intenta nuevamente.'
+        : 'Error al cargar los pedidos listos. Intenta nuevamente.',
+      'error'
+    );
 
     pedidosContainer.innerHTML = '';
 
@@ -4265,6 +4612,34 @@ const cargarPedidos = async (mostrarCarga = true) => {
 
 };
 
+const construirPayloadCobroCuenta = (pagos, { generarFactura = true } = {}) => {
+  const detalleDescuentosPayload = expandirDescuentosPorDetalle();
+  const tipoComprobante = normalizarTipoComprobante(selectTipoComprobante?.value || '');
+  const sinComprobante = esSinComprobante(tipoComprobante);
+  const ncfManual = generarFactura && !sinComprobante ? inputNcfManual?.value : null;
+  const usuario = obtenerUsuarioActual();
+
+  return {
+    descuento_porcentaje: calculo.descuentoPorcentaje,
+    descuento_monto: calculo.descuentoMonto,
+    propina_porcentaje: calculo.propinaPorcentaje,
+    cliente: inputClienteNombre?.value,
+    cliente_documento: inputClienteDocumento?.value,
+    tipo_comprobante: tipoComprobante || 'B02',
+    ncf: ncfManual,
+    generar_ncf: generarFactura ? !sinComprobante : false,
+    comentarios: inputComentarios?.value,
+    usuario_id: usuario?.id,
+    detalle_descuentos: detalleDescuentosPayload,
+    pagos: {
+      efectivo: pagos.efectivoAplicado ?? pagos.efectivo ?? obtenerSaldoPendienteActual(),
+      efectivo_entregado: pagos.efectivoEntregado,
+      tarjeta: pagos.tarjeta,
+      transferencia: pagos.transferencia,
+    },
+  };
+};
+
 
 
 const cerrarCuenta = async () => {
@@ -4272,6 +4647,14 @@ const cerrarCuenta = async () => {
   if (!cuentaSeleccionada) {
 
     setMensajeDetalle('Selecciona una cuenta antes de cobrar.', 'error');
+
+    return;
+
+  }
+
+  if (!cuentaEstaListaParaCobro(cuentaSeleccionada)) {
+
+    setMensajeDetalle('Esta cuenta aun no esta lista. Usa el cobro adelantado para registrar el pago antes de tiempo.', 'error');
 
     return;
 
@@ -4289,9 +4672,9 @@ const cerrarCuenta = async () => {
 
   const efectivoAplicado =
 
-    pagos.efectivoAplicado ?? pagos.efectivo ?? Math.max(calculo.total - (pagos.tarjeta + pagos.transferencia), 0);
+    pagos.efectivoAplicado ?? pagos.efectivo ?? Math.max(obtenerSaldoPendienteActual() - (pagos.tarjeta + pagos.transferencia), 0);
 
-  const total = calculo.total;
+  const total = obtenerSaldoPendienteActual();
 
   const toleranciaMinima = 0.05;
 
@@ -4365,18 +4748,6 @@ const cerrarCuenta = async () => {
 
 
 
-    const detalleDescuentosPayload = expandirDescuentosPorDetalle();
-
-
-
-    const tipoComprobante = normalizarTipoComprobante(selectTipoComprobante?.value || '');
-    const sinComprobante = esSinComprobante(tipoComprobante);
-    const ncfManual = sinComprobante ? null : inputNcfManual?.value;
-
-
-
-    const usuario = obtenerUsuarioActual();
-
     const respuesta = await fetchAutorizadoCaja(`/api/cuentas/${cuentaSeleccionada.cuenta_id}/cerrar`, {
 
       method: 'PUT',
@@ -4387,43 +4758,7 @@ const cerrarCuenta = async () => {
 
       },
 
-      body: JSON.stringify({
-
-        descuento_porcentaje: calculo.descuentoPorcentaje,
-
-        descuento_monto: calculo.descuentoMonto,
-
-        propina_porcentaje: calculo.propinaPorcentaje,
-
-        cliente: inputClienteNombre?.value,
-
-        cliente_documento: inputClienteDocumento?.value,
-
-        tipo_comprobante: tipoComprobante || 'B02',
-
-        ncf: ncfManual,
-
-        generar_ncf: !sinComprobante,
-
-        comentarios: inputComentarios?.value,
-
-        usuario_id: usuario?.id,
-
-        detalle_descuentos: detalleDescuentosPayload,
-
-        pagos: {
-
-          efectivo: pagos.efectivoAplicado ?? pagos.efectivo ?? calculo.total,
-
-          efectivo_entregado: pagos.efectivoEntregado,
-
-          tarjeta: pagos.tarjeta,
-
-          transferencia: pagos.transferencia,
-
-        },
-
-      }),
+      body: JSON.stringify(construirPayloadCobroCuenta(pagos, { generarFactura: true })),
 
     });
 
@@ -4499,6 +4834,138 @@ const cerrarCuenta = async () => {
 
 };
 
+const registrarCobroAdelantado = async () => {
+
+  if (!cuentaSeleccionada) {
+
+    setMensajeDetalle('Selecciona una cuenta antes de registrar el cobro adelantado.', 'error');
+
+    return;
+
+  }
+
+  if (cuentaEstaListaParaCobro(cuentaSeleccionada)) {
+
+    setMensajeDetalle('La cuenta ya esta lista. Usa Confirmar pago para cerrarla.', 'error');
+
+    return;
+
+  }
+
+  actualizarResumenUI();
+
+  const pagos = recalcularCambio();
+  const total = obtenerSaldoPendienteActual();
+  const toleranciaMinima = 0.05;
+  const toleranciaExcesoNoEfectivo = 5;
+
+  if (pagos.metodo === 'tarjeta') {
+
+    if (pagos.tarjeta < total - toleranciaMinima) {
+
+      setMensajeDetalle('El monto en tarjeta no cubre el saldo pendiente.', 'error');
+
+      return;
+
+    }
+
+  } else if (pagos.metodo === 'transferencia') {
+
+    if (pagos.transferencia < total - toleranciaMinima) {
+
+      setMensajeDetalle('El monto en transferencia no cubre el saldo pendiente.', 'error');
+
+      return;
+
+    }
+
+  } else if (pagos.metodo === 'combinado') {
+
+    const totalPagado = pagos.efectivoEntregado + pagos.tarjeta + pagos.transferencia;
+
+    if (totalPagado < total - toleranciaMinima) {
+
+      setMensajeDetalle('La suma de los metodos de pago no cubre el saldo pendiente.', 'error');
+
+      return;
+
+    }
+
+    if (totalPagado > total + toleranciaExcesoNoEfectivo) {
+
+      setMensajeDetalle('Los montos ingresados exceden el total permitido.', 'error');
+
+      return;
+
+    }
+
+  }
+
+  try {
+
+    setMensajeDetalle('Registrando cobro adelantado...', 'info');
+
+    if (botonCobroAdelantado) {
+      botonCobroAdelantado.disabled = true;
+      botonCobroAdelantado.classList.add('is-loading');
+    }
+
+    const respuesta = await fetchAutorizadoCaja(`/api/cuentas/${cuentaSeleccionada.cuenta_id}/cobro-adelantado`, {
+
+      method: 'PUT',
+
+      headers: {
+
+        'Content-Type': 'application/json',
+
+      },
+
+      body: JSON.stringify(construirPayloadCobroCuenta(pagos, { generarFactura: false })),
+
+    });
+
+    const data = await respuesta.json().catch(() => ({ ok: false }));
+
+    if (!respuesta.ok || !data.ok) {
+
+      throw new Error(data.error || 'No se pudo registrar el cobro adelantado.');
+
+    }
+
+    const facturaId = Number(cuentaSeleccionada?.pedidos?.[0]?.id);
+    if (Number.isFinite(facturaId)) {
+      window.open(`/factura.html?id=${facturaId}`, '_blank');
+    }
+
+    const cuentaId = cuentaSeleccionada.cuenta_id;
+    await recargarEstadoCaja(false);
+    if (cuentas.some((cuenta) => cuenta.cuenta_id === cuentaId)) {
+      await seleccionarCuenta(cuentaId);
+      setMensajeDetalle('Cobro adelantado registrado correctamente.', 'info');
+    } else {
+      limpiarSeleccion();
+    }
+
+    setMensajeLista('Cobro adelantado registrado correctamente.', 'info');
+    notificarActualizacionGlobal('pedido-actualizado', { cuentaId });
+
+  } catch (error) {
+
+    console.error('Error al registrar cobro adelantado:', error);
+
+    setMensajeDetalle(error.message || 'No se pudo registrar el cobro adelantado.', 'error');
+
+  } finally {
+
+    if (botonCobroAdelantado) {
+      botonCobroAdelantado.disabled = false;
+      botonCobroAdelantado.classList.remove('is-loading');
+    }
+
+  }
+
+};
+
 const abrirFacturaCuentaSeleccionada = (mensajeSinCuenta, { vistaPrevia = false } = {}) => {
   if (!cuentaSeleccionada) {
     setMensajeDetalle(mensajeSinCuenta, 'error');
@@ -4563,6 +5030,10 @@ const eliminarCuentaSeleccionada = async () => {
     setMensajeDetalle('Selecciona una cuenta para eliminar.', 'error');
     return;
   }
+  if (!cuentaPermiteCambiosEstructurales(cuentaSeleccionada)) {
+    setMensajeDetalle('Esta cuenta no se puede eliminar porque esta en curso o ya tiene pagos registrados.', 'error');
+    return;
+  }
 
   const cuentaId = Number(cuentaSeleccionada.cuenta_id);
   if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
@@ -4623,6 +5094,10 @@ const eliminarCuentaSeleccionada = async () => {
 const actualizarPrecioProductoCuenta = async (itemIndex, boton = null) => {
   if (!cuentaSeleccionada) {
     setMensajeDetalle('Selecciona una cuenta.', 'error');
+    return;
+  }
+  if (!cuentaPermiteCambiosEstructurales(cuentaSeleccionada)) {
+    setMensajeDetalle('No se puede cambiar precios en una cuenta en curso o con pagos registrados.', 'error');
     return;
   }
 
@@ -4701,6 +5176,10 @@ const actualizarPrecioProductoCuenta = async (itemIndex, boton = null) => {
 const eliminarProductoCuenta = async (itemIndex, nombreProducto, boton = null) => {
   if (!cuentaSeleccionada) {
     setMensajeDetalle('Selecciona una cuenta.', 'error');
+    return;
+  }
+  if (!cuentaPermiteCambiosEstructurales(cuentaSeleccionada)) {
+    setMensajeDetalle('No se pueden eliminar productos de una cuenta en curso o con pagos registrados.', 'error');
     return;
   }
 
@@ -4782,6 +5261,20 @@ const eliminarProductoCuenta = async (itemIndex, nombreProducto, boton = null) =
 
 
 const inicializarEventos = () => {
+
+  toggleCobroAdelantado?.addEventListener('change', (event) => {
+    modoCobroAdelantado = Boolean(event.target.checked);
+    limpiarSeleccion();
+    recargarEstadoCaja(true).catch((error) => {
+      console.error('Error al cambiar el modo de cobro adelantado:', error);
+      setMensajeLista('No se pudo actualizar la lista de cuentas.', 'error');
+    });
+  });
+
+  botonCobroAdelantado?.addEventListener('click', (event) => {
+    event.preventDefault();
+    registrarCobroAdelantado();
+  });
 
   botonSepararCuenta?.addEventListener('click', (event) => {
     event.preventDefault();
@@ -5057,6 +5550,14 @@ const inicializarEventos = () => {
     if (!cuentaSeleccionada) {
 
       setMensajeDetalle('Selecciona una cuenta para confirmar el pago.', 'error');
+
+      return;
+
+    }
+
+    if (!cuentaEstaListaParaCobro(cuentaSeleccionada)) {
+
+      setMensajeDetalle('Esta cuenta aun no esta lista. Usa Cobrar por adelantado para registrar el pago.', 'error');
 
       return;
 
@@ -5428,6 +5929,7 @@ const inicializarCuadre = () => {
 window.addEventListener('DOMContentLoaded', () => {
 
   cargarConfigSecuencias();
+  modoCobroAdelantado = Boolean(toggleCobroAdelantado?.checked);
 
   recargarEstadoCaja(true);
 

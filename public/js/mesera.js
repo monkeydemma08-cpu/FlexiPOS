@@ -1833,10 +1833,30 @@ const crearCardCuenta = (cuenta, vista = 'pendiente') => {
   return card;
 };
 
+const capturarEstadoScrollListaMesera = (contenedor) => {
+  if (!contenedor) return null;
+  const maxScroll = Math.max(contenedor.scrollHeight - contenedor.clientHeight, 0);
+  const scrollTop = Math.min(Math.max(contenedor.scrollTop || 0, 0), maxScroll);
+  const distanciaAlFinal = Math.max(maxScroll - scrollTop, 0);
+  return {
+    scrollTop,
+    mantenerAlFinal: distanciaAlFinal <= 16,
+  };
+};
+
+const restaurarEstadoScrollListaMesera = (contenedor, estadoScroll) => {
+  if (!contenedor || !estadoScroll) return;
+  const maxScroll = Math.max(contenedor.scrollHeight - contenedor.clientHeight, 0);
+  contenedor.scrollTop = estadoScroll.mantenerAlFinal
+    ? maxScroll
+    : Math.min(Math.max(estadoScroll.scrollTop, 0), maxScroll);
+};
+
 const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVacio, vista = null) => {
   if (!contenedor) return;
 
   const vistaActual = vista || (estadosFiltro.includes('listo') ? 'listo' : estadosFiltro[0] || 'pendiente');
+  const estadoScroll = capturarEstadoScrollListaMesera(contenedor);
   contenedor.innerHTML = '';
   const cuentasFiltradas = estado.pedidosActivos.filter((cuenta) => {
     if (vistaActual === 'listo') {
@@ -1850,6 +1870,7 @@ const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVac
 
   if (!cuentasFiltradas.length) {
     mostrarMensajeTab(mensajeEl, mensajeVacio, 'info');
+    restaurarEstadoScrollListaMesera(contenedor, estadoScroll);
     return;
   }
 
@@ -1880,10 +1901,12 @@ const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVac
 
   if (!fragment.childNodes.length) {
     mostrarMensajeTab(mensajeEl, mensajeVacio, 'info');
+    restaurarEstadoScrollListaMesera(contenedor, estadoScroll);
     return;
   }
 
   contenedor.appendChild(fragment);
+  restaurarEstadoScrollListaMesera(contenedor, estadoScroll);
 };
 
 

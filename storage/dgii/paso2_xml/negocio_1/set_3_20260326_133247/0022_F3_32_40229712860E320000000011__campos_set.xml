@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SetPruebaCaso>
+  <CasoCodigo>40229712860E320000000011</CasoCodigo>
+  <Flujo>RESUMEN_FC</Flujo>
+  <TipoDocumento>32</TipoDocumento>
+  <Hoja>RFCE</Hoja>
+  <FilaExcel>2</FilaExcel>
+  <Campos>
+    <Campo orden="1" nombre="CasoPrueba" vacio="0">40229712860E320000000011</Campo>
+    <Campo orden="2" nombre="Version" vacio="0">1.0</Campo>
+    <Campo orden="3" nombre="TipoeCF" vacio="0">32</Campo>
+    <Campo orden="4" nombre="ENCF" vacio="0">E320000000011</Campo>
+    <Campo orden="5" nombre="TipoIngresos" vacio="0">01</Campo>
+    <Campo orden="6" nombre="TipoPago" vacio="0">1</Campo>
+    <Campo orden="7" nombre="FormaPago[1]" vacio="1"></Campo>
+    <Campo orden="8" nombre="MontoPago[1]" vacio="1"></Campo>
+    <Campo orden="9" nombre="FormaPago[2]" vacio="1"></Campo>
+    <Campo orden="10" nombre="MontoPago[2]" vacio="1"></Campo>
+    <Campo orden="11" nombre="FormaPago[3]" vacio="1"></Campo>
+    <Campo orden="12" nombre="MontoPago[3]" vacio="1"></Campo>
+    <Campo orden="13" nombre="FormaPago[4]" vacio="1"></Campo>
+    <Campo orden="14" nombre="MontoPago[4]" vacio="1"></Campo>
+    <Campo orden="15" nombre="FormaPago[5]" vacio="1"></Campo>
+    <Campo orden="16" nombre="MontoPago[5]" vacio="1"></Campo>
+    <Campo orden="17" nombre="FormaPago[6]" vacio="1"></Campo>
+    <Campo orden="18" nombre="MontoPago[6]" vacio="1"></Campo>
+    <Campo orden="19" nombre="FormaPago[7]" vacio="1"></Campo>
+    <Campo orden="20" nombre="MontoPago[7]" vacio="1"></Campo>
+    <Campo orden="21" nombre="RNCEmisor" vacio="0">40229712860</Campo>
+    <Campo orden="22" nombre="RazonSocialEmisor" vacio="0">DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL</Campo>
+    <Campo orden="23" nombre="FechaEmision" vacio="0">01-04-2020</Campo>
+    <Campo orden="24" nombre="RNCComprador" vacio="0">131880681</Campo>
+    <Campo orden="25" nombre="IdentificadorExtranjero" vacio="1"></Campo>
+    <Campo orden="26" nombre="RazonSocialComprador" vacio="0">DOCUMENTOS ELECTRONICOS DE 03</Campo>
+    <Campo orden="27" nombre="MontoGravadoTotal" vacio="0">34000.00</Campo>
+    <Campo orden="28" nombre="MontoGravadoI1" vacio="0">34000.00</Campo>
+    <Campo orden="29" nombre="MontoGravadoI2" vacio="1"></Campo>
+    <Campo orden="30" nombre="MontoGravadoI3" vacio="1"></Campo>
+    <Campo orden="31" nombre="MontoExento" vacio="1"></Campo>
+    <Campo orden="32" nombre="TotalITBIS" vacio="0">6120.00</Campo>
+    <Campo orden="33" nombre="TotalITBIS1" vacio="0">6120.00</Campo>
+    <Campo orden="34" nombre="TotalITBIS2" vacio="1"></Campo>
+    <Campo orden="35" nombre="TotalITBIS3" vacio="1"></Campo>
+    <Campo orden="36" nombre="MontoImpuestoAdicional" vacio="1"></Campo>
+    <Campo orden="37" nombre="TipoImpuesto[1]" vacio="1"></Campo>
+    <Campo orden="38" nombre="MontoImpuestoSelectivoConsumoEspecifico[1]" vacio="1"></Campo>
+    <Campo orden="39" nombre="MontoImpuestoSelectivoConsumoAdvalorem[1]" vacio="1"></Campo>
+    <Campo orden="40" nombre="OtrosImpuestosAdicionales[1]" vacio="1"></Campo>
+    <Campo orden="41" nombre="TipoImpuesto[2]" vacio="1"></Campo>
+    <Campo orden="42" nombre="MontoImpuestoSelectivoConsumoEspecifico[2]" vacio="1"></Campo>
+    <Campo orden="43" nombre="MontoImpuestoSelectivoConsumoAdvalorem[2]" vacio="1"></Campo>
+    <Campo orden="44" nombre="OtrosImpuestosAdicionales[2]" vacio="1"></Campo>
+    <Campo orden="45" nombre="TipoImpuesto[3]" vacio="1"></Campo>
+    <Campo orden="46" nombre="MontoImpuestoSelectivoConsumoEspecifico[3]" vacio="1"></Campo>
+    <Campo orden="47" nombre="MontoImpuestoSelectivoConsumoAdvalorem[3]" vacio="1"></Campo>
+    <Campo orden="48" nombre="OtrosImpuestosAdicionales[3]" vacio="1"></Campo>
+    <Campo orden="49" nombre="TipoImpuesto[4]" vacio="1"></Campo>
+    <Campo orden="50" nombre="MontoImpuestoSelectivoConsumoEspecifico[4]" vacio="1"></Campo>
+    <Campo orden="51" nombre="MontoImpuestoSelectivoConsumoAdvalorem[4]" vacio="1"></Campo>
+    <Campo orden="52" nombre="OtrosImpuestosAdicionales[4]" vacio="1"></Campo>
+    <Campo orden="53" nombre="MontoTotal" vacio="0">40120.00</Campo>
+    <Campo orden="54" nombre="MontoNoFacturable" vacio="1"></Campo>
+    <Campo orden="55" nombre="MontoPeriodo" vacio="1"></Campo>
+    <Campo orden="56" nombre="CodigoSeguridadeCF" vacio="1"></Campo>
+  </Campos>
+</SetPruebaCaso>

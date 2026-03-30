@@ -20,8 +20,9 @@ const usuariosRepo = require('./repos/usuarios-mysql');
 const runMultiNegocioMigrations = require('./migrations/mysql-multi-negocio');
 const runChatMigrations = require('./migrations/mysql-chat');
 const dgiiRoutes = require('./dgii.routes');
-const createDgiiPaso2Router = require('./dgii-paso2.routes');
 console.log('server.js carga correctamente');
+
+const ENABLE_DGII_PASO2 = /^(1|true|yes|on)$/i.test(String(process.env.ENABLE_DGII_PASO2 || ''));
 
 const app = express();
 let io = null;
@@ -4723,7 +4724,17 @@ const obtenerCuentasPorEstados = async (estados, negocioId, opciones = {}) => {
     `
       SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
              impuesto, total, fecha_creacion, fecha_listo, fecha_cierre,
-             cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, negocio_id
+             cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, negocio_id,
+             cliente_documento, ncf, tipo_comprobante, comentarios,
+             COALESCE(descuento_porcentaje, 0) AS descuento_porcentaje,
+             COALESCE(descuento_monto, 0) AS descuento_monto,
+             COALESCE(propina_porcentaje, 0) AS propina_porcentaje,
+             COALESCE(propina_monto, 0) AS propina_monto,
+             COALESCE(pago_efectivo, 0) AS pago_efectivo,
+             COALESCE(pago_efectivo_entregado, 0) AS pago_efectivo_entregado,
+             COALESCE(pago_tarjeta, 0) AS pago_tarjeta,
+             COALESCE(pago_transferencia, 0) AS pago_transferencia,
+             COALESCE(pago_cambio, 0) AS pago_cambio
       FROM pedidos
       WHERE ${filtros.join(' AND ')}
       ORDER BY fecha_creacion ASC
@@ -4770,7 +4781,20 @@ const obtenerCuentasPorEstados = async (estados, negocioId, opciones = {}) => {
           return false;
         });
 
-  return agruparPedidosEnCuentas(pedidosFiltrados, detalle);
+  const cuentas = agruparPedidosEnCuentas(pedidosFiltrados, detalle);
+  const cuentaIds = cuentas.map((cuenta) => Number(cuenta.cuenta_id || cuenta.id)).filter((id) => Number.isFinite(id) && id > 0);
+  const pagosMap = cuentaIds.length
+    ? await obtenerMapaPagosRegistradosCuentas(cuentaIds, negocioId).catch(() => new Map())
+    : new Map();
+
+  cuentas.forEach((cuenta) => {
+    const cuentaId = Number(cuenta.cuenta_id || cuenta.id);
+    const pagosRegistrados = pagosMap.get(cuentaId) || resumirPagosCuenta(cuenta.pedidos || []);
+    cuenta.pagos_registrados = pagosRegistrados;
+    cuenta.total_pagado = Number(pagosRegistrados.total || 0);
+  });
+
+  return cuentas;
 };
 
 const obtenerPedidoConDetalle = async (pedidoId, negocioId) => {
@@ -5041,6 +5065,280 @@ const actualizarCogsPedidos = async (pedidoIds, negocioId) => {
   return cogsPorPedido;
 };
 
+const crearResumenPagosVacio = () => ({
+  efectivo: 0,
+  efectivo_entregado: 0,
+  tarjeta: 0,
+  transferencia: 0,
+  cambio: 0,
+  total: 0,
+  ultimo_pago: null,
+});
+
+const redondearMontoPago = (valor) => Number((Number(valor) || 0).toFixed(2));
+
+const obtenerPagoEfectivoAplicadoMovimiento = (registro = {}) => {
+  const efectivoRegistrado = Number(registro?.pago_efectivo) || 0;
+  if (efectivoRegistrado > 0) {
+    return redondearMontoPago(efectivoRegistrado);
+  }
+
+  const efectivoEntregado = Number(registro?.pago_efectivo_entregado) || 0;
+  const cambioRegistrado = Number(registro?.pago_cambio) || 0;
+  return redondearMontoPago(Math.max(efectivoEntregado - cambioRegistrado, 0));
+};
+
+const combinarResumenesPago = (base = {}, extra = {}) => {
+  const resumen = crearResumenPagosVacio();
+  resumen.efectivo = redondearMontoPago((Number(base?.efectivo) || 0) + (Number(extra?.efectivo) || 0));
+  resumen.efectivo_entregado = redondearMontoPago(
+    (Number(base?.efectivo_entregado) || 0) + (Number(extra?.efectivo_entregado) || 0)
+  );
+  resumen.tarjeta = redondearMontoPago((Number(base?.tarjeta) || 0) + (Number(extra?.tarjeta) || 0));
+  resumen.transferencia = redondearMontoPago(
+    (Number(base?.transferencia) || 0) + (Number(extra?.transferencia) || 0)
+  );
+  resumen.cambio = redondearMontoPago((Number(base?.cambio) || 0) + (Number(extra?.cambio) || 0));
+  resumen.total = redondearMontoPago(resumen.efectivo + resumen.tarjeta + resumen.transferencia);
+
+  const fechaBase = base?.ultimo_pago ? new Date(base.ultimo_pago) : null;
+  const fechaExtra = extra?.ultimo_pago ? new Date(extra.ultimo_pago) : null;
+  if (fechaBase && !Number.isNaN(fechaBase.getTime()) && fechaExtra && !Number.isNaN(fechaExtra.getTime())) {
+    resumen.ultimo_pago =
+      fechaBase.getTime() >= fechaExtra.getTime() ? base.ultimo_pago : extra.ultimo_pago;
+  } else {
+    resumen.ultimo_pago = base?.ultimo_pago || extra?.ultimo_pago || null;
+  }
+
+  return resumen;
+};
+
+const resumirMovimientosPago = (rows = []) => {
+  const resumen = crearResumenPagosVacio();
+  (rows || []).forEach((row) => {
+    resumen.efectivo += obtenerPagoEfectivoAplicadoMovimiento(row);
+    resumen.efectivo_entregado += Number(row?.pago_efectivo_entregado) || 0;
+    resumen.tarjeta += Number(row?.pago_tarjeta) || 0;
+    resumen.transferencia += Number(row?.pago_transferencia) || 0;
+    resumen.cambio += Number(row?.pago_cambio) || 0;
+
+    const fechaPago = row?.fecha_pago || row?.created_at || null;
+    if (fechaPago) {
+      const actual = resumen.ultimo_pago ? new Date(resumen.ultimo_pago) : null;
+      const candidata = new Date(fechaPago);
+      if (!actual || Number.isNaN(actual.getTime()) || (!Number.isNaN(candidata.getTime()) && candidata > actual)) {
+        resumen.ultimo_pago = fechaPago;
+      }
+    }
+  });
+
+  resumen.efectivo = redondearMontoPago(resumen.efectivo);
+  resumen.efectivo_entregado = redondearMontoPago(resumen.efectivo_entregado);
+  resumen.tarjeta = redondearMontoPago(resumen.tarjeta);
+  resumen.transferencia = redondearMontoPago(resumen.transferencia);
+  resumen.cambio = redondearMontoPago(resumen.cambio);
+  resumen.total = redondearMontoPago(resumen.efectivo + resumen.tarjeta + resumen.transferencia);
+  return resumen;
+};
+
+const construirMapaResumenPagosPorCuenta = (rows = []) => {
+  const mapa = new Map();
+  (rows || []).forEach((row) => {
+    const cuentaId = Number(row?.cuenta_id);
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) return;
+    const actual = mapa.get(cuentaId) || crearResumenPagosVacio();
+    mapa.set(cuentaId, combinarResumenesPago(actual, resumirMovimientosPago([row])));
+  });
+  return mapa;
+};
+
+const obtenerCuentaIdPedido = (pedido = {}) => {
+  const cuentaId = Number(pedido?.cuenta_id || pedido?.id);
+  return Number.isFinite(cuentaId) && cuentaId > 0 ? cuentaId : null;
+};
+
+const obtenerMovimientosPagoCuenta = async (
+  negocioId,
+  {
+    cuentaIds = [],
+    cuentaId = null,
+    cierreId = null,
+    soloPendientes = false,
+    fecha = null,
+    ignorarFecha = false,
+    desde = null,
+    hasta = null,
+    origen_caja = 'caja',
+  } = {}
+) => {
+  const ids = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(cuentaIds) ? cuentaIds : []),
+        cuentaId,
+      ]
+        .map((valor) => Number(valor))
+        .filter((valor) => Number.isFinite(valor) && valor > 0)
+    )
+  );
+
+  const params = [negocioId || NEGOCIO_ID_DEFAULT];
+  const filtros = ['negocio_id = ?'];
+
+  if (ids.length) {
+    filtros.push(`cuenta_id IN (${ids.map(() => '?').join(', ')})`);
+    params.push(...ids);
+  }
+
+  const origenCaja = normalizarOrigenCaja(origen_caja, 'caja');
+  filtros.push(construirFiltroOrigenCaja(origenCaja, params, 'origen_caja'));
+
+  if (Number.isInteger(Number(cierreId)) && Number(cierreId) > 0) {
+    filtros.push('cierre_id = ?');
+    params.push(Number(cierreId));
+  } else if (soloPendientes) {
+    filtros.push('cierre_id IS NULL');
+  }
+
+  if (!ignorarFecha && esFechaISOValida(fecha)) {
+    filtros.push('DATE(fecha_pago) = ?');
+    params.push(fecha);
+  }
+
+  if (typeof desde === 'string' && desde.trim()) {
+    filtros.push('fecha_pago >= ?');
+    params.push(desde);
+  }
+
+  if (typeof hasta === 'string' && hasta.trim()) {
+    filtros.push('fecha_pago <= ?');
+    params.push(hasta);
+  }
+
+  return db.all(
+    `
+      SELECT id, cuenta_id, pedido_referencia_id, negocio_id, usuario_id, usuario_rol,
+             origen_caja, es_adelantado, fecha_pago, pago_efectivo, pago_efectivo_entregado,
+             pago_tarjeta, pago_transferencia, pago_cambio, cierre_id, created_at, updated_at
+      FROM pagos_cuenta
+      WHERE ${filtros.join('\n        AND ')}
+      ORDER BY fecha_pago ASC, id ASC
+    `,
+    params
+  );
+};
+
+const obtenerMapaPagosRegistradosCuentas = async (cuentaIds = [], negocioId) => {
+  const rows = await obtenerMovimientosPagoCuenta(negocioId, { cuentaIds });
+  return construirMapaResumenPagosPorCuenta(rows);
+};
+
+const obtenerResumenPagosRegistradosCuenta = async (cuentaId, negocioId) => {
+  const mapa = await obtenerMapaPagosRegistradosCuentas([cuentaId], negocioId);
+  return mapa.get(Number(cuentaId)) || crearResumenPagosVacio();
+};
+
+const insertarMovimientoPagoCuenta = async ({
+  cuentaId,
+  pedidoReferenciaId = null,
+  negocioId,
+  usuarioId = null,
+  usuarioRol = null,
+  origenCaja = 'caja',
+  esAdelantado = false,
+  efectivo = 0,
+  efectivoEntregado = 0,
+  tarjeta = 0,
+  transferencia = 0,
+  cambio = 0,
+}) => {
+  const resumen = resumirMovimientosPago([
+    {
+      pago_efectivo: efectivo,
+      pago_efectivo_entregado: efectivoEntregado,
+      pago_tarjeta: tarjeta,
+      pago_transferencia: transferencia,
+      pago_cambio: cambio,
+    },
+  ]);
+
+  if (resumen.total <= 0.009) {
+    return null;
+  }
+
+  return db.run(
+    `
+      INSERT INTO pagos_cuenta
+        (cuenta_id, pedido_referencia_id, negocio_id, usuario_id, usuario_rol, origen_caja,
+         es_adelantado, pago_efectivo, pago_efectivo_entregado, pago_tarjeta, pago_transferencia, pago_cambio)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      Number(cuentaId),
+      pedidoReferenciaId ? Number(pedidoReferenciaId) : null,
+      negocioId || NEGOCIO_ID_DEFAULT,
+      usuarioId ? Number(usuarioId) : null,
+      usuarioRol || null,
+      normalizarOrigenCaja(origenCaja, 'caja'),
+      esAdelantado ? 1 : 0,
+      redondearMontoPago(efectivo),
+      redondearMontoPago(efectivoEntregado),
+      redondearMontoPago(tarjeta),
+      redondearMontoPago(transferencia),
+      redondearMontoPago(cambio),
+    ]
+  );
+};
+
+const actualizarMetodoPagoMovimientosCuenta = async ({
+  cuentaId,
+  negocioId,
+  metodo,
+  origenCaja = 'caja',
+  cierreId = null,
+  fecha = null,
+  ignorarFecha = false,
+}) => {
+  const rows = await obtenerMovimientosPagoCuenta(negocioId, {
+    cuentaId,
+    cierreId,
+    soloPendientes: !cierreId,
+    fecha,
+    ignorarFecha,
+    origen_caja: origenCaja,
+  });
+
+  for (const row of rows || []) {
+    const totalMovimiento = resumirMovimientosPago([row]).total;
+    const pagoEfectivo = metodo === 'efectivo' ? totalMovimiento : 0;
+    const pagoEfectivoEntregado = metodo === 'efectivo' ? totalMovimiento : 0;
+    const pagoTarjeta = metodo === 'tarjeta' ? totalMovimiento : 0;
+    const pagoTransferencia = metodo === 'transferencia' ? totalMovimiento : 0;
+
+    await db.run(
+      `
+        UPDATE pagos_cuenta
+           SET pago_efectivo = ?,
+               pago_efectivo_entregado = ?,
+               pago_tarjeta = ?,
+               pago_transferencia = ?,
+               pago_cambio = 0
+         WHERE id = ? AND negocio_id = ?
+      `,
+      [
+        redondearMontoPago(pagoEfectivo),
+        redondearMontoPago(pagoEfectivoEntregado),
+        redondearMontoPago(pagoTarjeta),
+        redondearMontoPago(pagoTransferencia),
+        Number(row.id),
+        negocioId,
+      ]
+    );
+  }
+
+  return rows?.length || 0;
+};
+
 const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
   const pedido = await db.get(
     `
@@ -5081,12 +5379,21 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
   const impuestoTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.impuesto) || 0), 0);
   const descuentoTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.descuento_monto) || 0), 0);
   const propinaTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.propina_monto) || 0), 0);
-  const pagoEfectivoTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.pago_efectivo) || 0), 0);
-  const pagoTarjetaTotal = pedidosRelacionados.reduce((acc, p) => acc + (Number(p.pago_tarjeta) || 0), 0);
-  const pagoTransferenciaTotal = pedidosRelacionados.reduce(
-    (acc, p) => acc + (Number(p.pago_transferencia) || 0),
-    0
-  );
+  const pagosRegistrados =
+    (await obtenerResumenPagosRegistradosCuenta(cuentaId, negocioId).catch(() => crearResumenPagosVacio())) ||
+    crearResumenPagosVacio();
+  const pagoEfectivoTotal =
+    pagosRegistrados.total > 0
+      ? pagosRegistrados.efectivo
+      : pedidosRelacionados.reduce((acc, p) => acc + (Number(p.pago_efectivo) || 0), 0);
+  const pagoTarjetaTotal =
+    pagosRegistrados.total > 0
+      ? pagosRegistrados.tarjeta
+      : pedidosRelacionados.reduce((acc, p) => acc + (Number(p.pago_tarjeta) || 0), 0);
+  const pagoTransferenciaTotal =
+    pagosRegistrados.total > 0
+      ? pagosRegistrados.transferencia
+      : pedidosRelacionados.reduce((acc, p) => acc + (Number(p.pago_transferencia) || 0), 0);
   const totalFinal = Number(
     Math.max(subtotalTotal + impuestoTotal - descuentoTotal + propinaTotal, 0).toFixed(2)
   );
@@ -5107,6 +5414,11 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
       pago_efectivo: Number(pagoEfectivoTotal.toFixed(2)),
       pago_tarjeta: Number(pagoTarjetaTotal.toFixed(2)),
       pago_transferencia: Number(pagoTransferenciaTotal.toFixed(2)),
+      fecha_factura:
+        pedidoReferencia.fecha_factura ||
+        pagosRegistrados.ultimo_pago ||
+        pedidoReferencia.fecha_cierre ||
+        pedidoReferencia.fecha_creacion,
       total: totalFinal,
       total_final: totalFinal,
     },
@@ -5139,6 +5451,8 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     generar_ncf = true,
     ncf: ncfManual,
   } = opciones || {};
+  const esCobroAdelantado =
+    normalizarFlag(opciones?.registrar_pago_adelantado ?? opciones?.cobro_adelantado, 0) === 1;
 
   const negocioIdOperacion =
     opciones?.negocio_id ||
@@ -5166,20 +5480,22 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
   const comentariosFinal = normalizarCampoTexto(comentarios, null);
   const ncfManualNormalizado = normalizarCampoTexto(ncfManual, null);
 
-  try {
-    const permisosSecuencias = await obtenerConfiguracionSecuenciasNegocio(negocioIdOperacion);
-    if (tipoFinal === 'B01' && Number(permisosSecuencias.permitir_b01) === 0) {
-      return callback({ status: 400, message: 'B01 desactivado para este negocio' });
+  if (!esCobroAdelantado) {
+    try {
+      const permisosSecuencias = await obtenerConfiguracionSecuenciasNegocio(negocioIdOperacion);
+      if (tipoFinal === 'B01' && Number(permisosSecuencias.permitir_b01) === 0) {
+        return callback({ status: 400, message: 'B01 desactivado para este negocio' });
+      }
+      if (tipoFinal === 'B02' && Number(permisosSecuencias.permitir_b02) === 0) {
+        return callback({ status: 400, message: 'B02 desactivado para este negocio' });
+      }
+      if (tipoFinal === 'B14' && Number(permisosSecuencias.permitir_b14) === 0) {
+        return callback({ status: 400, message: 'B14 desactivado para este negocio' });
+      }
+    } catch (error) {
+      console.error('Error al validar secuencias fiscales:', error?.message || error);
+      return callback({ status: 500, message: 'No se pudo validar la secuencia fiscal' });
     }
-    if (tipoFinal === 'B02' && Number(permisosSecuencias.permitir_b02) === 0) {
-      return callback({ status: 400, message: 'B02 desactivado para este negocio' });
-    }
-    if (tipoFinal === 'B14' && Number(permisosSecuencias.permitir_b14) === 0) {
-      return callback({ status: 400, message: 'B14 desactivado para este negocio' });
-    }
-  } catch (error) {
-    console.error('Error al validar secuencias fiscales:', error?.message || error);
-    return callback({ status: 500, message: 'No se pudo validar la secuencia fiscal' });
   }
 
   let configImpuestoOperacion = null;
@@ -5370,7 +5686,7 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     procesar(0);
   };
 
-  actualizarPedidosConDescuentos((descErr) => {
+  actualizarPedidosConDescuentos(async (descErr) => {
     if (descErr) {
       return callback({
         status: 500,
@@ -5380,6 +5696,11 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
 
     const subtotalTotal = pedidosActivos.reduce((acc, p) => acc + (Number(p.subtotal) || 0), 0);
     const impuestoTotal = pedidosActivos.reduce((acc, p) => acc + (Number(p.impuesto) || 0), 0);
+    const pedidoReferencia = pedidosActivos.reduce(
+      (min, p) => (!min || Number(p.id) < Number(min.id) ? p : min),
+      null
+    );
+    const cuentaOperacionId = obtenerCuentaIdPedido(pedidoReferencia);
     const base = subtotalTotal + impuestoTotal;
     const descuentoMonto = Math.min(base * (descuentoValor / 100), base);
     const baseConDescuento = Math.max(base - descuentoMonto, 0);
@@ -5387,6 +5708,32 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     const subtotalConDescuento = subtotalTotal * factorDescuento;
     const propinaMonto = subtotalConDescuento * (propinaValor / 100);
     const totalAPagar = baseConDescuento + propinaMonto;
+    const pagosPreviosLegacy = resumirPagosCuenta(pedidosActivos);
+    const pagosPreviosRegistrados = cuentaOperacionId
+      ? await obtenerResumenPagosRegistradosCuenta(cuentaOperacionId, negocioIdOperacion).catch(() =>
+          crearResumenPagosVacio()
+        )
+      : crearResumenPagosVacio();
+    const pagosPrevios =
+      pagosPreviosRegistrados.total > 0.009 ? pagosPreviosRegistrados : pagosPreviosLegacy;
+    const totalPagadoPrevio = Number(pagosPrevios.total) || 0;
+
+    if (totalPagadoPrevio > totalAPagar + 0.01) {
+      return callback({
+        status: 400,
+        message: esCobroAdelantado
+          ? 'La cuenta ya tiene pagos registrados que exceden el total actual. Ajusta la cuenta antes de registrar otro cobro adelantado.'
+          : 'La cuenta ya tiene pagos registrados que exceden el total actual. Ajusta la cuenta antes de cerrarla.',
+      });
+    }
+
+    const saldoPendiente = Math.max(totalAPagar - totalPagadoPrevio, 0);
+    if (esCobroAdelantado && saldoPendiente <= 0.01) {
+      return callback({
+        status: 400,
+        message: 'La cuenta ya tiene el cobro adelantado completo.',
+      });
+    }
 
     const tarjeta = normalizarNumero(pagos.tarjeta, 0);
     const transferencia = normalizarNumero(pagos.transferencia, 0);
@@ -5397,7 +5744,7 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
         ? normalizarNumero(pagos.efectivo_entregado, efectivoSolicitado || 0)
         : efectivoSolicitado !== null
         ? efectivoSolicitado
-        : Math.max(totalAPagar - (tarjeta + transferencia), 0);
+        : Math.max(saldoPendiente - (tarjeta + transferencia), 0);
 
     if ([tarjeta, transferencia, efectivoEntregado].some((monto) => monto < 0)) {
       return callback({
@@ -5407,20 +5754,20 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     }
 
     const totalNoEfectivo = tarjeta + transferencia;
-    if (totalNoEfectivo > totalAPagar + 0.01) {
+    if (totalNoEfectivo > saldoPendiente + 0.01) {
       return callback({
         status: 400,
-        message: 'Los montos asignados a tarjeta o transferencia exceden el total a cobrar',
+        message: 'Los montos asignados a tarjeta o transferencia exceden el saldo pendiente',
       });
     }
 
-    const efectivoRequerido = Math.max(totalAPagar - totalNoEfectivo, 0);
+    const efectivoRequerido = Math.max(saldoPendiente - totalNoEfectivo, 0);
     const efectivoAplicado = efectivoSolicitado !== null ? efectivoSolicitado : efectivoRequerido;
 
-    if (efectivoAplicado + totalNoEfectivo < totalAPagar - 0.01) {
+    if (efectivoAplicado + totalNoEfectivo < saldoPendiente - 0.01) {
       return callback({
         status: 400,
-        message: 'La suma de los metodos de pago no cubre el total a cobrar',
+        message: 'La suma de los metodos de pago no cubre el saldo pendiente',
       });
     }
 
@@ -5432,12 +5779,19 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     }
 
     const cambio = Math.max(efectivoEntregado - efectivoRequerido, 0);
-    const pagoEfectivoFinal = Math.max(efectivoAplicado, efectivoRequerido);
-
-    const pedidoReferencia = pedidosActivos.reduce(
-      (min, p) => (!min || Number(p.id) < Number(min.id) ? p : min),
-      null
+    const pagoEfectivoIncremental = Math.max(efectivoAplicado, efectivoRequerido);
+    const montoRegistradoAhora = pagoEfectivoIncremental + tarjeta + transferencia;
+    const totalPagadoTrasOperacion = totalPagadoPrevio + montoRegistradoAhora;
+    const saldoPendienteTrasOperacion = Math.max(totalAPagar - totalPagadoTrasOperacion, 0);
+    const pagoEfectivoTotalCuenta = redondearMontoPago((pagosPrevios.efectivo || 0) + pagoEfectivoIncremental);
+    const pagoEfectivoEntregadoTotalCuenta = redondearMontoPago(
+      (pagosPrevios.efectivo_entregado || 0) + efectivoEntregado
     );
+    const pagoTarjetaTotalCuenta = redondearMontoPago((pagosPrevios.tarjeta || 0) + tarjeta);
+    const pagoTransferenciaTotalCuenta = redondearMontoPago(
+      (pagosPrevios.transferencia || 0) + transferencia
+    );
+    const pagoCambioTotalCuenta = redondearMontoPago((pagosPrevios.cambio || 0) + cambio);
 
     const distribuirSegunSubtotal = (monto) => {
       if (subtotalTotal <= 0) {
@@ -5449,223 +5803,351 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
 
     const descuentosDistribuidos = distribuirSegunSubtotal(descuentoMonto);
     const propinasDistribuidas = distribuirSegunSubtotal(propinaMonto);
-    const pagoEfectivoDistribuido = distribuirSegunSubtotal(pagoEfectivoFinal);
-    const pagoEfectivoEntregadoDistribuido = distribuirSegunSubtotal(efectivoEntregado);
-    const pagoTarjetaDistribuido = distribuirSegunSubtotal(tarjeta);
-    const pagoTransferenciaDistribuido = distribuirSegunSubtotal(transferencia);
-    const pagoCambioDistribuido = distribuirSegunSubtotal(cambio);
+    const pagoEfectivoDistribuido = distribuirSegunSubtotal(pagoEfectivoTotalCuenta);
+    const pagoEfectivoEntregadoDistribuido = distribuirSegunSubtotal(pagoEfectivoEntregadoTotalCuenta);
+    const pagoTarjetaDistribuido = distribuirSegunSubtotal(pagoTarjetaTotalCuenta);
+    const pagoTransferenciaDistribuido = distribuirSegunSubtotal(pagoTransferenciaTotalCuenta);
+    const pagoCambioDistribuido = distribuirSegunSubtotal(pagoCambioTotalCuenta);
 
-  const reintentosNCF = 2;
-  const puedeReintentarNCF = generar_ncf !== false && !ncfManualNormalizado;
-  const ncfManualEnviado = Boolean(ncfManualNormalizado);
+    const reintentosNCF = 2;
+    const puedeReintentarNCF =
+      !esCobroAdelantado && generar_ncf !== false && !ncfManualNormalizado;
+    const ncfManualEnviado = Boolean(ncfManualNormalizado);
 
-  const ejecutarCierre = (ncfAsignado, intentosRestantes = 0) => {
-    db.run('BEGIN TRANSACTION', (beginErr) => {
-      if (beginErr) {
-        console.error('No se pudo iniciar transaccion de cierre:', beginErr.message);
-        return callback({ status: 500, message: 'No se pudo cerrar la cuenta' });
+    const construirTotalesRespuesta = () => ({
+      subtotal: Number(subtotalTotal.toFixed(2)),
+      impuesto: Number(impuestoTotal.toFixed(2)),
+      descuento_porcentaje: descuentoValor,
+      descuento_monto: Number(descuentoMonto.toFixed(2)),
+      propina_porcentaje: propinaValor,
+      propina_monto: Number(propinaMonto.toFixed(2)),
+      total_cobrado: Number(totalAPagar.toFixed(2)),
+      total_pagado: Number(totalPagadoTrasOperacion.toFixed(2)),
+      monto_registrado: Number(montoRegistradoAhora.toFixed(2)),
+      saldo_pendiente: Number(saldoPendienteTrasOperacion.toFixed(2)),
+    });
+
+    const finalizarRespuesta = async (factura = null) => {
+      let clienteSincronizado = null;
+      try {
+        const sync = await sincronizarClientePorDocumento({
+          negocioId: negocioIdOperacion,
+          documento: documentoFinal || pedidoReferencia.cliente_documento,
+          nombre: clienteFinal || pedidoReferencia.cliente,
+        });
+        if (sync?.ok) {
+          clienteSincronizado = sync.cliente || null;
+        }
+      } catch (syncError) {
+        console.warn(
+          esCobroAdelantado
+            ? 'No se pudo sincronizar cliente automaticamente al registrar cobro adelantado:'
+            : 'No se pudo sincronizar cliente automaticamente al cerrar cuenta:',
+          syncError?.message || syncError
+        );
       }
 
-      const actualizarPedido = (indice) => {
-        if (indice >= pedidosActivos.length) {
-          const pedidoIds = pedidosActivos.map((pedido) => pedido.id);
-          return actualizarCogsPedidos(pedidoIds, negocioIdOperacion)
-            .then(() =>
-              db.run('COMMIT', async (commitErr) => {
-                if (commitErr) {
-                  console.error('Error al confirmar cierre de cuenta:', commitErr.message);
-                  return callback({ status: 500, message: 'No se pudo cerrar la cuenta' });
-                }
+      limpiarCacheAnalitica(negocioIdOperacion);
+      callback(null, {
+        factura,
+        totales: construirTotalesRespuesta(),
+        cliente: clienteSincronizado,
+      });
+    };
 
-                const factura = {
-                  id: Number(pedidoReferencia.id),
-                  cliente: clienteFinal || pedidoReferencia.cliente,
-                  cliente_documento: documentoFinal || pedidoReferencia.cliente_documento,
-                  tipo_comprobante: tipoFinal,
-                  ncf: ncfAsignado || pedidoReferencia.ncf,
-                  fecha: new Date().toISOString(),
-                };
-
-                const totales = {
-                  subtotal: subtotalTotal,
-                  impuesto: impuestoTotal,
-                  descuento_porcentaje: descuentoValor,
-                  descuento_monto: descuentoMonto,
-                  propina_porcentaje: propinaValor,
-                  propina_monto: propinaMonto,
-                  total_cobrado: totalAPagar,
-                };
-
-                let clienteSincronizado = null;
-                try {
-                  const sync = await sincronizarClientePorDocumento({
-                    negocioId: negocioIdOperacion,
-                    documento: factura.cliente_documento,
-                    nombre: factura.cliente,
-                  });
-                  if (sync?.ok) {
-                    clienteSincronizado = sync.cliente || null;
-                  }
-                } catch (syncError) {
-                  console.warn(
-                    'No se pudo sincronizar cliente automaticamente al cerrar cuenta:',
-                    syncError?.message || syncError
-                  );
-                }
-
-                limpiarCacheAnalitica(negocioIdOperacion);
-                return callback(null, { factura, totales, cliente: clienteSincronizado });
-              })
-            )
-            .catch((cogsErr) => {
-              console.error('Error al registrar COGS del pedido:', cogsErr?.message || cogsErr);
-              return db.run('ROLLBACK', () =>
-                callback({ status: 500, message: 'No se pudo registrar el costo de la venta' })
-              );
-            });
+    const ejecutarOperacion = (ncfAsignado, intentosRestantes = 0) => {
+      db.run('BEGIN TRANSACTION', (beginErr) => {
+        if (beginErr) {
+          console.error(
+            esCobroAdelantado
+              ? 'No se pudo iniciar transaccion de cobro adelantado:'
+              : 'No se pudo iniciar transaccion de cierre:',
+            beginErr.message
+          );
+          return callback({
+            status: 500,
+            message: esCobroAdelantado
+              ? 'No se pudo registrar el cobro adelantado'
+              : 'No se pudo cerrar la cuenta',
+          });
         }
 
-        const p = pedidosActivos[indice];
-        const esReferencia = p.id === pedidoReferencia.id;
-        const estadoComprobante = ncfAsignado && esReferencia ? 'emitido' : 'sin_emitir';
-        const descuentoPedido = descuentosDistribuidos[indice] || 0;
-        const propinaPedido = propinasDistribuidas[indice] || 0;
-        const subtotalPedido = Number(p.subtotal) || 0;
-        const impuestoPedido = Number(p.impuesto) || 0;
-        const totalPedidoFinal = Number(
-          Math.max(subtotalPedido + impuestoPedido - descuentoPedido + propinaPedido, 0).toFixed(2)
-        );
-        const sql = esReferencia
-          ? `
-          UPDATE pedidos
-          SET estado = 'pagado',
-              fecha_cierre = COALESCE(fecha_cierre, CURRENT_TIMESTAMP),
-              fecha_factura = COALESCE(fecha_factura, CURRENT_TIMESTAMP),
-              cliente = COALESCE(?, cliente),
-              cliente_documento = ?,
-              tipo_comprobante = ?,
-              ncf = ?,
-              estado_comprobante = ?,
-              descuento_porcentaje = ?,
-              descuento_monto = ?,
-              propina_porcentaje = ?,
-              propina_monto = ?,
-              total = ?,
-              comentarios = COALESCE(?, comentarios),
-              cobrado_por = COALESCE(cobrado_por, ?),
-              origen_caja = ?,
-              pago_efectivo = ?,
-              pago_efectivo_entregado = ?,
-              pago_tarjeta = ?,
-              pago_transferencia = ?,
-              pago_cambio = ?
-          WHERE id = ?
-            AND negocio_id = ?
-        `
-          : `
-          UPDATE pedidos
-          SET estado = 'pagado',
-              fecha_cierre = COALESCE(fecha_cierre, CURRENT_TIMESTAMP),
-              fecha_factura = COALESCE(fecha_factura, CURRENT_TIMESTAMP),
-              cliente = COALESCE(?, cliente),
-              cliente_documento = ?,
-              tipo_comprobante = ?,
-              ncf = COALESCE(ncf, ?),
-              estado_comprobante = ?,
-              descuento_porcentaje = ?,
-              descuento_monto = ?,
-              propina_porcentaje = ?,
-              propina_monto = ?,
-              total = ?,
-              comentarios = COALESCE(?, comentarios),
-              cobrado_por = COALESCE(cobrado_por, ?),
-              origen_caja = ?,
-              pago_efectivo = ?,
-              pago_efectivo_entregado = ?,
-              pago_tarjeta = ?,
-              pago_transferencia = ?,
-              pago_cambio = ?
-          WHERE id = ?
-            AND negocio_id = ?
-        `;
+        const actualizarPedido = (indice) => {
+          if (indice >= pedidosActivos.length) {
+            const registrarMovimiento = async () => {
+              if (!cuentaOperacionId || montoRegistradoAhora <= 0.009) {
+                return;
+              }
 
-        const params = [
-          clienteFinal !== null ? clienteFinal : p.cliente,
-          documentoFinal,
-          tipoFinal,
-          esReferencia ? ncfAsignado || p.ncf || null : p.ncf || null,
-          estadoComprobante,
-          descuentoValor,
-          descuentoPedido,
-          propinaValor,
-          propinaPedido,
-          totalPedidoFinal,
-          comentariosFinal,
-          usuario_id || null,
-          origenCaja,
-          pagoEfectivoDistribuido[indice] || 0,
-          pagoEfectivoEntregadoDistribuido[indice] || 0,
-          pagoTarjetaDistribuido[indice] || 0,
-          pagoTransferenciaDistribuido[indice] || 0,
-          pagoCambioDistribuido[indice] || 0,
-          p.id,
-          negocioIdOperacion,
-        ];
+              await insertarMovimientoPagoCuenta({
+                cuentaId: cuentaOperacionId,
+                pedidoReferenciaId: pedidoReferencia?.id || null,
+                negocioId: negocioIdOperacion,
+                usuarioId: usuario_id || null,
+                usuarioRol: opciones?.usuario_rol || null,
+                origenCaja,
+                esAdelantado: esCobroAdelantado,
+                efectivo: pagoEfectivoIncremental,
+                efectivoEntregado,
+                tarjeta,
+                transferencia,
+                cambio,
+              });
+            };
 
-        db.run(sql, params, (updateErr) => {
-          const esNCFDuplicado =
-            updateErr && typeof updateErr.message === 'string' && updateErr.message.includes('UNIQUE constraint failed: pedidos.ncf');
+            const confirmarCommit = () =>
+              db.run('COMMIT', (commitErr) => {
+                if (commitErr) {
+                  console.error(
+                    esCobroAdelantado
+                      ? 'Error al confirmar cobro adelantado:'
+                      : 'Error al confirmar cierre de cuenta:',
+                    commitErr.message
+                  );
+                  return callback({
+                    status: 500,
+                    message: esCobroAdelantado
+                      ? 'No se pudo registrar el cobro adelantado'
+                      : 'No se pudo cerrar la cuenta',
+                  });
+                }
 
-          if (esNCFDuplicado) {
-            if (ncfManualEnviado) {
-              db.run('ROLLBACK', () =>
-                callback({ status: 400, message: 'El NCF ingresado ya existe. Usa otro NCF.' })
-              );
-              return;
+                const factura = esCobroAdelantado
+                  ? null
+                  : {
+                      id: Number(pedidoReferencia.id),
+                      cliente: clienteFinal || pedidoReferencia.cliente,
+                      cliente_documento: documentoFinal || pedidoReferencia.cliente_documento,
+                      tipo_comprobante: tipoFinal,
+                      ncf: ncfAsignado || pedidoReferencia.ncf,
+                      fecha: new Date().toISOString(),
+                    };
+
+                finalizarRespuesta(factura).catch((respuestaErr) => {
+                  console.error('Error al finalizar respuesta de cobro/cierre:', respuestaErr);
+                  callback({
+                    status: 500,
+                    message: esCobroAdelantado
+                      ? 'No se pudo completar el cobro adelantado'
+                      : 'No se pudo completar el cierre de la cuenta',
+                  });
+                });
+              });
+
+            return registrarMovimiento()
+              .then(() => {
+                if (esCobroAdelantado) {
+                  return confirmarCommit();
+                }
+
+                const pedidoIds = pedidosActivos.map((pedido) => pedido.id);
+                return actualizarCogsPedidos(pedidoIds, negocioIdOperacion)
+                  .then(() => confirmarCommit())
+                  .catch((cogsErr) => {
+                    console.error('Error al registrar COGS del pedido:', cogsErr?.message || cogsErr);
+                    return db.run('ROLLBACK', () =>
+                      callback({ status: 500, message: 'No se pudo registrar el costo de la venta' })
+                    );
+                  });
+              })
+              .catch((pagoErr) => {
+                console.error('Error al registrar movimiento de pago en caja:', pagoErr?.message || pagoErr);
+                return db.run('ROLLBACK', () =>
+                  callback({
+                    status: 500,
+                    message: esCobroAdelantado
+                      ? 'No se pudo registrar el cobro adelantado'
+                      : 'No se pudo registrar el movimiento de pago',
+                  })
+                );
+              });
+          }
+
+          const p = pedidosActivos[indice];
+          const esReferencia = p.id === pedidoReferencia.id;
+          const descuentoPedido = descuentosDistribuidos[indice] || 0;
+          const propinaPedido = propinasDistribuidas[indice] || 0;
+          const subtotalPedido = Number(p.subtotal) || 0;
+          const impuestoPedido = Number(p.impuesto) || 0;
+          const totalPedidoFinal = Number(
+            Math.max(subtotalPedido + impuestoPedido - descuentoPedido + propinaPedido, 0).toFixed(2)
+          );
+          const sql = esCobroAdelantado
+            ? `
+              UPDATE pedidos
+              SET cliente = COALESCE(?, cliente),
+                  cliente_documento = COALESCE(?, cliente_documento),
+                  tipo_comprobante = COALESCE(?, tipo_comprobante),
+                  descuento_porcentaje = ?,
+                  descuento_monto = ?,
+                  propina_porcentaje = ?,
+                  propina_monto = ?,
+                  total = ?,
+                  comentarios = COALESCE(?, comentarios),
+                  origen_caja = COALESCE(origen_caja, ?)
+              WHERE id = ?
+                AND negocio_id = ?
+            `
+            : esReferencia
+            ? `
+              UPDATE pedidos
+              SET estado = 'pagado',
+                  fecha_cierre = COALESCE(fecha_cierre, CURRENT_TIMESTAMP),
+                  fecha_factura = COALESCE(fecha_factura, CURRENT_TIMESTAMP),
+                  cliente = COALESCE(?, cliente),
+                  cliente_documento = ?,
+                  tipo_comprobante = ?,
+                  ncf = ?,
+                  estado_comprobante = ?,
+                  descuento_porcentaje = ?,
+                  descuento_monto = ?,
+                  propina_porcentaje = ?,
+                  propina_monto = ?,
+                  total = ?,
+                  comentarios = COALESCE(?, comentarios),
+                  cobrado_por = COALESCE(cobrado_por, ?),
+                  origen_caja = ?,
+                  pago_efectivo = ?,
+                  pago_efectivo_entregado = ?,
+                  pago_tarjeta = ?,
+                  pago_transferencia = ?,
+                  pago_cambio = ?
+              WHERE id = ?
+                AND negocio_id = ?
+            `
+            : `
+              UPDATE pedidos
+              SET estado = 'pagado',
+                  fecha_cierre = COALESCE(fecha_cierre, CURRENT_TIMESTAMP),
+                  fecha_factura = COALESCE(fecha_factura, CURRENT_TIMESTAMP),
+                  cliente = COALESCE(?, cliente),
+                  cliente_documento = ?,
+                  tipo_comprobante = ?,
+                  ncf = COALESCE(ncf, ?),
+                  estado_comprobante = ?,
+                  descuento_porcentaje = ?,
+                  descuento_monto = ?,
+                  propina_porcentaje = ?,
+                  propina_monto = ?,
+                  total = ?,
+                  comentarios = COALESCE(?, comentarios),
+                  cobrado_por = COALESCE(cobrado_por, ?),
+                  origen_caja = ?,
+                  pago_efectivo = ?,
+                  pago_efectivo_entregado = ?,
+                  pago_tarjeta = ?,
+                  pago_transferencia = ?,
+                  pago_cambio = ?
+              WHERE id = ?
+                AND negocio_id = ?
+            `;
+
+          const params = esCobroAdelantado
+            ? [
+                clienteFinal !== null ? clienteFinal : p.cliente,
+                documentoFinal,
+                tipoFinal,
+                descuentoValor,
+                descuentoPedido,
+                propinaValor,
+                propinaPedido,
+                totalPedidoFinal,
+                comentariosFinal,
+                origenCaja,
+                p.id,
+                negocioIdOperacion,
+              ]
+            : [
+                clienteFinal !== null ? clienteFinal : p.cliente,
+                documentoFinal,
+                tipoFinal,
+                esReferencia ? ncfAsignado || p.ncf || null : p.ncf || null,
+                ncfAsignado && esReferencia ? 'emitido' : 'sin_emitir',
+                descuentoValor,
+                descuentoPedido,
+                propinaValor,
+                propinaPedido,
+                totalPedidoFinal,
+                comentariosFinal,
+                usuario_id || null,
+                origenCaja,
+                pagoEfectivoDistribuido[indice] || 0,
+                pagoEfectivoEntregadoDistribuido[indice] || 0,
+                pagoTarjetaDistribuido[indice] || 0,
+                pagoTransferenciaDistribuido[indice] || 0,
+                pagoCambioDistribuido[indice] || 0,
+                p.id,
+                negocioIdOperacion,
+              ];
+
+          db.run(sql, params, (updateErr) => {
+            const esNCFDuplicado =
+              !esCobroAdelantado &&
+              updateErr &&
+              typeof updateErr.message === 'string' &&
+              updateErr.message.includes('UNIQUE constraint failed: pedidos.ncf');
+
+            if (esNCFDuplicado) {
+              if (ncfManualEnviado) {
+                db.run('ROLLBACK', () =>
+                  callback({ status: 400, message: 'El NCF ingresado ya existe. Usa otro NCF.' })
+                );
+                return;
+              }
+
+              if (puedeReintentarNCF && esReferencia && intentosRestantes > 0) {
+                return db.run('ROLLBACK', () =>
+                  generarNCF(tipoFinal, negocioIdOperacion, (nuevoErr, nuevoNcf) => {
+                    if (nuevoErr) {
+                      console.error('Error al regenerar NCF tras conflicto:', nuevoErr.message);
+                      return callback({ status: 500, message: 'No fue posible generar un NCF unico' });
+                    }
+                    ejecutarOperacion(nuevoNcf, intentosRestantes - 1);
+                  })
+                );
+              }
             }
 
-            if (puedeReintentarNCF && esReferencia && intentosRestantes > 0) {
-              // El NCF generado ya existe; reintentamos con uno nuevo, forzando a escribirlo en el pedido de referencia.
+            if (esNCFDuplicado) {
+              console.error('Conflicto de NCF y no se pudo regenerar.');
               return db.run('ROLLBACK', () =>
-                generarNCF(tipoFinal, negocioIdOperacion, (nuevoErr, nuevoNcf) => {
-                  if (nuevoErr) {
-                    console.error('Error al regenerar NCF tras conflicto:', nuevoErr.message);
-                    return callback({ status: 500, message: 'No fue posible generar un NCF unico' });
-                  }
-                  ejecutarCierre(nuevoNcf, intentosRestantes - 1);
+                callback({ status: 500, message: 'No se pudo asignar un NCF unico al pedido' })
+              );
+            }
+
+            if (updateErr) {
+              console.error(
+                esCobroAdelantado ? 'Error al registrar cobro adelantado:' : 'Error al cerrar pedido:',
+                updateErr.message
+              );
+              return db.run('ROLLBACK', () =>
+                callback({
+                  status: 500,
+                  message: esCobroAdelantado
+                    ? 'Error al registrar el cobro adelantado'
+                    : 'Error al cerrar la cuenta',
                 })
               );
             }
-          }
 
-          if (esNCFDuplicado) {
-            console.error('Conflicto de NCF y no se pudo regenerar.');
-            return db.run('ROLLBACK', () =>
-              callback({ status: 500, message: 'No se pudo asignar un NCF unico al pedido' })
-            );
-          }
+            actualizarPedido(indice + 1);
+          });
+        };
 
-          if (updateErr) {
-            console.error('Error al cerrar pedido:', updateErr.message);
-            return db.run('ROLLBACK', () =>
-              callback({ status: 500, message: 'Error al cerrar la cuenta' })
-            );
-          }
+        actualizarPedido(0);
+      });
+    };
 
-          actualizarPedido(indice + 1);
-        });
-      };
-
-      actualizarPedido(0);
-    });
-  };
+    if (esCobroAdelantado) {
+      return ejecutarOperacion(null, 0);
+    }
 
     if (pedidoReferencia.ncf) {
-      return ejecutarCierre(pedidoReferencia.ncf, puedeReintentarNCF ? reintentosNCF : 0);
+      return ejecutarOperacion(pedidoReferencia.ncf, puedeReintentarNCF ? reintentosNCF : 0);
     }
 
     if (ncfManualNormalizado) {
-      return ejecutarCierre(ncfManualNormalizado, 0);
+      return ejecutarOperacion(ncfManualNormalizado, 0);
     }
 
     if (generar_ncf) {
@@ -5674,11 +6156,11 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
           console.error('Error al generar NCF:', ncfErr.message);
           return callback({ status: 500, message: 'No fue posible generar el NCF' });
         }
-        ejecutarCierre(nuevoNcf, reintentosNCF);
+        ejecutarOperacion(nuevoNcf, reintentosNCF);
       });
     }
 
-    ejecutarCierre(null, 0);
+    ejecutarOperacion(null, 0);
   });
 };
 
@@ -5735,6 +6217,81 @@ function obtenerPagoEfectivoAplicado(registro = {}) {
   const cambioRegistrado = Number(registro?.pago_cambio) || 0;
   return Number(Math.max(efectivoEntregado - cambioRegistrado, 0).toFixed(2));
 }
+
+function resumirPagosCuenta(pedidos = []) {
+  let efectivo = 0;
+  let efectivoEntregado = 0;
+  let tarjeta = 0;
+  let transferencia = 0;
+  let cambio = 0;
+
+  (pedidos || []).forEach((pedido) => {
+    efectivo += obtenerPagoEfectivoAplicado(pedido);
+    efectivoEntregado += Number(pedido?.pago_efectivo_entregado) || 0;
+    tarjeta += Number(pedido?.pago_tarjeta) || 0;
+    transferencia += Number(pedido?.pago_transferencia) || 0;
+    cambio += Number(pedido?.pago_cambio) || 0;
+  });
+
+  const total = efectivo + tarjeta + transferencia;
+  return {
+    efectivo: Number(efectivo.toFixed(2)),
+    efectivo_entregado: Number(efectivoEntregado.toFixed(2)),
+    tarjeta: Number(tarjeta.toFixed(2)),
+    transferencia: Number(transferencia.toFixed(2)),
+    cambio: Number(cambio.toFixed(2)),
+    total: Number(total.toFixed(2)),
+  };
+}
+
+const ESTADOS_COBRO_ADELANTADO = ['pendiente', 'preparando', 'listo'];
+
+const obtenerPedidosCuentaParaCobro = async (cuentaId, negocioId, { incluirEnCurso = false } = {}) => {
+  const estados = incluirEnCurso ? ESTADOS_COBRO_ADELANTADO : ['listo'];
+  const placeholders = estados.map(() => '?').join(', ');
+  return db.all(
+    `
+      SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
+             impuesto, total, fecha_creacion, fecha_listo, fecha_cierre, cocinero_id,
+             cocinero_nombre, bartender_id, bartender_nombre, cliente_documento, ncf,
+             tipo_comprobante, COALESCE(propina_porcentaje, 0) AS propina_porcentaje,
+             COALESCE(propina_monto, 0) AS propina_monto,
+             COALESCE(descuento_porcentaje, 0) AS descuento_porcentaje,
+             COALESCE(descuento_monto, 0) AS descuento_monto, comentarios, negocio_id,
+             COALESCE(pago_efectivo, 0) AS pago_efectivo,
+             COALESCE(pago_efectivo_entregado, 0) AS pago_efectivo_entregado,
+             COALESCE(pago_tarjeta, 0) AS pago_tarjeta,
+             COALESCE(pago_transferencia, 0) AS pago_transferencia,
+             COALESCE(pago_cambio, 0) AS pago_cambio
+      FROM pedidos
+      WHERE (cuenta_id = ? OR id = ?)
+        AND estado IN (${placeholders})
+        AND negocio_id = ?
+      ORDER BY fecha_creacion ASC
+    `,
+    [cuentaId, cuentaId, ...estados, negocioId]
+  );
+};
+
+const determinarEstadoCuentaCaja = (pedidos = []) => {
+  const estados = new Set((pedidos || []).map((pedido) => (pedido?.estado || '').toString().trim().toLowerCase()).filter(Boolean));
+  if (!estados.size) {
+    return 'listo';
+  }
+  if (estados.has('preparando') || (estados.has('pendiente') && estados.has('listo'))) {
+    return 'preparando';
+  }
+  if (estados.size === 1) {
+    return Array.from(estados)[0];
+  }
+  if (estados.has('pendiente')) {
+    return 'pendiente';
+  }
+  if (estados.has('listo')) {
+    return 'listo';
+  }
+  return 'preparando';
+};
 
 const FECHA_BASE_PEDIDOS_SQL = 'COALESCE(fecha_factura, fecha_cierre, fecha_creacion)';
 const FECHA_BASE_PEDIDOS_ALIAS_SQL = 'COALESCE(p.fecha_factura, p.fecha_cierre, p.fecha_creacion)';
@@ -6114,6 +6671,30 @@ const calcularResumenCajaPorFecha = (
       });
     };
 
+    const cargarPagosCaja = async () => {
+      if (!ignorarFecha) {
+        return obtenerMovimientosPagoCuenta(negocioId, {
+          fecha,
+          soloPendientes,
+          origen_caja: origenCaja,
+        });
+      }
+
+      const inicioTurno = await new Promise((resolve, reject) => {
+        obtenerUltimoCierreCaja(negocioId, origenCaja, (inicioErr, fechaInicio) => {
+          if (inicioErr) return reject(inicioErr);
+          resolve(fechaInicio || null);
+        });
+      });
+
+      return obtenerMovimientosPagoCuenta(negocioId, {
+        soloPendientes,
+        ignorarFecha: true,
+        desde: inicioTurno,
+        origen_caja: origenCaja,
+      });
+    };
+
     cargarSalidas((salidasErr, salidasData) => {
       if (salidasErr) {
         return callback(salidasErr);
@@ -6124,134 +6705,148 @@ const calcularResumenCajaPorFecha = (
           return callback(descErr);
         }
 
-        let totalEfectivo = 0;
-        let totalTarjeta = 0;
-        let totalTransferencia = 0;
-        let totalDescuentos = 0;
+        Promise.resolve()
+          .then(() => cargarPagosCaja())
+          .then((movimientosPago) => {
+            let totalEfectivo = 0;
+            let totalTarjeta = 0;
+            let totalTransferencia = 0;
+            let totalDescuentos = 0;
+            const mapaPagosPorCuenta = construirMapaResumenPagosPorCuenta(movimientosPago || []);
 
-        const total = pedidos.reduce((acumulado, pedido) => {
-          const subtotal = Number(pedido.subtotal) || 0;
-          const impuesto = Number(pedido.impuesto) || 0;
-          const descuento = Number(pedido.descuento_monto) || 0;
-          const propina = Number(pedido.propina_monto) || 0;
-          const totalPedido = subtotal + impuesto - descuento + propina;
-          totalDescuentos += descuento;
+            const total = pedidos.reduce((acumulado, pedido) => {
+              const subtotal = Number(pedido.subtotal) || 0;
+              const impuesto = Number(pedido.impuesto) || 0;
+              const descuento = Number(pedido.descuento_monto) || 0;
+              const propina = Number(pedido.propina_monto) || 0;
+              const totalPedido = subtotal + impuesto - descuento + propina;
+              totalDescuentos += descuento;
 
-          const tarjeta = Number(pedido.pago_tarjeta) || 0;
-          const transferencia = Number(pedido.pago_transferencia) || 0;
-          const totalNoEfectivo = tarjeta + transferencia;
-          const efectivoEsperado = Math.max(totalPedido - totalNoEfectivo, 0);
-          let efectivo = obtenerPagoEfectivoAplicado(pedido);
+              return acumulado + totalPedido;
+            }, 0);
 
-          if (efectivo <= 0 && totalNoEfectivo === 0) {
-            efectivo = totalPedido;
-          } else if (efectivo > 0) {
-            efectivo = Math.min(efectivo, efectivoEsperado);
-          }
+            const agruparPedidosResumen = (lista) => {
+              const mapa = new Map();
+              lista.forEach((pedido) => {
+                const clave = String(pedido.cuenta_id || pedido.id || 'pedido');
+                if (!mapa.has(clave)) {
+                  mapa.set(clave, {
+                    id: pedido.cuenta_id || pedido.id,
+                    cuenta_id: pedido.cuenta_id || pedido.id,
+                    mesa: pedido.mesa,
+                    cliente: pedido.cliente,
+                    modo_servicio: pedido.modo_servicio,
+                    fecha_cierre: pedido.fecha_cierre || null,
+                    pedidos: [],
+                    subtotal: 0,
+                    impuesto: 0,
+                    total: 0,
+                    descuento_monto: 0,
+                    propina_monto: 0,
+                    pago_efectivo: 0,
+                    pago_efectivo_entregado: 0,
+                    pago_tarjeta: 0,
+                    pago_transferencia: 0,
+                    pago_cambio: 0,
+                  });
+                }
+                const cuenta = mapa.get(clave);
+                const subtotal = Number(pedido.subtotal) || 0;
+                const impuesto = Number(pedido.impuesto) || 0;
+                const descuentoMonto = Number(pedido.descuento_monto) || 0;
+                const propinaMonto = Number(pedido.propina_monto) || 0;
 
-          efectivo = Math.max(efectivo, 0);
+                cuenta.subtotal += subtotal;
+                cuenta.impuesto += impuesto;
+                cuenta.descuento_monto += descuentoMonto;
+                cuenta.propina_monto += propinaMonto;
+                cuenta.total += subtotal + impuesto - descuentoMonto + propinaMonto;
+                cuenta.pago_efectivo += Number(pedido.pago_efectivo) || 0;
+                cuenta.pago_efectivo_entregado += Number(pedido.pago_efectivo_entregado) || 0;
+                cuenta.pago_tarjeta += Number(pedido.pago_tarjeta) || 0;
+                cuenta.pago_transferencia += Number(pedido.pago_transferencia) || 0;
+                cuenta.pago_cambio += Number(pedido.pago_cambio) || 0;
 
-          totalEfectivo += efectivo;
-          totalTarjeta += tarjeta;
-          totalTransferencia += transferencia;
+                if (!cuenta.fecha_cierre && pedido.fecha_cierre) {
+                  cuenta.fecha_cierre = pedido.fecha_cierre;
+                }
 
-          return acumulado + totalPedido;
-        }, 0);
+                if (!cuenta.mesa && pedido.mesa) {
+                  cuenta.mesa = pedido.mesa;
+                }
+                if (!cuenta.cliente && pedido.cliente) {
+                  cuenta.cliente = pedido.cliente;
+                }
 
-        const totalRedondeado = Number(total.toFixed(2));
-        const efectivoRedondeado = Number(totalEfectivo.toFixed(2));
-        const tarjetaRedondeado = Number(totalTarjeta.toFixed(2));
-        const transferenciaRedondeado = Number(totalTransferencia.toFixed(2));
-        const totalSalidas = Number((salidasData?.total || 0).toFixed(2));
-        const totalDescuentosRedondeado = Number((totalDescuentos + descuentosLineas).toFixed(2));
-        const agruparPedidosResumen = (lista) => {
-          const mapa = new Map();
-          lista.forEach((pedido) => {
-            const clave = String(pedido.cuenta_id || pedido.id || 'pedido');
-            if (!mapa.has(clave)) {
-              mapa.set(clave, {
-                id: pedido.cuenta_id || pedido.id,
-                cuenta_id: pedido.cuenta_id || pedido.id,
-                mesa: pedido.mesa,
-              cliente: pedido.cliente,
-              modo_servicio: pedido.modo_servicio,
-              fecha_cierre: pedido.fecha_cierre || null,
-              pedidos: [],
-              subtotal: 0,
-              impuesto: 0,
-              total: 0,
-              descuento_monto: 0,
-              propina_monto: 0,
-              pago_efectivo: 0,
-              pago_efectivo_entregado: 0,
-              pago_tarjeta: 0,
-              pago_transferencia: 0,
-              pago_cambio: 0,
+                cuenta.pedidos.push(pedido);
               });
-            }
-            const cuenta = mapa.get(clave);
-            const subtotal = Number(pedido.subtotal) || 0;
-            const impuesto = Number(pedido.impuesto) || 0;
-            const descuentoMonto = Number(pedido.descuento_monto) || 0;
-            const propinaMonto = Number(pedido.propina_monto) || 0;
+              return Array.from(mapa.values()).map((cuenta) => ({
+                ...cuenta,
+                subtotal: Number(cuenta.subtotal.toFixed(2)),
+                impuesto: Number(cuenta.impuesto.toFixed(2)),
+                descuento_monto: Number(cuenta.descuento_monto.toFixed(2)),
+                propina_monto: Number(cuenta.propina_monto.toFixed(2)),
+                total: Number(cuenta.total.toFixed(2)),
+                pago_efectivo: Number(cuenta.pago_efectivo.toFixed(2)),
+                pago_efectivo_entregado: Number(cuenta.pago_efectivo_entregado.toFixed(2)),
+                pago_tarjeta: Number(cuenta.pago_tarjeta.toFixed(2)),
+                pago_transferencia: Number(cuenta.pago_transferencia.toFixed(2)),
+                pago_cambio: Number(cuenta.pago_cambio.toFixed(2)),
+                fecha_cierre: cuenta.fecha_cierre
+                  ? new Date(cuenta.fecha_cierre).toISOString()
+                  : cuenta.pedidos[0]?.fecha_cierre
+                  ? new Date(cuenta.pedidos[0].fecha_cierre).toISOString()
+                  : null,
+              }));
+            };
 
-            cuenta.subtotal += subtotal;
-            cuenta.impuesto += impuesto;
-            cuenta.descuento_monto += descuentoMonto;
-            cuenta.propina_monto += propinaMonto;
-            cuenta.total += subtotal + impuesto - descuentoMonto + propinaMonto;
-            cuenta.pago_efectivo += Number(pedido.pago_efectivo) || 0;
-            cuenta.pago_efectivo_entregado += Number(pedido.pago_efectivo_entregado) || 0;
-            cuenta.pago_tarjeta += Number(pedido.pago_tarjeta) || 0;
-            cuenta.pago_transferencia += Number(pedido.pago_transferencia) || 0;
-            cuenta.pago_cambio += Number(pedido.pago_cambio) || 0;
+            const pedidosAgrupados = agruparPedidosResumen(pedidos).map((cuenta) => {
+              const cuentaId = Number(cuenta.cuenta_id || cuenta.id);
+              const pagosCuenta =
+                Number.isFinite(cuentaId) && cuentaId > 0 && mapaPagosPorCuenta.has(cuentaId)
+                  ? mapaPagosPorCuenta.get(cuentaId)
+                  : resumirPagosCuenta(cuenta.pedidos || []);
 
-            if (!cuenta.fecha_cierre && pedido.fecha_cierre) {
-              cuenta.fecha_cierre = pedido.fecha_cierre;
-            }
+              return {
+                ...cuenta,
+                pagos_registrados: pagosCuenta,
+                total_pagado: redondearMontoPago(pagosCuenta.total),
+                pago_efectivo: redondearMontoPago(pagosCuenta.efectivo),
+                pago_efectivo_entregado: redondearMontoPago(pagosCuenta.efectivo_entregado),
+                pago_tarjeta: redondearMontoPago(pagosCuenta.tarjeta),
+                pago_transferencia: redondearMontoPago(pagosCuenta.transferencia),
+                pago_cambio: redondearMontoPago(pagosCuenta.cambio),
+              };
+            });
 
-            if (!cuenta.mesa && pedido.mesa) {
-              cuenta.mesa = pedido.mesa;
-            }
-            if (!cuenta.cliente && pedido.cliente) {
-              cuenta.cliente = pedido.cliente;
-            }
+            pedidosAgrupados.forEach((cuenta) => {
+              totalEfectivo += Number(cuenta.pago_efectivo) || 0;
+              totalTarjeta += Number(cuenta.pago_tarjeta) || 0;
+              totalTransferencia += Number(cuenta.pago_transferencia) || 0;
+            });
 
-            cuenta.pedidos.push(pedido);
-          });
-          return Array.from(mapa.values()).map((cuenta) => ({
-            ...cuenta,
-            subtotal: Number(cuenta.subtotal.toFixed(2)),
-            impuesto: Number(cuenta.impuesto.toFixed(2)),
-            descuento_monto: Number(cuenta.descuento_monto.toFixed(2)),
-            propina_monto: Number(cuenta.propina_monto.toFixed(2)),
-            total: Number(cuenta.total.toFixed(2)),
-            pago_efectivo: Number(cuenta.pago_efectivo.toFixed(2)),
-            pago_efectivo_entregado: Number(cuenta.pago_efectivo_entregado.toFixed(2)),
-            pago_tarjeta: Number(cuenta.pago_tarjeta.toFixed(2)),
-            pago_transferencia: Number(cuenta.pago_transferencia.toFixed(2)),
-            pago_cambio: Number(cuenta.pago_cambio.toFixed(2)),
-            fecha_cierre: cuenta.fecha_cierre
-              ? new Date(cuenta.fecha_cierre).toISOString()
-              : cuenta.pedidos[0]?.fecha_cierre
-              ? new Date(cuenta.pedidos[0].fecha_cierre).toISOString()
-              : null,
-          }));
-        };
+            const totalRedondeado = Number(total.toFixed(2));
+            const efectivoRedondeado = Number(totalEfectivo.toFixed(2));
+            const tarjetaRedondeado = Number(totalTarjeta.toFixed(2));
+            const transferenciaRedondeado = Number(totalTransferencia.toFixed(2));
+            const totalSalidas = Number((salidasData?.total || 0).toFixed(2));
+            const totalDescuentosRedondeado = Number((totalDescuentos + descuentosLineas).toFixed(2));
 
-        callback(null, {
-          fecha,
-          cantidad_pedidos: pedidos.length,
-          total_sistema: efectivoRedondeado,
-          total_general: totalRedondeado,
-          total_efectivo: efectivoRedondeado,
-          total_tarjeta: tarjetaRedondeado,
-          total_transferencia: transferenciaRedondeado,
-          total_salidas: totalSalidas,
-          total_descuentos: totalDescuentosRedondeado,
-          pedidos: agruparPedidosResumen(pedidos),
-          salidas: salidasData?.salidas || [],
-        });
+            callback(null, {
+              fecha,
+              cantidad_pedidos: pedidos.length,
+              total_sistema: efectivoRedondeado,
+              total_general: totalRedondeado,
+              total_efectivo: efectivoRedondeado,
+              total_tarjeta: tarjetaRedondeado,
+              total_transferencia: transferenciaRedondeado,
+              total_salidas: totalSalidas,
+              total_descuentos: totalDescuentosRedondeado,
+              pedidos: pedidosAgrupados,
+              salidas: salidasData?.salidas || [],
+            });
+          })
+          .catch((pagosErr) => callback(pagosErr));
       });
     });
   });
@@ -6339,15 +6934,20 @@ const obtenerRangoAnterior = (desde, dias) => {
   };
 };
 
-app.use(
-  '/api/dgii/paso2',
-  createDgiiPaso2Router({
-    db,
-    requireUsuarioSesion,
-    tienePermisoAdmin: esSuperAdmin,
-    obtenerNegocioIdUsuario,
-  })
-);
+if (ENABLE_DGII_PASO2) {
+  const createDgiiPaso2Router = require('./dgii-paso2.routes');
+  app.use(
+    '/api/dgii/paso2',
+    createDgiiPaso2Router({
+      db,
+      requireUsuarioSesion,
+      tienePermisoAdmin: esSuperAdmin,
+      obtenerNegocioIdUsuario,
+    })
+  );
+} else {
+  console.log('DGII Paso 2 desactivado. Usa ENABLE_DGII_PASO2=true para reactivarlo.');
+}
 
 app.post('/api/caja/cierres', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
@@ -6373,7 +6973,7 @@ const obtenerCierresCaja = (desde, hasta, negocioId, origen, callback) => {
   filtros.push(construirFiltroOrigenCaja(origenCaja, params, 'origen_caja'));
   const sql = `
     SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol, origen_caja,
-           total_sistema, total_declarado, diferencia, observaciones
+           fondo_inicial, total_sistema, total_declarado, diferencia, observaciones
     FROM cierres_caja
     WHERE ${filtros.join('\n      AND ')}
     ORDER BY fecha_operacion DESC
@@ -6383,7 +6983,7 @@ const obtenerCierresCaja = (desde, hasta, negocioId, origen, callback) => {
       return callback(err);
     }
     const cierres = (rows || []).map((row) => ({
-      ...row,
+      ...normalizarCierreCajaAdmin(row),
       fecha_operacion: normalizarFechaOperacion(row?.fecha_operacion),
     }));
     callback(null, cierres);
@@ -6571,8 +7171,19 @@ const registrarCierreCaja = async (payload, negocioId) => {
        WHERE estado = 'pagado'
          AND (cierre_id IS NULL)
          AND negocio_id = ?
-        AND ${filtroOrigen}`,
+         AND ${filtroOrigen}`,
       params
+    );
+
+    const paramsPagos = [cierreId, negocio];
+    const filtroOrigenPagos = construirFiltroOrigenCaja(origenCaja, paramsPagos, 'origen_caja');
+    await db.run(
+      `UPDATE pagos_cuenta
+          SET cierre_id = ?
+        WHERE cierre_id IS NULL
+          AND negocio_id = ?
+          AND ${filtroOrigenPagos}`,
+      paramsPagos
     );
 
     const paramsFacturas = [cierreId, origenCaja, negocio];
@@ -6599,6 +7210,29 @@ const registrarCierreCaja = async (payload, negocioId) => {
     total_declarado: Number(totalDeclarado.toFixed(2)),
     diferencia,
     observaciones,
+  };
+};
+
+const restarFondoInicialDeCierre = (monto, fondoInicial) => {
+  const total = Number(monto) || 0;
+  const fondo = Number(fondoInicial) || 0;
+  return Number((total - fondo).toFixed(2));
+};
+
+const normalizarCierreCajaAdmin = (cierre) => {
+  if (!cierre) return cierre;
+  const fondoInicial = Number(cierre.fondo_inicial) || 0;
+  const totalSistemaBruto = Number(cierre.total_sistema) || 0;
+  const totalDeclaradoBruto = Number(cierre.total_declarado) || 0;
+
+  return {
+    ...cierre,
+    fondo_inicial: fondoInicial,
+    total_sistema_bruto: totalSistemaBruto,
+    total_declarado_bruto: totalDeclaradoBruto,
+    total_sistema: restarFondoInicialDeCierre(totalSistemaBruto, fondoInicial),
+    total_declarado: restarFondoInicialDeCierre(totalDeclaradoBruto, fondoInicial),
+    diferencia: Number(cierre.diferencia) || 0,
   };
 };
 
@@ -7049,7 +7683,8 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
       const paramsCierre = [cierreId, negocioId];
       const filtroOrigen = construirFiltroOrigenCaja(origenCaja, paramsCierre, 'origen_caja');
       const cierre = await db.get(
-        `SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol, origen_caja, total_sistema, total_declarado, diferencia
+        `SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol, origen_caja,
+                fondo_inicial, total_sistema, total_declarado, diferencia
          FROM cierres_caja
          WHERE id = ? AND negocio_id = ? AND ${filtroOrigen}`,
         paramsCierre
@@ -7060,7 +7695,10 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
       }
 
       const fechaOperacion = normalizarFechaConsulta(cierre.fecha_operacion || cierre.fecha_cierre);
-      cierre.fecha_operacion = fechaOperacion;
+      const cierreAdmin = {
+        ...normalizarCierreCajaAdmin(cierre),
+        fecha_operacion: fechaOperacion,
+      };
 
       const paramsVentas = [negocioId, cierreId];
       const filtroOrigenPedidos = construirFiltroOrigenCaja(origenCaja, paramsVentas, 'p.origen_caja');
@@ -7221,7 +7859,7 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
 
       res.json({
         ok: true,
-        cierre,
+        cierre: cierreAdmin,
         fecha_operacion: fechaOperacion,
         productos: detalleProductos,
         totales: {
@@ -8519,26 +9157,38 @@ const recalcularCierreCajaRegistrado = async (cierreId, negocioId, origenPreferi
   }
 
   const origenCaja = normalizarOrigenCaja(origenPreferido ?? cierre.origen_caja, 'caja');
-  const paramsPedidos = [cierreId, negocioId];
-  const filtroOrigenPedidos = construirFiltroOrigenCaja(origenCaja, paramsPedidos, 'origen_caja');
-  const pedidos = await db.all(
-    `SELECT subtotal, impuesto, descuento_monto, propina_monto,
-            pago_efectivo, pago_efectivo_entregado, pago_tarjeta, pago_transferencia, pago_cambio
-       FROM pedidos
-      WHERE cierre_id = ?
-        AND negocio_id = ?
-        AND estado = 'pagado'
-        AND ${filtroOrigenPedidos}`,
-    paramsPedidos
+  const paramsPagos = [negocioId, cierreId];
+  const filtroOrigenPagos = construirFiltroOrigenCaja(origenCaja, paramsPagos, 'origen_caja');
+  let pagos = await db.all(
+    `SELECT pago_efectivo, pago_efectivo_entregado, pago_tarjeta, pago_transferencia, pago_cambio
+       FROM pagos_cuenta
+      WHERE negocio_id = ?
+        AND cierre_id = ?
+        AND ${filtroOrigenPagos}`,
+    paramsPagos
   );
+
+  if (!pagos.length) {
+    const paramsPedidos = [cierreId, negocioId];
+    const filtroOrigenPedidos = construirFiltroOrigenCaja(origenCaja, paramsPedidos, 'origen_caja');
+    pagos = await db.all(
+      `SELECT pago_efectivo, pago_efectivo_entregado, pago_tarjeta, pago_transferencia, pago_cambio
+         FROM pedidos
+        WHERE cierre_id = ?
+          AND negocio_id = ?
+          AND estado = 'pagado'
+          AND ${filtroOrigenPedidos}`,
+      paramsPedidos
+    );
+  }
 
   let totalEfectivo = 0;
   let totalTarjeta = 0;
   let totalTransferencia = 0;
-  for (const pedido of pedidos || []) {
-    totalEfectivo += obtenerPagoEfectivoAplicado(pedido);
-    totalTarjeta += Number(pedido.pago_tarjeta) || 0;
-    totalTransferencia += Number(pedido.pago_transferencia) || 0;
+  for (const pago of pagos || []) {
+    totalEfectivo += obtenerPagoEfectivoAplicadoMovimiento(pago);
+    totalTarjeta += Number(pago.pago_tarjeta) || 0;
+    totalTransferencia += Number(pago.pago_transferencia) || 0;
   }
 
   const fechaHasta =
@@ -8667,6 +9317,14 @@ app.put('/api/caja/cuadre/:id/metodo-pago', (req, res) => {
 
       await db.run('BEGIN');
       await actualizarMetodoPagoPedidosCuadre(pedidos, negocioId, metodo);
+      await actualizarMetodoPagoMovimientosCuenta({
+        cuentaId,
+        negocioId,
+        metodo,
+        origenCaja,
+        fecha,
+        ignorarFecha: modoTurno,
+      });
       await db.run('COMMIT');
 
       return res.json({
@@ -8747,6 +9405,13 @@ app.put('/api/caja/cierres/:id/metodo-pago', (req, res) => {
 
       await db.run('BEGIN');
       await actualizarMetodoPagoPedidosCuadre(pedidos, negocioId, metodo);
+      await actualizarMetodoPagoMovimientosCuenta({
+        cuentaId,
+        negocioId,
+        metodo,
+        origenCaja,
+        cierreId,
+      });
       const cierre = await recalcularCierreCajaRegistrado(cierreId, negocioId, origenCaja);
       await db.run('COMMIT');
 
@@ -8756,7 +9421,7 @@ app.put('/api/caja/cierres/:id/metodo-pago', (req, res) => {
         cuenta_id: cuentaId,
         metodo_pago: metodo,
         pedidos_actualizados: pedidos.length,
-        cierre,
+        cierre: normalizarCierreCajaAdmin(cierre),
       });
     } catch (error) {
       await db.run('ROLLBACK').catch(() => {});
@@ -9373,20 +10038,8 @@ app.get('/api/cuentas/:id/detalle', (req, res) => {
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
     try {
-      const pedidos = await db.all(
-        `
-          SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
-                 impuesto, total, fecha_creacion, fecha_listo, fecha_cierre, cocinero_id,
-                 cocinero_nombre, cliente_documento, ncf, tipo_comprobante, propina_monto,
-                 descuento_monto,comentarios
-          FROM pedidos
-          WHERE (cuenta_id = ? OR id = ?)
-            AND estado = 'listo'
-            AND negocio_id = ?
-          ORDER BY fecha_creacion ASC
-        `,
-        [cuentaId, cuentaId, negocioId]
-      );
+      const incluirEnCurso = normalizarFlag(req.query?.permitir_en_curso ?? req.query?.cobro_adelantado, 0) === 1;
+      const pedidos = await obtenerPedidosCuentaParaCobro(cuentaId, negocioId, { incluirEnCurso });
 
       if (!pedidos.length) {
         return res.status(404).json({ ok: false, error: 'Cuenta no encontrada.' });
@@ -9394,13 +10047,36 @@ app.get('/api/cuentas/:id/detalle', (req, res) => {
 
       const detalle = await obtenerDetallePedidosPorIds(pedidos.map((pedido) => pedido.id), negocioId);
       const itemsAgrupados = agruparItemsCuenta(detalle);
+      const pagosRegistradosTabla = await obtenerResumenPagosRegistradosCuenta(cuentaId, negocioId).catch(() =>
+        crearResumenPagosVacio()
+      );
+      const pagosRegistrados =
+        pagosRegistradosTabla.total > 0.009 ? pagosRegistradosTabla : resumirPagosCuenta(pedidos);
+      const totalCuenta = pedidos.reduce(
+        (acc, pedido) =>
+          acc +
+          Math.max(
+            (Number(pedido.subtotal) || 0) +
+              (Number(pedido.impuesto) || 0) -
+              (Number(pedido.descuento_monto) || 0) +
+              (Number(pedido.propina_monto) || 0),
+            0
+          ),
+        0
+      );
+      const estadoCuenta = determinarEstadoCuentaCaja(pedidos);
+      const puedeCobrar = (pedidos || []).every((pedido) => pedido.estado === 'listo');
       const cuenta = {
         cuenta_id: pedidos[0].cuenta_id || pedidos[0].id,
         mesa: pedidos[0].mesa,
         cliente: pedidos[0].cliente,
         modo_servicio: pedidos[0].modo_servicio,
-        estado: 'listo',
-        estado_cuenta: 'listo',
+        estado: estadoCuenta,
+        estado_cuenta: estadoCuenta,
+        puedeCobrar,
+        pagos_registrados: pagosRegistrados,
+        total_pagado: Number(pagosRegistrados.total.toFixed(2)),
+        saldo_pendiente: Number(Math.max(totalCuenta - pagosRegistrados.total, 0).toFixed(2)),
         items_agregados: itemsAgrupados,
         pedidos: pedidos.map((pedido) => ({
           ...pedido,
@@ -10429,20 +11105,7 @@ app.put('/api/cuentas/:id/cerrar', (req, res) => {
 
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
     try {
-      const pedidos = await db.all(
-        `
-          SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
-                 impuesto, total, fecha_creacion, fecha_listo, fecha_cierre, cocinero_id,
-                 cocinero_nombre, cliente_documento, ncf, tipo_comprobante, propina_monto,
-                 descuento_monto, comentarios, negocio_id
-          FROM pedidos
-          WHERE (cuenta_id = ? OR id = ?)
-            AND estado = 'listo'
-            AND negocio_id = ?
-          ORDER BY fecha_creacion ASC
-        `,
-        [cuentaId, cuentaId, negocioId]
-      );
+      const pedidos = await obtenerPedidosCuentaParaCobro(cuentaId, negocioId, { incluirEnCurso: false });
 
       if (!pedidos.length) {
         return res.status(404).json({ ok: false, error: 'No hay pedidos listos para esta cuenta.' });
@@ -10491,6 +11154,49 @@ app.put('/api/cuentas/:id/cerrar', (req, res) => {
     } catch (error) {
       console.error('Error al cerrar la cuenta:', error);
       res.status(500).json({ ok: false, error: 'No se pudo cerrar la cuenta.' });
+    }
+  });
+});
+
+app.put('/api/cuentas/:id/cobro-adelantado', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const cuentaId = Number(req.params.id);
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
+    }
+
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const pedidos = await obtenerPedidosCuentaParaCobro(cuentaId, negocioId, { incluirEnCurso: true });
+      if (!pedidos.length) {
+        return res.status(404).json({ ok: false, error: 'No hay pedidos activos para esta cuenta.' });
+      }
+
+      const payload = {
+        ...req.body,
+        registrar_pago_adelantado: 1,
+        usuario_id: req.body?.usuario_id || usuarioSesion.id,
+        usuario_rol: req.body?.usuario_rol || usuarioSesion.rol,
+        negocio_id: negocioId,
+      };
+
+      cerrarCuentaYRegistrarPago(pedidos, payload, (err, resultado) => {
+        if (err) {
+          const status = err.status || 500;
+          return res
+            .status(status)
+            .json({ ok: false, error: err.message || 'No se pudo registrar el cobro adelantado.' });
+        }
+
+        res.json({
+          ok: true,
+          totales: resultado?.totales || null,
+          cliente: resultado?.cliente || null,
+        });
+      });
+    } catch (error) {
+      console.error('Error al registrar cobro adelantado:', error);
+      res.status(500).json({ ok: false, error: 'No se pudo registrar el cobro adelantado.' });
     }
   });
 });

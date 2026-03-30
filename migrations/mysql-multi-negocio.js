@@ -1827,6 +1827,38 @@ async function normalizeSecuenciasPk() {
   await ensurePrimaryKey('secuencias_ncf', ['tipo', 'negocio_id']);
 }
 
+async function ensureTablePagosCuenta() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS pagos_cuenta (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      cuenta_id INT NOT NULL,
+      pedido_referencia_id INT NULL,
+      negocio_id INT NOT NULL,
+      usuario_id INT NULL,
+      usuario_rol VARCHAR(50) NULL,
+      origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja',
+      es_adelantado TINYINT(1) NOT NULL DEFAULT 0,
+      fecha_pago DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      pago_efectivo DECIMAL(10,2) NOT NULL DEFAULT 0,
+      pago_efectivo_entregado DECIMAL(10,2) NOT NULL DEFAULT 0,
+      pago_tarjeta DECIMAL(10,2) NOT NULL DEFAULT 0,
+      pago_transferencia DECIMAL(10,2) NOT NULL DEFAULT 0,
+      pago_cambio DECIMAL(10,2) NOT NULL DEFAULT 0,
+      cierre_id INT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_pagos_cuenta_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureIndexByName('pagos_cuenta', 'idx_pagos_cuenta_negocio', '(negocio_id)');
+  await ensureIndexByName('pagos_cuenta', 'idx_pagos_cuenta_cuenta', '(cuenta_id)');
+  await ensureIndexByName('pagos_cuenta', 'idx_pagos_cuenta_fecha', '(fecha_pago)');
+  await ensureIndexByName('pagos_cuenta', 'idx_pagos_cuenta_cierre', '(cierre_id)');
+  await ensureIndexByName('pagos_cuenta', 'idx_pagos_cuenta_origen', '(origen_caja)');
+  await ensureIndexByName('pagos_cuenta', 'idx_pagos_cuenta_pedido_ref', '(pedido_referencia_id)');
+}
+
 async function runMigrations() {
   await ensureTableEmpresas();
   await ensureTableNegocios();
@@ -1885,6 +1917,7 @@ async function runMigrations() {
   await ensureTableClientesDeudas();
   await ensureTableClientesDeudasDetalle();
   await ensureTableClientesAbonos();
+  await ensureTablePagosCuenta();
   await ensureColumn('clientes_deudas', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
   await ensureColumn('clientes_deudas', 'cierre_id INT NULL');
   await ensureColumn('clientes_deudas', 'tipo_comprobante VARCHAR(30) NULL');

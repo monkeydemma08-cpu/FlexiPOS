@@ -1,0 +1,300 @@
+{
+  "negocio_id": 1,
+  "set_id": 3,
+  "archivo_set": "40229712860-26032026104105.xlsx",
+  "generado_en": "2026-03-26T17:32:48.604Z",
+  "carpeta_absoluta": "C:\\Users\\Usuario\\OneDrive\\Documents\\KANM\\storage\\dgii\\paso2_xml\\negocio_1\\set_3_20260326_133247",
+  "carpeta_relativa": "storage\\dgii\\paso2_xml\\negocio_1\\set_3_20260326_133247",
+  "casos": [
+    {
+      "orden_envio": 1,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "31",
+      "caso_codigo": "40229712860E310000000001",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0001_F1_31_40229712860E310000000001.xml",
+      "archivo_campos_set": "0001_F1_31_40229712860E310000000001__campos_set.xml"
+    },
+    {
+      "orden_envio": 2,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "31",
+      "caso_codigo": "40229712860E310000000009",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0002_F1_31_40229712860E310000000009.xml",
+      "archivo_campos_set": "0002_F1_31_40229712860E310000000009__campos_set.xml"
+    },
+    {
+      "orden_envio": 3,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "31",
+      "caso_codigo": "40229712860E310000000012",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0003_F1_31_40229712860E310000000012.xml",
+      "archivo_campos_set": "0003_F1_31_40229712860E310000000012__campos_set.xml"
+    },
+    {
+      "orden_envio": 4,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "31",
+      "caso_codigo": "40229712860E310000000034",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0004_F1_31_40229712860E310000000034.xml",
+      "archivo_campos_set": "0004_F1_31_40229712860E310000000034__campos_set.xml"
+    },
+    {
+      "orden_envio": 5,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "32",
+      "caso_codigo": "40229712860E320000000003",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0005_F1_32_40229712860E320000000003.xml",
+      "archivo_campos_set": "0005_F1_32_40229712860E320000000003__campos_set.xml"
+    },
+    {
+      "orden_envio": 6,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "32",
+      "caso_codigo": "40229712860E320000000006",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0006_F1_32_40229712860E320000000006.xml",
+      "archivo_campos_set": "0006_F1_32_40229712860E320000000006__campos_set.xml"
+    },
+    {
+      "orden_envio": 7,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "41",
+      "caso_codigo": "40229712860E410000000001",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0007_F1_41_40229712860E410000000001.xml",
+      "archivo_campos_set": "0007_F1_41_40229712860E410000000001__campos_set.xml"
+    },
+    {
+      "orden_envio": 8,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "41",
+      "caso_codigo": "40229712860E410000000010",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0008_F1_41_40229712860E410000000010.xml",
+      "archivo_campos_set": "0008_F1_41_40229712860E410000000010__campos_set.xml"
+    },
+    {
+      "orden_envio": 9,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "43",
+      "caso_codigo": "40229712860E430000000009",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0009_F1_43_40229712860E430000000009.xml",
+      "archivo_campos_set": "0009_F1_43_40229712860E430000000009__campos_set.xml"
+    },
+    {
+      "orden_envio": 10,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "43",
+      "caso_codigo": "40229712860E430000000010",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0010_F1_43_40229712860E430000000010.xml",
+      "archivo_campos_set": "0010_F1_43_40229712860E430000000010__campos_set.xml"
+    },
+    {
+      "orden_envio": 11,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "44",
+      "caso_codigo": "40229712860E440000000009",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0011_F1_44_40229712860E440000000009.xml",
+      "archivo_campos_set": "0011_F1_44_40229712860E440000000009__campos_set.xml"
+    },
+    {
+      "orden_envio": 12,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "44",
+      "caso_codigo": "40229712860E440000000011",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0012_F1_44_40229712860E440000000011.xml",
+      "archivo_campos_set": "0012_F1_44_40229712860E440000000011__campos_set.xml"
+    },
+    {
+      "orden_envio": 13,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "45",
+      "caso_codigo": "40229712860E450000000007",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0013_F1_45_40229712860E450000000007.xml",
+      "archivo_campos_set": "0013_F1_45_40229712860E450000000007__campos_set.xml"
+    },
+    {
+      "orden_envio": 14,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "45",
+      "caso_codigo": "40229712860E450000000011",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0014_F1_45_40229712860E450000000011.xml",
+      "archivo_campos_set": "0014_F1_45_40229712860E450000000011__campos_set.xml"
+    },
+    {
+      "orden_envio": 15,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "46",
+      "caso_codigo": "40229712860E460000000001",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0015_F1_46_40229712860E460000000001.xml",
+      "archivo_campos_set": "0015_F1_46_40229712860E460000000001__campos_set.xml"
+    },
+    {
+      "orden_envio": 16,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "46",
+      "caso_codigo": "40229712860E460000000011",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0016_F1_46_40229712860E460000000011.xml",
+      "archivo_campos_set": "0016_F1_46_40229712860E460000000011__campos_set.xml"
+    },
+    {
+      "orden_envio": 17,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "47",
+      "caso_codigo": "40229712860E470000000001",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0017_F1_47_40229712860E470000000001.xml",
+      "archivo_campos_set": "0017_F1_47_40229712860E470000000001__campos_set.xml"
+    },
+    {
+      "orden_envio": 18,
+      "fase_emision": 1,
+      "fase_label": "PRIMERO",
+      "tipo_documento": "47",
+      "caso_codigo": "40229712860E470000000010",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0018_F1_47_40229712860E470000000010.xml",
+      "archivo_campos_set": "0018_F1_47_40229712860E470000000010__campos_set.xml"
+    },
+    {
+      "orden_envio": 19,
+      "fase_emision": 2,
+      "fase_label": "SEGUNDO",
+      "tipo_documento": "33",
+      "caso_codigo": "40229712860E330000000001",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0019_F2_33_40229712860E330000000001.xml",
+      "archivo_campos_set": "0019_F2_33_40229712860E330000000001__campos_set.xml"
+    },
+    {
+      "orden_envio": 20,
+      "fase_emision": 2,
+      "fase_label": "SEGUNDO",
+      "tipo_documento": "34",
+      "caso_codigo": "40229712860E340000000002",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0020_F2_34_40229712860E340000000002.xml",
+      "archivo_campos_set": "0020_F2_34_40229712860E340000000002__campos_set.xml"
+    },
+    {
+      "orden_envio": 21,
+      "fase_emision": 2,
+      "fase_label": "SEGUNDO",
+      "tipo_documento": "34",
+      "caso_codigo": "40229712860E340000000016",
+      "flujo": "ECF_NORMAL",
+      "archivo_xml": "0021_F2_34_40229712860E340000000016.xml",
+      "archivo_campos_set": "0021_F2_34_40229712860E340000000016__campos_set.xml"
+    },
+    {
+      "orden_envio": 22,
+      "fase_emision": 3,
+      "fase_label": "TERCERO",
+      "tipo_documento": "32",
+      "caso_codigo": "40229712860E320000000011",
+      "flujo": "RESUMEN_FC",
+      "archivo_xml": "0022_F3_32_40229712860E320000000011.xml",
+      "archivo_campos_set": "0022_F3_32_40229712860E320000000011__campos_set.xml"
+    },
+    {
+      "orden_envio": 23,
+      "fase_emision": 3,
+      "fase_label": "TERCERO",
+      "tipo_documento": "32",
+      "caso_codigo": "40229712860E320000000012",
+      "flujo": "RESUMEN_FC",
+      "archivo_xml": "0023_F3_32_40229712860E320000000012.xml",
+      "archivo_campos_set": "0023_F3_32_40229712860E320000000012__campos_set.xml"
+    },
+    {
+      "orden_envio": 24,
+      "fase_emision": 3,
+      "fase_label": "TERCERO",
+      "tipo_documento": "32",
+      "caso_codigo": "40229712860E320000000014",
+      "flujo": "RESUMEN_FC",
+      "archivo_xml": "0024_F3_32_40229712860E320000000014.xml",
+      "archivo_campos_set": "0024_F3_32_40229712860E320000000014__campos_set.xml"
+    },
+    {
+      "orden_envio": 25,
+      "fase_emision": 3,
+      "fase_label": "TERCERO",
+      "tipo_documento": "32",
+      "caso_codigo": "40229712860E320000000015",
+      "flujo": "RESUMEN_FC",
+      "archivo_xml": "0025_F3_32_40229712860E320000000015.xml",
+      "archivo_campos_set": "0025_F3_32_40229712860E320000000015__campos_set.xml"
+    },
+    {
+      "orden_envio": 26,
+      "fase_emision": 4,
+      "fase_label": "CUARTO",
+      "tipo_documento": "32",
+      "caso_codigo": "40229712860E320000000011",
+      "flujo": "FC_MENOR_250K",
+      "archivo_xml": "0026_F4_32_40229712860E320000000011.xml",
+      "archivo_campos_set": "0026_F4_32_40229712860E320000000011__campos_set.xml"
+    },
+    {
+      "orden_envio": 27,
+      "fase_emision": 4,
+      "fase_label": "CUARTO",
+      "tipo_documento": "32",
+      "caso_codigo": "40229712860E320000000012",
+      "flujo": "FC_MENOR_250K",
+      "archivo_xml": "0027_F4_32_40229712860E320000000012.xml",
+      "archivo_campos_set": "0027_F4_32_40229712860E320000000012__campos_set.xml"
+    },
+    {
+      "orden_envio": 28,
+      "fase_emision": 4,
+      "fase_label": "CUARTO",
+      "tipo_documento": "32",
+      "caso_codigo": "40229712860E320000000014",
+      "flujo": "FC_MENOR_250K",
+      "archivo_xml": "0028_F4_32_40229712860E320000000014.xml",
+      "archivo_campos_set": "0028_F4_32_40229712860E320000000014__campos_set.xml"
+    },
+    {
+      "orden_envio": 29,
+      "fase_emision": 4,
+      "fase_label": "CUARTO",
+      "tipo_documento": "32",
+      "caso_codigo": "40229712860E320000000015",
+      "flujo": "FC_MENOR_250K",
+      "archivo_xml": "0029_F4_32_40229712860E320000000015.xml",
+      "archivo_campos_set": "0029_F4_32_40229712860E320000000015__campos_set.xml"
+    }
+  ]
+}

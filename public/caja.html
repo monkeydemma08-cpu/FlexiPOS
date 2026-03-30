@@ -55,8 +55,14 @@
         <div class="caja-cobros-grid">
           <div class="kanm-card caja-lista-card">
             <div class="kanm-card-header sticky-header">
-              <h2>Pedidos listos para cobrar</h2>
-              <p class="kanm-subtitle">Selecciona un pedido para revisar los montos y finalizar el pago.</p>
+              <h2>Cuentas para cobrar</h2>
+              <p class="kanm-subtitle">
+                Selecciona una cuenta para cerrar el pago o activa el cobro adelantado para ver cuentas en curso.
+              </p>
+              <label class="caja-toggle-inline" for="caja-cobro-adelantado-toggle">
+                <input type="checkbox" id="caja-cobro-adelantado-toggle" />
+                <span>Incluir cuentas en curso para cobro adelantado</span>
+              </label>
             </div>
             <div id="caja-mensaje-lista" class="kanm-message"></div>
             <div id="caja-pedidos" class="caja-pedidos-lista"></div>
@@ -194,14 +200,25 @@
                   <span id="caja-resumen-descuento">- DOP&nbsp;0.00</span>
                 </div>
                 <div class="flex-between total">
-                  <span>Total a cobrar</span>
+                  <span>Total de la cuenta</span>
                   <span id="caja-resumen-total">DOP&nbsp;0.00</span>
+                </div>
+                <div class="flex-between caja-resumen-secundario">
+                  <span>Pagado por adelantado</span>
+                  <span id="caja-resumen-pagado">DOP&nbsp;0.00</span>
+                </div>
+                <div class="flex-between total caja-resumen-restante">
+                  <span>Pendiente por cobrar</span>
+                  <span id="caja-resumen-restante">DOP&nbsp;0.00</span>
                 </div>
               </div>
 
               <div class="caja-acciones">
                 <button type="button" class="kanm-button secondary" id="caja-vista-previa">
                   Vista previa
+                </button>
+                <button type="button" class="kanm-button ghost" id="caja-cobro-adelantado" hidden>
+                  Cobrar por adelantado
                 </button>
                 <button type="submit" class="kanm-button primary" id="caja-cobrar">
                   Confirmar pago

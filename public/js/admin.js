@@ -314,6 +314,7 @@ const dgiiConfigP12Input = document.getElementById('dgii-config-p12');
 const dgiiConfigP12PasswordInput = document.getElementById('dgii-config-p12-password');
 const dgiiSemillaFirmadaFileInput = document.getElementById('dgii-semilla-firmada-file');
 const dgiiConfigGuardarBtn = document.getElementById('dgii-config-guardar');
+const dgiiSemillaDescargarBtn = document.getElementById('dgii-semilla-descargar');
 const dgiiConfigTestBtn = document.getElementById('dgii-config-test');
 const dgiiSemillaValidarBtn = document.getElementById('dgii-semilla-validar');
 const dgiiConfigMensaje = document.getElementById('dgii-config-mensaje');
@@ -329,6 +330,11 @@ const dgiiSetResumen = document.getElementById('dgii-set-resumen');
 const dgiiSetsTabla = document.getElementById('dgii-sets-tabla');
 const dgiiCasosMensaje = document.getElementById('dgii-casos-mensaje');
 const dgiiCasosTabla = document.getElementById('dgii-casos-tabla');
+const dgiiCasoXmlFirmadoInput = document.createElement('input');
+dgiiCasoXmlFirmadoInput.type = 'file';
+dgiiCasoXmlFirmadoInput.accept = '.xml,text/xml,application/xml';
+dgiiCasoXmlFirmadoInput.hidden = true;
+document.body?.appendChild(dgiiCasoXmlFirmadoInput);
 const adminTabs = Array.from(document.querySelectorAll('[data-admin-tab]'));
 const adminSections = Array.from(document.querySelectorAll('[data-admin-section]'));
 const menuPublicoRefrescarBtn = document.getElementById('menu-publico-refrescar');
@@ -360,6 +366,8 @@ let acreditaItbisConfig = true;
 let recetaProductoIdActivo = null;
 let dgiiSets = [];
 let dgiiCasos = [];
+let dgiiCasoXmlFirmadoPendienteId = 0;
+let dgiiCasoXmlFirmadoPendienteModo = '';
 let menuPublicoAccesos = [];
 let menuPublicoCargado = false;
 
@@ -550,6 +558,17 @@ const leerArchivoBase64 = (file) =>
     reader.readAsDataURL(file);
   });
 
+const descargarBlob = (filename, blob) => {
+  const enlace = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  enlace.href = url;
+  enlace.download = filename;
+  document.body.appendChild(enlace);
+  enlace.click();
+  document.body.removeChild(enlace);
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+};
+
 const renderResumenDgii = (resumen) => {
   if (!dgiiSetResumen) return;
   const data = resumen || {};
@@ -618,6 +637,8 @@ const renderCasosDgii = () => {
     .map((caso) => {
       const flujo = DGII_FLOW_LABELS[caso.flujo] || caso.flujo || '--';
       const estado = caso.estado_local || '--';
+      const puedeUsarXmlFirmado = caso.flujo === 'RESUMEN_FC';
+      const puedeUsarXmlBaseFirmado = caso.flujo === 'FC_MENOR_250K';
       return `
         <tr>
           <td>${Number(caso.orden_envio || 0)}</td>
@@ -629,8 +650,10 @@ const renderCasosDgii = () => {
           <td>${caso.dgii_track_id || '--'}</td>
           <td>${Number(caso.intentos || 0)}</td>
           <td>
-            <button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-procesar-caso=\"${caso.id}\">Procesar</button>
+            ${caso.flujo === 'RESUMEN_FC' ? '' : `<button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-procesar-caso=\"${caso.id}\">Procesar</button>`}
             <button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-consultar-caso=\"${caso.id}\">Consultar</button>
+            ${puedeUsarXmlFirmado ? `<button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-xml-firmado-caso=\"${caso.id}\">XML firmado</button>` : ''}
+            ${puedeUsarXmlBaseFirmado ? `<button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-xml-base-firmado-caso=\"${caso.id}\">XML base firmado</button>` : ''}
           </td>
         </tr>
       `;
@@ -725,6 +748,33 @@ const probarAutenticacionDgii = async () => {
     setMessage(dgiiConfigMensaje, error.message || 'No se pudo autenticar con DGII.', 'error');
   } finally {
     if (dgiiConfigTestBtn) dgiiConfigTestBtn.disabled = false;
+  }
+};
+
+const descargarSemillaDgii = async () => {
+  try {
+    if (dgiiSemillaDescargarBtn) dgiiSemillaDescargarBtn.disabled = true;
+    const resp = await fetchJsonAutorizado('/api/dgii/paso2/autenticacion/descargar-semilla', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo descargar la semilla DGII.');
+    }
+    const binary = atob(String(data?.xml_base64 || ''));
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    descargarBlob(data?.nombre_archivo || 'semilla.xml', new Blob([bytes], { type: 'application/xml' }));
+    setMessage(
+      dgiiConfigMensaje,
+      'Semilla descargada. Firmala en la app oficial de DGII y luego usa "Validar semilla firmada".',
+      'info'
+    );
+  } catch (error) {
+    console.error('Error descargando semilla DGII:', error);
+    setMessage(dgiiConfigMensaje, error.message || 'No se pudo descargar la semilla DGII.', 'error');
+  } finally {
+    if (dgiiSemillaDescargarBtn) dgiiSemillaDescargarBtn.disabled = false;
   }
 };
 
@@ -970,6 +1020,54 @@ const consultarCasoDgii = async (casoId) => {
   } catch (error) {
     console.error('Error consultando caso DGII:', error);
     setMessage(dgiiCasosMensaje, error.message || 'No se pudo consultar el caso DGII.', 'error');
+  }
+};
+
+const seleccionarXmlFirmadoCasoDgii = (casoId, modo = 'RESUMEN_FC') => {
+  if (!Number.isFinite(casoId) || casoId <= 0) return;
+  dgiiCasoXmlFirmadoPendienteId = casoId;
+  dgiiCasoXmlFirmadoPendienteModo = modo || 'RESUMEN_FC';
+  dgiiCasoXmlFirmadoInput.value = '';
+  dgiiCasoXmlFirmadoInput.click();
+};
+
+const procesarXmlFirmadoCasoDgii = async ({ casoId, file, modo = 'RESUMEN_FC' }) => {
+  try {
+    if (!file) {
+      setMessage(dgiiCasosMensaje, 'Selecciona el XML firmado del caso.', 'warning');
+      return;
+    }
+    const xmlBase64 = await leerArchivoBase64(file);
+    const esFacturaBase = modo === 'FC_MENOR_250K';
+    const endpoint = esFacturaBase
+      ? `/api/dgii/paso2/casos/${casoId}/guardar-xml-firmado-base`
+      : `/api/dgii/paso2/casos/${casoId}/procesar-xml-firmado`;
+    const resp = await fetchJsonAutorizado(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({
+        nombre_archivo: file.name,
+        xml_firmada_base64: xmlBase64,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo procesar el XML firmado.');
+    }
+    if (esFacturaBase) {
+      const codigoSeguridadeCF = data?.resultado?.codigoSeguridadeCF || '--';
+      setMessage(
+        dgiiCasosMensaje,
+        `Factura base ${casoId} cargada. CodigoSeguridadeCF derivado: ${codigoSeguridadeCF}. Regenera XML sin firma para obtener los RFCE actualizados.`,
+        'info'
+      );
+    } else {
+      setMessage(dgiiCasosMensaje, `Caso ${casoId} procesado con XML firmado externo.`, 'info');
+    }
+    await cargarCasosDgii(dgiiSetSelect?.value);
+    await cargarSetsDgii({ mantenerSeleccion: true });
+  } catch (error) {
+    console.error('Error procesando XML firmado DGII:', error);
+    setMessage(dgiiCasosMensaje, error.message || 'No se pudo procesar el XML firmado.', 'error');
   }
 };
 
@@ -1462,7 +1560,8 @@ const tabsSoloAdmin = [
   'cuadres',
   'historial',
 ];
-const tabsSoloSuperAdmin = ['negocios', 'dgiiPaso2'];
+const tabsSoloSuperAdmin = ['negocios'];
+const tabsDeshabilitados = ['dgiiPaso2'];
 
 const aplicarModulosUI = () => {
   const modulos = obtenerConfigModulosUI();
@@ -1481,6 +1580,12 @@ const aplicarModulosUI = () => {
 
 const ocultarTabsNoPermitidos = () => {
   adminTabs.forEach((btn) => {
+    if (tabsDeshabilitados.includes(btn.dataset.adminTab)) {
+      btn.classList.add('hidden');
+      btn.setAttribute('tabindex', '-1');
+      return;
+    }
+
     if (!usuarioActual?.esSuperAdmin && tabsSoloSuperAdmin.includes(btn.dataset.adminTab)) {
       btn.classList.add('hidden');
       btn.setAttribute('tabindex', '-1');
@@ -1498,6 +1603,11 @@ const ocultarTabsNoPermitidos = () => {
   });
 
   adminSections.forEach((section) => {
+    if (tabsDeshabilitados.includes(section.dataset.adminSection)) {
+      section.classList.add('hidden');
+      return;
+    }
+
     if (!usuarioActual?.esSuperAdmin && tabsSoloSuperAdmin.includes(section.dataset.adminSection)) {
       section.classList.add('hidden');
       return;
@@ -1518,7 +1628,10 @@ const obtenerTabInicialAdmin = () => {
     const params = new URLSearchParams(window.location.search || '');
     const tabQuery = params.get('tab');
     if (tabQuery) {
-      return tabQuery;
+      const existeTab = adminTabs.some((tab) => tab.dataset.adminTab === tabQuery);
+      if (existeTab && !tabsDeshabilitados.includes(tabQuery)) {
+        return tabQuery;
+      }
     }
     if (window.location?.pathname?.includes('/admin/cotizaciones')) {
       return 'cotizaciones';
@@ -8910,6 +9023,11 @@ dgiiConfigGuardarBtn?.addEventListener('click', (event) => {
   guardarConfigDgii();
 });
 
+dgiiSemillaDescargarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  descargarSemillaDgii();
+});
+
 dgiiConfigTestBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   probarAutenticacionDgii();
@@ -8961,12 +9079,40 @@ dgiiSetReprocesarBtn?.addEventListener('click', (event) => {
   procesarSetDgii({ reprocesar: true });
 });
 
+dgiiCasoXmlFirmadoInput?.addEventListener('change', async () => {
+  const casoId = Number(dgiiCasoXmlFirmadoPendienteId || 0);
+  const modo = dgiiCasoXmlFirmadoPendienteModo || 'RESUMEN_FC';
+  const file = dgiiCasoXmlFirmadoInput.files?.[0];
+  dgiiCasoXmlFirmadoPendienteId = 0;
+  dgiiCasoXmlFirmadoPendienteModo = '';
+  if (Number.isFinite(casoId) && casoId > 0 && file) {
+    await procesarXmlFirmadoCasoDgii({ casoId, file, modo });
+  }
+  dgiiCasoXmlFirmadoInput.value = '';
+});
+
 dgiiCasosTabla?.addEventListener('click', (event) => {
   const btnProcesar = event.target.closest('[data-dgii-procesar-caso]');
   if (btnProcesar) {
     const casoId = Number(btnProcesar.dataset.dgiiProcesarCaso);
     if (Number.isFinite(casoId) && casoId > 0) {
       procesarCasoDgii(casoId);
+    }
+    return;
+  }
+  const btnXmlFirmado = event.target.closest('[data-dgii-xml-firmado-caso]');
+  if (btnXmlFirmado) {
+    const casoId = Number(btnXmlFirmado.dataset.dgiiXmlFirmadoCaso);
+    if (Number.isFinite(casoId) && casoId > 0) {
+      seleccionarXmlFirmadoCasoDgii(casoId, 'RESUMEN_FC');
+    }
+    return;
+  }
+  const btnXmlBaseFirmado = event.target.closest('[data-dgii-xml-base-firmado-caso]');
+  if (btnXmlBaseFirmado) {
+    const casoId = Number(btnXmlBaseFirmado.dataset.dgiiXmlBaseFirmadoCaso);
+    if (Number.isFinite(casoId) && casoId > 0) {
+      seleccionarXmlFirmadoCasoDgii(casoId, 'FC_MENOR_250K');
     }
     return;
   }
@@ -9003,17 +9149,6 @@ adminTabs.forEach((btn) =>
       cargarMenuPublicoAccesos({ force: true }).catch((error) => {
         console.warn('No se pudieron cargar los accesos del menu publico:', error);
       });
-    }
-    if (tab === 'dgiiPaso2') {
-      if (!sesion?.esSuperAdmin) {
-        setMessage(dgiiSetMensaje, 'Modulo DGII Paso 2 habilitado solo para super admin.', 'warning');
-        return;
-      }
-      cargarConfigDgii();
-      cargarSetsDgii({ mantenerSeleccion: true });
-      if (dgiiSetSelect?.value) {
-        cargarCasosDgii(dgiiSetSelect.value);
-      }
     }
     const tabUrl = btn.dataset.tabUrl;
     if (tabUrl) {
@@ -9119,14 +9254,6 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (tabInicial === 'menuPublico') {
     await cargarMenuPublicoAccesos({ force: true });
-  }
-
-  if (tabInicial === 'dgiiPaso2' && (usuarioActual?.esSuperAdmin || usuarioActual?.es_super_admin)) {
-    await cargarConfigDgii();
-    await cargarSetsDgii({ mantenerSeleccion: true });
-    if (dgiiSetSelect?.value) {
-      await cargarCasosDgii(dgiiSetSelect.value);
-    }
   }
 
   await cargarCocinerosHistorial();
