@@ -5076,6 +5076,10 @@ const crearResumenPagosVacio = () => ({
 });
 
 const redondearMontoPago = (valor) => Number((Number(valor) || 0).toFixed(2));
+const normalizarIdNumerico = (valor) => {
+  const numero = Number(valor);
+  return Number.isFinite(numero) && numero > 0 ? Number(numero) : null;
+};
 
 const obtenerPagoEfectivoAplicadoMovimiento = (registro = {}) => {
   const efectivoRegistrado = Number(registro?.pago_efectivo) || 0;
@@ -5266,6 +5270,15 @@ const insertarMovimientoPagoCuenta = async ({
     return null;
   }
 
+  const cuentaIdNormalizado = normalizarIdNumerico(cuentaId);
+  const pedidoReferenciaIdNormalizado = normalizarIdNumerico(pedidoReferenciaId);
+  const negocioIdNormalizado = normalizarIdNumerico(negocioId) || NEGOCIO_ID_DEFAULT;
+  const usuarioIdNormalizado = normalizarIdNumerico(usuarioId);
+
+  if (!cuentaIdNormalizado) {
+    throw new Error('Cuenta invalida para registrar el movimiento de pago.');
+  }
+
   return db.run(
     `
       INSERT INTO pagos_cuenta
@@ -5274,10 +5287,10 @@ const insertarMovimientoPagoCuenta = async ({
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
-      Number(cuentaId),
-      pedidoReferenciaId ? Number(pedidoReferenciaId) : null,
-      negocioId || NEGOCIO_ID_DEFAULT,
-      usuarioId ? Number(usuarioId) : null,
+      cuentaIdNormalizado,
+      pedidoReferenciaIdNormalizado,
+      negocioIdNormalizado,
+      usuarioIdNormalizado,
       usuarioRol || null,
       normalizarOrigenCaja(origenCaja, 'caja'),
       esAdelantado ? 1 : 0,
@@ -11111,10 +11124,14 @@ app.put('/api/cuentas/:id/cerrar', (req, res) => {
         return res.status(404).json({ ok: false, error: 'No hay pedidos listos para esta cuenta.' });
       }
 
+      const usuarioIdSesion = normalizarIdNumerico(usuarioSesion?.id);
+      const usuarioIdPayload = normalizarIdNumerico(req.body?.usuario_id ?? req.body?.usuarioId);
+      const usuarioRolPayload = normalizarCampoTexto(req.body?.usuario_rol ?? req.body?.usuarioRol);
+      const usuarioRolSesion = normalizarCampoTexto(usuarioSesion?.rol);
       const payload = {
         ...req.body,
-        usuario_id: req.body?.usuario_id || usuarioSesion.id,
-        usuario_rol: req.body?.usuario_rol || usuarioSesion.rol,
+        usuario_id: usuarioIdPayload || usuarioIdSesion,
+        usuario_rol: usuarioRolPayload || usuarioRolSesion,
         negocio_id: negocioId,
       };
 
@@ -11172,11 +11189,15 @@ app.put('/api/cuentas/:id/cobro-adelantado', (req, res) => {
         return res.status(404).json({ ok: false, error: 'No hay pedidos activos para esta cuenta.' });
       }
 
+      const usuarioIdSesion = normalizarIdNumerico(usuarioSesion?.id);
+      const usuarioIdPayload = normalizarIdNumerico(req.body?.usuario_id ?? req.body?.usuarioId);
+      const usuarioRolPayload = normalizarCampoTexto(req.body?.usuario_rol ?? req.body?.usuarioRol);
+      const usuarioRolSesion = normalizarCampoTexto(usuarioSesion?.rol);
       const payload = {
         ...req.body,
         registrar_pago_adelantado: 1,
-        usuario_id: req.body?.usuario_id || usuarioSesion.id,
-        usuario_rol: req.body?.usuario_rol || usuarioSesion.rol,
+        usuario_id: usuarioIdPayload || usuarioIdSesion,
+        usuario_rol: usuarioRolPayload || usuarioRolSesion,
         negocio_id: negocioId,
       };
 

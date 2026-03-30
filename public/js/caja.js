@@ -4618,6 +4618,7 @@ const construirPayloadCobroCuenta = (pagos, { generarFactura = true } = {}) => {
   const sinComprobante = esSinComprobante(tipoComprobante);
   const ncfManual = generarFactura && !sinComprobante ? inputNcfManual?.value : null;
   const usuario = obtenerUsuarioActual();
+  const usuarioId = Number(usuario?.id ?? usuario?.usuarioId);
 
   return {
     descuento_porcentaje: calculo.descuentoPorcentaje,
@@ -4629,7 +4630,7 @@ const construirPayloadCobroCuenta = (pagos, { generarFactura = true } = {}) => {
     ncf: ncfManual,
     generar_ncf: generarFactura ? !sinComprobante : false,
     comentarios: inputComentarios?.value,
-    usuario_id: usuario?.id,
+    usuario_id: Number.isFinite(usuarioId) && usuarioId > 0 ? usuarioId : undefined,
     detalle_descuentos: detalleDescuentosPayload,
     pagos: {
       efectivo: pagos.efectivoAplicado ?? pagos.efectivo ?? obtenerSaldoPendienteActual(),
