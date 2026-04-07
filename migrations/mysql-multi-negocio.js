@@ -1917,6 +1917,59 @@ async function normalizeSecuenciasPk() {
   await ensurePrimaryKey('secuencias_ncf', ['tipo', 'negocio_id']);
 }
 
+async function ensureTableSecuenciasEcf() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS secuencias_ecf (
+      tipo VARCHAR(10) NOT NULL,
+      rnc_emisor VARCHAR(20) NOT NULL DEFAULT '',
+      correlativo INT NOT NULL DEFAULT 1,
+      fecha_vencimiento DATE NULL,
+      negocio_id INT NOT NULL,
+      actualizado_en DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (tipo, negocio_id),
+      CONSTRAINT fk_secuencias_ecf_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableEcfIntentos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS ecf_intentos (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      pedido_id INT NOT NULL,
+      negocio_id INT NOT NULL,
+      tipo_envio VARCHAR(30) NOT NULL,
+      endpoint VARCHAR(300) NULL,
+      response_status INT NULL,
+      response_body LONGTEXT NULL,
+      resultado VARCHAR(20) NOT NULL DEFAULT 'ERROR',
+      codigo VARCHAR(80) NULL,
+      mensaje LONGTEXT NULL,
+      track_id VARCHAR(120) NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_ecf_intentos_pedido (pedido_id),
+      KEY idx_ecf_intentos_negocio_fecha (negocio_id, created_at),
+      CONSTRAINT fk_ecf_intentos_pedido FOREIGN KEY (pedido_id) REFERENCES pedidos(id),
+      CONSTRAINT fk_ecf_intentos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensurePedidosEcfColumns() {
+  await ensureColumn('pedidos', 'ecf_tipo VARCHAR(10) NULL');
+  await ensureColumn('pedidos', 'ecf_encf VARCHAR(20) NULL');
+  await ensureColumn('pedidos', "ecf_estado VARCHAR(30) NULL");
+  await ensureColumn('pedidos', 'ecf_track_id VARCHAR(120) NULL');
+  await ensureColumn('pedidos', 'ecf_codigo_dgii VARCHAR(80) NULL');
+  await ensureColumn('pedidos', 'ecf_mensaje_dgii LONGTEXT NULL');
+  await ensureColumn('pedidos', 'ecf_xml_generado LONGTEXT NULL');
+  await ensureColumn('pedidos', 'ecf_xml_firmado LONGTEXT NULL');
+  await ensureColumn('pedidos', 'ecf_codigo_seguridad VARCHAR(10) NULL');
+  await ensureColumn('pedidos', 'ecf_qr_url TEXT NULL');
+  await ensureColumn('pedidos', 'ecf_intentos INT DEFAULT 0');
+  await ensureColumn('pedidos', 'ecf_ultimo_intento_at DATETIME NULL');
+}
+
 async function ensureTablePagosCuenta() {
   await query(`
     CREATE TABLE IF NOT EXISTS pagos_cuenta (
@@ -2122,6 +2175,9 @@ async function runMigrations() {
   await ensureTableRegistroSolicitudes();
   await normalizeConfiguracionKeys();
   await normalizeSecuenciasPk();
+  await ensureTableSecuenciasEcf();
+  await ensureTableEcfIntentos();
+  await ensurePedidosEcfColumns();
 }
 
 module.exports = runMigrations;

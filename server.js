@@ -4651,6 +4651,9 @@ const normalizarTipoComprobanteVenta = (valor, fallback = null) => {
   if (['b01', 'b02', 'b14', 'e31', 'e32', 'e33', 'e34', 'e41', 'e43', 'e44', 'e45', 'e46', 'e47'].includes(limpio)) {
     return limpio.toUpperCase();
   }
+  if (/^e(31|32|33|34|41|43|44|45|46|47)$/i.test(limpio)) {
+    return limpio.toUpperCase();
+  }
   return fallback;
 };
 
@@ -4670,6 +4673,9 @@ const validarTipoComprobanteVentaEntrada = (valor) => {
 
 const esTipoComprobanteSinRegistroFiscal = (valor) =>
   normalizarTipoComprobanteVenta(valor, 'Sin comprobante') === 'Sin comprobante';
+
+const esTipoComprobanteEcf = (valor) =>
+  /^E(31|32|33|34|41|43|44|45|46|47)$/i.test(String(valor || '').trim());
 
 const generarNCFAsync = (tipo, negocioId) =>
   new Promise((resolve, reject) => {
@@ -8265,6 +8271,23 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
       }
 
       limpiarCacheAnalitica(negocioIdOperacion);
+
+      // e-CF: mark pedido for e-CF emission when using electronic comprobante types
+      if (!esCobroAdelantado && tipoFinal && /^E(31|32|33|34|41|43|44|45|46|47)$/i.test(tipoFinal)) {
+        const ecfTipoFinal = tipoFinal.toUpperCase();
+        const pedidoRefId = pedidoReferencia.id;
+        setImmediate(async () => {
+          try {
+            await db.run(
+              'UPDATE pedidos SET ecf_tipo = ?, ecf_estado = ? WHERE id = ? AND ecf_tipo IS NULL',
+              [ecfTipoFinal, 'PENDIENTE', pedidoRefId]
+            );
+          } catch (ecfErr) {
+            console.error('Error marcando pedido para e-CF', pedidoRefId, ':', ecfErr?.message || ecfErr);
+          }
+        });
+      }
+
       callback(null, {
         factura,
         totales: construirTotalesRespuesta(),
@@ -9400,6 +9423,17 @@ if (ENABLE_DGII_PASO2) {
 } else {
   console.log('DGII Paso 2 desactivado. Usa ENABLE_DGII_PASO2=true para reactivarlo.');
 }
+
+const { createDgiiEcfRouter } = require('./dgii-ecf.routes');
+app.use(
+  '/api/dgii/ecf',
+  createDgiiEcfRouter({
+    db,
+    requireUsuarioSesion,
+    tienePermisoAdmin: esSuperAdmin,
+    obtenerNegocioIdUsuario,
+  })
+);
 
 app.post('/api/caja/cierres', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {

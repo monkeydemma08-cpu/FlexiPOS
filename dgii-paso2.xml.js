@@ -380,13 +380,17 @@ const buildPaginacion = (accessor) => {
 const buildInformacionReferencia = (accessor) =>
   section('InformacionReferencia', renderFields(accessor, ['NCFModificado', 'RNCOtroContribuyente', 'FechaNCFModificado', 'CodigoModificacion', 'RazonModificacion']));
 
-const buildEcfXml = ({ payload = {}, flujo = 'ECF_NORMAL', rncEmisorFallback = '', fechaHoraFirma = null }) => {
+const buildEcfXml = ({ payload = {}, flujo = 'ECF_NORMAL', rncEmisorFallback = '', fechaHoraFirma = null, fechaVencimientoSecuenciaFallback = null }) => {
   const accessor = buildAccessor(payload);
   const tipoeCF = String(accessor.get('TipoeCF') || '').trim();
   const includeInformacionReferencia = tipoeCF === '33' || tipoeCF === '34';
+  const idDocFallbacks = {};
+  if (fechaVencimientoSecuenciaFallback) {
+    idDocFallbacks.FechaVencimientoSecuencia = normalizeDate(fechaVencimientoSecuenciaFallback, { fallbackToday: false });
+  }
   const encabezado = [
     tag('Version', accessor.get('Version') || '1.0', 'Version'),
-    section('IdDoc', renderFields(accessor, [{ xmlName: 'TipoeCF', keys: ['TipoeCF'] }, { xmlName: 'eNCF', keys: ['eNCF', 'ENCF'] }, 'FechaVencimientoSecuencia', 'IndicadorNotaCredito', 'IndicadorEnvioDiferido', 'IndicadorMontoGravado', 'IndicadorServicioTodoIncluido', 'TipoIngresos', 'TipoPago', 'FechaLimitePago', 'TerminoPago']) + buildFormasPago(accessor) + renderFields(accessor, ['TipoCuentaPago', 'NumeroCuentaPago', 'BancoPago', 'FechaDesde', 'FechaHasta', 'TotalPaginas'])),
+    section('IdDoc', renderFields(accessor, [{ xmlName: 'TipoeCF', keys: ['TipoeCF'] }, { xmlName: 'eNCF', keys: ['eNCF', 'ENCF'] }, 'FechaVencimientoSecuencia', 'IndicadorNotaCredito', 'IndicadorEnvioDiferido', 'IndicadorMontoGravado', 'IndicadorServicioTodoIncluido', 'TipoIngresos', 'TipoPago', 'FechaLimitePago', 'TerminoPago'], idDocFallbacks) + buildFormasPago(accessor) + renderFields(accessor, ['TipoCuentaPago', 'NumeroCuentaPago', 'BancoPago', 'FechaDesde', 'FechaHasta', 'TotalPaginas'])),
     section('Emisor', renderFields(accessor, [{ xmlName: 'RNCEmisor', keys: ['RNCEmisor'] }, 'RazonSocialEmisor', 'NombreComercial', 'Sucursal', 'DireccionEmisor', 'Municipio', 'Provincia'], { RNCEmisor: rncEmisorFallback || '' }) + wrapSimpleRepeating(accessor, 'TablaTelefonoEmisor', 'TelefonoEmisor', 'TelefonoEmisor') + renderFields(accessor, ['CorreoEmisor', 'WebSite', 'ActividadEconomica', 'CodigoVendedor', 'NumeroFacturaInterna', 'NumeroPedidoInterno', 'ZonaVenta', 'RutaVenta', 'InformacionAdicionalEmisor', 'FechaEmision'])),
     section('Comprador', renderFields(accessor, ['RNCComprador', 'IdentificadorExtranjero', 'RazonSocialComprador', 'ContactoComprador', 'CorreoComprador', 'DireccionComprador', 'MunicipioComprador', 'ProvinciaComprador', 'PaisComprador', 'FechaEntrega', 'ContactoEntrega', 'DireccionEntrega', 'TelefonoAdicional', 'FechaOrdenCompra', 'NumeroOrdenCompra', 'CodigoInternoComprador', 'ResponsablePago', 'InformacionAdicionalComprador'])),
     section('InformacionesAdicionales', renderFields(accessor, ['FechaEmbarque', 'NumeroEmbarque', 'NumeroContenedor', 'NumeroReferencia', 'NombrePuertoEmbarque', 'CondicionesEntrega', 'TotalFob', 'Seguro', 'Flete', 'OtrosGastos', 'TotalCif', 'RegimenAduanero', 'NombrePuertoSalida', 'NombrePuertoDesembarque', 'PesoBruto', 'PesoNeto', 'UnidadPesoBruto', 'UnidadPesoNeto', 'CantidadBulto', 'UnidadBulto', 'VolumenBulto', 'UnidadVolumen'])),
