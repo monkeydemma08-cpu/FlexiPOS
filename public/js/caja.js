@@ -4777,9 +4777,12 @@ const cerrarCuenta = async () => {
 
 
 
-    setMensajeDetalle('Pago registrado correctamente.', 'info');
-
-
+    const tipoComp = selectTipoComprobante?.value || '';
+    const esEcf = /^E(31|32|33|34|41|43|44|45|46|47)$/i.test(tipoComp);
+    setMensajeDetalle(
+      esEcf ? 'Pago registrado. e-CF pendiente de emision.' : 'Pago registrado correctamente.',
+      'info'
+    );
 
     const facturaGenerada = data.factura;
 

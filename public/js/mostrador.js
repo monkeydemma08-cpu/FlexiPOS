@@ -1824,7 +1824,12 @@ const confirmarPago = async () => {
       throw new Error(data.error || 'No se pudo cerrar la venta.');
     }
 
-    mostrarMensajeCobro('Pago registrado correctamente.', 'info');
+    const tipoComp = selectTipoComprobante?.value || '';
+    const esEcf = /^E(31|32|33|34|41|43|44|45|46|47)$/i.test(tipoComp);
+    mostrarMensajeCobro(
+      esEcf ? 'Pago registrado. e-CF pendiente de emision.' : 'Pago registrado correctamente.',
+      'info'
+    );
     const facturaGenerada = data.factura;
     if (facturaGenerada?.id) {
       const facturaId = Number(facturaGenerada.id);

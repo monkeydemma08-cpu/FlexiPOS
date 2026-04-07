@@ -1556,6 +1556,7 @@ const tabsSoloAdmin = [
   'gastos',
   'menuPublico',
   'ventas',
+  'facturacionEcf',
   'analisis',
   'cuadres',
   'historial',
@@ -8374,6 +8375,252 @@ const initNegociosAdmin = () => {
   cargarRegistrosSolicitudes();
 };
 
+// ---------------------------------------------------------------------------
+// Facturacion Electronica e-CF
+// ---------------------------------------------------------------------------
+
+let ecfPanelCargado = false;
+
+const ecfAuthMsg = document.getElementById('ecf-auth-msg');
+const ecfResumenContainer = document.getElementById('ecf-resumen-container');
+const ecfSecuenciasTabla = document.getElementById('ecf-secuencias-tabla');
+const ecfPendientesTabla = document.getElementById('ecf-pendientes-tabla');
+
+const mostrarEcfMsg = (el, texto, tipo = 'info') => {
+  if (!el) return;
+  el.style.display = 'block';
+  el.textContent = texto;
+  el.style.background = tipo === 'ok' ? '#d4edda' : tipo === 'error' ? '#f8d7da' : '#d1ecf1';
+  el.style.color = tipo === 'ok' ? '#155724' : tipo === 'error' ? '#721c24' : '#0c5460';
+};
+
+const cargarEcfResumen = async () => {
+  if (!ecfResumenContainer) return;
+  try {
+    const res = await fetchConAutorizacion('/api/dgii/ecf/resumen');
+    const data = await leerRespuestaApi(res);
+    if (!data || !data.resumen) {
+      ecfResumenContainer.innerHTML = '<p>No hay datos de resumen.</p>';
+      return;
+    }
+    const r = data.resumen;
+    const items = Array.isArray(r) ? r : [];
+    if (items.length === 0) {
+      ecfResumenContainer.innerHTML = '<p>No hay comprobantes emitidos aun.</p>';
+      return;
+    }
+    let html = '<table class="tabla-generica" style="width:100%;"><thead><tr>' +
+      '<th>Tipo</th><th>Aceptados</th><th>Rechazados</th><th>Pendientes</th><th>Total</th>' +
+      '</tr></thead><tbody>';
+    items.forEach((row) => {
+      html += `<tr>
+        <td>${row.ecf_tipo || '-'}</td>
+        <td style="color:green;">${row.aceptados || 0}</td>
+        <td style="color:red;">${row.rechazados || 0}</td>
+        <td style="color:orange;">${row.pendientes || 0}</td>
+        <td>${row.total || 0}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    ecfResumenContainer.innerHTML = html;
+  } catch (err) {
+    ecfResumenContainer.innerHTML = `<p style="color:red;">Error: ${err.message}</p>`;
+  }
+};
+
+const cargarEcfSecuencias = async () => {
+  if (!ecfSecuenciasTabla) return;
+  try {
+    const res = await fetchConAutorizacion('/api/dgii/ecf/secuencias');
+    const data = await leerRespuestaApi(res);
+    const seqs = data?.secuencias || [];
+    if (seqs.length === 0) {
+      ecfSecuenciasTabla.innerHTML = '<tr><td colspan="4">Sin secuencias configuradas.</td></tr>';
+      return;
+    }
+    ecfSecuenciasTabla.innerHTML = seqs.map((s) =>
+      `<tr>
+        <td>${s.tipo}</td>
+        <td>${s.rnc_emisor || '-'}</td>
+        <td>${s.correlativo}</td>
+        <td>${s.fecha_vencimiento ? new Date(s.fecha_vencimiento).toLocaleDateString() : '-'}</td>
+      </tr>`
+    ).join('');
+  } catch (err) {
+    ecfSecuenciasTabla.innerHTML = `<tr><td colspan="4" style="color:red;">Error: ${err.message}</td></tr>`;
+  }
+};
+
+const cargarEcfPendientes = async () => {
+  if (!ecfPendientesTabla) return;
+  try {
+    const res = await fetchConAutorizacion('/api/dgii/ecf/pendientes');
+    const data = await leerRespuestaApi(res);
+    const pedidos = data?.pedidos || [];
+    if (pedidos.length === 0) {
+      ecfPendientesTabla.innerHTML = '<tr><td colspan="9">No hay pedidos pendientes.</td></tr>';
+      return;
+    }
+    ecfPendientesTabla.innerHTML = pedidos.map((p) => {
+      const estadoColor = p.ecf_estado === 'ACEPTADO' ? 'green'
+        : p.ecf_estado === 'RECHAZADO' ? 'red'
+        : p.ecf_estado === 'PENDIENTE' ? 'orange' : '#666';
+      const acciones = (p.ecf_estado === 'PENDIENTE' || p.ecf_estado === 'ERROR' || p.ecf_estado === 'RECHAZADO')
+        ? `<button class="btn btn-sm btn-primary ecf-btn-emitir" data-pedido-id="${p.id}">Emitir</button>
+           <button class="btn btn-sm btn-secondary ecf-btn-reintentar" data-pedido-id="${p.id}">Reintentar</button>`
+        : (p.ecf_estado === 'ENVIADO'
+          ? `<button class="btn btn-sm btn-secondary ecf-btn-consultar" data-pedido-id="${p.id}">Consultar</button>`
+          : '');
+      return `<tr>
+        <td>${p.id}</td>
+        <td>${p.cliente_nombre || '-'}</td>
+        <td>${p.ecf_tipo || p.tipo_comprobante || '-'}</td>
+        <td>${p.ecf_encf || '-'}</td>
+        <td>${Number(p.total || 0).toFixed(2)}</td>
+        <td style="color:${estadoColor};font-weight:bold;">${p.ecf_estado || 'PENDIENTE'}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(p.ecf_mensaje_dgii || '').replace(/"/g, '&quot;')}">${p.ecf_mensaje_dgii || '-'}</td>
+        <td>${p.ecf_intentos || 0}</td>
+        <td>${acciones}</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    ecfPendientesTabla.innerHTML = `<tr><td colspan="9" style="color:red;">Error: ${err.message}</td></tr>`;
+  }
+};
+
+const cargarEcfPanel = async () => {
+  await Promise.all([cargarEcfResumen(), cargarEcfSecuencias(), cargarEcfPendientes()]);
+  ecfPanelCargado = true;
+};
+
+// e-CF button handlers (delegated)
+document.getElementById('admin-section-ecf')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const pedidoId = btn.dataset.pedidoId;
+
+  if (btn.id === 'ecf-btn-test-auth') {
+    mostrarEcfMsg(ecfAuthMsg, 'Probando autenticacion...', 'info');
+    try {
+      const res = await fetchConAutorizacion('/api/dgii/ecf/test-auth', { method: 'POST' });
+      const data = await leerRespuestaApi(res);
+      if (data?.ok) {
+        mostrarEcfMsg(ecfAuthMsg, 'Autenticacion exitosa. Token obtenido.', 'ok');
+      } else {
+        mostrarEcfMsg(ecfAuthMsg, `Error: ${data?.error || 'No se pudo autenticar'}`, 'error');
+      }
+    } catch (err) {
+      mostrarEcfMsg(ecfAuthMsg, `Error: ${err.message}`, 'error');
+    }
+    return;
+  }
+
+  if (btn.id === 'ecf-btn-emitir-lote') {
+    btn.disabled = true;
+    btn.textContent = 'Emitiendo...';
+    try {
+      const res = await fetchJsonAutorizado('/api/dgii/ecf/emitir-lote', { method: 'POST' });
+      const data = await leerRespuestaApi(res);
+      const ok = data?.resultados?.filter((r) => r.ok)?.length || 0;
+      const fail = data?.resultados?.filter((r) => !r.ok)?.length || 0;
+      mostrarEcfMsg(ecfAuthMsg, `Lote completado: ${ok} exitosos, ${fail} fallidos.`, fail > 0 ? 'error' : 'ok');
+      await cargarEcfPanel();
+    } catch (err) {
+      mostrarEcfMsg(ecfAuthMsg, `Error lote: ${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Emitir Lote Pendiente';
+    }
+    return;
+  }
+
+  if (btn.id === 'ecf-btn-refresh') {
+    await cargarEcfPanel();
+    return;
+  }
+
+  if (btn.id === 'ecf-btn-init-secuencias') {
+    btn.disabled = true;
+    try {
+      const tipos = ['E31', 'E32', 'E33', 'E34', 'E41', 'E43', 'E44', 'E45', 'E46', 'E47'];
+      for (const tipo of tipos) {
+        await fetchJsonAutorizado('/api/dgii/ecf/secuencias/inicializar', {
+          method: 'POST',
+          body: JSON.stringify({ tipo, correlativoInicial: 1 }),
+        });
+      }
+      mostrarEcfMsg(ecfAuthMsg, 'Secuencias inicializadas correctamente.', 'ok');
+      await cargarEcfSecuencias();
+    } catch (err) {
+      mostrarEcfMsg(ecfAuthMsg, `Error: ${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+
+  if (btn.classList.contains('ecf-btn-emitir') && pedidoId) {
+    btn.disabled = true;
+    btn.textContent = 'Emitiendo...';
+    try {
+      const res = await fetchConAutorizacion(`/api/dgii/ecf/emitir/${pedidoId}`, { method: 'POST' });
+      const data = await leerRespuestaApi(res);
+      if (data?.ok) {
+        mostrarEcfMsg(ecfAuthMsg, `Pedido ${pedidoId}: ${data.ecf_estado || 'Emitido'}`, 'ok');
+      } else {
+        mostrarEcfMsg(ecfAuthMsg, `Pedido ${pedidoId}: ${data?.error || 'Error'}`, 'error');
+      }
+      await cargarEcfPendientes();
+    } catch (err) {
+      mostrarEcfMsg(ecfAuthMsg, `Error: ${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Emitir';
+    }
+    return;
+  }
+
+  if (btn.classList.contains('ecf-btn-reintentar') && pedidoId) {
+    btn.disabled = true;
+    btn.textContent = 'Reintentando...';
+    try {
+      const res = await fetchConAutorizacion(`/api/dgii/ecf/reintentar/${pedidoId}`, { method: 'POST' });
+      const data = await leerRespuestaApi(res);
+      if (data?.ok) {
+        mostrarEcfMsg(ecfAuthMsg, `Pedido ${pedidoId}: Reintento ${data.ecf_estado || 'OK'}`, 'ok');
+      } else {
+        mostrarEcfMsg(ecfAuthMsg, `Pedido ${pedidoId}: ${data?.error || 'Error'}`, 'error');
+      }
+      await cargarEcfPendientes();
+    } catch (err) {
+      mostrarEcfMsg(ecfAuthMsg, `Error: ${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Reintentar';
+    }
+    return;
+  }
+
+  if (btn.classList.contains('ecf-btn-consultar') && pedidoId) {
+    btn.disabled = true;
+    try {
+      const res = await fetchConAutorizacion(`/api/dgii/ecf/consultar/${pedidoId}`, { method: 'POST' });
+      const data = await leerRespuestaApi(res);
+      if (data?.ok) {
+        mostrarEcfMsg(ecfAuthMsg, `Pedido ${pedidoId}: ${data.ecf_estado || 'Consultado'}`, 'ok');
+      } else {
+        mostrarEcfMsg(ecfAuthMsg, `Pedido ${pedidoId}: ${data?.error || 'Error'}`, 'error');
+      }
+      await cargarEcfPendientes();
+    } catch (err) {
+      mostrarEcfMsg(ecfAuthMsg, `Error: ${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[Negocios] DOMContentLoaded, APP_SESION actual:', window.APP_SESION);
 
@@ -9149,6 +9396,9 @@ adminTabs.forEach((btn) =>
       cargarMenuPublicoAccesos({ force: true }).catch((error) => {
         console.warn('No se pudieron cargar los accesos del menu publico:', error);
       });
+    }
+    if (tab === 'facturacionEcf') {
+      cargarEcfPanel();
     }
     const tabUrl = btn.dataset.tabUrl;
     if (tabUrl) {

@@ -119,6 +119,7 @@
       <button type="button" class="kanm-tab" data-admin-tab="abastecimiento" data-modulo="admin">Abastecimiento</button>
       <button type="button" class="kanm-tab" data-admin-tab="gastos" data-modulo="admin">Gastos</button>
       <button type="button" class="kanm-tab" data-admin-tab="ventas" data-modulo="caja">Ventas &amp; 607</button>
+      <button type="button" class="kanm-tab" data-admin-tab="facturacionEcf" data-modulo="admin">e-CF</button>
       <button type="button" class="kanm-tab" data-admin-tab="analisis" data-modulo="admin">Analisis del negocio</button>
       <button type="button" class="kanm-tab" data-admin-tab="cuadres" data-modulo="caja">Cuadres de caja</button>
       <button type="button" class="kanm-tab" data-admin-tab="historial" data-modulo="historialCocina">Historial de preparación</button>
@@ -1952,6 +1953,68 @@
           </table>
         </div>
       </section>
+    </section>
+
+    <!-- Facturacion Electronica e-CF -->
+    <section class="admin-panel hidden" data-admin-section="facturacionEcf" id="admin-section-ecf">
+      <div class="kanm-card-header">
+        <h2>Facturacion Electronica (e-CF)</h2>
+        <p class="kanm-subtitle">Emision directa de comprobantes fiscales electronicos a la DGII.</p>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+        <button class="btn btn-sm btn-primary" id="ecf-btn-test-auth">Probar Autenticacion</button>
+        <button class="btn btn-sm btn-success" id="ecf-btn-emitir-lote">Emitir Lote Pendiente</button>
+        <button class="btn btn-sm btn-secondary" id="ecf-btn-refresh">Actualizar</button>
+      </div>
+
+      <div id="ecf-auth-msg" style="display:none;margin-bottom:12px;padding:8px;border-radius:4px;"></div>
+
+      <!-- Resumen -->
+      <h3 style="margin-top:20px;">Estado de Pruebas</h3>
+      <div id="ecf-resumen-container">
+        <p>Cargando...</p>
+      </div>
+
+      <!-- Secuencias -->
+      <h3 style="margin-top:20px;">Secuencias e-CF</h3>
+      <table class="tabla-generica" style="width:100%;margin-bottom:12px;">
+        <thead>
+          <tr>
+            <th>Tipo</th>
+            <th>RNC Emisor</th>
+            <th>Correlativo Actual</th>
+            <th>Fecha Vencimiento</th>
+          </tr>
+        </thead>
+        <tbody id="ecf-secuencias-tabla">
+          <tr><td colspan="4">Sin secuencias configuradas.</td></tr>
+        </tbody>
+      </table>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+        <button class="btn btn-sm btn-secondary" id="ecf-btn-init-secuencias">Inicializar Secuencias</button>
+      </div>
+
+      <!-- Pendientes -->
+      <h3 style="margin-top:20px;">Pedidos Pendientes de Emision</h3>
+      <table class="tabla-generica" style="width:100%;">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Cliente</th>
+            <th>Tipo</th>
+            <th>eNCF</th>
+            <th>Total</th>
+            <th>Estado</th>
+            <th>Mensaje DGII</th>
+            <th>Intentos</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="ecf-pendientes-tabla">
+          <tr><td colspan="9">Cargando...</td></tr>
+        </tbody>
+      </table>
     </section>
 
     <!-- DGII Paso 2 -->
