@@ -161,6 +161,13 @@ let secuenciasConfig = {
   permitir_b01: 1,
   permitir_b02: 1,
   permitir_b14: 1,
+  permitir_e31: 1,
+  permitir_e32: 1,
+  permitir_e43: 1,
+  permitir_e44: 1,
+  permitir_e45: 1,
+  permitir_e46: 1,
+  facturacion_electronica_habilitada: 0,
 };
 
 const METODOS_PAGO_CUADRE = [
@@ -285,7 +292,7 @@ const normalizarTipoComprobante = (valor) => {
   if (['sin comprobante', 'sin_comprobante', 'sin'].includes(lower)) {
     return 'Sin comprobante';
   }
-  if (['b01', 'b02', 'b14'].includes(lower)) {
+  if (['b01', 'b02', 'b14', 'e31', 'e32', 'e43', 'e44', 'e45', 'e46'].includes(lower)) {
     return lower.toUpperCase();
   }
   return texto;
@@ -293,16 +300,93 @@ const normalizarTipoComprobante = (valor) => {
 
 const esSinComprobante = (valor) => normalizarTipoComprobante(valor).toLowerCase() === 'sin comprobante';
 
+const esTipoComprobanteElectronico = (valor) =>
+  ['E31', 'E32', 'E43', 'E44', 'E45', 'E46'].includes(normalizarTipoComprobante(valor).toUpperCase());
+
+const esFacturacionElectronicaActiva = () =>
+  Number(secuenciasConfig.facturacion_electronica_habilitada) === 1;
+
+const obtenerTipoComprobantePredeterminado = () => (esFacturacionElectronicaActiva() ? 'E32' : 'B02');
+
+const adaptarTipoComprobanteAlModoFiscal = (valor) => {
+  const tipo = normalizarTipoComprobante(valor || obtenerTipoComprobantePredeterminado());
+  if (!tipo || esSinComprobante(tipo)) {
+    return tipo;
+  }
+  if (esFacturacionElectronicaActiva()) {
+    if (tipo === 'B01') return 'E31';
+    if (tipo === 'B02') return 'E32';
+    if (tipo === 'B14') return 'E43';
+    return tipo;
+  }
+  if (tipo === 'E31') return 'B01';
+  if (tipo === 'E32') return 'B02';
+  if (tipo === 'E43') return 'B14';
+  return tipo;
+};
+
 const resolverConfigSecuencias = (tema = {}) => ({
   permitir_b01: normalizarFlagUI(tema?.permitir_b01 ?? tema?.permitirB01, 1),
   permitir_b02: normalizarFlagUI(tema?.permitir_b02 ?? tema?.permitirB02, 1),
   permitir_b14: normalizarFlagUI(tema?.permitir_b14 ?? tema?.permitirB14, 1),
+  permitir_e31: normalizarFlagUI(
+    tema?.permitir_e31 ??
+      tema?.permitirE31 ??
+      tema?.facturacionElectronica?.permitir_e31 ??
+      tema?.facturacion_electronica?.permitir_e31,
+    1
+  ),
+  permitir_e32: normalizarFlagUI(
+    tema?.permitir_e32 ??
+      tema?.permitirE32 ??
+      tema?.facturacionElectronica?.permitir_e32 ??
+      tema?.facturacion_electronica?.permitir_e32,
+    1
+  ),
+  permitir_e43: normalizarFlagUI(
+    tema?.permitir_e43 ??
+      tema?.permitirE43 ??
+      tema?.facturacionElectronica?.permitir_e43 ??
+      tema?.facturacion_electronica?.permitir_e43,
+    1
+  ),
+  permitir_e44: normalizarFlagUI(
+    tema?.permitir_e44 ??
+      tema?.permitirE44 ??
+      tema?.facturacionElectronica?.permitir_e44 ??
+      tema?.facturacion_electronica?.permitir_e44,
+    1
+  ),
+  permitir_e45: normalizarFlagUI(
+    tema?.permitir_e45 ??
+      tema?.permitirE45 ??
+      tema?.facturacionElectronica?.permitir_e45 ??
+      tema?.facturacion_electronica?.permitir_e45,
+    1
+  ),
+  permitir_e46: normalizarFlagUI(
+    tema?.permitir_e46 ??
+      tema?.permitirE46 ??
+      tema?.facturacionElectronica?.permitir_e46 ??
+      tema?.facturacion_electronica?.permitir_e46,
+    1
+  ),
+  facturacion_electronica_habilitada: normalizarFlagUI(
+    tema?.facturacion_electronica_habilitada ??
+      tema?.facturacionElectronicaHabilitada ??
+      tema?.facturacionElectronica?.habilitada ??
+      tema?.facturacion_electronica?.habilitada,
+    0
+  ),
 });
 
 const actualizarEstadoNcfManual = (tipoComprobante) => {
   if (!inputNcfManual) return;
   const sinComprobante = esSinComprobante(tipoComprobante);
   inputNcfManual.disabled = sinComprobante;
+  inputNcfManual.placeholder = esTipoComprobanteElectronico(tipoComprobante)
+    ? 'Dejar en blanco para generar e-CF'
+    : 'Dejar en blanco para generar';
   if (sinComprobante) {
     inputNcfManual.value = '';
   }
@@ -316,11 +400,17 @@ const obtenerOpcionDisponible = () => {
 
 const seleccionarTipoComprobantePermitido = (preferido) => {
   if (!selectTipoComprobante) return;
-  const valorPreferido = normalizarTipoComprobante(preferido || 'B02');
+  const valorPreferido = adaptarTipoComprobanteAlModoFiscal(preferido || obtenerTipoComprobantePredeterminado());
   const valorPreferidoUpper = valorPreferido.toUpperCase();
-  const permitirB01 = Number(secuenciasConfig.permitir_b01) !== 0;
-  const permitirB02 = Number(secuenciasConfig.permitir_b02) !== 0;
-  const permitirB14 = Number(secuenciasConfig.permitir_b14) !== 0;
+  const permitirB01 = !esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_b01) !== 0;
+  const permitirB02 = !esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_b02) !== 0;
+  const permitirB14 = !esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_b14) !== 0;
+  const permitirE31 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e31) !== 0;
+  const permitirE32 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e32) !== 0;
+  const permitirE43 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e43) !== 0;
+  const permitirE44 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e44) !== 0;
+  const permitirE45 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e45) !== 0;
+  const permitirE46 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e46) !== 0;
 
   let valorFinal = valorPreferido;
   if (valorPreferidoUpper === 'B01' && !permitirB01) {
@@ -330,6 +420,24 @@ const seleccionarTipoComprobantePermitido = (preferido) => {
     valorFinal = null;
   }
   if (valorPreferidoUpper === 'B14' && !permitirB14) {
+    valorFinal = null;
+  }
+  if (valorPreferidoUpper === 'E31' && !permitirE31) {
+    valorFinal = null;
+  }
+  if (valorPreferidoUpper === 'E32' && !permitirE32) {
+    valorFinal = null;
+  }
+  if (valorPreferidoUpper === 'E43' && !permitirE43) {
+    valorFinal = null;
+  }
+  if (valorPreferidoUpper === 'E44' && !permitirE44) {
+    valorFinal = null;
+  }
+  if (valorPreferidoUpper === 'E45' && !permitirE45) {
+    valorFinal = null;
+  }
+  if (valorPreferidoUpper === 'E46' && !permitirE46) {
     valorFinal = null;
   }
 
@@ -348,13 +456,32 @@ const aplicarConfigSecuencias = (config = {}) => {
     permitir_b01: normalizarFlagUI(config.permitir_b01 ?? config.permitirB01, 1),
     permitir_b02: normalizarFlagUI(config.permitir_b02 ?? config.permitirB02, 1),
     permitir_b14: normalizarFlagUI(config.permitir_b14 ?? config.permitirB14, 1),
+    permitir_e31: normalizarFlagUI(config.permitir_e31 ?? config.permitirE31, 1),
+    permitir_e32: normalizarFlagUI(config.permitir_e32 ?? config.permitirE32, 1),
+    permitir_e43: normalizarFlagUI(config.permitir_e43 ?? config.permitirE43, 1),
+    permitir_e44: normalizarFlagUI(config.permitir_e44 ?? config.permitirE44, 1),
+    permitir_e45: normalizarFlagUI(config.permitir_e45 ?? config.permitirE45, 1),
+    permitir_e46: normalizarFlagUI(config.permitir_e46 ?? config.permitirE46, 1),
+    facturacion_electronica_habilitada: normalizarFlagUI(
+      config.facturacion_electronica_habilitada ??
+        config.facturacionElectronicaHabilitada ??
+        config.facturacionElectronica?.habilitada ??
+        config.facturacion_electronica?.habilitada,
+      0
+    ),
   };
 
   if (!selectTipoComprobante) return;
 
-  const permitirB01 = Number(secuenciasConfig.permitir_b01) !== 0;
-  const permitirB02 = Number(secuenciasConfig.permitir_b02) !== 0;
-  const permitirB14 = Number(secuenciasConfig.permitir_b14) !== 0;
+  const permitirB01 = !esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_b01) !== 0;
+  const permitirB02 = !esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_b02) !== 0;
+  const permitirB14 = !esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_b14) !== 0;
+  const permitirE31 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e31) !== 0;
+  const permitirE32 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e32) !== 0;
+  const permitirE43 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e43) !== 0;
+  const permitirE44 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e44) !== 0;
+  const permitirE45 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e45) !== 0;
+  const permitirE46 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e46) !== 0;
   const opciones = Array.from(selectTipoComprobante.options || []);
 
   opciones.forEach((opt) => {
@@ -370,9 +497,33 @@ const aplicarConfigSecuencias = (config = {}) => {
       opt.hidden = !permitirB14;
       opt.disabled = !permitirB14;
     }
+    if (opt.value === 'E31') {
+      opt.hidden = !permitirE31;
+      opt.disabled = !permitirE31;
+    }
+    if (opt.value === 'E32') {
+      opt.hidden = !permitirE32;
+      opt.disabled = !permitirE32;
+    }
+    if (opt.value === 'E43') {
+      opt.hidden = !permitirE43;
+      opt.disabled = !permitirE43;
+    }
+    if (opt.value === 'E44') {
+      opt.hidden = !permitirE44;
+      opt.disabled = !permitirE44;
+    }
+    if (opt.value === 'E45') {
+      opt.hidden = !permitirE45;
+      opt.disabled = !permitirE45;
+    }
+    if (opt.value === 'E46') {
+      opt.hidden = !permitirE46;
+      opt.disabled = !permitirE46;
+    }
   });
 
-  seleccionarTipoComprobantePermitido(selectTipoComprobante.value || 'B02');
+  seleccionarTipoComprobantePermitido(selectTipoComprobante.value || obtenerTipoComprobantePredeterminado());
 };
 
 const cargarConfigSecuencias = async () => {
@@ -665,6 +816,8 @@ let resumenCuadre = {
   totalSistema: 0,
 
   totalGeneral: 0,
+
+  efectivoEsperado: 0,
 
   totalEfectivo: 0,
 
@@ -1810,11 +1963,11 @@ const actualizarEfectivoEsperado = () => {
 
   const esperado = calcularEfectivoEsperado();
 
-  resumenCuadre.totalSistema = esperado;
+  resumenCuadre.efectivoEsperado = esperado;
 
 
 
-  setCampoCuadre('cuadre-total-sistema', esperado);
+  setCampoCuadre('cuadre-total-sistema', resumenCuadre.totalGeneral || resumenCuadre.totalSistema || 0);
 
   setCampoCuadre('cuadre-fondo-display', obtenerFondoInicial());
 
@@ -2162,7 +2315,7 @@ const limpiarSeleccion = () => {
 
   resetPagosFormulario(0);
 
-  seleccionarTipoComprobantePermitido('B02');
+  seleccionarTipoComprobantePermitido(obtenerTipoComprobantePredeterminado());
 
   if (inputNcfManual) inputNcfManual.value = '';
 
@@ -3005,7 +3158,7 @@ const renderDetallePedido = () => {
 
   if (inputClienteDocumento) inputClienteDocumento.value = encabezado?.cliente_documento || '';
 
-  seleccionarTipoComprobantePermitido(encabezado?.tipo_comprobante || 'B02');
+  seleccionarTipoComprobantePermitido(encabezado?.tipo_comprobante || obtenerTipoComprobantePredeterminado());
 
   if (inputNcfManual) inputNcfManual.value = encabezado?.ncf || '';
 
@@ -4021,9 +4174,11 @@ const cargarResumenCuadre = async (mostrarCarga = true) => {
 
       fecha,
 
-      totalSistema: Number(data.total_sistema) || 0,
+      totalSistema: Number(data.total_general) || 0,
 
       totalGeneral: Number(data.total_general) || 0,
+
+      efectivoEsperado: 0,
 
       totalEfectivo: Number(data.total_efectivo) || 0,
 
@@ -4126,6 +4281,8 @@ const cargarResumenCuadre = async (mostrarCarga = true) => {
       totalSistema: 0,
 
       totalGeneral: 0,
+
+      efectivoEsperado: 0,
 
       totalEfectivo: 0,
 
@@ -4614,7 +4771,7 @@ const cargarPedidos = async (mostrarCarga = true) => {
 
 const construirPayloadCobroCuenta = (pagos, { generarFactura = true } = {}) => {
   const detalleDescuentosPayload = expandirDescuentosPorDetalle();
-  const tipoComprobante = normalizarTipoComprobante(selectTipoComprobante?.value || '');
+  const tipoComprobante = adaptarTipoComprobanteAlModoFiscal(selectTipoComprobante?.value || '');
   const sinComprobante = esSinComprobante(tipoComprobante);
   const ncfManual = generarFactura && !sinComprobante ? inputNcfManual?.value : null;
   const usuario = obtenerUsuarioActual();
@@ -4626,7 +4783,7 @@ const construirPayloadCobroCuenta = (pagos, { generarFactura = true } = {}) => {
     propina_porcentaje: calculo.propinaPorcentaje,
     cliente: inputClienteNombre?.value,
     cliente_documento: inputClienteDocumento?.value,
-    tipo_comprobante: tipoComprobante || 'B02',
+    tipo_comprobante: tipoComprobante || obtenerTipoComprobantePredeterminado(),
     ncf: ncfManual,
     generar_ncf: generarFactura ? !sinComprobante : false,
     comentarios: inputComentarios?.value,

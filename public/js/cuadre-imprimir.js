@@ -160,7 +160,7 @@ const renderDetalle = (data) => {
       usuarioSpan.textContent = `Usuario: ${cierre.usuario || '--'}${rol}`;
     }
   }
-  if (totalSistemaSpan) totalSistemaSpan.textContent = formatCurrency(cierre.total_sistema);
+  if (totalSistemaSpan) totalSistemaSpan.textContent = formatCurrency(cierre.efectivo_esperado ?? cierre.total_sistema);
   if (totalDeclaradoSpan) totalDeclaradoSpan.textContent = formatCurrency(cierre.total_declarado);
   if (diferenciaSpan) diferenciaSpan.textContent = formatCurrency(cierre.diferencia);
 
@@ -175,7 +175,7 @@ const renderDetalle = (data) => {
           <td>${formatDate(cierreMes.fecha_operacion)}</td>
           <td>${formatDateTime(cierreMes.fecha_cierre)}</td>
           <td>${cierreMes.usuario || 'N/D'}</td>
-          <td class="text-right">${formatCurrency(cierreMes.total_sistema)}</td>
+          <td class="text-right">${formatCurrency(cierreMes.efectivo_esperado ?? cierreMes.total_sistema)}</td>
           <td class="text-right">${formatCurrency(cierreMes.total_declarado)}</td>
           <td class="text-right">${formatCurrency(cierreMes.diferencia)}</td>
         `;

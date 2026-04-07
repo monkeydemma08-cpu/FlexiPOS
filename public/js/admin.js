@@ -93,6 +93,7 @@ const facturaLogoInput = document.getElementById('factura-logo');
 const facturaPieInput = document.getElementById('factura-pie');
 const facturaGuardarBtn = document.getElementById('factura-guardar');
 const facturaMensaje = document.getElementById('factura-mensaje');
+const facturaLegacyBloqueo = document.getElementById('factura-legacy-bloqueo');
 const ncfB02InicioInput = document.getElementById('ncf-b02-inicio');
 const ncfB02FinInput = document.getElementById('ncf-b02-fin');
 const ncfB02Restante = document.getElementById('ncf-b02-restante');
@@ -335,6 +336,82 @@ dgiiCasoXmlFirmadoInput.type = 'file';
 dgiiCasoXmlFirmadoInput.accept = '.xml,text/xml,application/xml';
 dgiiCasoXmlFirmadoInput.hidden = true;
 document.body?.appendChild(dgiiCasoXmlFirmadoInput);
+const feConfigForm = document.getElementById('fe-config-form');
+const feHabilitadaInput = document.getElementById('fe-habilitada');
+const feAmbienteInput = document.getElementById('fe-ambiente');
+const feProveedorInput = document.getElementById('fe-proveedor');
+const feRncEmisorInput = document.getElementById('fe-rnc-emisor');
+const feRazonSocialInput = document.getElementById('fe-razon-social');
+const feNombreComercialInput = document.getElementById('fe-nombre-comercial');
+const feDireccionInput = document.getElementById('fe-direccion');
+const feMunicipioCodigoInput = document.getElementById('fe-municipio-codigo');
+const feProvinciaCodigoInput = document.getElementById('fe-provincia-codigo');
+const feTelefonoInput = document.getElementById('fe-telefono');
+const feCorreoInput = document.getElementById('fe-correo');
+const feWebsiteInput = document.getElementById('fe-website');
+const feUsuarioEnvioInput = document.getElementById('fe-usuario-envio');
+const feClaveEnvioInput = document.getElementById('fe-clave-envio');
+const feCertificadoFileInput = document.getElementById('fe-certificado-file');
+const feCertificadoPasswordInput = document.getElementById('fe-certificado-password');
+const feFirmaAliasInput = document.getElementById('fe-firma-alias');
+const feObservacionesInput = document.getElementById('fe-observaciones');
+const feConfigGuardarBtn = document.getElementById('fe-config-guardar');
+const feConfigEstado = document.getElementById('fe-config-estado');
+const feConfigMensaje = document.getElementById('fe-config-mensaje');
+const feDgiiSemillaDescargarBtn = document.getElementById('fe-dgii-semilla-descargar');
+const feDgiiSemillaFirmadaFileInput = document.getElementById('fe-dgii-semilla-firmada-file');
+const feDgiiSemillaValidarBtn = document.getElementById('fe-dgii-semilla-validar');
+const feDgiiAuthMensaje = document.getElementById('fe-dgii-auth-mensaje');
+const feE31ActivaInput = document.getElementById('fe-e31-activa');
+const feE31PrefijoInput = document.getElementById('fe-e31-prefijo');
+const feE31CorrelativoInput = document.getElementById('fe-e31-correlativo');
+const feE31InicioInput = document.getElementById('fe-e31-inicio');
+const feE31FinInput = document.getElementById('fe-e31-fin');
+const feE31VencimientoInput = document.getElementById('fe-e31-vencimiento');
+const feE32ActivaInput = document.getElementById('fe-e32-activa');
+const feE32PrefijoInput = document.getElementById('fe-e32-prefijo');
+const feE32CorrelativoInput = document.getElementById('fe-e32-correlativo');
+const feE32InicioInput = document.getElementById('fe-e32-inicio');
+const feE32FinInput = document.getElementById('fe-e32-fin');
+const feE32VencimientoInput = document.getElementById('fe-e32-vencimiento');
+const feE43ActivaInput = document.getElementById('fe-e43-activa');
+const feE43PrefijoInput = document.getElementById('fe-e43-prefijo');
+const feE43CorrelativoInput = document.getElementById('fe-e43-correlativo');
+const feE43InicioInput = document.getElementById('fe-e43-inicio');
+const feE43FinInput = document.getElementById('fe-e43-fin');
+const feE43VencimientoInput = document.getElementById('fe-e43-vencimiento');
+const feE44ActivaInput = document.getElementById('fe-e44-activa');
+const feE44PrefijoInput = document.getElementById('fe-e44-prefijo');
+const feE44CorrelativoInput = document.getElementById('fe-e44-correlativo');
+const feE44InicioInput = document.getElementById('fe-e44-inicio');
+const feE44FinInput = document.getElementById('fe-e44-fin');
+const feE44VencimientoInput = document.getElementById('fe-e44-vencimiento');
+const feDocEstadoSelect = document.getElementById('fe-doc-estado');
+const feDocRefrescarBtn = document.getElementById('fe-doc-refrescar');
+const feDocTotalEl = document.getElementById('fe-doc-total');
+const feDocPendienteEl = document.getElementById('fe-doc-pendiente');
+const feDocConfigPendienteEl = document.getElementById('fe-doc-config-pendiente');
+const feDocTotalMontoEl = document.getElementById('fe-doc-total-monto');
+const feDocumentosMensaje = document.getElementById('fe-documentos-mensaje');
+const feDocumentosTabla = document.getElementById('fe-documentos-tabla');
+const feManualForm = document.getElementById('fe-manual-form');
+const feManualTipoInput = document.getElementById('fe-manual-tipo');
+const feManualFechaInput = document.getElementById('fe-manual-fecha');
+const feManualRolInput = document.getElementById('fe-manual-rol');
+const feManualNombreInput = document.getElementById('fe-manual-nombre');
+const feManualDocumentoInput = document.getElementById('fe-manual-documento');
+const feManualReferenciaTipoInput = document.getElementById('fe-manual-referencia-tipo');
+const feManualReferenciaEncfInput = document.getElementById('fe-manual-referencia-encf');
+const feManualMotivoInput = document.getElementById('fe-manual-motivo');
+const feManualDescripcionInput = document.getElementById('fe-manual-descripcion');
+const feManualSubtotalInput = document.getElementById('fe-manual-subtotal');
+const feManualImpuestoInput = document.getElementById('fe-manual-impuesto');
+const feManualTotalInput = document.getElementById('fe-manual-total');
+const feManualNotasInput = document.getElementById('fe-manual-notas');
+const feManualGuardarBtn = document.getElementById('fe-manual-guardar');
+const feManualMensaje = document.getElementById('fe-manual-mensaje');
+const feOrigenesTabla = document.getElementById('fe-origenes-tabla');
+const feOrigenesMensaje = document.getElementById('fe-origenes-mensaje');
 const adminTabs = Array.from(document.querySelectorAll('[data-admin-tab]'));
 const adminSections = Array.from(document.querySelectorAll('[data-admin-section]'));
 const menuPublicoRefrescarBtn = document.getElementById('menu-publico-refrescar');
@@ -358,6 +435,9 @@ let cuentaPorPagarActiva = null;
 let datosReporte607 = [];
 let datosReporte606 = [];
 let cierresCaja = [];
+let feConfigCache = null;
+let feDocumentos = [];
+let feOrigenes = [];
 let detalleCierreActivo = null;
 let detalleAbastecimientoActivo = null;
 let abastecimientoEditId = null;
@@ -751,10 +831,14 @@ const probarAutenticacionDgii = async () => {
   }
 };
 
-const descargarSemillaDgii = async () => {
+const descargarSemillaDgii = async ({
+  buttonEl = dgiiSemillaDescargarBtn,
+  messageEl = dgiiConfigMensaje,
+  endpoint = '/api/dgii/paso2/autenticacion/descargar-semilla',
+} = {}) => {
   try {
-    if (dgiiSemillaDescargarBtn) dgiiSemillaDescargarBtn.disabled = true;
-    const resp = await fetchJsonAutorizado('/api/dgii/paso2/autenticacion/descargar-semilla', {
+    if (buttonEl) buttonEl.disabled = true;
+    const resp = await fetchJsonAutorizado(endpoint, {
       method: 'POST',
       body: JSON.stringify({}),
     });
@@ -766,28 +850,36 @@ const descargarSemillaDgii = async () => {
     const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
     descargarBlob(data?.nombre_archivo || 'semilla.xml', new Blob([bytes], { type: 'application/xml' }));
     setMessage(
-      dgiiConfigMensaje,
+      messageEl,
       'Semilla descargada. Firmala en la app oficial de DGII y luego usa "Validar semilla firmada".',
       'info'
     );
   } catch (error) {
     console.error('Error descargando semilla DGII:', error);
-    setMessage(dgiiConfigMensaje, error.message || 'No se pudo descargar la semilla DGII.', 'error');
+    setMessage(messageEl, error.message || 'No se pudo descargar la semilla DGII.', 'error');
   } finally {
-    if (dgiiSemillaDescargarBtn) dgiiSemillaDescargarBtn.disabled = false;
+    if (buttonEl) buttonEl.disabled = false;
   }
 };
 
-const validarSemillaFirmadaDgii = async () => {
+const validarSemillaFirmadaDgii = async ({
+  buttonEl = dgiiSemillaValidarBtn,
+  fileInputEl = dgiiSemillaFirmadaFileInput,
+  messageEl = dgiiConfigMensaje,
+  endpoint = '/api/dgii/paso2/autenticacion/validar-semilla-firmada',
+  onSuccess = async () => {
+    await cargarConfigDgii();
+  },
+} = {}) => {
   try {
-    const file = dgiiSemillaFirmadaFileInput?.files?.[0];
+    const file = fileInputEl?.files?.[0];
     if (!file) {
-      setMessage(dgiiConfigMensaje, 'Selecciona el archivo XML de semilla firmada.', 'warning');
+      setMessage(messageEl, 'Selecciona el archivo XML de semilla firmada.', 'warning');
       return;
     }
-    if (dgiiSemillaValidarBtn) dgiiSemillaValidarBtn.disabled = true;
+    if (buttonEl) buttonEl.disabled = true;
     const xmlBase64 = await leerArchivoBase64(file);
-    const resp = await fetchJsonAutorizado('/api/dgii/paso2/autenticacion/validar-semilla-firmada', {
+    const resp = await fetchJsonAutorizado(endpoint, {
       method: 'POST',
       body: JSON.stringify({
         nombre_archivo: file.name,
@@ -799,17 +891,19 @@ const validarSemillaFirmadaDgii = async () => {
       throw new Error(data?.error || 'No se pudo validar la semilla firmada.');
     }
     setMessage(
-      dgiiConfigMensaje,
+      messageEl,
       `Semilla validada. Endpoint: ${data?.endpoint || '--'} | Token: ${data?.token_preview || '--'}`,
       'info'
     );
-    if (dgiiSemillaFirmadaFileInput) dgiiSemillaFirmadaFileInput.value = '';
-    await cargarConfigDgii();
+    if (fileInputEl) fileInputEl.value = '';
+    if (typeof onSuccess === 'function') {
+      await onSuccess();
+    }
   } catch (error) {
     console.error('Error validando semilla firmada DGII:', error);
-    setMessage(dgiiConfigMensaje, error.message || 'No se pudo validar la semilla firmada.', 'error');
+    setMessage(messageEl, error.message || 'No se pudo validar la semilla firmada.', 'error');
   } finally {
-    if (dgiiSemillaValidarBtn) dgiiSemillaValidarBtn.disabled = false;
+    if (buttonEl) buttonEl.disabled = false;
   }
 };
 
@@ -1068,6 +1162,475 @@ const procesarXmlFirmadoCasoDgii = async ({ casoId, file, modo = 'RESUMEN_FC' })
   } catch (error) {
     console.error('Error procesando XML firmado DGII:', error);
     setMessage(dgiiCasosMensaje, error.message || 'No se pudo procesar el XML firmado.', 'error');
+  }
+};
+
+const FE_SECUENCIAS_UI = {
+  E31: {
+    activa: feE31ActivaInput,
+    prefijo: feE31PrefijoInput,
+    correlativo: feE31CorrelativoInput,
+    inicio: feE31InicioInput,
+    fin: feE31FinInput,
+    vencimiento: feE31VencimientoInput,
+  },
+  E32: {
+    activa: feE32ActivaInput,
+    prefijo: feE32PrefijoInput,
+    correlativo: feE32CorrelativoInput,
+    inicio: feE32InicioInput,
+    fin: feE32FinInput,
+    vencimiento: feE32VencimientoInput,
+  },
+  E43: {
+    activa: feE43ActivaInput,
+    prefijo: feE43PrefijoInput,
+    correlativo: feE43CorrelativoInput,
+    inicio: feE43InicioInput,
+    fin: feE43FinInput,
+    vencimiento: feE43VencimientoInput,
+  },
+  E44: {
+    activa: feE44ActivaInput,
+    prefijo: feE44PrefijoInput,
+    correlativo: feE44CorrelativoInput,
+    inicio: feE44InicioInput,
+    fin: feE44FinInput,
+    vencimiento: feE44VencimientoInput,
+  },
+};
+
+const estaFacturacionLegacyBloqueada = (valor = null) => {
+  if (valor !== null && valor !== undefined) {
+    return normalizarFlagUI(valor, false);
+  }
+  return normalizarFlagUI(feConfigCache?.habilitada, false);
+};
+
+const aplicarBloqueoFacturacionLegacy = (bloqueada = null) => {
+  const legacyBloqueada = estaFacturacionLegacyBloqueada(bloqueada);
+  const controles = Array.from(facturaForm?.querySelectorAll('input, textarea, select, button') || []);
+  controles.forEach((control) => {
+    control.disabled = legacyBloqueada;
+  });
+  if (facturaLegacyBloqueo) {
+    facturaLegacyBloqueo.classList.toggle('hidden', !legacyBloqueada);
+    facturaLegacyBloqueo.textContent = legacyBloqueada
+      ? 'La facturación electrónica está activa para este negocio. Los datos fiscales y las secuencias tradicionales ahora se administran desde el módulo Facturación Electrónica.'
+      : '';
+  }
+  if (legacyBloqueada) {
+    facturaConfigDirty = false;
+    secuenciasConfigDirty = false;
+    setMessage(facturaMensaje, '', 'info');
+    setMessage(secuenciasMensaje, '', 'info');
+  }
+};
+
+const aplicarSecuenciaFacturacionElectronicaUI = (tipo, secuencia = {}) => {
+  const refs = FE_SECUENCIAS_UI[tipo];
+  if (!refs) return;
+  if (refs.activa) refs.activa.checked = normalizarFlagUI(secuencia.activa, tipo !== 'E44');
+  if (refs.prefijo) refs.prefijo.value = secuencia.prefijo || tipo;
+  if (refs.correlativo) refs.correlativo.value = secuencia.correlativo_actual || 1;
+  if (refs.inicio) refs.inicio.value = secuencia.rango_inicio || '';
+  if (refs.fin) refs.fin.value = secuencia.rango_fin || '';
+  if (refs.vencimiento) refs.vencimiento.value = secuencia.fecha_vencimiento || '';
+};
+
+const leerSecuenciaFacturacionElectronicaUI = (tipo) => {
+  const refs = FE_SECUENCIAS_UI[tipo];
+  if (!refs) return null;
+  return {
+    activa: refs.activa?.checked ? 1 : 0,
+    prefijo: refs.prefijo?.value?.trim() || tipo,
+    correlativo_actual: refs.correlativo?.value ? Number(refs.correlativo.value) : 1,
+    rango_inicio: refs.inicio?.value ? Number(refs.inicio.value) : null,
+    rango_fin: refs.fin?.value ? Number(refs.fin.value) : null,
+    fecha_vencimiento: refs.vencimiento?.value || null,
+  };
+};
+
+const renderEstadoFacturacionElectronica = (config = {}) => {
+  if (!feConfigEstado) return;
+  const habilitada = normalizarFlagUI(config.habilitada, false);
+  const listaParaEnvio =
+    config.lista_para_envio ?? (habilitada && Boolean(config.rnc_emisor) && Boolean(config.tiene_certificado));
+  const tiposActivos = (Array.isArray(config.tipos_documento) ? config.tipos_documento : [])
+    .filter((item) => normalizarFlagUI(item?.activa, false))
+    .map((item) => item.tipo_documento)
+    .join(', ');
+  const partes = [
+    habilitada ? 'FE activa' : 'FE inactiva',
+    config.ambiente === 'produccion' ? 'Producción' : 'Certificación',
+    config.tiene_certificado ? 'Certificado cargado' : 'Sin certificado',
+    tiposActivos ? `Tipos activos: ${tiposActivos}` : 'Sin tipos activos',
+    listaParaEnvio ? 'Lista para XML y envío' : 'Falta completar configuración',
+  ];
+  feConfigEstado.textContent = partes.join(' | ');
+};
+
+const aplicarConfigFacturacionElectronica = (config = {}) => {
+  feConfigCache = config || null;
+  if (feHabilitadaInput) feHabilitadaInput.checked = normalizarFlagUI(config.habilitada, false);
+  if (feAmbienteInput) feAmbienteInput.value = config.ambiente || 'certificacion';
+  if (feProveedorInput) feProveedorInput.value = config.proveedor || 'DGII';
+  if (feRncEmisorInput) feRncEmisorInput.value = config.rnc_emisor || '';
+  if (feRazonSocialInput) feRazonSocialInput.value = config.razon_social || '';
+  if (feNombreComercialInput) feNombreComercialInput.value = config.nombre_comercial || '';
+  if (feDireccionInput) feDireccionInput.value = config.direccion || '';
+  if (feMunicipioCodigoInput) feMunicipioCodigoInput.value = config.municipio_codigo || '';
+  if (feProvinciaCodigoInput) feProvinciaCodigoInput.value = config.provincia_codigo || '';
+  if (feTelefonoInput) feTelefonoInput.value = config.telefono || '';
+  if (feCorreoInput) feCorreoInput.value = config.correo || '';
+  if (feWebsiteInput) feWebsiteInput.value = config.website || '';
+  if (feUsuarioEnvioInput) feUsuarioEnvioInput.value = config.usuario_envio || '';
+  if (feClaveEnvioInput) feClaveEnvioInput.value = '';
+  if (feCertificadoPasswordInput) feCertificadoPasswordInput.value = '';
+  if (feCertificadoFileInput) feCertificadoFileInput.value = '';
+  if (feFirmaAliasInput) feFirmaAliasInput.value = config.firma_alias || '';
+  if (feObservacionesInput) feObservacionesInput.value = config.observaciones || '';
+
+  const secuencias = config.secuencias || {};
+  aplicarSecuenciaFacturacionElectronicaUI('E31', secuencias.E31 || {});
+  aplicarSecuenciaFacturacionElectronicaUI('E32', secuencias.E32 || {});
+  aplicarSecuenciaFacturacionElectronicaUI('E43', secuencias.E43 || {});
+  aplicarSecuenciaFacturacionElectronicaUI('E44', secuencias.E44 || {});
+  renderEstadoFacturacionElectronica(config);
+  aplicarBloqueoFacturacionLegacy(config.habilitada);
+};
+
+const cargarConfigFacturacionElectronica = async () => {
+  if (!feConfigForm) return;
+  try {
+    const resp = await fetchConAutorizacion('/api/facturacion-electronica/config');
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo cargar la configuración de facturación electrónica.');
+    }
+    aplicarConfigFacturacionElectronica(data.config || {});
+    setMessage(feConfigMensaje, '', 'info');
+  } catch (error) {
+    console.error('Error cargando configuración de facturación electrónica:', error);
+    setMessage(
+      feConfigMensaje,
+      error.message || 'No se pudo cargar la configuración de facturación electrónica.',
+      'error'
+    );
+  }
+};
+
+const guardarConfigFacturacionElectronica = async () => {
+  if (!feConfigForm) return;
+  try {
+    if (feConfigGuardarBtn) {
+      feConfigGuardarBtn.disabled = true;
+      feConfigGuardarBtn.classList.add('is-loading');
+    }
+    setMessage(feConfigMensaje, '', 'info');
+    const certificadoFile = feCertificadoFileInput?.files?.[0] || null;
+    const certificadoBase64 = certificadoFile ? await leerArchivoBase64(certificadoFile) : undefined;
+    const payload = {
+      habilitada: feHabilitadaInput?.checked ? 1 : 0,
+      ambiente: feAmbienteInput?.value || 'certificacion',
+      proveedor: feProveedorInput?.value || 'DGII',
+      rnc_emisor: feRncEmisorInput?.value || '',
+      razon_social: feRazonSocialInput?.value || '',
+      nombre_comercial: feNombreComercialInput?.value || '',
+      direccion: feDireccionInput?.value || '',
+      municipio_codigo: feMunicipioCodigoInput?.value || '',
+      provincia_codigo: feProvinciaCodigoInput?.value || '',
+      telefono: feTelefonoInput?.value || '',
+      correo: feCorreoInput?.value || '',
+      website: feWebsiteInput?.value || '',
+      usuario_envio: feUsuarioEnvioInput?.value || '',
+      clave_envio: feClaveEnvioInput?.value || undefined,
+      certificado_nombre_archivo: certificadoFile ? certificadoFile.name : undefined,
+      certificado_base64: certificadoBase64,
+      certificado_password: feCertificadoPasswordInput?.value || undefined,
+      firma_alias: feFirmaAliasInput?.value || '',
+      observaciones: feObservacionesInput?.value || '',
+      secuencias: {
+        E31: leerSecuenciaFacturacionElectronicaUI('E31'),
+        E32: leerSecuenciaFacturacionElectronicaUI('E32'),
+        E43: leerSecuenciaFacturacionElectronicaUI('E43'),
+        E44: leerSecuenciaFacturacionElectronicaUI('E44'),
+      },
+    };
+    const resp = await fetchJsonAutorizado('/api/facturacion-electronica/config', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo guardar la configuración de facturación electrónica.');
+    }
+    aplicarConfigFacturacionElectronica(data.config || {});
+    setMessage(feConfigMensaje, 'Configuración de facturación electrónica guardada.', 'info');
+  } catch (error) {
+    console.error('Error guardando configuración de facturación electrónica:', error);
+    setMessage(
+      feConfigMensaje,
+      error.message || 'No se pudo guardar la configuración de facturación electrónica.',
+      'error'
+    );
+  } finally {
+    if (feConfigGuardarBtn) {
+      feConfigGuardarBtn.disabled = false;
+      feConfigGuardarBtn.classList.remove('is-loading');
+    }
+  }
+};
+
+const renderDocumentosFacturacionElectronica = (documentos = [], resumen = {}) => {
+  feDocumentos = Array.isArray(documentos) ? documentos : [];
+  if (feDocTotalEl) feDocTotalEl.textContent = String(Number(resumen.total || 0));
+  if (feDocPendienteEl) feDocPendienteEl.textContent = String(Number(resumen.pendiente_xml || 0));
+  if (feDocConfigPendienteEl) feDocConfigPendienteEl.textContent = String(Number(resumen.config_pendiente || 0));
+  if (feDocTotalMontoEl) feDocTotalMontoEl.textContent = formatCurrency(Number(resumen.total_monto || 0));
+
+  if (!feDocumentosTabla) return;
+  if (!feDocumentos.length) {
+    feDocumentosTabla.innerHTML = '<tr><td colspan="9">Sin documentos en cola para este filtro.</td></tr>';
+    return;
+  }
+  feDocumentosTabla.innerHTML = feDocumentos
+    .map((doc) => {
+      const accionLabel = doc.xml_disponible ? 'Regenerar XML' : 'Generar XML';
+      const descargarDisabled = doc.xml_disponible ? '' : 'disabled';
+      return `
+        <tr>
+          <td>${formatDateTime(doc.fecha_emision)}</td>
+          <td>${doc.encf || '--'}</td>
+          <td>${doc.tipo_documento || '--'}</td>
+          <td>${doc.cliente || '--'}<br /><small>${doc.cliente_documento || '--'}</small></td>
+          <td>${doc.mesa || '--'}</td>
+          <td>${formatCurrency(doc.total || 0)}</td>
+          <td>${doc.estado_local || '--'}</td>
+          <td>${doc.track_id || '--'}</td>
+          <td>
+            <div class="admin-report-actions">
+              <button type="button" class="kanm-button ghost" data-fe-doc-action="generar" data-fe-doc-id="${doc.id}">
+                ${accionLabel}
+              </button>
+              <button type="button" class="kanm-button" data-fe-doc-action="enviar" data-fe-doc-id="${doc.id}">
+                Enviar DGII
+              </button>
+              <button
+                type="button"
+                class="kanm-button ghost"
+                data-fe-doc-action="descargar"
+                data-fe-doc-id="${doc.id}"
+                ${descargarDisabled}
+              >
+                Descargar
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+};
+
+const cargarDocumentosFacturacionElectronica = async (mostrarCarga = true) => {
+  if (!feDocumentosTabla) return;
+  try {
+    if (mostrarCarga) {
+      setMessage(feDocumentosMensaje, 'Cargando documentos e-CF...', 'info');
+    }
+    const params = new URLSearchParams();
+    if (feDocEstadoSelect?.value) {
+      params.set('estado', feDocEstadoSelect.value);
+    }
+    params.set('limit', '100');
+    const resp = await fetchConAutorizacion(`/api/facturacion-electronica/documentos?${params.toString()}`);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudieron cargar los documentos e-CF.');
+    }
+    renderDocumentosFacturacionElectronica(data.documentos || [], data.resumen || {});
+    setMessage(feDocumentosMensaje, '', 'info');
+  } catch (error) {
+    console.error('Error cargando documentos de facturación electrónica:', error);
+    setMessage(
+      feDocumentosMensaje,
+      error.message || 'No se pudieron cargar los documentos de facturación electrónica.',
+      'error'
+    );
+  }
+};
+
+const generarXmlDocumentoFacturacionElectronica = async (documentoId, { descargar = false } = {}) => {
+  const id = Number(documentoId);
+  if (!Number.isFinite(id) || id <= 0) {
+    setMessage(feDocumentosMensaje, 'Documento FE inválido.', 'error');
+    return;
+  }
+  try {
+    setMessage(feDocumentosMensaje, 'Generando XML e-CF...', 'info');
+    const resp = await fetchJsonAutorizado(`/api/facturacion-electronica/documentos/${id}/generar-xml`, {
+      method: 'POST',
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo generar el XML del documento.');
+    }
+    if (descargar && data?.xml_borrador) {
+      descargarBlob(
+        data?.nombre_archivo || `${data?.documento?.encf || 'ecf'}.xml`,
+        new Blob([data.xml_borrador], { type: 'application/xml;charset=utf-8' })
+      );
+    }
+    await cargarDocumentosFacturacionElectronica(false);
+    setMessage(
+      feDocumentosMensaje,
+      `XML ${descargar ? 'generado y descargado' : 'generado'} para ${data?.documento?.encf || 'el documento'}.`,
+      'info'
+    );
+  } catch (error) {
+    console.error('Error generando XML FE:', error);
+    setMessage(feDocumentosMensaje, error.message || 'No se pudo generar el XML del documento.', 'error');
+  }
+};
+
+const enviarDocumentoFacturacionElectronica = async (documentoId) => {
+  const id = Number(documentoId);
+  if (!Number.isFinite(id) || id <= 0) {
+    setMessage(feDocumentosMensaje, 'Documento FE inválido.', 'error');
+    return;
+  }
+  try {
+    setMessage(feDocumentosMensaje, 'Enviando e-CF a DGII...', 'info');
+    const resp = await fetchJsonAutorizado(`/api/facturacion-electronica/documentos/${id}/enviar`, {
+      method: 'POST',
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo enviar el documento FE.');
+    }
+    await cargarDocumentosFacturacionElectronica(false);
+    const trackId = data?.documento?.track_id || data?.envio?.extracted?.trackId || '--';
+    setMessage(
+      feDocumentosMensaje,
+      `Documento ${data?.documento?.encf || ''} enviado. Estado: ${data?.documento?.estado_local || '--'} | Track: ${trackId}`,
+      'info'
+    );
+  } catch (error) {
+    console.error('Error enviando documento FE:', error);
+    setMessage(feDocumentosMensaje, error.message || 'No se pudo enviar el documento FE.', 'error');
+  }
+};
+
+const renderOrigenesFacturacionElectronica = (origenes = []) => {
+  feOrigenes = Array.isArray(origenes) ? origenes : [];
+  if (!feOrigenesTabla) return;
+  if (!feOrigenes.length) {
+    feOrigenesTabla.innerHTML = '<tr><td colspan="5">Sin cobertura configurada.</td></tr>';
+    return;
+  }
+  feOrigenesTabla.innerHTML = feOrigenes
+    .map((item) => {
+      const filas = Array.isArray(item.origenes) && item.origenes.length ? item.origenes : [{ descripcion: '--' }];
+      return filas
+        .map(
+          (origen, index) => `
+            <tr>
+              <td>${index === 0 ? item.label || item.tipo_documento || '--' : ''}</td>
+              <td>${origen.modulo || '--'}<br /><small>${origen.origen_documento || '--'}</small></td>
+              <td>${origen.modo || '--'}</td>
+              <td>${Number(item.secuencia_activa || 0) === 1 ? 'Activa' : 'Pendiente'}</td>
+              <td>${origen.descripcion || '--'}</td>
+            </tr>
+          `
+        )
+        .join('');
+    })
+    .join('');
+};
+
+const cargarOrigenesFacturacionElectronica = async () => {
+  if (!feOrigenesTabla) return;
+  try {
+    setMessage(feOrigenesMensaje, 'Cargando cobertura e-CF...', 'info');
+    const resp = await fetchConAutorizacion('/api/facturacion-electronica/origenes');
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo cargar la cobertura de facturación electrónica.');
+    }
+    renderOrigenesFacturacionElectronica(data.origenes || []);
+    setMessage(feOrigenesMensaje, '', 'info');
+  } catch (error) {
+    console.error('Error cargando cobertura de facturación electrónica:', error);
+    setMessage(
+      feOrigenesMensaje,
+      error.message || 'No se pudo cargar la cobertura de facturación electrónica.',
+      'error'
+    );
+  }
+};
+
+const recalcularTotalManualFacturacionElectronica = () => {
+  if (!feManualTotalInput) return;
+  if (feManualTotalInput.dataset.userEdited === '1') return;
+  const subtotal = parseFloat(feManualSubtotalInput?.value || '0') || 0;
+  const impuesto = parseFloat(feManualImpuestoInput?.value || '0') || 0;
+  feManualTotalInput.value = String((subtotal + impuesto).toFixed(2));
+};
+
+const limpiarFormularioManualFacturacionElectronica = () => {
+  if (!feManualForm) return;
+  feManualForm.reset();
+  if (feManualFechaInput) feManualFechaInput.value = getLocalDateISO(new Date());
+  if (feManualImpuestoInput) feManualImpuestoInput.value = '0';
+  if (feManualTotalInput) {
+    feManualTotalInput.value = '';
+    feManualTotalInput.dataset.userEdited = '0';
+  }
+};
+
+const guardarDocumentoFacturacionElectronicaManual = async () => {
+  if (!feManualForm) return;
+  try {
+    if (feManualGuardarBtn) {
+      feManualGuardarBtn.disabled = true;
+      feManualGuardarBtn.classList.add('is-loading');
+    }
+    setMessage(feManualMensaje, '', 'info');
+    const payload = {
+      tipo_documento: feManualTipoInput?.value || 'E33',
+      fecha: feManualFechaInput?.value || getLocalDateISO(new Date()),
+      rol_contraparte: feManualRolInput?.value || 'cliente',
+      contraparte_nombre: feManualNombreInput?.value?.trim() || '',
+      contraparte_documento: feManualDocumentoInput?.value?.trim() || '',
+      referencia_tipo_documento: feManualReferenciaTipoInput?.value?.trim() || '',
+      referencia_encf: feManualReferenciaEncfInput?.value?.trim() || '',
+      referencia_motivo: feManualMotivoInput?.value?.trim() || '',
+      descripcion: feManualDescripcionInput?.value?.trim() || '',
+      subtotal: parseFloat(feManualSubtotalInput?.value || '0') || 0,
+      impuesto: parseFloat(feManualImpuestoInput?.value || '0') || 0,
+      total: parseFloat(feManualTotalInput?.value || '0') || 0,
+      notas: feManualNotasInput?.value?.trim() || '',
+    };
+    const resp = await fetchJsonAutorizado('/api/facturacion-electronica/documentos/manual', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo registrar el documento manual.');
+    }
+    setMessage(feManualMensaje, `Documento ${data?.documento?.encf || ''} registrado.`, 'info');
+    limpiarFormularioManualFacturacionElectronica();
+    await Promise.all([cargarDocumentosFacturacionElectronica(false), cargarOrigenesFacturacionElectronica()]);
+  } catch (error) {
+    console.error('Error registrando documento FE manual:', error);
+    setMessage(feManualMensaje, error.message || 'No se pudo registrar el documento.', 'error');
+  } finally {
+    if (feManualGuardarBtn) {
+      feManualGuardarBtn.disabled = false;
+      feManualGuardarBtn.classList.remove('is-loading');
+    }
   }
 };
 
@@ -1556,6 +2119,7 @@ const tabsSoloAdmin = [
   'gastos',
   'menuPublico',
   'ventas',
+  'facturacionElectronica',
   'analisis',
   'cuadres',
   'historial',
@@ -3601,6 +4165,7 @@ const aplicarConfigSecuencias = (config = {}) => {
   if (permitirB01Input) permitirB01Input.checked = permitirB01;
   if (permitirB02Input) permitirB02Input.checked = permitirB02;
   if (permitirB14Input) permitirB14Input.checked = permitirB14;
+  aplicarBloqueoFacturacionLegacy(config.legacy_bloqueada);
 };
 
 const marcarSecuenciasDirty = () => {
@@ -3647,6 +4212,14 @@ const cargarConfigSecuencias = async (options = {}) => {
 
 const guardarConfigSecuencias = async () => {
   if (!permitirB01Input && !permitirB02Input && !permitirB14Input) return;
+  if (estaFacturacionLegacyBloqueada()) {
+    setMessage(
+      secuenciasMensaje,
+      'Las secuencias tradicionales estan bloqueadas porque este negocio ya usa facturacion electronica.',
+      'error'
+    );
+    return;
+  }
 
   const payload = {
     permitir_b01: permitirB01Input?.checked ? 1 : 0,
@@ -3801,6 +4374,7 @@ const cargarConfiguracionFactura = async (options = {}) => {
 
     facturaConfigDirty = false;
     setMessage(facturaMensaje, '');
+    aplicarBloqueoFacturacionLegacy(data.legacy_bloqueada);
   } catch (error) {
     console.error('Error al cargar configuracion de factura:', error);
     setMessage(facturaMensaje, 'No se pudo cargar la configuracion de facturacion.', 'error');
@@ -3808,6 +4382,14 @@ const cargarConfiguracionFactura = async (options = {}) => {
 };
 
 const guardarConfiguracionFactura = async () => {
+  if (estaFacturacionLegacyBloqueada()) {
+    setMessage(
+      facturaMensaje,
+      'La configuracion fiscal tradicional esta bloqueada porque este negocio ya usa facturacion electronica.',
+      'error'
+    );
+    return;
+  }
   const payload = {
     telefono: obtenerTelefonosUI(),
     direccion: facturaDireccionInput?.value || '',
@@ -6627,8 +7209,12 @@ const renderCierresCaja = () => {
     celdaUsuario.textContent = cierre.usuario || 'N/D';
     fila.appendChild(celdaUsuario);
 
+    const celdaVentas = document.createElement('td');
+    celdaVentas.textContent = formatCurrency(cierre.total_ventas);
+    fila.appendChild(celdaVentas);
+
     const celdaSistema = document.createElement('td');
-    celdaSistema.textContent = formatCurrency(cierre.total_sistema);
+    celdaSistema.textContent = formatCurrency(cierre.efectivo_esperado ?? cierre.total_sistema);
     fila.appendChild(celdaSistema);
 
     const celdaDeclarado = document.createElement('td');
@@ -7220,6 +7806,14 @@ const recargarEstadoAdmin = async (mostrarCarga = false) => {
     }
     if (permitirB01Input || permitirB02Input || permitirB14Input) {
       tareas.push(cargarConfigSecuencias());
+    }
+
+    const feSectionActiva = !document
+      .getElementById('admin-section-facturacion-electronica')
+      ?.classList.contains('hidden');
+    if (feSectionActiva && feDocumentosTabla) {
+      tareas.push(cargarDocumentosFacturacionElectronica(false));
+      tareas.push(cargarOrigenesFacturacionElectronica());
     }
 
     const dgiiSectionActiva = !document.getElementById('admin-section-dgii-paso2')?.classList.contains('hidden');
@@ -9018,6 +9612,54 @@ modalEliminarConfirmar?.addEventListener('click', (event) => {
   ejecutarEliminacionAdmin();
 });
 
+feConfigGuardarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  guardarConfigFacturacionElectronica();
+});
+
+feDocRefrescarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  cargarDocumentosFacturacionElectronica();
+});
+
+feDocEstadoSelect?.addEventListener('change', () => {
+  cargarDocumentosFacturacionElectronica();
+});
+
+feDocumentosTabla?.addEventListener('click', (event) => {
+  const boton = event.target.closest('[data-fe-doc-action]');
+  if (!boton) return;
+  event.preventDefault();
+  const accion = boton.dataset.feDocAction || '';
+  const documentoId = boton.dataset.feDocId || '';
+  if (accion === 'generar') {
+    generarXmlDocumentoFacturacionElectronica(documentoId, { descargar: false });
+    return;
+  }
+  if (accion === 'enviar') {
+    enviarDocumentoFacturacionElectronica(documentoId);
+    return;
+  }
+  if (accion === 'descargar') {
+    generarXmlDocumentoFacturacionElectronica(documentoId, { descargar: true });
+  }
+});
+
+feManualGuardarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  guardarDocumentoFacturacionElectronicaManual();
+});
+
+[feManualSubtotalInput, feManualImpuestoInput].forEach((input) => {
+  input?.addEventListener('input', () => {
+    recalcularTotalManualFacturacionElectronica();
+  });
+});
+
+feManualTotalInput?.addEventListener('input', () => {
+  feManualTotalInput.dataset.userEdited = feManualTotalInput.value ? '1' : '0';
+});
+
 dgiiConfigGuardarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   guardarConfigDgii();
@@ -9028,6 +9670,15 @@ dgiiSemillaDescargarBtn?.addEventListener('click', (event) => {
   descargarSemillaDgii();
 });
 
+feDgiiSemillaDescargarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  descargarSemillaDgii({
+    buttonEl: feDgiiSemillaDescargarBtn,
+    messageEl: feDgiiAuthMensaje || feConfigMensaje,
+    endpoint: '/api/facturacion-electronica/autenticacion/descargar-semilla',
+  });
+});
+
 dgiiConfigTestBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   probarAutenticacionDgii();
@@ -9036,6 +9687,19 @@ dgiiConfigTestBtn?.addEventListener('click', (event) => {
 dgiiSemillaValidarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   validarSemillaFirmadaDgii();
+});
+
+feDgiiSemillaValidarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  validarSemillaFirmadaDgii({
+    buttonEl: feDgiiSemillaValidarBtn,
+    fileInputEl: feDgiiSemillaFirmadaFileInput,
+    messageEl: feDgiiAuthMensaje || feConfigMensaje,
+    endpoint: '/api/facturacion-electronica/autenticacion/validar-semilla-firmada',
+    onSuccess: async () => {
+      await Promise.allSettled([cargarConfigDgii(), cargarConfigFacturacionElectronica()]);
+    },
+  });
 });
 
 dgiiSetImportarBtn?.addEventListener('click', (event) => {
@@ -9149,6 +9813,18 @@ adminTabs.forEach((btn) =>
       cargarMenuPublicoAccesos({ force: true }).catch((error) => {
         console.warn('No se pudieron cargar los accesos del menu publico:', error);
       });
+    }
+    if (tab === 'facturacionElectronica') {
+      cargarConfigFacturacionElectronica().catch((error) => {
+        console.warn('No se pudo cargar la configuración FE:', error);
+      });
+      cargarDocumentosFacturacionElectronica().catch((error) => {
+        console.warn('No se pudieron cargar los documentos FE:', error);
+      });
+      cargarOrigenesFacturacionElectronica().catch((error) => {
+        console.warn('No se pudo cargar la cobertura FE:', error);
+      });
+      limpiarFormularioManualFacturacionElectronica();
     }
     const tabUrl = btn.dataset.tabUrl;
     if (tabUrl) {
@@ -9270,6 +9946,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     cargarConfiguracionInventario(),
     cargarConfiguracionFactura(),
     cargarConfigSecuencias(),
+    cargarConfigFacturacionElectronica(),
+    cargarOrigenesFacturacionElectronica(),
     cargarCompras(),
     cargarComprasInventario(),
     cargarGastos(),
@@ -9289,6 +9967,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   await consultarReporte607();
   await consultarReporte606();
   await consultarCierresCaja();
+  if (tabInicial === 'facturacionElectronica') {
+    limpiarFormularioManualFacturacionElectronica();
+    await cargarOrigenesFacturacionElectronica();
+    await cargarDocumentosFacturacionElectronica();
+  }
   await cargarHistorialCocina();
   limpiarFormularioUsuario();
   iniciarActualizacionPeriodicaAdmin();

@@ -20,6 +20,24 @@ const usuariosRepo = require('./repos/usuarios-mysql');
 const runMultiNegocioMigrations = require('./migrations/mysql-multi-negocio');
 const runChatMigrations = require('./migrations/mysql-chat');
 const dgiiRoutes = require('./dgii.routes');
+const { buildEcfXml } = require('./dgii-paso2.xml');
+const {
+  missingDeps: facturacionElectronicaDgiiMissingDeps,
+  buildAuthCandidates,
+  decryptDgiiSecret,
+  resolveDgiiEndpoints,
+  validateDgiiAuthConfig,
+  getTokenFromCache: getTokenDgiiFromCache,
+  autenticarDgii,
+  extractToken,
+  fetchWithTimeout,
+  extractPemFromP12,
+  parseTextResponse,
+  signXmlDocument,
+  extractSignatureValueFromXml,
+  sendXmlToDgii,
+  consultDgiiResult,
+} = require('./facturacion-electronica.dgii');
 console.log('server.js carga correctamente');
 
 const ENABLE_DGII_PASO2 = /^(1|true|yes|on)$/i.test(String(process.env.ENABLE_DGII_PASO2 || ''));
@@ -1171,6 +1189,14 @@ function construirFiltroOrigenCaja(origen, params = [], campo = 'origen_caja') {
   }
   params.push(normalizado);
   return `${campo} = ?`;
+}
+
+function construirFiltroOrigenCajaSql(origen, campo = 'origen_caja') {
+  const normalizado = normalizarOrigenCaja(origen, 'caja');
+  if (normalizado === 'caja') {
+    return `(${campo} IS NULL OR ${campo} = 'caja')`;
+  }
+  return `${campo} = '${normalizado}'`;
 }
 
 function normalizarTipoMenuPublico(valor, fallback = 'mesa') {
@@ -2946,6 +2972,399 @@ const formatearFechaHoraMySQL = (valor) => {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 };
 
+const TIPOS_COMPROBANTE_ELECTRONICOS = new Set([
+  'E31',
+  'E32',
+  'E33',
+  'E34',
+  'E41',
+  'E43',
+  'E44',
+  'E45',
+  'E46',
+  'E47',
+]);
+const TIPOS_COMPROBANTE_TRADICIONALES = new Set(['B01', 'B02', 'B14']);
+const MAPA_COMPROBANTE_A_ECF = Object.freeze({
+  B01: 'E31',
+  B02: 'E32',
+  B14: 'E43',
+  E31: 'E31',
+  E32: 'E32',
+  E33: 'E33',
+  E34: 'E34',
+  E41: 'E41',
+  E43: 'E43',
+  E44: 'E44',
+  E45: 'E45',
+  E46: 'E46',
+  E47: 'E47',
+});
+const MAPA_COMPROBANTE_A_TRADICIONAL = Object.freeze({
+  E31: 'B01',
+  E32: 'B02',
+  E43: 'B14',
+  B01: 'B01',
+  B02: 'B02',
+  B14: 'B14',
+});
+const FACTURACION_ELECTRONICA_TIPOS = Object.freeze({
+  E31: {
+    tipo: 'E31',
+    legacy: 'B01',
+    label: 'E31 - Crédito fiscal',
+    descripcion: 'Factura de crédito fiscal electrónica',
+    prefijo: 'E31',
+    digitos: 10,
+    activa_por_defecto: 1,
+  },
+  E32: {
+    tipo: 'E32',
+    legacy: 'B02',
+    label: 'E32 - Consumidor final',
+    descripcion: 'Factura de consumo electrónica',
+    prefijo: 'E32',
+    digitos: 10,
+    activa_por_defecto: 1,
+  },
+  E33: {
+    tipo: 'E33',
+    legacy: null,
+    label: 'E33 - Nota de débito',
+    descripcion: 'Nota de débito electrónica',
+    prefijo: 'E33',
+    digitos: 10,
+    activa_por_defecto: 1,
+  },
+  E34: {
+    tipo: 'E34',
+    legacy: null,
+    label: 'E34 - Nota de crédito',
+    descripcion: 'Nota de crédito electrónica',
+    prefijo: 'E34',
+    digitos: 10,
+    activa_por_defecto: 1,
+  },
+  E41: {
+    tipo: 'E41',
+    legacy: null,
+    label: 'E41 - Compras',
+    descripcion: 'Comprobante de compras electrónico',
+    prefijo: 'E41',
+    digitos: 10,
+    activa_por_defecto: 1,
+  },
+  E43: {
+    tipo: 'E43',
+    legacy: 'B14',
+    label: 'E43 - Gastos menores',
+    descripcion: 'Comprobante de gastos menores electrónico',
+    prefijo: 'E43',
+    digitos: 10,
+    activa_por_defecto: 1,
+  },
+  E44: {
+    tipo: 'E44',
+    legacy: null,
+    label: 'E44 - Regímenes especiales',
+    descripcion: 'Comprobante de regímenes especiales electrónico',
+    prefijo: 'E44',
+    digitos: 10,
+    activa_por_defecto: 1,
+  },
+  E45: {
+    tipo: 'E45',
+    legacy: null,
+    label: 'E45 - Gubernamental',
+    descripcion: 'Comprobante gubernamental electrónico',
+    prefijo: 'E45',
+    digitos: 10,
+    activa_por_defecto: 1,
+  },
+  E46: {
+    tipo: 'E46',
+    legacy: null,
+    label: 'E46 - Exportaciones',
+    descripcion: 'Comprobante de exportaciones electrónico',
+    prefijo: 'E46',
+    digitos: 10,
+    activa_por_defecto: 1,
+  },
+  E47: {
+    tipo: 'E47',
+    legacy: null,
+    label: 'E47 - Pagos al exterior',
+    descripcion: 'Comprobante para pagos al exterior electrónico',
+    prefijo: 'E47',
+    digitos: 10,
+    activa_por_defecto: 1,
+  },
+});
+const FACTURACION_ELECTRONICA_TIPOS_LISTA = Object.freeze(Object.values(FACTURACION_ELECTRONICA_TIPOS));
+const FACTURACION_ELECTRONICA_COBERTURA = Object.freeze({
+  E31: {
+    tipo_documento: 'E31',
+    label: FACTURACION_ELECTRONICA_TIPOS.E31.label,
+    origenes: [
+      {
+        modulo: 'caja',
+        origen_documento: 'caja',
+        flujo: 'venta',
+        modo: 'automatico',
+        descripcion: 'Ventas cerradas en caja con crédito fiscal.',
+      },
+      {
+        modulo: 'clientes',
+        origen_documento: 'clientes',
+        flujo: 'venta_credito',
+        modo: 'automatico',
+        descripcion: 'Cuentas por cobrar / ventas a crédito.',
+      },
+    ],
+  },
+  E32: {
+    tipo_documento: 'E32',
+    label: FACTURACION_ELECTRONICA_TIPOS.E32.label,
+    origenes: [
+      {
+        modulo: 'caja',
+        origen_documento: 'caja',
+        flujo: 'venta',
+        modo: 'automatico',
+        descripcion: 'Ventas de consumo desde caja.',
+      },
+      {
+        modulo: 'clientes',
+        origen_documento: 'clientes',
+        flujo: 'venta_credito',
+        modo: 'automatico',
+        descripcion: 'Ventas de consumo a crédito.',
+      },
+      {
+        modulo: 'facturacionElectronica',
+        origen_documento: 'facturacion_electronica',
+        flujo: 'resumen_fc',
+        modo: 'manual',
+        descripcion: 'Resumen de factura de consumo menor a RD$250,000 para el paso 2.',
+      },
+    ],
+  },
+  E33: {
+    tipo_documento: 'E33',
+    label: FACTURACION_ELECTRONICA_TIPOS.E33.label,
+    origenes: [
+      {
+        modulo: 'facturacionElectronica',
+        origen_documento: 'facturacion_electronica',
+        flujo: 'nota_debito',
+        modo: 'manual',
+        descripcion: 'Registro manual hasta que exista un flujo operativo de nota de débito.',
+      },
+    ],
+  },
+  E34: {
+    tipo_documento: 'E34',
+    label: FACTURACION_ELECTRONICA_TIPOS.E34.label,
+    origenes: [
+      {
+        modulo: 'notasCredito',
+        origen_documento: 'notas_credito_ventas',
+        flujo: 'nota_credito',
+        modo: 'automatico',
+        descripcion: 'Notas de crédito de ventas emitidas sobre pedidos/facturas.',
+      },
+    ],
+  },
+  E41: {
+    tipo_documento: 'E41',
+    label: FACTURACION_ELECTRONICA_TIPOS.E41.label,
+    origenes: [
+      {
+        modulo: 'compras',
+        origen_documento: 'compras',
+        flujo: 'compra',
+        modo: 'manual',
+        descripcion: 'Puede alimentarse desde compras o registrarse manualmente en FE.',
+      },
+    ],
+  },
+  E43: {
+    tipo_documento: 'E43',
+    label: FACTURACION_ELECTRONICA_TIPOS.E43.label,
+    origenes: [
+      {
+        modulo: 'caja',
+        origen_documento: 'caja',
+        flujo: 'venta',
+        modo: 'automatico',
+        descripcion: 'Ventas emitidas como gastos menores desde caja.',
+      },
+      {
+        modulo: 'facturacionElectronica',
+        origen_documento: 'facturacion_electronica',
+        flujo: 'gasto_menor',
+        modo: 'manual',
+        descripcion: 'Registro manual FE para casos administrativos.',
+      },
+    ],
+  },
+  E44: {
+    tipo_documento: 'E44',
+    label: FACTURACION_ELECTRONICA_TIPOS.E44.label,
+    origenes: [
+      {
+        modulo: 'facturacionElectronica',
+        origen_documento: 'facturacion_electronica',
+        flujo: 'regimen_especial',
+        modo: 'manual',
+        descripcion: 'Registro administrativo hasta abrirlo en los flujos comerciales.',
+      },
+    ],
+  },
+  E45: {
+    tipo_documento: 'E45',
+    label: FACTURACION_ELECTRONICA_TIPOS.E45.label,
+    origenes: [
+      {
+        modulo: 'facturacionElectronica',
+        origen_documento: 'facturacion_electronica',
+        flujo: 'gubernamental',
+        modo: 'manual',
+        descripcion: 'Registro administrativo para ventas gubernamentales.',
+      },
+    ],
+  },
+  E46: {
+    tipo_documento: 'E46',
+    label: FACTURACION_ELECTRONICA_TIPOS.E46.label,
+    origenes: [
+      {
+        modulo: 'facturacionElectronica',
+        origen_documento: 'facturacion_electronica',
+        flujo: 'exportacion',
+        modo: 'manual',
+        descripcion: 'Registro administrativo para exportaciones.',
+      },
+    ],
+  },
+  E47: {
+    tipo_documento: 'E47',
+    label: FACTURACION_ELECTRONICA_TIPOS.E47.label,
+    origenes: [
+      {
+        modulo: 'gastos',
+        origen_documento: 'gastos',
+        flujo: 'pago_exterior',
+        modo: 'manual',
+        descripcion: 'Puede alimentarse desde gastos o registrarse manualmente en FE.',
+      },
+    ],
+  },
+});
+const FACTURACION_ELECTRONICA_ESTADOS = Object.freeze({
+  CONFIG_PENDIENTE: 'config_pendiente',
+  PENDIENTE_XML: 'pendiente_xml',
+  XML_GENERADO: 'xml_generado',
+  FIRMADO: 'firmado',
+  ENVIADO: 'enviado',
+  ACEPTADO: 'aceptado',
+  RECHAZADO: 'rechazado',
+  ERROR: 'error',
+});
+
+const normalizarFechaIsoFacturacionElectronica = (valor, fallback = null) => {
+  if (valor === undefined || valor === null || valor === '') {
+    return fallback;
+  }
+  if (valor instanceof Date && !Number.isNaN(valor.getTime())) {
+    return valor.toISOString().slice(0, 10);
+  }
+  const texto = String(valor).trim();
+  if (!texto) {
+    return fallback;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) {
+    return texto;
+  }
+  if (/^\d{2}-\d{2}-\d{4}$/.test(texto)) {
+    const [dd, mm, yyyy] = texto.split('-');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  const match = texto.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+  if (match) {
+    const [, a, b, c] = match;
+    const yyyy = c.length === 2 ? `20${c}` : c;
+    return `${yyyy}-${String(b).padStart(2, '0')}-${String(a).padStart(2, '0')}`;
+  }
+  const fecha = new Date(texto);
+  if (!Number.isNaN(fecha.getTime())) {
+    return fecha.toISOString().slice(0, 10);
+  }
+  return fallback;
+};
+
+const normalizarFechaDgiiFacturacionElectronica = (valor, fallback = null) => {
+  const iso = normalizarFechaIsoFacturacionElectronica(valor, fallback ? normalizarFechaIsoFacturacionElectronica(fallback) : null);
+  if (!iso) {
+    return fallback;
+  }
+  const [yyyy, mm, dd] = String(iso).split('-');
+  if (!yyyy || !mm || !dd) {
+    return fallback;
+  }
+  return `${dd}-${mm}-${yyyy}`;
+};
+
+const formatearMontoXmlFacturacionElectronica = (valor, decimales = 2) =>
+  Number(redondearMontoPago(valor) || 0).toFixed(decimales);
+
+const formatearCantidadXmlFacturacionElectronica = (valor, decimales = 2) =>
+  Number(normalizarNumero(valor, 0) || 0).toFixed(decimales);
+
+const formatearTasaXmlFacturacionElectronica = (valor) => {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) {
+    return null;
+  }
+  return Number.isInteger(numero) ? String(numero) : numero.toFixed(2).replace(/\.?0+$/, '');
+};
+
+const buildFacturacionElectronicaSecretKey = () => {
+  const secret =
+    process.env.FACTURACION_ELECTRONICA_SECRET ||
+    process.env.DGII_PASO2_SECRET ||
+    process.env.IMPERSONATION_JWT_SECRET ||
+    process.env.JWT_SECRET ||
+    'kanm-facturacion-electronica-dev-secret';
+  return crypto.createHash('sha256').update(String(secret)).digest();
+};
+
+const encryptFacturacionElectronicaSecret = (plain) => {
+  if (!plain) return null;
+  const key = buildFacturacionElectronicaSecretKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1:${iv.toString('base64')}:${tag.toString('base64')}:${encrypted.toString('base64')}`;
+};
+
+const decryptFacturacionElectronicaSecret = (encoded) => {
+  if (!encoded) return '';
+  if (!String(encoded).startsWith('v1:')) return String(encoded);
+  const parts = String(encoded).split(':');
+  if (parts.length !== 4) return '';
+  const [, ivB64, tagB64, dataB64] = parts;
+  const key = buildFacturacionElectronicaSecretKey();
+  const iv = Buffer.from(ivB64, 'base64');
+  const tag = Buffer.from(tagB64, 'base64');
+  const data = Buffer.from(dataB64, 'base64');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  const plain = Buffer.concat([decipher.update(data), decipher.final()]);
+  return plain.toString('utf8');
+};
+
 const obtenerLimiteNCF = (tipo, negocioId, callback) => {
   if (typeof negocioId === 'function') {
     callback = negocioId;
@@ -3291,10 +3710,28 @@ const obtenerConfiguracionFacturacion = async (negocioId) => {
   const negocio = negocioId || NEGOCIO_ID_DEFAULT;
   const claves = Array.from(new Set(Object.values(FACTURACION_CLAVES)));
   const valores = await leerConfiguracionNegocio(negocio, claves);
+  const configFacturacionElectronica = await obtenerConfiguracionFacturacionElectronica(negocio, {
+    includeSecrets: false,
+  }).catch(() => null);
+  const facturacionElectronicaHabilitada =
+    normalizarFlag(configFacturacionElectronica?.habilitada, 0) === 1;
 
   const telefonosConfigurados = extraerTelefonosConfiguracion(
     valores[FACTURACION_CLAVES.telefonos] || valores[FACTURACION_CLAVES.telefono]
   );
+  const telefonosFacturacionElectronica = extraerTelefonosConfiguracion(configFacturacionElectronica?.telefono);
+  const telefonosEfectivos =
+    facturacionElectronicaHabilitada && telefonosFacturacionElectronica.length
+      ? telefonosFacturacionElectronica
+      : telefonosConfigurados;
+  const direccionEfectiva =
+    facturacionElectronicaHabilitada && normalizarCampoTexto(configFacturacionElectronica?.direccion, null)
+      ? configFacturacionElectronica.direccion
+      : valores[FACTURACION_CLAVES.direccion] || '';
+  const rncEfectivo =
+    facturacionElectronicaHabilitada && normalizarCampoTexto(configFacturacionElectronica?.rnc_emisor, null)
+      ? configFacturacionElectronica.rnc_emisor
+      : valores[FACTURACION_CLAVES.rnc] || '';
 
   const b02 = await construirRangoNCF(
     'B02',
@@ -3312,17 +3749,19 @@ const obtenerConfiguracionFacturacion = async (negocioId) => {
   );
 
   return {
-    telefonos: telefonosConfigurados,
+    telefonos: telefonosEfectivos,
     telefono:
-      telefonosConfigurados.length > 0
-        ? telefonosConfigurados.join(' | ')
+      telefonosEfectivos.length > 0
+        ? telefonosEfectivos.join(' | ')
         : valores[FACTURACION_CLAVES.telefono] || '',
-    direccion: valores[FACTURACION_CLAVES.direccion] || '',
-    rnc: valores[FACTURACION_CLAVES.rnc] || '',
+    direccion: direccionEfectiva,
+    rnc: rncEfectivo,
     logo: valores[FACTURACION_CLAVES.logo] || '',
     pie: valores[FACTURACION_CLAVES.pie] || '',
     b02,
     b01,
+    legacy_bloqueada: facturacionElectronicaHabilitada,
+    facturacion_electronica_habilitada: facturacionElectronicaHabilitada ? 1 : 0,
   };
 };
 
@@ -3743,11 +4182,463 @@ const obtenerConfiguracionSecuenciasNegocio = async (negocioId) => {
   }
 };
 
+const normalizarAmbienteFacturacionElectronica = (valor, predeterminado = 'certificacion') => {
+  const limpio = String(valor || '').trim().toLowerCase();
+  if (['produccion', 'production', 'prod'].includes(limpio)) return 'produccion';
+  if (['certificacion', 'certification', 'test', 'sandbox', 'cert'].includes(limpio)) return 'certificacion';
+  return predeterminado;
+};
+
+const normalizarTipoComprobanteElectronico = (valor, fallback = null) => {
+  const limpio = String(valor || '').trim().toUpperCase();
+  if (TIPOS_COMPROBANTE_ELECTRONICOS.has(limpio)) {
+    return limpio;
+  }
+  return fallback;
+};
+
+const esTipoComprobanteElectronico = (valor) =>
+  TIPOS_COMPROBANTE_ELECTRONICOS.has(normalizarTipoComprobanteElectronico(valor, ''));
+
+const mapearTipoComprobanteAElectronico = (valor, fallback = null) => {
+  const limpio = String(valor || '').trim().toUpperCase();
+  return MAPA_COMPROBANTE_A_ECF[limpio] || fallback;
+};
+
+const mapearTipoComprobanteATradicional = (valor, fallback = null) => {
+  const limpio = String(valor || '').trim().toUpperCase();
+  return MAPA_COMPROBANTE_A_TRADICIONAL[limpio] || fallback;
+};
+
+const normalizarDigitosSecuenciaFE = (valor, predeterminado = 10) => {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero) || numero < 1) {
+    return predeterminado;
+  }
+  return Math.max(1, Math.floor(numero));
+};
+
+const normalizarRangoSecuenciaFE = (valor) => {
+  if (valor === undefined || valor === null || valor === '') {
+    return null;
+  }
+  const numero = Number(valor);
+  if (!Number.isFinite(numero) || numero < 1) {
+    return null;
+  }
+  return Math.floor(numero);
+};
+
+const construirSecuenciaFacturacionElectronica = (tipoDocumento, row = null) => {
+  const tipo = normalizarTipoComprobanteElectronico(tipoDocumento, 'E32');
+  const meta = FACTURACION_ELECTRONICA_TIPOS[tipo] || FACTURACION_ELECTRONICA_TIPOS.E32;
+  const rangoInicio = normalizarRangoSecuenciaFE(row?.rango_inicio ?? row?.rangoInicio);
+  const rangoFin = normalizarRangoSecuenciaFE(row?.rango_fin ?? row?.rangoFin);
+  const fechaVencimiento = normalizarFechaIsoFacturacionElectronica(
+    row?.fecha_vencimiento ?? row?.fechaVencimiento,
+    null
+  );
+  const correlativoPersistido = normalizarRangoSecuenciaFE(
+    row?.correlativo_actual ?? row?.correlativoActual
+  );
+  const inicioEfectivo = rangoInicio || 1;
+  const correlativoActual = Math.max(correlativoPersistido || inicioEfectivo, inicioEfectivo);
+  let restante = null;
+  if (Number.isFinite(rangoFin) && rangoFin !== null) {
+    restante = Math.max(rangoFin - correlativoActual + 1, 0);
+  }
+  return {
+    tipo_documento: tipo,
+    tipoDocumento: tipo,
+    legacy: meta.legacy,
+    label: meta.label,
+    descripcion: meta.descripcion,
+    prefijo: normalizarCampoTexto(row?.prefijo, meta.prefijo) || meta.prefijo,
+    digitos: normalizarDigitosSecuenciaFE(row?.digitos, meta.digitos),
+    rango_inicio: rangoInicio,
+    rango_fin: rangoFin,
+    fecha_vencimiento: fechaVencimiento,
+    correlativo_actual: correlativoActual,
+    activa: normalizarFlag(row?.activa, meta.activa_por_defecto),
+    restante,
+  };
+};
+
+const obtenerConfiguracionFacturacionElectronica = async (negocioId, opciones = {}) => {
+  const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const incluirSecretos = opciones?.includeSecrets === true;
+  const [row, secuenciasRows] = await Promise.all([
+    db.get(
+      `SELECT id, negocio_id, habilitada, ambiente, proveedor, rnc_emisor, razon_social, nombre_comercial,
+              direccion, municipio_codigo, provincia_codigo, telefono, correo, website, usuario_envio, clave_envio_enc, certificado_nombre_archivo,
+              certificado_base64, certificado_password_enc, firma_alias, observaciones, updated_by_usuario_id,
+              created_at, updated_at
+         FROM facturacion_electronica_config
+        WHERE negocio_id = ?
+        LIMIT 1`,
+      [negocio]
+    ),
+    db.all(
+      `SELECT id, negocio_id, tipo_documento, prefijo, digitos, rango_inicio, rango_fin, fecha_vencimiento,
+              correlativo_actual, activa, created_at, updated_at
+         FROM facturacion_electronica_secuencias
+         WHERE negocio_id = ?
+         ORDER BY tipo_documento ASC`,
+      [negocio]
+    ),
+  ]);
+
+  const mapaSecuencias = new Map();
+  (secuenciasRows || []).forEach((secuencia) => {
+    const tipo = normalizarTipoComprobanteElectronico(secuencia?.tipo_documento, null);
+    if (!tipo) return;
+    mapaSecuencias.set(tipo, construirSecuenciaFacturacionElectronica(tipo, secuencia));
+  });
+
+  FACTURACION_ELECTRONICA_TIPOS_LISTA.forEach((meta) => {
+    if (!mapaSecuencias.has(meta.tipo)) {
+      mapaSecuencias.set(meta.tipo, construirSecuenciaFacturacionElectronica(meta.tipo, null));
+    }
+  });
+
+  const config = {
+    id: row?.id || null,
+    negocio_id: negocio,
+    habilitada: normalizarFlag(row?.habilitada, 0),
+    ambiente: normalizarAmbienteFacturacionElectronica(row?.ambiente, 'certificacion'),
+    proveedor: normalizarCampoTexto(row?.proveedor, 'DGII') || 'DGII',
+    rnc_emisor: normalizarCampoTexto(row?.rnc_emisor, null),
+    razon_social: normalizarCampoTexto(row?.razon_social, null),
+    nombre_comercial: normalizarCampoTexto(row?.nombre_comercial, null),
+    direccion: normalizarCampoTexto(row?.direccion, null),
+    municipio_codigo: normalizarCampoTexto(row?.municipio_codigo, null),
+    provincia_codigo: normalizarCampoTexto(row?.provincia_codigo, null),
+    telefono: normalizarCampoTexto(row?.telefono, null),
+    correo: normalizarCampoTexto(row?.correo, null),
+    website: normalizarCampoTexto(row?.website, null),
+    usuario_envio: normalizarCampoTexto(row?.usuario_envio, null),
+    certificado_nombre_archivo: normalizarCampoTexto(row?.certificado_nombre_archivo, null),
+    firma_alias: normalizarCampoTexto(row?.firma_alias, null),
+    observaciones: normalizarCampoTexto(row?.observaciones, null),
+    tiene_clave_envio: Boolean(row?.clave_envio_enc),
+    tiene_certificado: Boolean(row?.certificado_base64),
+    tiene_certificado_password: Boolean(row?.certificado_password_enc),
+    secuencias: Object.fromEntries(Array.from(mapaSecuencias.entries())),
+    tipos_documento: FACTURACION_ELECTRONICA_TIPOS_LISTA.map((meta) => mapaSecuencias.get(meta.tipo)),
+    created_at: row?.created_at || null,
+    updated_at: row?.updated_at || null,
+  };
+  config.lista_para_envio = esConfiguracionFacturacionElectronicaLista(config);
+
+  if (incluirSecretos) {
+    config.clave_envio = decryptFacturacionElectronicaSecret(row?.clave_envio_enc || '');
+    config.certificado_password = decryptFacturacionElectronicaSecret(row?.certificado_password_enc || '');
+    config.certificado_base64 = row?.certificado_base64 || null;
+  }
+
+  return config;
+};
+
+const esConfiguracionFacturacionElectronicaLista = (config = {}) => {
+  if (normalizarFlag(config?.habilitada, 0) !== 1) {
+    return false;
+  }
+  return Boolean(normalizarCampoTexto(config?.rnc_emisor, null) && (config?.tiene_certificado || config?.certificado_base64));
+};
+
+const guardarConfiguracionFacturacionElectronica = async (negocioId, payload = {}, usuarioId = null) => {
+  const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const actual = await obtenerConfiguracionFacturacionElectronica(negocio, { includeSecrets: false }).catch(() => null);
+  const secuenciasActuales = actual?.secuencias || {};
+  const secuenciasEntrada =
+    payload?.secuencias && typeof payload.secuencias === 'object' ? payload.secuencias : {};
+
+  const obtenerValorPayload = (...claves) => {
+    for (const clave of claves) {
+      if (Object.prototype.hasOwnProperty.call(payload || {}, clave)) {
+        return payload[clave];
+      }
+    }
+    return undefined;
+  };
+
+  const campoTexto = (fallback, ...claves) => {
+    const valor = obtenerValorPayload(...claves);
+    if (valor === undefined) return fallback;
+    return normalizarCampoTexto(valor, null);
+  };
+
+  const habilitada = normalizarFlag(
+    obtenerValorPayload('habilitada', 'enabled') ?? actual?.habilitada ?? 0,
+    actual?.habilitada ?? 0
+  );
+  const ambiente = normalizarAmbienteFacturacionElectronica(
+    obtenerValorPayload('ambiente', 'modo', 'environment') ?? actual?.ambiente,
+    actual?.ambiente || 'certificacion'
+  );
+  const proveedor = campoTexto(actual?.proveedor || 'DGII', 'proveedor', 'provider') || 'DGII';
+  const rncEmisor = campoTexto(actual?.rnc_emisor || null, 'rnc_emisor', 'rncEmisor');
+  const razonSocial = campoTexto(actual?.razon_social || null, 'razon_social', 'razonSocial');
+  const nombreComercial = campoTexto(
+    actual?.nombre_comercial || null,
+    'nombre_comercial',
+    'nombreComercial'
+  );
+  const direccion = campoTexto(actual?.direccion || null, 'direccion');
+  const municipioCodigo = campoTexto(actual?.municipio_codigo || null, 'municipio_codigo', 'municipioCodigo');
+  const provinciaCodigo = campoTexto(actual?.provincia_codigo || null, 'provincia_codigo', 'provinciaCodigo');
+  const telefono = campoTexto(actual?.telefono || null, 'telefono');
+  const correo = campoTexto(actual?.correo || null, 'correo', 'email');
+  const website = campoTexto(actual?.website || null, 'website', 'web_site', 'webSite');
+  const usuarioEnvio = campoTexto(actual?.usuario_envio || null, 'usuario_envio', 'usuarioEnvio');
+  const firmaAlias = campoTexto(actual?.firma_alias || null, 'firma_alias', 'firmaAlias');
+  const observaciones = campoTexto(actual?.observaciones || null, 'observaciones');
+  const certificadoNombreArchivo = campoTexto(
+    actual?.certificado_nombre_archivo || null,
+    'certificado_nombre_archivo',
+    'certificadoNombreArchivo',
+    'p12_nombre_archivo',
+    'p12NombreArchivo'
+  );
+  const certificadoBase64Input = obtenerValorPayload(
+    'certificado_base64',
+    'certificadoBase64',
+    'p12_base64',
+    'p12Base64'
+  );
+  const certificadoBase64 =
+    certificadoBase64Input === undefined
+      ? actual?.certificado_base64 || null
+      : normalizarCampoTexto(certificadoBase64Input, null);
+  const claveEnvioInput = obtenerValorPayload('clave_envio', 'claveEnvio', 'password_envio');
+  const certificadoPasswordInput = obtenerValorPayload(
+    'certificado_password',
+    'certificadoPassword',
+    'p12_password',
+    'p12Password'
+  );
+  const claveEnvioEnc =
+    claveEnvioInput === undefined
+      ? null
+      : normalizarCampoTexto(claveEnvioInput, null)
+      ? encryptFacturacionElectronicaSecret(claveEnvioInput)
+      : null;
+  const certificadoPasswordEnc =
+    certificadoPasswordInput === undefined
+      ? null
+      : normalizarCampoTexto(certificadoPasswordInput, null)
+      ? encryptFacturacionElectronicaSecret(certificadoPasswordInput)
+      : null;
+
+  await db.run(
+      `INSERT INTO facturacion_electronica_config (
+        negocio_id, habilitada, ambiente, proveedor, rnc_emisor, razon_social, nombre_comercial,
+        direccion, municipio_codigo, provincia_codigo, telefono, correo, website, usuario_envio, clave_envio_enc, certificado_nombre_archivo,
+        certificado_base64, certificado_password_enc, firma_alias, observaciones, updated_by_usuario_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+        habilitada = VALUES(habilitada),
+        ambiente = VALUES(ambiente),
+        proveedor = VALUES(proveedor),
+        rnc_emisor = VALUES(rnc_emisor),
+        razon_social = VALUES(razon_social),
+        nombre_comercial = VALUES(nombre_comercial),
+        direccion = VALUES(direccion),
+        municipio_codigo = VALUES(municipio_codigo),
+        provincia_codigo = VALUES(provincia_codigo),
+        telefono = VALUES(telefono),
+        correo = VALUES(correo),
+        website = VALUES(website),
+        usuario_envio = VALUES(usuario_envio),
+        clave_envio_enc = COALESCE(VALUES(clave_envio_enc), clave_envio_enc),
+        certificado_nombre_archivo = VALUES(certificado_nombre_archivo),
+       certificado_base64 = COALESCE(VALUES(certificado_base64), certificado_base64),
+       certificado_password_enc = COALESCE(VALUES(certificado_password_enc), certificado_password_enc),
+       firma_alias = VALUES(firma_alias),
+       observaciones = VALUES(observaciones),
+       updated_by_usuario_id = VALUES(updated_by_usuario_id),
+       updated_at = CURRENT_TIMESTAMP`,
+    [
+      negocio,
+      habilitada,
+      ambiente,
+      proveedor,
+      rncEmisor,
+      razonSocial,
+      nombreComercial,
+      direccion,
+      municipioCodigo,
+      provinciaCodigo,
+      telefono,
+      correo,
+      website,
+      usuarioEnvio,
+      claveEnvioEnc,
+      certificadoNombreArchivo,
+      certificadoBase64,
+      certificadoPasswordEnc,
+      firmaAlias,
+      observaciones,
+      usuarioId || null,
+    ]
+  );
+
+  for (const meta of FACTURACION_ELECTRONICA_TIPOS_LISTA) {
+    const entrada = secuenciasEntrada?.[meta.tipo] && typeof secuenciasEntrada[meta.tipo] === 'object'
+      ? secuenciasEntrada[meta.tipo]
+      : {};
+    const actualTipo = secuenciasActuales?.[meta.tipo] || construirSecuenciaFacturacionElectronica(meta.tipo, null);
+    const prefijo = normalizarCampoTexto(entrada.prefijo, actualTipo.prefijo) || meta.prefijo;
+    const digitos = normalizarDigitosSecuenciaFE(entrada.digitos, actualTipo.digitos || meta.digitos);
+    const rangoInicio =
+      entrada.rango_inicio !== undefined || entrada.rangoInicio !== undefined
+        ? normalizarRangoSecuenciaFE(entrada.rango_inicio ?? entrada.rangoInicio)
+        : actualTipo.rango_inicio;
+    const rangoFin =
+      entrada.rango_fin !== undefined || entrada.rangoFin !== undefined
+        ? normalizarRangoSecuenciaFE(entrada.rango_fin ?? entrada.rangoFin)
+        : actualTipo.rango_fin;
+    const fechaVencimiento = normalizarFechaIsoFacturacionElectronica(
+      entrada.fecha_vencimiento ?? entrada.fechaVencimiento ?? actualTipo.fecha_vencimiento,
+      actualTipo.fecha_vencimiento || null
+    );
+    if (rangoInicio !== null && rangoFin !== null && rangoFin < rangoInicio) {
+      const error = new Error(`${meta.tipo}: el fin no puede ser menor que el inicio.`);
+      error.status = 400;
+      throw error;
+    }
+    const correlativoEntrada = entrada.correlativo_actual ?? entrada.correlativoActual;
+    const correlativoBase = normalizarRangoSecuenciaFE(correlativoEntrada) ?? actualTipo.correlativo_actual;
+    const correlativoActual = Math.max(correlativoBase || rangoInicio || 1, rangoInicio || 1);
+    const activa =
+      entrada.activa !== undefined
+        ? normalizarFlag(entrada.activa, meta.activa_por_defecto)
+        : actualTipo.activa;
+
+      await db.run(
+        `INSERT INTO facturacion_electronica_secuencias (
+         negocio_id, tipo_documento, prefijo, digitos, rango_inicio, rango_fin, fecha_vencimiento, correlativo_actual, activa
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+         prefijo = VALUES(prefijo),
+         digitos = VALUES(digitos),
+         rango_inicio = VALUES(rango_inicio),
+         rango_fin = VALUES(rango_fin),
+         fecha_vencimiento = VALUES(fecha_vencimiento),
+         correlativo_actual = VALUES(correlativo_actual),
+         activa = VALUES(activa),
+         updated_at = CURRENT_TIMESTAMP`,
+      [negocio, meta.tipo, prefijo, digitos, rangoInicio, rangoFin, fechaVencimiento, correlativoActual, activa]
+    );
+  }
+
+  return obtenerConfiguracionFacturacionElectronica(negocio, { includeSecrets: false });
+};
+
+const obtenerResumenFacturacionElectronicaNegocio = async (negocioId) => {
+  const config = await obtenerConfiguracionFacturacionElectronica(negocioId, { includeSecrets: false }).catch(
+    () => null
+  );
+  const resumen = config || {
+    negocio_id: negocioId || NEGOCIO_ID_DEFAULT,
+    habilitada: 0,
+    ambiente: 'certificacion',
+    proveedor: 'DGII',
+    secuencias: {},
+    tipos_documento: FACTURACION_ELECTRONICA_TIPOS_LISTA.map((meta) =>
+      construirSecuenciaFacturacionElectronica(meta.tipo, null)
+    ),
+  };
+  return {
+    habilitada: normalizarFlag(resumen?.habilitada, 0),
+    ambiente: resumen?.ambiente || 'certificacion',
+    proveedor: resumen?.proveedor || 'DGII',
+    rnc_emisor: resumen?.rnc_emisor || null,
+    razon_social: resumen?.razon_social || null,
+    nombre_comercial: resumen?.nombre_comercial || null,
+    tiene_certificado: Boolean(resumen?.tiene_certificado),
+    lista_para_envio: esConfiguracionFacturacionElectronicaLista(resumen),
+    secuencias: resumen?.secuencias || {},
+    tipos_documento: (resumen?.tipos_documento || []).map((tipo) => ({
+      tipo_documento: tipo.tipo_documento,
+      label: tipo.label,
+      legacy: tipo.legacy,
+      activa: normalizarFlag(tipo.activa, 0),
+      rango_inicio: tipo.rango_inicio,
+      rango_fin: tipo.rango_fin,
+      correlativo_actual: tipo.correlativo_actual,
+      restante: tipo.restante,
+    })),
+    permitir_e31: normalizarFlag(resumen?.secuencias?.E31?.activa, FACTURACION_ELECTRONICA_TIPOS.E31.activa_por_defecto),
+    permitir_e32: normalizarFlag(resumen?.secuencias?.E32?.activa, FACTURACION_ELECTRONICA_TIPOS.E32.activa_por_defecto),
+    permitir_e33: normalizarFlag(resumen?.secuencias?.E33?.activa, FACTURACION_ELECTRONICA_TIPOS.E33.activa_por_defecto),
+    permitir_e34: normalizarFlag(resumen?.secuencias?.E34?.activa, FACTURACION_ELECTRONICA_TIPOS.E34.activa_por_defecto),
+    permitir_e41: normalizarFlag(resumen?.secuencias?.E41?.activa, FACTURACION_ELECTRONICA_TIPOS.E41.activa_por_defecto),
+    permitir_e43: normalizarFlag(resumen?.secuencias?.E43?.activa, FACTURACION_ELECTRONICA_TIPOS.E43.activa_por_defecto),
+    permitir_e44: normalizarFlag(resumen?.secuencias?.E44?.activa, FACTURACION_ELECTRONICA_TIPOS.E44.activa_por_defecto),
+    permitir_e45: normalizarFlag(resumen?.secuencias?.E45?.activa, FACTURACION_ELECTRONICA_TIPOS.E45.activa_por_defecto),
+    permitir_e46: normalizarFlag(resumen?.secuencias?.E46?.activa, FACTURACION_ELECTRONICA_TIPOS.E46.activa_por_defecto),
+    permitir_e47: normalizarFlag(resumen?.secuencias?.E47?.activa, FACTURACION_ELECTRONICA_TIPOS.E47.activa_por_defecto),
+  };
+};
+
+const generarECF = async (tipoSolicitado, negocioId) => {
+  const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const tipo = normalizarTipoComprobanteElectronico(tipoSolicitado, 'E32');
+  const meta = FACTURACION_ELECTRONICA_TIPOS[tipo];
+  if (!meta) {
+    throw new Error('Tipo de e-CF no soportado');
+  }
+  const existente = await db.get(
+    `SELECT id, prefijo, digitos, rango_inicio, rango_fin, correlativo_actual, activa
+       FROM facturacion_electronica_secuencias
+      WHERE negocio_id = ?
+        AND tipo_documento = ?
+      LIMIT 1`,
+    [negocio, tipo]
+  );
+  const secuencia = construirSecuenciaFacturacionElectronica(tipo, existente);
+  if (normalizarFlag(secuencia.activa, meta.activa_por_defecto) !== 1) {
+    throw new Error(`La secuencia ${tipo} no esta activa para este negocio`);
+  }
+  if (secuencia.rango_fin !== null && secuencia.correlativo_actual > secuencia.rango_fin) {
+    throw new Error(`No hay e-CF disponibles en la secuencia ${tipo}`);
+  }
+  const encf = `${secuencia.prefijo}${padNumber(secuencia.correlativo_actual, secuencia.digitos)}`;
+  const siguiente = secuencia.correlativo_actual + 1;
+  await db.run(
+    `INSERT INTO facturacion_electronica_secuencias (
+       negocio_id, tipo_documento, prefijo, digitos, rango_inicio, rango_fin, correlativo_actual, activa
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       prefijo = VALUES(prefijo),
+       digitos = VALUES(digitos),
+       rango_inicio = VALUES(rango_inicio),
+       rango_fin = VALUES(rango_fin),
+       correlativo_actual = VALUES(correlativo_actual),
+       activa = VALUES(activa),
+       updated_at = CURRENT_TIMESTAMP`,
+    [
+      negocio,
+      tipo,
+      secuencia.prefijo,
+      secuencia.digitos,
+      secuencia.rango_inicio,
+      secuencia.rango_fin,
+      siguiente,
+      secuencia.activa,
+    ]
+  );
+  return encf;
+};
+
 const inferirTipoComprobanteDesdeNCF = (ncf) => {
   const valor = normalizarCampoTexto(ncf);
   if (!valor) return null;
   const prefijo = valor.slice(0, 3).toUpperCase();
-  return ['B01', 'B02', 'B14'].includes(prefijo) ? prefijo : null;
+  return [...TIPOS_COMPROBANTE_TRADICIONALES, ...TIPOS_COMPROBANTE_ELECTRONICOS].includes(prefijo)
+    ? prefijo
+    : null;
 };
 
 const normalizarTipoComprobanteVenta = (valor, fallback = null) => {
@@ -3757,7 +4648,7 @@ const normalizarTipoComprobanteVenta = (valor, fallback = null) => {
   if (['sin comprobante', 'sin_comprobante', 'sin'].includes(limpio)) {
     return 'Sin comprobante';
   }
-  if (['b01', 'b02', 'b14'].includes(limpio)) {
+  if (['b01', 'b02', 'b14', 'e31', 'e32', 'e33', 'e34', 'e41', 'e43', 'e44', 'e45', 'e46', 'e47'].includes(limpio)) {
     return limpio.toUpperCase();
   }
   return fallback;
@@ -3768,7 +4659,9 @@ const validarTipoComprobanteVentaEntrada = (valor) => {
   if (!texto) return null;
   const tipo = normalizarTipoComprobanteVenta(texto, null);
   if (!tipo) {
-    const error = new Error('Tipo de comprobante invalido. Usa Sin comprobante, B02 o B01.');
+    const error = new Error(
+      'Tipo de comprobante invalido. Usa Sin comprobante, B02, B01, B14, E31, E32, E33, E34, E41, E43, E44, E45, E46 o E47.'
+    );
     error.status = 400;
     throw error;
   }
@@ -3788,6 +4681,15 @@ const generarNCFAsync = (tipo, negocioId) =>
       resolve(ncf);
     });
   });
+
+const generarECFAsync = (tipo, negocioId) => generarECF(tipo, negocioId);
+
+const generarComprobanteFiscalAsync = (tipo, negocioId) => {
+  if (esTipoComprobanteElectronico(tipo)) {
+    return generarECFAsync(tipo, negocioId);
+  }
+  return generarNCFAsync(tipo, negocioId);
+};
 
 const existeNCFVenta = async (ncf, negocioId, opciones = {}) => {
   const valor = normalizarCampoTexto(ncf);
@@ -3837,6 +4739,44 @@ const validarTipoComprobanteVentaNegocio = async (tipoComprobante, negocioId) =>
   const tipo = normalizarTipoComprobanteVenta(tipoComprobante, 'Sin comprobante');
   if (esTipoComprobanteSinRegistroFiscal(tipo)) {
     return tipo;
+  }
+
+  const configFacturacionElectronica = await obtenerResumenFacturacionElectronicaNegocio(negocioId).catch(() => ({
+    habilitada: 0,
+    permitir_e31: FACTURACION_ELECTRONICA_TIPOS.E31.activa_por_defecto,
+    permitir_e32: FACTURACION_ELECTRONICA_TIPOS.E32.activa_por_defecto,
+    permitir_e33: FACTURACION_ELECTRONICA_TIPOS.E33.activa_por_defecto,
+    permitir_e34: FACTURACION_ELECTRONICA_TIPOS.E34.activa_por_defecto,
+    permitir_e41: FACTURACION_ELECTRONICA_TIPOS.E41.activa_por_defecto,
+    permitir_e43: FACTURACION_ELECTRONICA_TIPOS.E43.activa_por_defecto,
+    permitir_e44: FACTURACION_ELECTRONICA_TIPOS.E44.activa_por_defecto,
+    permitir_e45: FACTURACION_ELECTRONICA_TIPOS.E45.activa_por_defecto,
+    permitir_e46: FACTURACION_ELECTRONICA_TIPOS.E46.activa_por_defecto,
+    permitir_e47: FACTURACION_ELECTRONICA_TIPOS.E47.activa_por_defecto,
+  }));
+  if (normalizarFlag(configFacturacionElectronica?.habilitada, 0) === 1) {
+    const tipoElectronico = mapearTipoComprobanteAElectronico(tipo, null);
+    if (!tipoElectronico) {
+      const error = new Error('Este negocio usa facturacion electronica. Debes usar un tipo e-CF valido.');
+      error.status = 400;
+      throw error;
+    }
+    const permiso = normalizarFlag(
+      configFacturacionElectronica?.[`permitir_${tipoElectronico.toLowerCase()}`],
+      FACTURACION_ELECTRONICA_TIPOS[tipoElectronico]?.activa_por_defecto ?? 0
+    );
+    if (permiso === 0) {
+      const error = new Error(`${tipoElectronico} desactivado para este negocio`);
+      error.status = 400;
+      throw error;
+    }
+    return tipoElectronico;
+  }
+
+  if (esTipoComprobanteElectronico(tipo)) {
+    const error = new Error('Este negocio no tiene facturacion electronica habilitada para emitir e-CF.');
+    error.status = 400;
+    throw error;
   }
 
   const permisosSecuencias = await obtenerConfiguracionSecuenciasNegocio(negocioId);
@@ -3931,7 +4871,7 @@ const resolverComprobanteVentaCliente = async ({
   }
 
   for (let intento = 0; intento < 3; intento += 1) {
-    const ncfGenerado = await generarNCFAsync(tipoValidado, negocioId);
+    const ncfGenerado = await generarComprobanteFiscalAsync(tipoValidado, negocioId);
     const ncfDuplicado = await existeNCFVenta(ncfGenerado, negocioId, {
       excluirDeudaId: deudaIdNumerico,
     });
@@ -4830,6 +5770,1460 @@ const obtenerPedidoConDetalle = async (pedidoId, negocioId) => {
   };
 };
 
+const construirEstadoInicialDocumentoFacturacionElectronica = (config = {}) =>
+  esConfiguracionFacturacionElectronicaLista(config)
+    ? FACTURACION_ELECTRONICA_ESTADOS.PENDIENTE_XML
+    : FACTURACION_ELECTRONICA_ESTADOS.CONFIG_PENDIENTE;
+
+const construirPayloadDocumentoFacturacionElectronica = async ({
+  negocioId,
+  cuentaId,
+  pedidoReferencia,
+  pedidos = [],
+  tipoDocumento,
+  encf,
+  cliente,
+  clienteDocumento,
+  comentarios,
+  pagosResumen = {},
+  totales = {},
+  usuarioId = null,
+  origenDocumento = 'caja',
+} = {}) => {
+  const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const configFE = await obtenerConfiguracionFacturacionElectronica(negocio, { includeSecrets: false }).catch(
+    () => null
+  );
+  const pedidoIds = (pedidos || [])
+    .map((pedido) => Number(pedido?.id))
+    .filter((pedidoId) => Number.isFinite(pedidoId) && pedidoId > 0);
+  const itemsMap = pedidoIds.length ? await obtenerDetallePedidosPorIds(pedidoIds, negocio) : new Map();
+  const itemsAgrupados = agruparItemsCuenta(itemsMap).map((item) => ({
+    producto_id: Number(item.producto_id) || null,
+    nombre: item.nombre || null,
+    cantidad: Number((Number(item.cantidad) || 0).toFixed(4)),
+    precio_unitario: redondearMontoPago(item.precio_unitario),
+    subtotal_sin_descuento: redondearMontoPago(item.subtotal_sin_descuento),
+    descuento_monto: redondearMontoPago(item.descuento_monto),
+    descuento_porcentaje: Number(item.descuento_porcentaje) || 0,
+    total_linea: redondearMontoPago(item.total_linea),
+  }));
+
+  return {
+    version_interna: 1,
+    negocio_id: negocio,
+    origen_documento: origenDocumento,
+    flujo: 'venta',
+    tipo_documento: tipoDocumento,
+    encf,
+    fecha_emision:
+      pedidoReferencia?.fecha_factura ||
+      pedidoReferencia?.fecha_cierre ||
+      pedidoReferencia?.fecha_creacion ||
+      new Date().toISOString(),
+    emisor: {
+      negocio_id: negocio,
+      rnc_emisor: configFE?.rnc_emisor || null,
+      razon_social: configFE?.razon_social || null,
+      nombre_comercial: configFE?.nombre_comercial || null,
+      direccion: configFE?.direccion || null,
+      municipio_codigo: configFE?.municipio_codigo || null,
+      provincia_codigo: configFE?.provincia_codigo || null,
+      telefono: configFE?.telefono || null,
+      correo: configFE?.correo || null,
+      website: configFE?.website || null,
+      ambiente: configFE?.ambiente || 'certificacion',
+      proveedor: configFE?.proveedor || 'DGII',
+    },
+    cliente: {
+      nombre: cliente || pedidoReferencia?.cliente || null,
+      documento: clienteDocumento || pedidoReferencia?.cliente_documento || null,
+    },
+    venta: {
+      cuenta_id: cuentaId || null,
+      pedido_referencia_id: Number(pedidoReferencia?.id) || null,
+      pedidos_ids: pedidoIds,
+      mesa: pedidoReferencia?.mesa || null,
+      modo_servicio: pedidoReferencia?.modo_servicio || null,
+      creado_por_usuario_id: usuarioId || null,
+      comentarios: comentarios || pedidoReferencia?.comentarios || null,
+      moneda: 'DOP',
+    },
+    montos: {
+      subtotal: redondearMontoPago(totales?.subtotal),
+      impuesto: redondearMontoPago(totales?.impuesto),
+      descuento_monto: redondearMontoPago(totales?.descuento_monto),
+      propina_monto: redondearMontoPago(totales?.propina_monto),
+      total: redondearMontoPago(totales?.total_cobrado),
+      pagos: {
+        efectivo: redondearMontoPago(pagosResumen?.efectivo),
+        efectivo_entregado: redondearMontoPago(pagosResumen?.efectivo_entregado),
+        tarjeta: redondearMontoPago(pagosResumen?.tarjeta),
+        transferencia: redondearMontoPago(pagosResumen?.transferencia),
+        cambio: redondearMontoPago(pagosResumen?.cambio),
+        total: redondearMontoPago(pagosResumen?.total),
+      },
+    },
+    items: itemsAgrupados,
+  };
+};
+
+const construirPayloadBaseDocumentoFacturacionElectronica = async ({
+  negocioId,
+  tipoDocumento,
+  encf,
+  flujo = 'manual',
+  origenDocumento = 'facturacion_electronica',
+  fechaEmision = null,
+  contraparte = {},
+  referencia = {},
+  montos = {},
+  items = [],
+  datos = {},
+  usuarioId = null,
+} = {}) => {
+  const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const configFE = await obtenerConfiguracionFacturacionElectronica(negocio, { includeSecrets: false }).catch(
+    () => null
+  );
+  const subtotal = redondearMontoPago(montos?.subtotal);
+  const impuesto = redondearMontoPago(montos?.impuesto);
+  const total = redondearMontoPago(
+    montos?.total !== undefined && montos?.total !== null ? montos.total : subtotal + impuesto
+  );
+  return {
+    version_interna: 1,
+    negocio_id: negocio,
+    origen_documento: origenDocumento,
+    flujo,
+    tipo_documento: tipoDocumento,
+    encf,
+    fecha_emision: fechaEmision || new Date().toISOString(),
+    emisor: {
+      negocio_id: negocio,
+      rnc_emisor: configFE?.rnc_emisor || null,
+      razon_social: configFE?.razon_social || null,
+      nombre_comercial: configFE?.nombre_comercial || null,
+      direccion: configFE?.direccion || null,
+      municipio_codigo: configFE?.municipio_codigo || null,
+      provincia_codigo: configFE?.provincia_codigo || null,
+      telefono: configFE?.telefono || null,
+      correo: configFE?.correo || null,
+      website: configFE?.website || null,
+      ambiente: configFE?.ambiente || 'certificacion',
+      proveedor: configFE?.proveedor || 'DGII',
+    },
+    contraparte: {
+      rol: normalizarCampoTexto(contraparte?.rol, null) || 'cliente',
+      nombre: normalizarCampoTexto(contraparte?.nombre, null),
+      documento: normalizarCampoTexto(contraparte?.documento, null),
+      telefono: normalizarCampoTexto(contraparte?.telefono, null),
+      email: normalizarCampoTexto(contraparte?.email, null),
+      direccion: normalizarCampoTexto(contraparte?.direccion, null),
+    },
+    referencia: {
+      tipo_documento: normalizarCampoTexto(
+        referencia?.tipo_documento ?? referencia?.tipoDocumento,
+        null
+      ),
+      encf: normalizarCampoTexto(referencia?.encf, null),
+      motivo: normalizarCampoTexto(referencia?.motivo, null),
+      origen_id: normalizarNumero(referencia?.origen_id ?? referencia?.origenId, null),
+    },
+    datos: {
+      descripcion: normalizarCampoTexto(datos?.descripcion, null),
+      moneda: normalizarCampoTexto(datos?.moneda, 'DOP') || 'DOP',
+      usuario_id: usuarioId || null,
+      ...((datos && typeof datos === 'object') ? datos : {}),
+    },
+    montos: {
+      subtotal,
+      impuesto,
+      total,
+      descuento_monto: redondearMontoPago(montos?.descuento_monto),
+      propina_monto: redondearMontoPago(montos?.propina_monto),
+    },
+    items: (Array.isArray(items) ? items : []).map((item, index) => ({
+      linea: index + 1,
+      descripcion: normalizarCampoTexto(item?.descripcion ?? item?.nombre, null) || `Item ${index + 1}`,
+      cantidad: Number((normalizarNumero(item?.cantidad, 1) || 1).toFixed(4)),
+      precio_unitario: redondearMontoPago(item?.precio_unitario ?? item?.precioUnitario ?? item?.monto),
+      total_linea: redondearMontoPago(item?.total_linea ?? item?.totalLinea ?? item?.monto),
+      referencia: normalizarCampoTexto(item?.referencia, null),
+    })),
+  };
+};
+
+const insertarDocumentoFacturacionElectronica = async ({
+  negocioId,
+  cuentaId = null,
+  pedidoReferenciaId = null,
+  origenDocumento = 'facturacion_electronica',
+  flujo = 'manual',
+  tipoDocumento,
+  encf,
+  payload,
+  total = null,
+  usuarioId = null,
+} = {}) => {
+  const tipo = normalizarTipoComprobanteElectronico(tipoDocumento, null);
+  const comprobante = normalizarCampoTexto(encf, null);
+  if (!tipo || !comprobante || !payload || typeof payload !== 'object') {
+    return null;
+  }
+  const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const configFE = await obtenerConfiguracionFacturacionElectronica(negocio, { includeSecrets: false }).catch(
+    () => null
+  );
+  const estadoLocal = construirEstadoInicialDocumentoFacturacionElectronica(configFE || {});
+  const totalDocumento =
+    total !== null && total !== undefined
+      ? redondearMontoPago(total)
+      : redondearMontoPago(payload?.montos?.total);
+  await db.run(
+    `INSERT INTO facturacion_electronica_documentos (
+       negocio_id, cuenta_id, pedido_referencia_id, origen_documento, flujo, tipo_documento, encf,
+       estado_local, payload_json, fecha_emision, total, created_by_usuario_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       cuenta_id = VALUES(cuenta_id),
+       pedido_referencia_id = VALUES(pedido_referencia_id),
+       origen_documento = VALUES(origen_documento),
+       flujo = VALUES(flujo),
+       tipo_documento = VALUES(tipo_documento),
+       estado_local = VALUES(estado_local),
+       payload_json = VALUES(payload_json),
+       fecha_emision = VALUES(fecha_emision),
+       total = VALUES(total),
+       updated_at = CURRENT_TIMESTAMP`,
+    [
+      negocio,
+      cuentaId || null,
+      pedidoReferenciaId || null,
+      origenDocumento,
+      flujo,
+      tipo,
+      comprobante,
+      estadoLocal,
+      JSON.stringify(payload),
+      formatearFechaHoraMySQL(payload?.fecha_emision || new Date()),
+      totalDocumento,
+      usuarioId || null,
+    ]
+  );
+
+  const documentoRow = await db.get(
+    'SELECT id FROM facturacion_electronica_documentos WHERE negocio_id = ? AND encf = ? LIMIT 1',
+    [negocio, comprobante]
+  );
+  const documentoId = Number(documentoRow?.id) || null;
+  let estadoLocalFinal = estadoLocal;
+  if (documentoId) {
+    try {
+      await generarXmlDocumentoFacturacionElectronica({
+        documentoId,
+        negocioId: negocio,
+        persistirError: false,
+      });
+      estadoLocalFinal = FACTURACION_ELECTRONICA_ESTADOS.XML_GENERADO;
+    } catch (error) {
+      console.warn(
+        `FE XML pendiente para ${comprobante}:`,
+        error?.message || error
+      );
+    }
+  }
+
+  return {
+    id: documentoId,
+    tipo_documento: tipo,
+    encf: comprobante,
+    estado_local: estadoLocalFinal,
+    payload,
+  };
+};
+
+const registrarDocumentoFacturacionElectronicaVenta = async ({
+  negocioId,
+  cuentaId,
+  pedidoReferencia,
+  pedidos = [],
+  tipoDocumento,
+  encf,
+  cliente,
+  clienteDocumento,
+  comentarios,
+  pagosResumen = {},
+  totales = {},
+  usuarioId = null,
+  origenDocumento = 'caja',
+} = {}) => {
+  const tipo = normalizarTipoComprobanteElectronico(tipoDocumento, null);
+  const comprobante = normalizarCampoTexto(encf, null);
+  if (!tipo || !comprobante) {
+    return null;
+  }
+  const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const configFE = await obtenerConfiguracionFacturacionElectronica(negocio, { includeSecrets: false }).catch(
+    () => null
+  );
+  const payload = await construirPayloadDocumentoFacturacionElectronica({
+    negocioId: negocio,
+    cuentaId,
+    pedidoReferencia,
+    pedidos,
+    tipoDocumento: tipo,
+    encf: comprobante,
+    cliente,
+    clienteDocumento,
+    comentarios,
+    pagosResumen,
+    totales,
+    usuarioId,
+    origenDocumento,
+  });
+  return insertarDocumentoFacturacionElectronica({
+    negocioId: negocio,
+    cuentaId,
+    pedidoReferenciaId: Number(pedidoReferencia?.id) || null,
+    origenDocumento,
+    flujo: 'venta',
+    tipoDocumento: tipo,
+    encf: comprobante,
+    payload,
+    total: totales?.total_cobrado,
+    usuarioId,
+  });
+};
+
+const registrarDocumentoFacturacionElectronicaDeuda = async ({
+  negocioId,
+  deudaId,
+  clienteId = null,
+  tipoDocumento,
+  encf,
+  cliente = {},
+  fecha = null,
+  descripcion = null,
+  notas = null,
+  items = [],
+  montoTotal = 0,
+  usuarioId = null,
+} = {}) => {
+  const tipo = normalizarTipoComprobanteElectronico(tipoDocumento, null);
+  const comprobante = normalizarCampoTexto(encf, null);
+  if (!tipo || !comprobante) {
+    return null;
+  }
+  const subtotal = redondearMontoPago(montoTotal);
+  const payload = await construirPayloadBaseDocumentoFacturacionElectronica({
+    negocioId,
+    tipoDocumento: tipo,
+    encf: comprobante,
+    flujo: 'venta_credito',
+    origenDocumento: 'clientes',
+    fechaEmision: fecha,
+    contraparte: {
+      rol: 'cliente',
+      nombre: cliente?.nombre,
+      documento: cliente?.documento,
+      telefono: cliente?.telefono,
+      email: cliente?.email,
+      direccion: cliente?.direccion,
+    },
+    referencia: {
+      origen_id: deudaId,
+    },
+    montos: {
+      subtotal,
+      impuesto: 0,
+      total: subtotal,
+    },
+    items:
+      Array.isArray(items) && items.length
+        ? items.map((item) => ({
+            descripcion: item?.nombre_producto || item?.descripcion || 'Item',
+            cantidad: item?.cantidad,
+            precio_unitario: item?.precio_unitario,
+            total_linea: item?.total_linea,
+          }))
+        : [{ descripcion: descripcion || 'Venta a crédito', cantidad: 1, precio_unitario: subtotal, total_linea: subtotal }],
+    datos: {
+      descripcion: descripcion || 'Venta a crédito',
+      notas,
+      cliente_id: clienteId || null,
+      deuda_id: deudaId || null,
+      moneda: 'DOP',
+    },
+    usuarioId,
+  });
+  payload.cliente = {
+    nombre: cliente?.nombre || null,
+    documento: cliente?.documento || null,
+  };
+  return insertarDocumentoFacturacionElectronica({
+    negocioId,
+    origenDocumento: 'clientes',
+    flujo: 'venta_credito',
+    tipoDocumento: tipo,
+    encf: comprobante,
+    payload,
+    total: montoTotal,
+    usuarioId,
+  });
+};
+
+const registrarDocumentoFacturacionElectronicaNotaCreditoVenta = async ({
+  negocioId,
+  notaId,
+  pedidoId,
+  tipoDocumento = 'E34',
+  encf,
+  fecha = null,
+  motivo = null,
+  monto = 0,
+  ncfReferencia = null,
+  usuarioId = null,
+} = {}) => {
+  const tipo = normalizarTipoComprobanteElectronico(tipoDocumento, null);
+  const comprobante = normalizarCampoTexto(encf, null);
+  if (!tipo || !comprobante) {
+    return null;
+  }
+  const pedido = pedidoId ? await obtenerPedidoConDetalle(pedidoId, negocioId).catch(() => null) : null;
+  const payload = await construirPayloadBaseDocumentoFacturacionElectronica({
+    negocioId,
+    tipoDocumento: tipo,
+    encf: comprobante,
+    flujo: 'nota_credito',
+    origenDocumento: 'notas_credito_ventas',
+    fechaEmision: fecha,
+    contraparte: {
+      rol: 'cliente',
+      nombre: pedido?.cliente,
+      documento: pedido?.cliente_documento,
+    },
+    referencia: {
+      tipo_documento: normalizarTipoComprobanteVenta(
+        pedido?.tipo_comprobante || inferirTipoComprobanteDesdeNCF(ncfReferencia),
+        null
+      ),
+      encf: ncfReferencia,
+      motivo,
+      origen_id: pedidoId,
+    },
+    montos: {
+      subtotal: monto,
+      impuesto: 0,
+      total: monto,
+    },
+    items: [{ descripcion: motivo || 'Nota de crédito', cantidad: 1, precio_unitario: monto, total_linea: monto }],
+    datos: {
+      descripcion: motivo || 'Nota de crédito electrónica',
+      nota_credito_id: notaId || null,
+      pedido_id: pedidoId || null,
+      moneda: 'DOP',
+    },
+    usuarioId,
+  });
+  payload.cliente = {
+    nombre: pedido?.cliente || null,
+    documento: pedido?.cliente_documento || null,
+  };
+  return insertarDocumentoFacturacionElectronica({
+    negocioId,
+    pedidoReferenciaId: pedidoId || null,
+    origenDocumento: 'notas_credito_ventas',
+    flujo: 'nota_credito',
+    tipoDocumento: tipo,
+    encf: comprobante,
+    payload,
+    total: monto,
+    usuarioId,
+  });
+};
+
+const registrarDocumentoFacturacionElectronicaManual = async ({
+  negocioId,
+  tipoDocumento,
+  encf = null,
+  fechaEmision = null,
+  contraparte = {},
+  referencia = {},
+  descripcion = null,
+  notas = null,
+  subtotal = 0,
+  impuesto = 0,
+  total = null,
+  items = [],
+  flujo = 'manual',
+  usuarioId = null,
+} = {}) => {
+  const tipo = normalizarTipoComprobanteElectronico(tipoDocumento, null);
+  if (!tipo) {
+    const error = new Error('Tipo de e-CF no soportado para registro manual.');
+    error.status = 400;
+    throw error;
+  }
+  const comprobante = normalizarCampoTexto(encf, null) || (await generarComprobanteFiscalAsync(tipo, negocioId));
+  const subtotalFinal = redondearMontoPago(subtotal);
+  const impuestoFinal = redondearMontoPago(impuesto);
+  const totalFinal = redondearMontoPago(total !== null && total !== undefined ? total : subtotalFinal + impuestoFinal);
+  const itemsFinal =
+    Array.isArray(items) && items.length
+      ? items
+      : [{ descripcion: descripcion || FACTURACION_ELECTRONICA_TIPOS[tipo]?.descripcion || tipo, cantidad: 1, precio_unitario: totalFinal, total_linea: totalFinal }];
+  const payload = await construirPayloadBaseDocumentoFacturacionElectronica({
+    negocioId,
+    tipoDocumento: tipo,
+    encf: comprobante,
+    flujo,
+    origenDocumento: 'facturacion_electronica',
+    fechaEmision,
+    contraparte,
+    referencia,
+    montos: {
+      subtotal: subtotalFinal,
+      impuesto: impuestoFinal,
+      total: totalFinal,
+    },
+    items: itemsFinal,
+    datos: {
+      descripcion: descripcion || FACTURACION_ELECTRONICA_TIPOS[tipo]?.descripcion || tipo,
+      notas,
+      moneda: 'DOP',
+    },
+    usuarioId,
+  });
+  if (payload?.contraparte) {
+    payload.cliente = {
+      nombre: payload.contraparte.nombre || null,
+      documento: payload.contraparte.documento || null,
+    };
+  }
+  return insertarDocumentoFacturacionElectronica({
+    negocioId,
+    origenDocumento: 'facturacion_electronica',
+    flujo,
+    tipoDocumento: tipo,
+    encf: comprobante,
+    payload,
+    total: totalFinal,
+    usuarioId,
+  });
+};
+
+const dividirTelefonosFacturacionElectronica = (valor = '') =>
+  String(valor || '')
+    .split(/[,\n;|/]+/)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+
+const tienePagosRegistradosXmlFacturacionElectronica = (pagos = {}) => {
+  if (!pagos || typeof pagos !== 'object') {
+    return false;
+  }
+  return ['total', 'efectivo', 'tarjeta', 'transferencia']
+    .map((clave) => Number(pagos?.[clave]) || 0)
+    .some((monto) => monto > 0);
+};
+
+const descripcionPareceServicioFacturacionElectronica = (valor = '') =>
+  /\b(servicio|software|licencia|soporte|mantenimiento|suscrip|consultor|consultoria|consultoría|desarrollo|hosting|dominio|implementacion|implementación|capacitacion|capacitación)\b/i.test(
+    String(valor || '')
+  );
+
+const resolverIndicadorCreditoXmlFacturacionElectronica = (payload = {}) => {
+  const datos = payload?.datos && typeof payload.datos === 'object' ? payload.datos : {};
+  const venta = payload?.venta && typeof payload.venta === 'object' ? payload.venta : {};
+  const indicadores = [
+    datos.es_credito,
+    datos.esCredito,
+    datos.venta_credito,
+    datos.ventaCredito,
+    datos.a_credito,
+    datos.aCredito,
+    datos.credito,
+    venta.es_credito,
+    venta.esCredito,
+    venta.a_credito,
+    venta.aCredito,
+    venta.credito,
+  ];
+  const indicadorExplicito = indicadores.find((valor) => valor !== undefined && valor !== null && valor !== '');
+  if (indicadorExplicito !== undefined) {
+    return normalizarFlag(indicadorExplicito, 0);
+  }
+  const metodoPago = normalizarCampoTexto(
+    datos.metodo_pago ?? datos.metodoPago ?? venta.metodo_pago ?? venta.metodoPago ?? payload?.metodo_pago ?? payload?.metodoPago,
+    null
+  );
+  if (esMetodoPagoCredito(metodoPago)) {
+    return true;
+  }
+  return String(payload?.flujo || '').toLowerCase().includes('credito');
+};
+
+const obtenerCodigoTipoeCFFacturacionElectronica = (tipoDocumento = '') =>
+  String(tipoDocumento || '')
+    .replace(/[^0-9]/g, '')
+    .slice(-2);
+
+const normalizarDocumentoIdentificacionFacturacionElectronica = (valor = '') => {
+  const limpio = normalizarCampoTexto(valor, null);
+  if (!limpio) {
+    return { rnc: null, identificadorExtranjero: null };
+  }
+  const alfanumerico = String(limpio).replace(/[^A-Za-z0-9]/g, '');
+  if (/^\d{9,11}$/.test(alfanumerico)) {
+    return { rnc: alfanumerico, identificadorExtranjero: null };
+  }
+  return {
+    rnc: null,
+    identificadorExtranjero: alfanumerico || limpio,
+  };
+};
+
+const resolverTipoPagoXmlFacturacionElectronica = (payload = {}) => {
+  const datos = payload?.datos && typeof payload.datos === 'object' ? payload.datos : {};
+  const tipoPagoExplicito = normalizarCampoTexto(
+    datos.tipo_pago_dgii ?? datos.tipoPagoDgii ?? datos.tipo_pago ?? datos.tipoPago,
+    null
+  );
+  if (tipoPagoExplicito) {
+    return tipoPagoExplicito;
+  }
+  if (resolverIndicadorCreditoXmlFacturacionElectronica(payload)) {
+    return '2';
+  }
+  if (tienePagosRegistradosXmlFacturacionElectronica(payload?.montos?.pagos)) {
+    return '1';
+  }
+  return '1';
+};
+
+const MAPA_FORMAS_PAGO_XML_FACTURACION_ELECTRONICA = Object.freeze({
+  efectivo: '1',
+  cheque: '2',
+  tarjeta: '3',
+  transferencia: '4',
+  credito: '5',
+});
+
+const resolverFormasPagoXmlFacturacionElectronica = (payload = {}) => {
+  const datos = payload?.datos && typeof payload.datos === 'object' ? payload.datos : {};
+  const venta = payload?.venta && typeof payload.venta === 'object' ? payload.venta : {};
+  const formasExplicitas = Array.isArray(datos.formas_pago_dgii ?? datos.formasPagoDgii)
+    ? datos.formas_pago_dgii ?? datos.formasPagoDgii
+    : [];
+  const formas = [];
+  const registrarForma = (formaPago, monto) => {
+    const montoNormalizado = redondearMontoPago(monto);
+    const formaNormalizada = normalizarCampoTexto(formaPago, null);
+    if (!formaNormalizada || montoNormalizado <= 0) {
+      return;
+    }
+    formas.push({
+      FormaPago: formaNormalizada,
+      MontoPago: formatearMontoXmlFacturacionElectronica(montoNormalizado),
+    });
+  };
+
+  formasExplicitas.forEach((forma) => {
+    if (!forma || typeof forma !== 'object') {
+      return;
+    }
+    registrarForma(forma.forma_pago ?? forma.formaPago ?? forma.codigo, forma.monto_pago ?? forma.montoPago ?? forma.monto);
+  });
+
+  if (!formas.length) {
+    const pagos = payload?.montos?.pagos && typeof payload.montos.pagos === 'object' ? payload.montos.pagos : {};
+    Object.entries(MAPA_FORMAS_PAGO_XML_FACTURACION_ELECTRONICA).forEach(([clave, codigo]) => {
+      registrarForma(codigo, pagos?.[clave]);
+    });
+  }
+
+  if (!formas.length) {
+    const metodoPago = normalizarCampoTexto(
+      datos.forma_pago_dgii ??
+        datos.formaPagoDgii ??
+        datos.metodo_pago ??
+        datos.metodoPago ??
+        venta.metodo_pago ??
+        venta.metodoPago ??
+        payload?.metodo_pago ??
+        payload?.metodoPago,
+      null
+    );
+    if (metodoPago) {
+      const codigo = MAPA_FORMAS_PAGO_XML_FACTURACION_ELECTRONICA[String(metodoPago).toLowerCase()] || metodoPago;
+      registrarForma(codigo, payload?.montos?.total);
+    }
+  }
+
+  return formas;
+};
+
+const resolverIndicadorBienoServicioXmlFacturacionElectronica = (item = {}, datos = {}) => {
+  const explicito = normalizarCampoTexto(
+    item?.indicador_bien_servicio ??
+      item?.indicadorBienoServicio ??
+      item?.tipo_item ??
+      item?.tipoItem ??
+      datos.indicador_bien_servicio_default ??
+      datos.indicadorBienoServicioDefault,
+    null
+  );
+  if (explicito) {
+    return explicito;
+  }
+  const descripcion = normalizarCampoTexto(item?.nombre ?? item?.descripcion ?? datos.descripcion, null) || '';
+  return descripcionPareceServicioFacturacionElectronica(descripcion) ? '2' : '1';
+};
+
+const resolverUnidadMedidaXmlFacturacionElectronica = (item = {}, datos = {}) => {
+  const explicita = normalizarCampoTexto(
+    item?.unidad_medida ?? item?.unidadMedida ?? datos.unidad_medida_default ?? datos.unidadMedidaDefault,
+    null
+  );
+  if (explicita) {
+    return explicita;
+  }
+  return resolverIndicadorBienoServicioXmlFacturacionElectronica(item, datos) === '2' ? '43' : '31';
+};
+
+const resolverValorPagarXmlFacturacionElectronica = ({ payload = {}, total = 0, tipoPago = '1' } = {}) => {
+  const datos = payload?.datos && typeof payload.datos === 'object' ? payload.datos : {};
+  const montos = payload?.montos && typeof payload.montos === 'object' ? payload.montos : {};
+  const valorExplicito =
+    datos.valor_pagar ??
+    datos.valorPagar ??
+    montos.valor_pagar ??
+    montos.valorPagar;
+  if (valorExplicito !== undefined && valorExplicito !== null && valorExplicito !== '') {
+    return formatearMontoXmlFacturacionElectronica(valorExplicito);
+  }
+  if (String(tipoPago) === '2') {
+    return formatearMontoXmlFacturacionElectronica(total);
+  }
+  return undefined;
+};
+
+const construirClaveIndiceFacturacionElectronicaXml = (campo, indices = []) =>
+  `${campo}${(Array.isArray(indices) ? indices : []).map((indice) => `[${indice}]`).join('')}`;
+
+const aplanarEstructuraXmlFacturacionElectronicaNodo = (nodo, salida, indices = []) => {
+  if (nodo === undefined || nodo === null) {
+    return;
+  }
+  if (Array.isArray(nodo)) {
+    nodo.forEach((item, index) => {
+      aplanarEstructuraXmlFacturacionElectronicaNodo(item, salida, [...indices, index + 1]);
+    });
+    return;
+  }
+  if (typeof nodo !== 'object') {
+    return;
+  }
+  Object.entries(nodo).forEach(([clave, valor]) => {
+    if (valor === undefined || valor === null || valor === '') {
+      return;
+    }
+    if (Array.isArray(valor)) {
+      const todosEscalares = valor.every((item) => item === null || item === undefined || typeof item !== 'object');
+      if (todosEscalares) {
+        valor.forEach((item, index) => {
+          if (item === undefined || item === null || item === '') {
+            return;
+          }
+          salida[construirClaveIndiceFacturacionElectronicaXml(clave, [...indices, index + 1])] = item;
+        });
+        return;
+      }
+      valor.forEach((item, index) => {
+        aplanarEstructuraXmlFacturacionElectronicaNodo(item, salida, [...indices, index + 1]);
+      });
+      return;
+    }
+    if (typeof valor === 'object') {
+      aplanarEstructuraXmlFacturacionElectronicaNodo(valor, salida, indices);
+      return;
+    }
+    salida[construirClaveIndiceFacturacionElectronicaXml(clave, indices)] = valor;
+  });
+};
+
+const aplanarEstructuraXmlFacturacionElectronica = (estructura = {}) => {
+  const salida = {};
+  const raiz = estructura?.ECF && typeof estructura.ECF === 'object' ? estructura.ECF : estructura;
+  aplanarEstructuraXmlFacturacionElectronicaNodo(raiz, salida, []);
+  return salida;
+};
+
+const construirEstructuraXmlDocumentoFacturacionElectronica = ({
+  documento = {},
+  payload = {},
+  config = {},
+  secuencia = {},
+} = {}) => {
+  const tipoDocumento = normalizarTipoComprobanteElectronico(documento?.tipo_documento ?? payload?.tipo_documento, null);
+  const tipoeCF = obtenerCodigoTipoeCFFacturacionElectronica(tipoDocumento);
+  if (!tipoDocumento || !tipoeCF) {
+    const error = new Error('El documento FE no tiene un tipo e-CF válido para generar XML.');
+    error.status = 400;
+    throw error;
+  }
+
+  const datos = payload?.datos && typeof payload.datos === 'object' ? payload.datos : {};
+  const venta = payload?.venta && typeof payload.venta === 'object' ? payload.venta : {};
+  const montos = payload?.montos && typeof payload.montos === 'object' ? payload.montos : {};
+  const referencia = payload?.referencia && typeof payload.referencia === 'object' ? payload.referencia : {};
+  const contraparteBase =
+    (payload?.contraparte && typeof payload.contraparte === 'object' ? payload.contraparte : null) ||
+    (payload?.cliente && typeof payload.cliente === 'object' ? payload.cliente : null) ||
+    {};
+  const compradorId = normalizarDocumentoIdentificacionFacturacionElectronica(
+    contraparteBase?.documento ?? payload?.cliente?.documento
+  );
+  const subtotal = redondearMontoPago(montos?.subtotal);
+  const impuesto = redondearMontoPago(montos?.impuesto);
+  const total = redondearMontoPago(
+    montos?.total !== undefined && montos?.total !== null ? montos.total : subtotal + impuesto
+  );
+  const tasaItbis = Number(datos.itbis_tasa ?? datos.itbisTasa ?? (impuesto > 0 && subtotal > 0 ? 18 : 0)) || 0;
+  const formasPago = resolverFormasPagoXmlFacturacionElectronica(payload);
+  const tipoPago = resolverTipoPagoXmlFacturacionElectronica(payload);
+  const valorPagar = resolverValorPagarXmlFacturacionElectronica({ payload, total, tipoPago });
+  const descripcionFallback =
+    normalizarCampoTexto(datos.descripcion, null) ||
+    normalizarCampoTexto(referencia?.motivo, null) ||
+    FACTURACION_ELECTRONICA_TIPOS[tipoDocumento]?.descripcion ||
+    'Documento electrónico';
+  const itemsBase =
+    Array.isArray(payload?.items) && payload.items.length
+      ? payload.items
+      : [{ descripcion: descripcionFallback, cantidad: 1, precio_unitario: total, total_linea: total }];
+  const items = itemsBase.map((item, index) => ({
+    NumeroLinea: String(index + 1),
+    IndicadorFacturacion: normalizarCampoTexto(item?.indicador_facturacion ?? item?.indicadorFacturacion, '1') || '1',
+    NombreItem:
+      normalizarCampoTexto(item?.nombre ?? item?.descripcion, null) ||
+      normalizarCampoTexto(descripcionFallback, null) ||
+      `Item ${index + 1}`,
+    IndicadorBienoServicio: resolverIndicadorBienoServicioXmlFacturacionElectronica(item, datos),
+    CantidadItem: formatearCantidadXmlFacturacionElectronica(item?.cantidad ?? 1),
+    UnidadMedida: resolverUnidadMedidaXmlFacturacionElectronica(item, datos),
+    PrecioUnitarioItem: formatearMontoXmlFacturacionElectronica(
+      item?.precio_unitario ?? item?.precioUnitario ?? item?.total_linea ?? item?.totalLinea ?? total
+    ),
+    MontoItem: formatearMontoXmlFacturacionElectronica(
+      item?.total_linea ?? item?.totalLinea ?? item?.monto ?? item?.precio_unitario ?? total
+    ),
+  }));
+
+  const estructura = {
+    ECF: {
+      Encabezado: {
+        Version: '1.0',
+        IdDoc: {
+          TipoeCF: tipoeCF,
+          eNCF: normalizarCampoTexto(documento?.encf ?? payload?.encf, null),
+          FechaVencimientoSecuencia: normalizarFechaDgiiFacturacionElectronica(
+            secuencia?.fecha_vencimiento ?? datos.fecha_vencimiento_secuencia ?? datos.fechaVencimientoSecuencia,
+            null
+          ),
+          IndicadorMontoGravado:
+            normalizarCampoTexto(datos.indicador_monto_gravado ?? datos.indicadorMontoGravado, '0') || '0',
+          TipoIngresos: normalizarCampoTexto(datos.tipo_ingresos ?? datos.tipoIngresos, '01') || '01',
+          TipoPago: tipoPago,
+          TablaFormasPago: formasPago.length ? { FormaDePago: formasPago } : undefined,
+        },
+        Emisor: {
+          RNCEmisor: normalizarCampoTexto(config?.rnc_emisor ?? payload?.emisor?.rnc_emisor, null),
+          RazonSocialEmisor:
+            normalizarCampoTexto(config?.razon_social ?? payload?.emisor?.razon_social, null) ||
+            normalizarCampoTexto(config?.nombre_comercial ?? payload?.emisor?.nombre_comercial, null),
+          NombreComercial:
+            normalizarCampoTexto(config?.nombre_comercial ?? payload?.emisor?.nombre_comercial, null) ||
+            normalizarCampoTexto(config?.razon_social ?? payload?.emisor?.razon_social, null),
+          DireccionEmisor: normalizarCampoTexto(config?.direccion ?? payload?.emisor?.direccion, null),
+          Municipio: normalizarCampoTexto(
+            datos.municipio_emisor ??
+              datos.municipioEmisor ??
+              config?.municipio_codigo ??
+              payload?.emisor?.municipio_codigo,
+            null
+          ),
+          Provincia: normalizarCampoTexto(
+            datos.provincia_emisor ??
+              datos.provinciaEmisor ??
+              config?.provincia_codigo ??
+              payload?.emisor?.provincia_codigo,
+            null
+          ),
+          TablaTelefonoEmisor: (() => {
+            const telefonos = dividirTelefonosFacturacionElectronica(
+              datos.telefono_emisor ?? datos.telefonoEmisor ?? config?.telefono ?? payload?.emisor?.telefono
+            );
+            return telefonos.length ? { TelefonoEmisor: telefonos } : undefined;
+          })(),
+          CorreoEmisor: normalizarCampoTexto(
+            datos.correo_emisor ?? datos.correoEmisor ?? config?.correo ?? payload?.emisor?.correo,
+            null
+          ),
+          WebSite: normalizarCampoTexto(
+            datos.website ?? datos.webSite ?? config?.website ?? payload?.emisor?.website,
+            null
+          ),
+          CodigoVendedor: normalizarCampoTexto(
+            datos.codigo_vendedor ?? datos.codigoVendedor ?? venta?.creado_por_usuario_id ?? datos.usuario_id,
+            null
+          ),
+          NumeroFacturaInterna: normalizarCampoTexto(
+            datos.numero_factura_interna ??
+              datos.numeroFacturaInterna ??
+              venta?.cuenta_id ??
+              documento?.id,
+            null
+          ),
+          NumeroPedidoInterno: normalizarCampoTexto(
+            datos.numero_pedido_interno ??
+              datos.numeroPedidoInterno ??
+              venta?.pedido_referencia_id ??
+              (Array.isArray(venta?.pedidos_ids) && venta.pedidos_ids.length ? venta.pedidos_ids.join(',') : null),
+            null
+          ),
+          ZonaVenta: normalizarCampoTexto(datos.zona_venta ?? datos.zonaVenta, null),
+          FechaEmision: normalizarFechaDgiiFacturacionElectronica(payload?.fecha_emision, new Date()),
+        },
+        Comprador: {
+          RNCComprador: compradorId.rnc,
+          IdentificadorExtranjero: compradorId.identificadorExtranjero,
+          RazonSocialComprador:
+            normalizarCampoTexto(
+              contraparteBase?.nombre ?? payload?.cliente?.nombre ?? datos.razon_social_comprador,
+              null
+            ) || null,
+          ContactoComprador: normalizarCampoTexto(
+            datos.contacto_comprador ?? datos.contactoComprador,
+            null
+          ),
+          CorreoComprador: normalizarCampoTexto(
+            contraparteBase?.email ?? datos.correo_comprador ?? datos.correoComprador,
+            null
+          ),
+          DireccionComprador: normalizarCampoTexto(
+            contraparteBase?.direccion ?? datos.direccion_comprador ?? datos.direccionComprador,
+            null
+          ),
+          MunicipioComprador: normalizarCampoTexto(
+            datos.municipio_comprador ?? datos.municipioComprador,
+            null
+          ),
+          ProvinciaComprador: normalizarCampoTexto(
+            datos.provincia_comprador ?? datos.provinciaComprador,
+            null
+          ),
+          FechaEntrega: normalizarFechaDgiiFacturacionElectronica(
+            datos.fecha_entrega ?? datos.fechaEntrega,
+            null
+          ),
+          FechaOrdenCompra: normalizarFechaDgiiFacturacionElectronica(
+            datos.fecha_orden_compra ?? datos.fechaOrdenCompra,
+            null
+          ),
+          NumeroOrdenCompra: normalizarCampoTexto(
+            datos.numero_orden_compra ?? datos.numeroOrdenCompra,
+            null
+          ),
+          CodigoInternoComprador: normalizarCampoTexto(
+            datos.codigo_interno_comprador ?? datos.codigoInternoComprador,
+            null
+          ),
+        },
+        InformacionesAdicionales: {
+          NumeroContenedor: normalizarCampoTexto(
+            datos.numero_contenedor ?? datos.numeroContenedor,
+            null
+          ),
+          NumeroReferencia: normalizarCampoTexto(
+            datos.numero_referencia ??
+              datos.numeroReferencia ??
+              referencia?.origen_id ??
+              venta?.pedido_referencia_id ??
+              venta?.cuenta_id,
+            null
+          ),
+        },
+        Totales: {
+          MontoGravadoTotal: formatearMontoXmlFacturacionElectronica(subtotal),
+          MontoGravadoI1: formatearMontoXmlFacturacionElectronica(subtotal),
+          ITBIS1: formatearTasaXmlFacturacionElectronica(tasaItbis),
+          TotalITBIS: formatearMontoXmlFacturacionElectronica(impuesto),
+          TotalITBIS1: formatearMontoXmlFacturacionElectronica(impuesto),
+          MontoTotal: formatearMontoXmlFacturacionElectronica(total),
+          ValorPagar: valorPagar,
+        },
+      },
+      DetallesItems: {
+        Item: items,
+      },
+    },
+  };
+
+  if (tipoDocumento === 'E33' || tipoDocumento === 'E34') {
+    estructura.ECF.InformacionReferencia = {
+      NCFModificado: normalizarCampoTexto(referencia?.encf, null),
+      FechaNCFModificado: normalizarFechaDgiiFacturacionElectronica(
+        datos.fecha_ncf_modificado ?? datos.fechaNcfModificado ?? payload?.fecha_emision,
+        null
+      ),
+      CodigoModificacion: normalizarCampoTexto(
+        datos.codigo_modificacion ?? datos.codigoModificacion,
+        null
+      ),
+      RazonModificacion: normalizarCampoTexto(referencia?.motivo, null),
+    };
+  }
+
+  const rncEmisor = estructura?.ECF?.Encabezado?.Emisor?.RNCEmisor;
+  const razonSocialEmisor = estructura?.ECF?.Encabezado?.Emisor?.RazonSocialEmisor;
+  if (!rncEmisor || !razonSocialEmisor) {
+    const error = new Error(
+      'Faltan datos del emisor para generar el XML. Revisa RNC y razón social en Facturación Electrónica.'
+    );
+    error.status = 400;
+    throw error;
+  }
+  if (tipoDocumento === 'E31') {
+    const comprador = estructura?.ECF?.Encabezado?.Comprador || {};
+    if (!comprador.RazonSocialComprador || (!comprador.RNCComprador && !comprador.IdentificadorExtranjero)) {
+      const error = new Error(
+        'El XML E31 requiere datos del comprador. Completa nombre y documento del cliente en la venta.'
+      );
+      error.status = 400;
+      throw error;
+    }
+  }
+
+  return estructura;
+};
+
+const construirPayloadPlanoXmlDocumentoFacturacionElectronica = ({
+  documento = {},
+  payload = {},
+  config = {},
+  secuencia = {},
+} = {}) =>
+  aplanarEstructuraXmlFacturacionElectronica(
+    construirEstructuraXmlDocumentoFacturacionElectronica({
+      documento,
+      payload,
+      config,
+      secuencia,
+    })
+  );
+
+const serializarDocumentoFacturacionElectronicaRow = (row = {}) => {
+  const payload = parseJsonSeguro(row.payload_json, {});
+  return {
+    id: Number(row.id) || null,
+    cuenta_id: Number(row.cuenta_id) || null,
+    pedido_referencia_id: Number(row.pedido_referencia_id) || null,
+    origen_documento: row.origen_documento || 'caja',
+    flujo: row.flujo || 'venta',
+    tipo_documento: row.tipo_documento || '',
+    encf: row.encf || '',
+    estado_local: row.estado_local || '',
+    estado_dgii: row.estado_dgii || null,
+    codigo_respuesta: row.codigo_respuesta || null,
+    mensaje_respuesta: row.mensaje_respuesta || null,
+    track_id: row.track_id || null,
+    fecha_emision: row.fecha_emision || row.created_at || null,
+    total: redondearMontoPago(row.total),
+    cliente:
+      payload?.cliente?.nombre ||
+      payload?.contraparte?.nombre ||
+      payload?.proveedor?.nombre ||
+      null,
+    cliente_documento:
+      payload?.cliente?.documento ||
+      payload?.contraparte?.documento ||
+      payload?.proveedor?.documento ||
+      null,
+    mesa: payload?.venta?.mesa || null,
+    xml_disponible: Boolean(row.xml_borrador),
+    xml_firmado_disponible: Boolean(row.xml_firmado),
+    payload,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+  };
+};
+
+const obtenerDocumentoFacturacionElectronicaPorId = async (documentoId, negocioId) => {
+  const row = await db.get(
+    `SELECT id, cuenta_id, pedido_referencia_id, origen_documento, flujo, tipo_documento, encf,
+            estado_local, estado_dgii, codigo_respuesta, mensaje_respuesta, track_id,
+            payload_json, xml_borrador, xml_firmado, fecha_emision, total, created_by_usuario_id,
+            created_at, updated_at
+       FROM facturacion_electronica_documentos
+      WHERE id = ? AND negocio_id = ?
+      LIMIT 1`,
+    [documentoId, negocioId]
+  );
+  if (!row) {
+    return null;
+  }
+  const documento = serializarDocumentoFacturacionElectronicaRow(row);
+  documento.xml_borrador = row.xml_borrador || null;
+  documento.xml_firmado = row.xml_firmado || null;
+  return documento;
+};
+
+const construirNombreArchivoXmlFacturacionElectronica = (documento = {}, config = {}) => {
+  const rnc = String(config?.rnc_emisor || documento?.payload?.emisor?.rnc_emisor || 'ECF')
+    .replace(/[^0-9A-Za-z]/g, '')
+    .trim();
+  const encf = String(documento?.encf || 'documento')
+    .replace(/[^0-9A-Za-z_-]/g, '')
+    .trim();
+  return `${rnc || 'ECF'}${encf || 'documento'}.xml`;
+};
+
+const generarXmlDocumentoFacturacionElectronica = async ({
+  documentoId,
+  negocioId,
+  persistirError = true,
+} = {}) => {
+  const documento = await obtenerDocumentoFacturacionElectronicaPorId(documentoId, negocioId);
+  if (!documento) {
+    const error = new Error('No se encontró el documento FE solicitado.');
+    error.status = 404;
+    throw error;
+  }
+  try {
+    const config = await obtenerConfiguracionFacturacionElectronica(negocioId, { includeSecrets: false });
+    const secuencia = config?.secuencias?.[documento.tipo_documento] || construirSecuenciaFacturacionElectronica(documento.tipo_documento);
+    const payloadPlano = construirPayloadPlanoXmlDocumentoFacturacionElectronica({
+      documento,
+      payload: documento.payload || {},
+      config,
+      secuencia,
+    });
+    const xmlBorrador = buildEcfXml({
+      payload: payloadPlano,
+      flujo: 'ECF_NORMAL',
+      rncEmisorFallback: config?.rnc_emisor || documento?.payload?.emisor?.rnc_emisor || '',
+    });
+    await db.run(
+      `UPDATE facturacion_electronica_documentos
+          SET xml_borrador = ?, estado_local = ?, mensaje_respuesta = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND negocio_id = ?`,
+      [xmlBorrador, FACTURACION_ELECTRONICA_ESTADOS.XML_GENERADO, documento.id, negocioId]
+    );
+    return {
+      ...(await obtenerDocumentoFacturacionElectronicaPorId(documento.id, negocioId)),
+      xml_borrador: xmlBorrador,
+      nombre_archivo: construirNombreArchivoXmlFacturacionElectronica(documento, config),
+    };
+  } catch (error) {
+    if (persistirError) {
+      await db.run(
+        `UPDATE facturacion_electronica_documentos
+            SET estado_local = ?, mensaje_respuesta = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND negocio_id = ?`,
+        [
+          FACTURACION_ELECTRONICA_ESTADOS.ERROR,
+          error?.message || 'No se pudo generar el XML del documento FE.',
+          documento.id,
+          negocioId,
+        ]
+      ).catch(() => null);
+    }
+    throw error;
+  }
+};
+
+const cargarConfiguracionDgiiPaso2Negocio = async (negocioId) => {
+  const row = await db.get('SELECT * FROM dgii_paso2_config WHERE negocio_id = ? LIMIT 1', [negocioId]);
+  if (!row) {
+    return null;
+  }
+  return {
+    row,
+    config: {
+      ...row,
+      usuario_certificacion: row.usuario_certificacion || '',
+      clave_certificacion: decryptDgiiSecret(row.clave_certificacion_enc || ''),
+      p12_password: decryptDgiiSecret(row.p12_password_enc || ''),
+      endpoints: resolveDgiiEndpoints(row),
+    },
+  };
+};
+
+const guardarTokenCacheDgiiPaso2 = async ({ negocioId, token, expira }) => {
+  if (!token) {
+    return;
+  }
+  let expiraAt = new Date(Date.now() + 45 * 60 * 1000);
+  if (expira) {
+    const parsed = new Date(expira);
+    if (!Number.isNaN(parsed.getTime())) {
+      expiraAt = parsed;
+    }
+  }
+  await db.run(
+    'UPDATE dgii_paso2_config SET token_cache = ?, token_expira_en = ?, updated_at = CURRENT_TIMESTAMP WHERE negocio_id = ?',
+    [JSON.stringify({ token }), expiraAt.toISOString().slice(0, 19).replace('T', ' '), negocioId]
+  );
+};
+
+const cargarConfiguracionAutenticacionFacturacionElectronica = async (negocioId) => {
+  const configFE = await obtenerConfiguracionFacturacionElectronica(negocioId, { includeSecrets: true });
+  const dgii = await cargarConfiguracionDgiiPaso2Negocio(negocioId);
+  if (!dgii?.row || !dgii?.config) {
+    const error = new Error('Falta configurar DGII Paso 2 para autenticar y enviar el e-CF.');
+    error.status = 400;
+    throw error;
+  }
+
+  const combinedConfig = {
+    ...dgii.config,
+    usuario_certificacion:
+      normalizarCampoTexto(configFE?.usuario_envio, null) || dgii.config.usuario_certificacion || '',
+    clave_certificacion:
+      normalizarCampoTexto(configFE?.clave_envio, null) || dgii.config.clave_certificacion || '',
+    p12_base64: configFE?.certificado_base64 || dgii.config.p12_base64 || '',
+    p12_password:
+      normalizarCampoTexto(configFE?.certificado_password, null) ?? dgii.config.p12_password ?? '',
+    rnc_emisor: configFE?.rnc_emisor || dgii.config.rnc_emisor || '',
+    endpoints: dgii.config.endpoints,
+  };
+
+  return {
+    configFE,
+    dgii,
+    combinedConfig,
+  };
+};
+
+const resolverTokenDgiiFacturacionElectronica = async ({ negocioId, config = {}, configRow = {} } = {}) => {
+  const cached = getTokenDgiiFromCache(configRow);
+  if (cached) {
+    return cached;
+  }
+  const auth = await autenticarDgii({ config });
+  if (!auth?.token) {
+    throw new Error('DGII no devolvió token de autenticación.');
+  }
+  await guardarTokenCacheDgiiPaso2({ negocioId, token: auth.token, expira: auth.expira }).catch(() => null);
+  return auth.token;
+};
+
+const determinarEstadoDocumentoFacturacionElectronica = ({ envio = null, consulta = null } = {}) => {
+  if (consulta?.extracted?.accepted || envio?.extracted?.accepted) {
+    return FACTURACION_ELECTRONICA_ESTADOS.ACEPTADO;
+  }
+  if (consulta?.extracted?.rejected || envio?.extracted?.rejected) {
+    return FACTURACION_ELECTRONICA_ESTADOS.RECHAZADO;
+  }
+  return FACTURACION_ELECTRONICA_ESTADOS.ENVIADO;
+};
+
+const enviarDocumentoFacturacionElectronica = async ({ documentoId, negocioId } = {}) => {
+  const documentoInicial = await obtenerDocumentoFacturacionElectronicaPorId(documentoId, negocioId);
+  if (!documentoInicial) {
+    const error = new Error('No se encontró el documento FE a enviar.');
+    error.status = 404;
+    throw error;
+  }
+  const documentoConXml = documentoInicial?.xml_borrador
+    ? documentoInicial
+    : await generarXmlDocumentoFacturacionElectronica({
+        documentoId,
+        negocioId,
+        persistirError: true,
+      });
+
+  const { dgii, combinedConfig } = await cargarConfiguracionAutenticacionFacturacionElectronica(negocioId);
+
+  const authConfigError = validateDgiiAuthConfig(combinedConfig, {
+    hasTokenCache: Boolean(getTokenDgiiFromCache(dgii.row)),
+  });
+  if (authConfigError) {
+    const error = new Error(authConfigError);
+    error.status = 400;
+    throw error;
+  }
+  if (facturacionElectronicaDgiiMissingDeps.length) {
+    const error = new Error(
+      `No se puede enviar el e-CF. Faltan dependencias: ${facturacionElectronicaDgiiMissingDeps.join(', ')}.`
+    );
+    error.status = 503;
+    throw error;
+  }
+
+  try {
+    const cert = extractPemFromP12({
+      p12Base64: combinedConfig.p12_base64,
+      p12Password: combinedConfig.p12_password || '',
+    });
+    const firmado = signXmlDocument({
+      xml: documentoConXml.xml_borrador,
+      privateKeyPem: cert.privateKeyPem,
+      certPem: cert.certPem,
+    });
+    const token = await resolverTokenDgiiFacturacionElectronica({
+      negocioId,
+      config: combinedConfig,
+      configRow: dgii.row,
+    });
+    const envio = await sendXmlToDgii({
+      endpoint: combinedConfig.endpoints?.recepcion,
+      apiPath: '/api/recepcion/ecf',
+      xmlPayload: firmado.xml,
+      token,
+      fileName: construirNombreArchivoXmlFacturacionElectronica(documentoConXml, combinedConfig),
+    });
+    if (!envio?.ok && !envio?.extracted?.trackId && !envio?.extracted?.accepted && !envio?.extracted?.rejected) {
+      throw new Error(envio?.extracted?.message || envio?.raw || 'DGII rechazó el envío del XML.');
+    }
+
+    let consulta = null;
+    const trackId = envio?.extracted?.trackId || null;
+    if (trackId) {
+      consulta = await consultDgiiResult({
+        endpoint: combinedConfig.endpoints?.consultaResultado,
+        token,
+        trackId,
+        encf: documentoConXml.encf,
+        rncEmisor: combinedConfig.rnc_emisor,
+      }).catch(() => null);
+    }
+
+    const estadoLocal = determinarEstadoDocumentoFacturacionElectronica({ envio, consulta });
+    const codigoRespuesta = consulta?.extracted?.code || envio?.extracted?.code || null;
+    const mensajeRespuesta =
+      consulta?.extracted?.message ||
+      consulta?.raw ||
+      envio?.extracted?.message ||
+      envio?.raw ||
+      null;
+    const estadoDgii =
+      consulta?.extracted?.statusText ||
+      envio?.extracted?.statusText ||
+      estadoLocal;
+    await db.run(
+      `UPDATE facturacion_electronica_documentos
+          SET xml_firmado = ?, respuesta_json = ?, estado_local = ?, estado_dgii = ?, codigo_respuesta = ?,
+              mensaje_respuesta = ?, track_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND negocio_id = ?`,
+      [
+        firmado.xml,
+        JSON.stringify({
+          envio,
+          consulta,
+          signature_value: extractSignatureValueFromXml(firmado.xml),
+        }),
+        estadoLocal,
+        estadoDgii,
+        codigoRespuesta,
+        mensajeRespuesta,
+        consulta?.extracted?.trackId || envio?.extracted?.trackId || null,
+        documentoConXml.id,
+        negocioId,
+      ]
+    );
+    return {
+      ...(await obtenerDocumentoFacturacionElectronicaPorId(documentoConXml.id, negocioId)),
+      respuesta_envio: envio,
+      respuesta_consulta: consulta,
+    };
+  } catch (error) {
+    await db.run(
+      `UPDATE facturacion_electronica_documentos
+          SET estado_local = ?, mensaje_respuesta = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND negocio_id = ?`,
+      [
+        FACTURACION_ELECTRONICA_ESTADOS.ERROR,
+        error?.message || 'No se pudo enviar el e-CF a DGII.',
+        documentoConXml.id,
+        negocioId,
+      ]
+    ).catch(() => null);
+    throw error;
+  }
+};
+
+const listarDocumentosFacturacionElectronica = async (negocioId, opciones = {}) => {
+  const negocio = negocioId || NEGOCIO_ID_DEFAULT;
+  const limiteSolicitado = Number(opciones?.limit ?? opciones?.limite ?? 50);
+  const limite = Math.max(1, Math.min(Number.isFinite(limiteSolicitado) ? limiteSolicitado : 50, 200));
+  const estadoEntrada = normalizarCampoTexto(opciones?.estado, null);
+  const estado = Object.values(FACTURACION_ELECTRONICA_ESTADOS).includes(estadoEntrada)
+    ? estadoEntrada
+    : null;
+  const filtros = ['negocio_id = ?'];
+  const params = [negocio];
+  if (estado) {
+    filtros.push('estado_local = ?');
+    params.push(estado);
+  }
+  const rows = await db.all(
+    `SELECT id, cuenta_id, pedido_referencia_id, origen_documento, flujo, tipo_documento, encf,
+            estado_local, estado_dgii, codigo_respuesta, mensaje_respuesta, track_id,
+            payload_json, xml_borrador, xml_firmado, fecha_emision, total, created_by_usuario_id, created_at, updated_at
+       FROM facturacion_electronica_documentos
+      WHERE ${filtros.join(' AND ')}
+      ORDER BY COALESCE(fecha_emision, created_at) DESC, id DESC
+      LIMIT ${limite}`,
+    params
+  );
+
+  return (rows || []).map((row) => serializarDocumentoFacturacionElectronicaRow(row));
+};
+
+const resumirDocumentosFacturacionElectronica = (documentos = []) => {
+  const resumen = {
+    total: 0,
+    pendiente_xml: 0,
+    config_pendiente: 0,
+    xml_generado: 0,
+    firmado: 0,
+    enviado: 0,
+    aceptado: 0,
+    rechazado: 0,
+    error: 0,
+    total_monto: 0,
+  };
+  (documentos || []).forEach((documento) => {
+    resumen.total += 1;
+    const estado = String(documento?.estado_local || '').trim().toLowerCase();
+    if (estado && Object.prototype.hasOwnProperty.call(resumen, estado)) {
+      resumen[estado] += 1;
+    }
+    resumen.total_monto = redondearMontoPago(resumen.total_monto + (Number(documento?.total) || 0));
+  });
+  return resumen;
+};
+
+const obtenerCoberturaFacturacionElectronica = async (negocioId) => {
+  const resumen = await obtenerResumenFacturacionElectronicaNegocio(negocioId).catch(() => ({
+    habilitada: 0,
+  }));
+  return FACTURACION_ELECTRONICA_TIPOS_LISTA.map((tipo) => ({
+    tipo_documento: tipo.tipo,
+    label: tipo.label,
+    descripcion: tipo.descripcion,
+    legacy: tipo.legacy,
+    secuencia_activa: normalizarFlag(
+      resumen?.[`permitir_${tipo.tipo.toLowerCase()}`],
+      tipo.activa_por_defecto
+    ),
+    origenes: FACTURACION_ELECTRONICA_COBERTURA[tipo.tipo]?.origenes || [],
+  }));
+};
+
 const ajustarStockPorPedido = async (pedidoId, negocioId, signo = 1) => {
   const detalles = await db.all(
     `SELECT dp.producto_id, dp.cantidad, COALESCE(p.stock_indefinido, 0) AS stock_indefinido
@@ -5489,27 +7883,28 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     null
   );
   const documentoFinal = normalizarCampoTexto(cliente_documento, null);
-  const tipoFinal = normalizarCampoTexto(tipo_comprobante, 'B02') || 'B02';
   const comentariosFinal = normalizarCampoTexto(comentarios, null);
   const ncfManualNormalizado = normalizarCampoTexto(ncfManual, null);
-
-  if (!esCobroAdelantado) {
-    try {
-      const permisosSecuencias = await obtenerConfiguracionSecuenciasNegocio(negocioIdOperacion);
-      if (tipoFinal === 'B01' && Number(permisosSecuencias.permitir_b01) === 0) {
-        return callback({ status: 400, message: 'B01 desactivado para este negocio' });
-      }
-      if (tipoFinal === 'B02' && Number(permisosSecuencias.permitir_b02) === 0) {
-        return callback({ status: 400, message: 'B02 desactivado para este negocio' });
-      }
-      if (tipoFinal === 'B14' && Number(permisosSecuencias.permitir_b14) === 0) {
-        return callback({ status: 400, message: 'B14 desactivado para este negocio' });
-      }
-    } catch (error) {
-      console.error('Error al validar secuencias fiscales:', error?.message || error);
-      return callback({ status: 500, message: 'No se pudo validar la secuencia fiscal' });
-    }
+  const configFacturacionElectronicaNegocio = await obtenerResumenFacturacionElectronicaNegocio(
+    negocioIdOperacion
+  ).catch(() => ({
+    habilitada: 0,
+  }));
+  const tipoPredeterminado =
+    normalizarFlag(configFacturacionElectronicaNegocio?.habilitada, 0) === 1 ? 'E32' : 'B02';
+  const tipoSolicitado =
+    normalizarTipoComprobanteVenta(tipo_comprobante, tipoPredeterminado) || tipoPredeterminado;
+  let tipoFinal = tipoSolicitado;
+  try {
+    tipoFinal = await validarTipoComprobanteVentaNegocio(tipoSolicitado, negocioIdOperacion);
+  } catch (error) {
+    const status = error?.status || 400;
+    return callback({
+      status,
+      message: error?.message || 'No se pudo validar el tipo de comprobante para esta venta',
+    });
   }
+  const esTipoElectronicoOperacion = esTipoComprobanteElectronico(tipoFinal);
 
   let configImpuestoOperacion = null;
   try {
@@ -5805,6 +8200,15 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
       (pagosPrevios.transferencia || 0) + transferencia
     );
     const pagoCambioTotalCuenta = redondearMontoPago((pagosPrevios.cambio || 0) + cambio);
+    const pagosTotalesCuenta = {
+      efectivo: pagoEfectivoTotalCuenta,
+      efectivo_entregado: pagoEfectivoEntregadoTotalCuenta,
+      tarjeta: pagoTarjetaTotalCuenta,
+      transferencia: pagoTransferenciaTotalCuenta,
+      cambio: pagoCambioTotalCuenta,
+      total: redondearMontoPago(pagoEfectivoTotalCuenta + pagoTarjetaTotalCuenta + pagoTransferenciaTotalCuenta),
+      ultimo_pago: new Date().toISOString(),
+    };
 
     const distribuirSegunSubtotal = (monto) => {
       if (subtotalTotal <= 0) {
@@ -5955,11 +8359,34 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
 
                 const pedidoIds = pedidosActivos.map((pedido) => pedido.id);
                 return actualizarCogsPedidos(pedidoIds, negocioIdOperacion)
+                  .then(() => {
+                    if (!esTipoElectronicoOperacion || !ncfAsignado) {
+                      return null;
+                    }
+                    return registrarDocumentoFacturacionElectronicaVenta({
+                      negocioId: negocioIdOperacion,
+                      cuentaId: cuentaOperacionId,
+                      pedidoReferencia,
+                      pedidos: pedidosActivos,
+                      tipoDocumento: tipoFinal,
+                      encf: ncfAsignado,
+                      cliente: clienteFinal || pedidoReferencia?.cliente || null,
+                      clienteDocumento: documentoFinal || pedidoReferencia?.cliente_documento || null,
+                      comentarios: comentariosFinal || pedidoReferencia?.comentarios || null,
+                      pagosResumen: pagosTotalesCuenta,
+                      totales: construirTotalesRespuesta(),
+                      usuarioId: usuario_id || null,
+                      origenDocumento: origenCaja,
+                    });
+                  })
                   .then(() => confirmarCommit())
                   .catch((cogsErr) => {
                     console.error('Error al registrar COGS del pedido:', cogsErr?.message || cogsErr);
                     return db.run('ROLLBACK', () =>
-                      callback({ status: 500, message: 'No se pudo registrar el costo de la venta' })
+                      callback({
+                        status: 500,
+                        message: 'No se pudo registrar el costo o el documento de facturacion electronica',
+                      })
                     );
                   });
               })
@@ -6075,7 +8502,11 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
                 documentoFinal,
                 tipoFinal,
                 esReferencia ? ncfAsignado || p.ncf || null : p.ncf || null,
-                ncfAsignado && esReferencia ? 'emitido' : 'sin_emitir',
+                ncfAsignado && esReferencia
+                  ? esTipoElectronicoOperacion
+                    ? FACTURACION_ELECTRONICA_ESTADOS.PENDIENTE_XML
+                    : 'emitido'
+                  : 'sin_emitir',
                 descuentoValor,
                 descuentoPedido,
                 propinaValor,
@@ -6110,13 +8541,20 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
 
               if (puedeReintentarNCF && esReferencia && intentosRestantes > 0) {
                 return db.run('ROLLBACK', () =>
-                  generarNCF(tipoFinal, negocioIdOperacion, (nuevoErr, nuevoNcf) => {
-                    if (nuevoErr) {
-                      console.error('Error al regenerar NCF tras conflicto:', nuevoErr.message);
-                      return callback({ status: 500, message: 'No fue posible generar un NCF unico' });
-                    }
-                    ejecutarOperacion(nuevoNcf, intentosRestantes - 1);
-                  })
+                  generarComprobanteFiscalAsync(tipoFinal, negocioIdOperacion)
+                    .then((nuevoNcf) => {
+                      ejecutarOperacion(nuevoNcf, intentosRestantes - 1);
+                    })
+                    .catch((nuevoErr) => {
+                      if (nuevoErr) {
+                        console.error(
+                          'Error al regenerar comprobante fiscal tras conflicto:',
+                          nuevoErr?.message || nuevoErr
+                        );
+                        return callback({ status: 500, message: 'No fue posible generar un comprobante unico' });
+                      }
+                      return null;
+                    })
                 );
               }
             }
@@ -6164,13 +8602,14 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     }
 
     if (generar_ncf) {
-      return generarNCF(tipoFinal, negocioIdOperacion, (ncfErr, nuevoNcf) => {
-        if (ncfErr) {
-          console.error('Error al generar NCF:', ncfErr.message);
-          return callback({ status: 500, message: 'No fue posible generar el NCF' });
-        }
-        ejecutarOperacion(nuevoNcf, reintentosNCF);
-      });
+      return generarComprobanteFiscalAsync(tipoFinal, negocioIdOperacion)
+        .then((nuevoNcf) => {
+          ejecutarOperacion(nuevoNcf, reintentosNCF);
+        })
+        .catch((ncfErr) => {
+          console.error('Error al generar comprobante fiscal:', ncfErr?.message || ncfErr);
+          return callback({ status: 500, message: 'No fue posible generar el comprobante fiscal' });
+        });
     }
 
     ejecutarOperacion(null, 0);
@@ -6981,15 +9420,35 @@ app.post('/api/caja/cierres', (req, res) => {
 const obtenerCierresCaja = (desde, hasta, negocioId, origen, callback) => {
   const negocio = negocioId || NEGOCIO_ID_DEFAULT;
   const params = [negocio, desde, hasta];
-  const filtros = ['negocio_id = ?', 'DATE(fecha_operacion) BETWEEN ? AND ?'];
+  const filtros = ['cc.negocio_id = ?', 'DATE(cc.fecha_operacion) BETWEEN ? AND ?'];
   const origenCaja = normalizarOrigenCaja(origen, 'caja');
-  filtros.push(construirFiltroOrigenCaja(origenCaja, params, 'origen_caja'));
+  const filtroOrigenCierre = construirFiltroOrigenCaja(origenCaja, params, 'cc.origen_caja');
+  const filtroOrigenPedidos = construirFiltroOrigenCajaSql(origenCaja, 'p.origen_caja');
+  const filtroOrigenFacturas = construirFiltroOrigenCajaSql(origenCaja, 'd.origen_caja');
+  const totalPedidoSql =
+    'COALESCE(p.subtotal, 0) + COALESCE(p.impuesto, 0) - COALESCE(p.descuento_monto, 0) + COALESCE(p.propina_monto, 0)';
+  filtros.push(filtroOrigenCierre);
   const sql = `
-    SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol, origen_caja,
-           fondo_inicial, total_sistema, total_declarado, diferencia, observaciones
-    FROM cierres_caja
+    SELECT cc.id, cc.fecha_operacion, cc.fecha_cierre, cc.usuario, cc.usuario_rol, cc.origen_caja,
+           cc.fondo_inicial, cc.total_sistema, cc.total_declarado, cc.diferencia, cc.observaciones,
+           COALESCE((
+             SELECT SUM(${totalPedidoSql})
+             FROM pedidos p
+             WHERE p.cierre_id = cc.id
+               AND p.negocio_id = cc.negocio_id
+               AND p.estado = 'pagado'
+               AND ${filtroOrigenPedidos}
+           ), 0) AS total_ventas_pedidos,
+           COALESCE((
+             SELECT SUM(COALESCE(d.monto_total, 0))
+             FROM clientes_deudas d
+             WHERE d.negocio_id = cc.negocio_id
+               AND (d.cierre_id = cc.id OR (d.cierre_id IS NULL AND DATE(d.fecha) = DATE(cc.fecha_operacion)))
+               AND ${filtroOrigenFacturas}
+           ), 0) AS total_ventas_facturas
+    FROM cierres_caja cc
     WHERE ${filtros.join('\n      AND ')}
-    ORDER BY fecha_operacion DESC
+    ORDER BY cc.fecha_operacion DESC, cc.fecha_cierre DESC
   `;
   db.all(sql, params, (err, rows) => {
     if (err) {
@@ -7226,25 +9685,26 @@ const registrarCierreCaja = async (payload, negocioId) => {
   };
 };
 
-const restarFondoInicialDeCierre = (monto, fondoInicial) => {
-  const total = Number(monto) || 0;
-  const fondo = Number(fondoInicial) || 0;
-  return Number((total - fondo).toFixed(2));
-};
-
 const normalizarCierreCajaAdmin = (cierre) => {
   if (!cierre) return cierre;
   const fondoInicial = Number(cierre.fondo_inicial) || 0;
   const totalSistemaBruto = Number(cierre.total_sistema) || 0;
   const totalDeclaradoBruto = Number(cierre.total_declarado) || 0;
+  const totalVentasPedidos = Number(cierre.total_ventas_pedidos) || 0;
+  const totalVentasFacturas = Number(cierre.total_ventas_facturas) || 0;
+  const totalVentas = totalVentasPedidos + totalVentasFacturas;
 
   return {
     ...cierre,
     fondo_inicial: fondoInicial,
     total_sistema_bruto: totalSistemaBruto,
     total_declarado_bruto: totalDeclaradoBruto,
-    total_sistema: restarFondoInicialDeCierre(totalSistemaBruto, fondoInicial),
-    total_declarado: restarFondoInicialDeCierre(totalDeclaradoBruto, fondoInicial),
+    total_sistema: Number(totalSistemaBruto.toFixed(2)),
+    total_declarado: Number(totalDeclaradoBruto.toFixed(2)),
+    efectivo_esperado: Number(totalSistemaBruto.toFixed(2)),
+    total_ventas_pedidos: Number(totalVentasPedidos.toFixed(2)),
+    total_ventas_facturas: Number(totalVentasFacturas.toFixed(2)),
+    total_ventas: Number(totalVentas.toFixed(2)),
     diferencia: Number(cierre.diferencia) || 0,
   };
 };
@@ -7254,7 +9714,8 @@ const construirFilasCierresCSV = (cierres) =>
     fecha_operacion: cierre.fecha_operacion,
     fecha_cierre: cierre.fecha_cierre,
     usuario: cierre.usuario,
-    total_sistema: cierre.total_sistema,
+    total_ventas: cierre.total_ventas,
+    efectivo_esperado: cierre.efectivo_esperado ?? cierre.total_sistema,
     total_declarado: cierre.total_declarado,
     diferencia: cierre.diferencia,
     observaciones: cierre.observaciones || '',
@@ -7290,7 +9751,8 @@ app.get('/api/caja/cierres/export', (req, res) => {
         'fecha_operacion',
         'fecha_cierre',
         'usuario',
-        'total_sistema',
+        'total_ventas',
+        'efectivo_esperado',
         'total_declarado',
         'diferencia',
         'observaciones',
@@ -8463,8 +10925,17 @@ app.get('/api/configuracion/factura', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
     try {
-      const configuracion = await obtenerConfiguracionFacturacion(negocioId);
-      res.json({ ok: true, configuracion });
+      const [configuracion, facturacionElectronica] = await Promise.all([
+        obtenerConfiguracionFacturacion(negocioId),
+        obtenerResumenFacturacionElectronicaNegocio(negocioId).catch(() => ({ habilitada: 0 })),
+      ]);
+      const legacyBloqueada = normalizarFlag(facturacionElectronica?.habilitada, 0) === 1;
+      res.json({
+        ok: true,
+        configuracion,
+        legacy_bloqueada: legacyBloqueada,
+        facturacion_electronica: facturacionElectronica,
+      });
     } catch (error) {
       console.error('Error al obtener la configuracion de factura:', error?.message || error);
       res.status(500).json({ ok: false, error: 'No se pudo obtener la configuracion de factura' });
@@ -8475,6 +10946,16 @@ app.get('/api/configuracion/factura', (req, res) => {
 app.put('/api/configuracion/factura', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const resumenFacturacionElectronica = await obtenerResumenFacturacionElectronicaNegocio(negocioId).catch(() => ({
+      habilitada: 0,
+    }));
+    if (normalizarFlag(resumenFacturacionElectronica?.habilitada, 0) === 1) {
+      return res.status(409).json({
+        ok: false,
+        error:
+          'Este negocio usa facturacion electronica. Actualiza los datos fiscales y secuencias desde el modulo Facturacion Electronica.',
+      });
+    }
     const payload = req.body || {};
     const telefonosEntrada = Array.isArray(payload.telefono)
       ? payload.telefono.map((item) => (typeof item === 'string' ? item.trim() : String(item || '').trim())).filter(Boolean)
@@ -8548,8 +11029,17 @@ app.get('/api/admin/negocio/config', (req, res) => {
 
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
     try {
-      const configuracion = await obtenerConfiguracionSecuenciasNegocio(negocioId);
-      res.json({ ok: true, ...configuracion });
+      const [configuracion, facturacionElectronica] = await Promise.all([
+        obtenerConfiguracionSecuenciasNegocio(negocioId),
+        obtenerResumenFacturacionElectronicaNegocio(negocioId).catch(() => ({ habilitada: 0 })),
+      ]);
+      const legacyBloqueada = normalizarFlag(facturacionElectronica?.habilitada, 0) === 1;
+      res.json({
+        ok: true,
+        ...configuracion,
+        legacy_bloqueada: legacyBloqueada,
+        facturacion_electronica: facturacionElectronica,
+      });
     } catch (error) {
       console.error('Error al obtener configuracion de secuencias fiscales:', error?.message || error);
       res.status(500).json({ ok: false, error: 'No se pudo obtener la configuracion de secuencias fiscales' });
@@ -8564,6 +11054,16 @@ app.put('/api/admin/negocio/config', (req, res) => {
     }
 
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const resumenFacturacionElectronica = await obtenerResumenFacturacionElectronicaNegocio(negocioId).catch(() => ({
+      habilitada: 0,
+    }));
+    if (normalizarFlag(resumenFacturacionElectronica?.habilitada, 0) === 1) {
+      return res.status(409).json({
+        ok: false,
+        error:
+          'Este negocio usa facturacion electronica. Las secuencias fiscales tradicionales ya no se administran aqui.',
+      });
+    }
     const payload = req.body || {};
     const permitirB01 = normalizarFlag(payload.permitir_b01 ?? payload.permitirB01, 1);
     const permitirB02 = normalizarFlag(payload.permitir_b02 ?? payload.permitirB02, 1);
@@ -8579,6 +11079,363 @@ app.put('/api/admin/negocio/config', (req, res) => {
     } catch (error) {
       console.error('Error al guardar configuracion de secuencias fiscales:', error?.message || error);
       res.status(500).json({ ok: false, error: 'No se pudo guardar la configuracion de secuencias fiscales' });
+    }
+  });
+});
+
+app.get('/api/facturacion-electronica/config', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const config = await obtenerConfiguracionFacturacionElectronica(negocioId, { includeSecrets: false });
+      res.json({
+        ok: true,
+        config,
+        legacy_bloqueada: normalizarFlag(config?.habilitada, 0) === 1,
+      });
+    } catch (error) {
+      console.error('Error al obtener configuracion de facturacion electronica:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener la configuracion de facturacion electronica' });
+    }
+  });
+});
+
+app.put('/api/facturacion-electronica/config', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const config = await guardarConfiguracionFacturacionElectronica(negocioId, req.body || {}, usuarioSesion?.id || null);
+      res.json({
+        ok: true,
+        config,
+        legacy_bloqueada: normalizarFlag(config?.habilitada, 0) === 1,
+      });
+    } catch (error) {
+      const status = error?.status || 500;
+      console.error('Error al guardar configuracion de facturacion electronica:', error?.message || error);
+      res.status(status).json({
+        ok: false,
+        error: error?.message || 'No se pudo guardar la configuracion de facturacion electronica',
+      });
+    }
+  });
+});
+
+app.post('/api/facturacion-electronica/autenticacion/descargar-semilla', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const { dgii, combinedConfig } = await cargarConfiguracionAutenticacionFacturacionElectronica(negocioId);
+      const authConfigError = validateDgiiAuthConfig(combinedConfig, {
+        hasTokenCache: Boolean(getTokenDgiiFromCache(dgii?.row)),
+      });
+      if (authConfigError) {
+        return res.status(400).json({ ok: false, error: authConfigError });
+      }
+
+      const endpoints = combinedConfig?.endpoints || {};
+      const candidates = buildAuthCandidates(endpoints.autenticacion, 'SEMILLA');
+      const candidate = candidates.find((item) => item.mode === 'SEMILLA' && item.semillaUrl);
+      if (!candidate?.semillaUrl) {
+        return res.status(400).json({ ok: false, error: 'No hay endpoint de semilla configurado.' });
+      }
+
+      const semillaResp = await fetchWithTimeout(
+        candidate.semillaUrl,
+        {
+          method: 'GET',
+          headers: { Accept: 'application/xml,text/xml,*/*' },
+        }
+      );
+      const semillaText = await semillaResp.text();
+      if (!semillaResp.ok) {
+        const parsedSemilla = parseTextResponse(semillaText);
+        return res.status(502).json({
+          ok: false,
+          error:
+            `Semilla DGII fallida en ${candidate.semillaUrl} (${semillaResp.status}): ` +
+            `${parsedSemilla.extracted.message || parsedSemilla.raw || 'sin detalle'}`,
+        });
+      }
+      if (!/^\s*<\?xml|^\s*<semilla[\s>]/i.test(semillaText)) {
+        return res.status(502).json({ ok: false, error: 'DGII devolvio una semilla con formato inesperado.' });
+      }
+
+      return res.json({
+        ok: true,
+        endpoint: candidate.semillaUrl,
+        nombre_archivo: `semilla_${Date.now()}.xml`,
+        xml_base64: Buffer.from(semillaText, 'utf8').toString('base64'),
+      });
+    } catch (error) {
+      const status = error?.status || 500;
+      console.error('Error descargando semilla FE:', error?.message || error);
+      return res.status(status).json({
+        ok: false,
+        error: error?.message || 'No se pudo descargar la semilla DGII.',
+      });
+    }
+  });
+});
+
+app.post('/api/facturacion-electronica/autenticacion/validar-semilla-firmada', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const body = req.body || {};
+      const xmlFirmadaBase64 = normalizarCampoTexto(body.xml_firmada_base64 ?? body.xmlFirmadaBase64, null);
+      const xmlFirmadaTexto = normalizarCampoTexto(body.xml_firmada ?? body.xmlFirmada, null);
+      const xmlFirmada = xmlFirmadaTexto || (xmlFirmadaBase64 ? Buffer.from(xmlFirmadaBase64, 'base64').toString('utf8') : '');
+      if (!xmlFirmada) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Debes enviar un XML firmado valido (xml_firmada/xml_firmada_base64).',
+        });
+      }
+
+      const { dgii, combinedConfig } = await cargarConfiguracionAutenticacionFacturacionElectronica(negocioId);
+      const authConfigError = validateDgiiAuthConfig(combinedConfig, {
+        hasTokenCache: Boolean(getTokenDgiiFromCache(dgii?.row)),
+      });
+      if (authConfigError) {
+        return res.status(400).json({ ok: false, error: authConfigError });
+      }
+
+      const endpoints = combinedConfig?.endpoints || {};
+      const candidates = buildAuthCandidates(endpoints.autenticacion, 'SEMILLA');
+      const candidate = candidates.find((item) => item.mode === 'SEMILLA' && item.validarUrl);
+      if (!candidate?.validarUrl) {
+        return res.status(400).json({ ok: false, error: 'No hay endpoint de validacion de semilla configurado.' });
+      }
+
+      const formData = new FormData();
+      const fileName = normalizarCampoTexto(body.nombre_archivo ?? body.nombreArchivo, null) || 'semilla_firmada.xml';
+      formData.append('xml', new Blob([xmlFirmada], { type: 'application/xml' }), fileName);
+
+      const validarResp = await fetchWithTimeout(
+        candidate.validarUrl,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json, text/xml, application/xml, text/plain, */*' },
+          body: formData,
+        }
+      );
+      const validarText = await validarResp.text();
+      const parsed = parseTextResponse(validarText);
+      const token = extractToken(validarText, parsed.json);
+
+      if (!validarResp.ok || !token) {
+        const message = parsed.extracted?.message || parsed.raw || `ValidarSemilla fallida (${validarResp.status}).`;
+        return res.status(400).json({
+          ok: false,
+          status: validarResp.status,
+          endpoint: candidate.validarUrl,
+          error: String(message).slice(0, 1200),
+        });
+      }
+
+      await guardarTokenCacheDgiiPaso2({ negocioId, token, expira: parsed?.json?.expira || null });
+      return res.json({
+        ok: true,
+        endpoint: candidate.validarUrl,
+        status: validarResp.status,
+        token_preview: `${String(token).slice(0, 12)}...`,
+        token_expira_en: parsed?.json?.expira || null,
+      });
+    } catch (error) {
+      const status = error?.status || 500;
+      console.error('Error validando semilla firmada FE:', error?.message || error);
+      return res.status(status).json({
+        ok: false,
+        error: error?.message || 'No se pudo validar la semilla firmada.',
+      });
+    }
+  });
+});
+
+app.get('/api/facturacion-electronica/documentos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const documentos = await listarDocumentosFacturacionElectronica(negocioId, {
+        estado: req.query?.estado,
+        limit: req.query?.limit ?? req.query?.limite,
+      });
+      res.json({
+        ok: true,
+        documentos,
+        resumen: resumirDocumentosFacturacionElectronica(documentos),
+      });
+    } catch (error) {
+      console.error('Error al listar documentos de facturacion electronica:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener los documentos de facturacion electronica' });
+    }
+  });
+});
+
+app.post('/api/facturacion-electronica/documentos/:id/generar-xml', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const documentoId = Number(req.params?.id);
+    if (!Number.isFinite(documentoId) || documentoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Documento FE inválido.' });
+    }
+    try {
+      const documento = await generarXmlDocumentoFacturacionElectronica({
+        documentoId,
+        negocioId,
+        persistirError: true,
+      });
+      res.json({
+        ok: true,
+        documento,
+        xml_borrador: documento?.xml_borrador || '',
+        nombre_archivo: documento?.nombre_archivo || `${documento?.encf || 'ecf'}.xml`,
+      });
+    } catch (error) {
+      const status = error?.status || 500;
+      console.error('Error generando XML FE:', error?.message || error);
+      res.status(status).json({
+        ok: false,
+        error: error?.message || 'No se pudo generar el XML del documento FE.',
+      });
+    }
+  });
+});
+
+app.post('/api/facturacion-electronica/documentos/:id/enviar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const documentoId = Number(req.params?.id);
+    if (!Number.isFinite(documentoId) || documentoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Documento FE inválido.' });
+    }
+    try {
+      const documento = await enviarDocumentoFacturacionElectronica({
+        documentoId,
+        negocioId,
+      });
+      res.json({
+        ok: true,
+        documento,
+        envio: documento?.respuesta_envio || null,
+        consulta: documento?.respuesta_consulta || null,
+      });
+    } catch (error) {
+      const status = error?.status || 500;
+      console.error('Error enviando documento FE:', error?.message || error);
+      res.status(status).json({
+        ok: false,
+        error: error?.message || 'No se pudo enviar el documento FE a DGII.',
+      });
+    }
+  });
+});
+
+app.get('/api/facturacion-electronica/origenes', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const origenes = await obtenerCoberturaFacturacionElectronica(negocioId);
+      res.json({ ok: true, origenes });
+    } catch (error) {
+      console.error('Error al obtener cobertura de facturacion electronica:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener la cobertura de facturacion electronica' });
+    }
+  });
+});
+
+app.post('/api/facturacion-electronica/documentos/manual', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const payload = req.body || {};
+    try {
+      const tipoDocumento = await validarTipoComprobanteVentaNegocio(
+        payload.tipo_documento ?? payload.tipoDocumento,
+        negocioId
+      );
+      if (!esTipoComprobanteElectronico(tipoDocumento)) {
+        return res.status(400).json({ ok: false, error: 'Debes indicar un tipo e-CF valido.' });
+      }
+
+      const descripcion = normalizarCampoTexto(payload.descripcion, null);
+      const subtotal = redondearMontoPago(payload.subtotal);
+      const impuesto = redondearMontoPago(payload.impuesto);
+      const totalCalculado = redondearMontoPago(
+        payload.total !== undefined && payload.total !== null ? payload.total : subtotal + impuesto
+      );
+      if (totalCalculado <= 0) {
+        return res.status(400).json({ ok: false, error: 'El total del documento manual debe ser mayor que cero.' });
+      }
+      const itemsEntrada = Array.isArray(payload.items)
+        ? payload.items
+        : descripcion
+        ? [{ descripcion, cantidad: 1, precio_unitario: totalCalculado, total_linea: totalCalculado }]
+        : [];
+      if (!itemsEntrada.length) {
+        return res.status(400).json({ ok: false, error: 'Debes incluir una descripcion o al menos un item.' });
+      }
+
+      const documento = await registrarDocumentoFacturacionElectronicaManual({
+        negocioId,
+        tipoDocumento,
+        encf: payload.encf ?? payload.ncf,
+        fechaEmision: payload.fecha_emision ?? payload.fechaEmision ?? payload.fecha,
+        contraparte: {
+          rol: payload.rol_contraparte ?? payload.rolContraparte ?? 'cliente',
+          nombre: payload.contraparte_nombre ?? payload.contraparteNombre ?? payload.nombre,
+          documento: payload.contraparte_documento ?? payload.contraparteDocumento ?? payload.documento,
+          telefono: payload.contraparte_telefono ?? payload.contraparteTelefono,
+          email: payload.contraparte_email ?? payload.contraparteEmail,
+          direccion: payload.contraparte_direccion ?? payload.contraparteDireccion,
+        },
+        referencia: {
+          tipo_documento: payload.referencia_tipo_documento ?? payload.referenciaTipoDocumento,
+          encf: payload.referencia_encf ?? payload.referenciaEncf ?? payload.ncf_referencia,
+          motivo: payload.referencia_motivo ?? payload.referenciaMotivo ?? payload.motivo,
+          origen_id: payload.referencia_origen_id ?? payload.referenciaOrigenId,
+        },
+        descripcion,
+        notas: payload.notas ?? payload.comentarios,
+        subtotal,
+        impuesto,
+        total: totalCalculado,
+        items: itemsEntrada,
+        flujo: payload.flujo ?? 'manual',
+        usuarioId: usuarioSesion?.id || null,
+      });
+      res.status(201).json({ ok: true, documento });
+    } catch (error) {
+      const status = error?.status || 500;
+      console.error('Error al registrar documento FE manual:', error?.message || error);
+      res.status(status).json({ ok: false, error: error?.message || 'No se pudo registrar el documento manual' });
     }
   });
 });
@@ -12740,9 +15597,28 @@ app.patch('/api/negocios/:id/estado', (req, res) => {
 });
 
 app.get('/api/negocios/mi-tema', (req, res) => {
-  requireUsuarioSesion(req, res, (usuarioSesion) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || usuarioSesion?.negocioId || NEGOCIO_ID_DEFAULT;
-    db.get(
+    try {
+      const facturacionElectronica = await obtenerResumenFacturacionElectronicaNegocio(negocioId).catch(() => ({
+        habilitada: 0,
+        ambiente: 'certificacion',
+        proveedor: 'DGII',
+        lista_para_envio: false,
+        secuencias: {},
+        tipos_documento: [],
+        permitir_e31: FACTURACION_ELECTRONICA_TIPOS.E31.activa_por_defecto,
+        permitir_e32: FACTURACION_ELECTRONICA_TIPOS.E32.activa_por_defecto,
+        permitir_e33: FACTURACION_ELECTRONICA_TIPOS.E33.activa_por_defecto,
+        permitir_e34: FACTURACION_ELECTRONICA_TIPOS.E34.activa_por_defecto,
+        permitir_e41: FACTURACION_ELECTRONICA_TIPOS.E41.activa_por_defecto,
+        permitir_e43: FACTURACION_ELECTRONICA_TIPOS.E43.activa_por_defecto,
+        permitir_e44: FACTURACION_ELECTRONICA_TIPOS.E44.activa_por_defecto,
+        permitir_e45: FACTURACION_ELECTRONICA_TIPOS.E45.activa_por_defecto,
+        permitir_e46: FACTURACION_ELECTRONICA_TIPOS.E46.activa_por_defecto,
+        permitir_e47: FACTURACION_ELECTRONICA_TIPOS.E47.activa_por_defecto,
+      }));
+      db.get(
         `SELECT id, slug, nombre, titulo_sistema, color_primario, color_secundario, color_texto, color_header,
                 color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos, admin_principal_usuario_id,
                 logo_url, permitir_b01, permitir_b02, permitir_b14, activo
@@ -12784,11 +15660,39 @@ app.get('/api/negocios/mi-tema', (req, res) => {
               permitir_b01: permitirB01,
               permitir_b02: permitirB02,
               permitir_b14: permitirB14,
+              permitirE31: facturacionElectronica.permitir_e31,
+              permitirE32: facturacionElectronica.permitir_e32,
+              permitirE33: facturacionElectronica.permitir_e33,
+              permitirE34: facturacionElectronica.permitir_e34,
+              permitirE41: facturacionElectronica.permitir_e41,
+              permitirE43: facturacionElectronica.permitir_e43,
+              permitirE44: facturacionElectronica.permitir_e44,
+              permitirE45: facturacionElectronica.permitir_e45,
+              permitirE46: facturacionElectronica.permitir_e46,
+              permitirE47: facturacionElectronica.permitir_e47,
+              permitir_e31: facturacionElectronica.permitir_e31,
+              permitir_e32: facturacionElectronica.permitir_e32,
+              permitir_e33: facturacionElectronica.permitir_e33,
+              permitir_e34: facturacionElectronica.permitir_e34,
+              permitir_e41: facturacionElectronica.permitir_e41,
+              permitir_e43: facturacionElectronica.permitir_e43,
+              permitir_e44: facturacionElectronica.permitir_e44,
+              permitir_e45: facturacionElectronica.permitir_e45,
+              permitir_e46: facturacionElectronica.permitir_e46,
+              permitir_e47: facturacionElectronica.permitir_e47,
+              facturacionElectronica,
+              facturacion_electronica: facturacionElectronica,
+              facturacionElectronicaHabilitada: facturacionElectronica.habilitada,
+              facturacion_electronica_habilitada: facturacionElectronica.habilitada,
               activo: negocioTema.activo,
             },
           });
       }
     );
+    } catch (error) {
+      console.error('Error al obtener tema de negocio:', error?.message || error);
+      return res.status(500).json({ ok: false, error: 'No se pudo obtener el tema del negocio' });
+    }
   });
 });
 
@@ -20809,7 +23713,10 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
 
     try {
       const cliente = await db.get(
-        'SELECT id FROM clientes WHERE id = ? AND negocio_id = ? LIMIT 1',
+        `SELECT id, nombre, documento, telefono, email, direccion
+           FROM clientes
+          WHERE id = ? AND negocio_id = ?
+          LIMIT 1`,
         [clienteId, negocioId]
       );
       if (!cliente) {
@@ -20929,6 +23836,39 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
         }
       }
 
+      if (esTipoComprobanteElectronico(comprobante.tipo_comprobante) && comprobante.ncf) {
+        await registrarDocumentoFacturacionElectronicaDeuda({
+          negocioId,
+          deudaId,
+          clienteId,
+          tipoDocumento: comprobante.tipo_comprobante,
+          encf: comprobante.ncf,
+          cliente: {
+            nombre: cliente?.nombre,
+            documento: cliente?.documento,
+            telefono: cliente?.telefono,
+            email: cliente?.email,
+            direccion: cliente?.direccion,
+          },
+          fecha,
+          descripcion,
+          notas,
+          items:
+            usaItems && itemsProcesados.length
+              ? itemsProcesados.map((item) => ({
+                  nombre_producto: item?.nombre,
+                  cantidad: item?.cantidad,
+                  precio_unitario: item?.precio_unitario,
+                  total_linea: Number(
+                    (Number(item?.precio_unitario || 0) * Number(item?.cantidad || 0)).toFixed(2)
+                  ),
+                }))
+              : [],
+          montoTotal,
+          usuarioId: usuarioSesion?.id || null,
+        });
+      }
+
       await db.run('COMMIT');
       limpiarCacheAnalitica(negocioId);
 
@@ -20981,11 +23921,14 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
 
     try {
       const deuda = await db.get(
-        `SELECT id, tipo_comprobante, ncf
-           FROM clientes_deudas
-          WHERE id = ?
-            AND cliente_id = ?
-            AND negocio_id = ?
+        `SELECT d.id, d.tipo_comprobante, d.ncf,
+                c.nombre AS cliente_nombre, c.documento AS cliente_documento, c.telefono AS cliente_telefono,
+                c.email AS cliente_email, c.direccion AS cliente_direccion
+           FROM clientes_deudas d
+           JOIN clientes c ON c.id = d.cliente_id
+          WHERE d.id = ?
+            AND d.cliente_id = ?
+            AND d.negocio_id = ?
           LIMIT 1`,
         [deudaId, clienteId, negocioId]
       );
@@ -21074,6 +24017,29 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
 
         if (result.changes === 0) {
           return res.status(404).json({ ok: false, error: 'Deuda no encontrada' });
+        }
+
+        if (esTipoComprobanteElectronico(comprobante.tipo_comprobante) && comprobante.ncf) {
+          await registrarDocumentoFacturacionElectronicaDeuda({
+            negocioId,
+            deudaId,
+            clienteId,
+            tipoDocumento: comprobante.tipo_comprobante,
+            encf: comprobante.ncf,
+            cliente: {
+              nombre: deuda?.cliente_nombre,
+              documento: deuda?.cliente_documento,
+              telefono: deuda?.cliente_telefono,
+              email: deuda?.cliente_email,
+              direccion: deuda?.cliente_direccion,
+            },
+            fecha,
+            descripcion,
+            notas,
+            items: [],
+            montoTotal,
+            usuarioId: usuarioSesion?.id || null,
+          });
         }
 
         limpiarCacheAnalitica(negocioId);
@@ -21279,6 +24245,29 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
             );
           }
         }
+      }
+
+      if (esTipoComprobanteElectronico(comprobante.tipo_comprobante) && comprobante.ncf) {
+        await registrarDocumentoFacturacionElectronicaDeuda({
+          negocioId,
+          deudaId,
+          clienteId,
+          tipoDocumento: comprobante.tipo_comprobante,
+          encf: comprobante.ncf,
+          cliente: {
+            nombre: deuda?.cliente_nombre,
+            documento: deuda?.cliente_documento,
+            telefono: deuda?.cliente_telefono,
+            email: deuda?.cliente_email,
+            direccion: deuda?.cliente_direccion,
+          },
+          fecha,
+          descripcion,
+          notas,
+          items: itemsProcesados,
+          montoTotal,
+          usuarioId: usuarioSesion?.id || null,
+        });
       }
 
       await db.run('COMMIT');
@@ -26383,18 +29372,32 @@ app.post('/api/notas-credito/ventas', (req, res) => {
             return;
           }
 
+          obtenerResumenFacturacionElectronicaNegocio(negocioId)
+            .catch(() => ({ habilitada: 0 }))
+            .then((configFE) => {
+              const usaFacturacionElectronica = normalizarFlag(configFE?.habilitada, 0) === 1;
+              return (usaFacturacionElectronica && !normalizarCampoTexto(ncf_nota, null)
+                ? generarComprobanteFiscalAsync('E34', negocioId)
+                : Promise.resolve(normalizarCampoTexto(ncf_nota, null))
+              ).then((ncfNotaFinal) => ({
+                usaFacturacionElectronica,
+                ncfNotaFinal,
+              }));
+            })
+            .then(({ usaFacturacionElectronica, ncfNotaFinal }) => {
+
           const insertSql = `
         INSERT INTO notas_credito_ventas (pedido_id, fecha, motivo, monto, ncf_nota, ncf_referencia)
         VALUES (?, COALESCE(?, CURRENT_DATE), ?, ?, ?, ?)
       `;
-          db.run(
+              db.run(
             insertSql,
             [
               pedido_id,
               fecha,
               normalizarCampoTexto(motivo, null),
               montoValor,
-              ncf_nota || null,
+                  ncfNotaFinal || null,
               ncf_referencia || pedido.ncf || null,
             ],
             function (notaErr) {
@@ -26410,30 +29413,58 @@ app.post('/api/notas-credito/ventas', (req, res) => {
             WHERE id = ? AND negocio_id = ?
           `;
 
-              db.run(updateSql, [notaId, pedido_id, negocioId], (updateErr) => {
+                  db.run(updateSql, [notaId, pedido_id, negocioId], (updateErr) => {
                 if (updateErr) {
                   return finalizarError('Error al actualizar el pedido con la nota de cr?dito', updateErr);
                 }
 
-                db.run('COMMIT', (commitErr) => {
-                  if (commitErr) {
-                    return finalizarError('Error al confirmar la nota de cr?dito', commitErr);
-                  }
+                    const finalizarCommit = () =>
+                      db.run('COMMIT', (commitErr) => {
+                   if (commitErr) {
+                     return finalizarError('Error al confirmar la nota de cr?dito', commitErr);
+                   }
 
-                  res.status(201).json({
-                    ok: true,
-                    nota_credito: {
-                      id: notaId,
-                      pedido_id,
-                      monto: montoValor,
-                      ncf_nota: ncf_nota || null,
-                      ncf_referencia: ncf_referencia || pedido.ncf || null,
-                    },
-                  });
-                });
-              });
-            }
-          );
+                   res.status(201).json({
+                     ok: true,
+                     nota_credito: {
+                       id: notaId,
+                       pedido_id,
+                       monto: montoValor,
+                            ncf_nota: ncfNotaFinal || null,
+                       ncf_referencia: ncf_referencia || pedido.ncf || null,
+                     },
+                   });
+                 });
+                    if (usaFacturacionElectronica && ncfNotaFinal) {
+                      registrarDocumentoFacturacionElectronicaNotaCreditoVenta({
+                        negocioId,
+                        notaId,
+                        pedidoId: pedido_id,
+                        tipoDocumento: 'E34',
+                        encf: ncfNotaFinal,
+                        fecha,
+                        motivo,
+                        monto: montoValor,
+                        ncfReferencia: ncf_referencia || pedido.ncf || null,
+                        usuarioId: usuarioSesion?.id || null,
+                      })
+                        .then(() => finalizarCommit())
+                        .catch((registroErr) => {
+                          finalizarError(
+                            'Error al registrar la nota de cr?dito en facturacion electronica',
+                            registroErr
+                          );
+                        });
+                      return;
+                    }
+                    finalizarCommit();
+               });
+             }
+              );
+            })
+            .catch((errorFE) => {
+              finalizarError('Error al preparar la nota de credito electronica', errorFE);
+            });
         }
       );
     });

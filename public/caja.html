@@ -118,6 +118,12 @@
                 <div class="kanm-input-group">
                   <label for="caja-tipo-comprobante">Tipo de comprobante</label>
                   <select id="caja-tipo-comprobante">
+                    <option value="E32">E32 - Consumidor final electrónico</option>
+                    <option value="E31">E31 - Crédito fiscal electrónico</option>
+                    <option value="E43">E43 - Gastos menores electrónico</option>
+                    <option value="E44">E44 - Regímenes especiales electrónico</option>
+                    <option value="E45">E45 - Gubernamental electrónico</option>
+                    <option value="E46">E46 - Exportaciones electrónico</option>
                     <option value="B02">B02 - Consumidor final</option>
                     <option value="B01">B01 - Crédito fiscal</option>
                     <option value="B14">B14 - Gastos menores</option>
@@ -126,7 +132,7 @@
                 </div>
 
                 <div class="kanm-input-group">
-                  <label for="caja-ncf-manual">NCF (opcional)</label>
+                  <label for="caja-ncf-manual">NCF / e-CF (opcional)</label>
                   <input type="text" id="caja-ncf-manual" placeholder="Dejar en blanco para generar" />
                 </div>
 
@@ -289,7 +295,7 @@
                     <h3 class="caja-cuadre-title">Diferencia y esperados</h3>
                     <div class="caja-cuadre-grid two-cols">
                       <div class="kanm-input-group">
-                        <label for="cuadre-total-sistema">Total en sistema</label>
+                        <label for="cuadre-total-sistema">Total ventas en sistema</label>
                         <input type="text" id="cuadre-total-sistema" readonly />
                         <small class="kanm-subtitle">
                           Pedidos pagados: <span id="cuadre-cantidad-pedidos">0</span>

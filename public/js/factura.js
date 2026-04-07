@@ -37,6 +37,7 @@
   const logoTexto = document.getElementById('factura-logo-texto');
   const nombreNegocioSpan = document.getElementById('factura-negocio-nombre');
   const direccionSpan = document.getElementById('factura-direccion');
+  const rncSpan = document.getElementById('factura-rnc');
   const telefonoSpan = document.getElementById('factura-telefono');
   const pieSpan = document.getElementById('factura-pie');
 
@@ -245,6 +246,7 @@
   const aplicarConfigFactura = (config) => {
     configuracionFactura = config || null;
     const direccion = configuracionFactura?.direccion || 'Republica Dominicana - ITBIS incluido';
+    const rnc = limpiarTextoFactura(configuracionFactura?.rnc || '');
     const telefono =
       configuracionFactura?.telefono ||
       (Array.isArray(configuracionFactura?.telefonos) ? configuracionFactura.telefonos.join(' | ') : '') ||
@@ -252,6 +254,10 @@
     const pie = configuracionFactura?.pie || 'Gracias por su compra.';
 
     if (direccionSpan) direccionSpan.textContent = direccion;
+    if (rncSpan) {
+      rncSpan.textContent = rnc ? `RNC: ${rnc}` : '';
+      rncSpan.hidden = !rnc;
+    }
     if (telefonoSpan) telefonoSpan.textContent = telefono;
     if (pieSpan) pieSpan.textContent = pie;
 

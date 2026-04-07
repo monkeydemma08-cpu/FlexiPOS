@@ -648,6 +648,96 @@ async function ensureTableDgiiPaso2Intentos() {
   `);
 }
 
+async function ensureTableFacturacionElectronicaConfig() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS facturacion_electronica_config (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      habilitada TINYINT(1) NOT NULL DEFAULT 0,
+      ambiente VARCHAR(20) NOT NULL DEFAULT 'certificacion',
+      proveedor VARCHAR(80) NOT NULL DEFAULT 'DGII',
+      rnc_emisor VARCHAR(20) NULL,
+      razon_social VARCHAR(255) NULL,
+      nombre_comercial VARCHAR(255) NULL,
+      direccion TEXT NULL,
+      municipio_codigo VARCHAR(12) NULL,
+      provincia_codigo VARCHAR(12) NULL,
+      telefono VARCHAR(80) NULL,
+      correo VARCHAR(180) NULL,
+      website VARCHAR(255) NULL,
+      usuario_envio VARCHAR(180) NULL,
+      clave_envio_enc LONGTEXT NULL,
+      certificado_nombre_archivo VARCHAR(255) NULL,
+      certificado_base64 LONGTEXT NULL,
+      certificado_password_enc LONGTEXT NULL,
+      firma_alias VARCHAR(255) NULL,
+      observaciones LONGTEXT NULL,
+      updated_by_usuario_id INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_fe_config_negocio (negocio_id),
+      CONSTRAINT fk_fe_config_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableFacturacionElectronicaSecuencias() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS facturacion_electronica_secuencias (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      tipo_documento VARCHAR(20) NOT NULL,
+      prefijo VARCHAR(10) NOT NULL,
+      digitos INT NOT NULL DEFAULT 10,
+      rango_inicio BIGINT NULL,
+      rango_fin BIGINT NULL,
+      fecha_vencimiento DATE NULL,
+      correlativo_actual BIGINT NOT NULL DEFAULT 1,
+      activa TINYINT(1) NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_fe_secuencia_negocio_tipo (negocio_id, tipo_documento),
+      KEY idx_fe_secuencia_negocio (negocio_id),
+      CONSTRAINT fk_fe_secuencia_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTableFacturacionElectronicaDocumentos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS facturacion_electronica_documentos (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      cuenta_id INT NULL,
+      pedido_referencia_id INT NULL,
+      origen_documento VARCHAR(30) NOT NULL DEFAULT 'caja',
+      flujo VARCHAR(30) NOT NULL DEFAULT 'venta',
+      tipo_documento VARCHAR(20) NOT NULL,
+      encf VARCHAR(30) NULL,
+      estado_local VARCHAR(30) NOT NULL DEFAULT 'pendiente_xml',
+      estado_dgii VARCHAR(30) NULL,
+      codigo_respuesta VARCHAR(80) NULL,
+      mensaje_respuesta LONGTEXT NULL,
+      track_id VARCHAR(120) NULL,
+      payload_json LONGTEXT NOT NULL,
+      xml_borrador LONGTEXT NULL,
+      xml_firmado LONGTEXT NULL,
+      respuesta_json LONGTEXT NULL,
+      fecha_emision DATETIME NULL,
+      total DECIMAL(14,2) NOT NULL DEFAULT 0,
+      created_by_usuario_id INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_fe_documento_encf (negocio_id, encf),
+      KEY idx_fe_documento_negocio_estado (negocio_id, estado_local),
+      KEY idx_fe_documento_negocio_fecha (negocio_id, fecha_emision),
+      KEY idx_fe_documento_negocio_origen (negocio_id, origen_documento),
+      KEY idx_fe_documento_pedido_ref (pedido_referencia_id),
+      CONSTRAINT fk_fe_documento_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
 async function ensureTableDgiiRncCache() {
   await query(`
     CREATE TABLE IF NOT EXISTS dgii_rnc_cache (
@@ -1899,6 +1989,13 @@ async function runMigrations() {
   await ensureTableDgiiPaso2Sets();
   await ensureTableDgiiPaso2Casos();
   await ensureTableDgiiPaso2Intentos();
+  await ensureTableFacturacionElectronicaConfig();
+  await ensureTableFacturacionElectronicaSecuencias();
+  await ensureTableFacturacionElectronicaDocumentos();
+  await ensureColumn('facturacion_electronica_config', 'municipio_codigo VARCHAR(12) NULL');
+  await ensureColumn('facturacion_electronica_config', 'provincia_codigo VARCHAR(12) NULL');
+  await ensureColumn('facturacion_electronica_config', 'website VARCHAR(255) NULL');
+  await ensureColumn('facturacion_electronica_secuencias', 'fecha_vencimiento DATE NULL');
   await ensureTableDgiiRncCache();
   await ensureTableDgiiRncCacheImports();
   await ensureTableGastos();

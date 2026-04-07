@@ -5026,6 +5026,333 @@ body[data-role='mesera'] .kanm-main {
   margin-top: 12px;
 }
 
+#admin-section-facturacion-electronica .admin-seccion-grid {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.fe-section-header {
+  gap: 14px;
+}
+
+.fe-section-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.fe-section-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(37, 91, 199, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(244, 248, 255, 0.96) 100%);
+  color: var(--kanm-gray-800);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.fe-config-card,
+.fe-documentos-card,
+.fe-manual-card {
+  border: 1px solid rgba(36, 52, 74, 0.08);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  box-shadow: 0 18px 36px rgba(28, 34, 44, 0.08);
+  overflow: hidden;
+}
+
+.fe-config-form,
+.fe-manual-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.fe-form-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: start;
+}
+
+.fe-form-grid .kanm-input-group--full {
+  grid-column: 1 / -1;
+}
+
+.fe-config-form .fe-form-grid > .kanm-input-group:nth-child(-n + 3),
+.fe-manual-form .fe-form-grid > .kanm-input-group:nth-child(-n + 3) {
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(37, 91, 199, 0.1);
+  background: linear-gradient(180deg, rgba(247, 250, 255, 0.96) 0%, rgba(241, 246, 255, 0.96) 100%);
+}
+
+.fe-config-form .fe-form-grid > .kanm-input-group:first-child .kanm-input-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  font-weight: 700;
+}
+
+.fe-config-form .fe-form-grid > .kanm-input-group:first-child .kanm-input-help {
+  margin: 0;
+}
+
+.fe-config-status {
+  margin: 0;
+  padding: 18px 20px;
+  border-radius: 22px;
+  min-height: 0;
+  background: linear-gradient(145deg, rgba(37, 91, 199, 0.14) 0%, rgba(123, 143, 184, 0.08) 100%);
+  border: 1px solid rgba(37, 91, 199, 0.14);
+  color: var(--kanm-gray-800);
+  font-weight: 600;
+  line-height: 1.6;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.fe-config-message {
+  min-height: 36px;
+}
+
+.fe-config-form > .fe-form-grid {
+  order: 1;
+}
+
+.fe-config-form > #fe-config-estado {
+  order: 2;
+}
+
+.fe-config-form > .factura-rangos {
+  order: 3;
+}
+
+.fe-auth-card {
+  order: 4;
+  display: grid;
+  gap: 14px;
+}
+
+.fe-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: end;
+}
+
+.fe-auth-actions .kanm-input-group {
+  min-width: 260px;
+  flex: 1 1 320px;
+}
+
+.fe-config-form > .admin-form-actions {
+  order: 5;
+  justify-content: flex-start;
+  margin-top: 0;
+}
+
+.fe-config-form > #fe-config-mensaje {
+  order: 6;
+}
+
+.fe-config-card .factura-rangos {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 0;
+}
+
+.fe-config-card .factura-rangos > .kanm-card {
+  border: 1px solid rgba(36, 52, 74, 0.08);
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9ff 100%);
+  box-shadow: none;
+}
+
+.fe-config-card .factura-rango-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin-top: 0;
+}
+
+.fe-config-card .factura-rango-grid .kanm-input-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(37, 91, 199, 0.08);
+}
+
+.fe-doc-controls {
+  margin-bottom: 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(36, 52, 74, 0.08);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(250, 252, 255, 0.96) 0%, rgba(242, 246, 255, 0.96) 100%);
+  justify-content: space-between;
+}
+
+.fe-doc-controls .kanm-input-group {
+  min-width: 220px;
+  flex: 1 1 240px;
+}
+
+.fe-doc-controls .admin-report-actions {
+  margin-left: auto;
+}
+
+.fe-kpi-grid {
+  gap: 14px;
+}
+
+.fe-kpi-grid .resumen-metric {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(36, 52, 74, 0.08);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.fe-table-wrap {
+  border: 1px solid rgba(36, 52, 74, 0.08);
+  border-radius: 20px;
+  overflow: auto;
+  background: #ffffff;
+}
+
+.fe-documentos-table-wrap .kanm-table {
+  min-width: 980px;
+}
+
+.fe-origenes-table-wrap .kanm-table {
+  min-width: 640px;
+}
+
+.fe-manual-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  align-items: stretch;
+}
+
+.fe-manual-form .admin-form-actions {
+  margin-top: 0;
+  justify-content: flex-start;
+}
+
+@media (min-width: 760px) {
+  .fe-kpi-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .fe-config-form .fe-form-grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .fe-config-form .fe-form-grid > .kanm-input-group {
+    grid-column: span 3;
+  }
+
+  .fe-config-form .fe-form-grid > .kanm-input-group:nth-child(1) {
+    grid-column: span 5;
+  }
+
+  .fe-config-form .fe-form-grid > .kanm-input-group:nth-child(2) {
+    grid-column: span 3;
+  }
+
+  .fe-config-form .fe-form-grid > .kanm-input-group:nth-child(3) {
+    grid-column: span 4;
+  }
+
+  .fe-config-form .fe-form-grid > .kanm-input-group:nth-child(5) {
+    grid-column: span 5;
+  }
+
+  .fe-config-form .fe-form-grid > .kanm-input-group:nth-child(6) {
+    grid-column: span 4;
+  }
+
+  .fe-config-form .fe-form-grid > .kanm-input-group:nth-child(9),
+  .fe-config-form .fe-form-grid > .kanm-input-group:nth-child(18) {
+    grid-column: 1 / -1;
+  }
+
+  .fe-config-form > .admin-form-actions .kanm-button {
+    min-width: 320px;
+  }
+
+  .fe-config-card .factura-rango-grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .fe-config-card .factura-rango-grid > .kanm-input-toggle,
+  .fe-config-card .factura-rango-grid > .kanm-input-group {
+    grid-column: span 2;
+  }
+
+  .fe-manual-form .fe-form-grid--manual {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(1),
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(2),
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(3),
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(6),
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(7),
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(8),
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(10),
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(11),
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(12) {
+    grid-column: span 4;
+  }
+
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(4),
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(5) {
+    grid-column: span 6;
+  }
+
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(9),
+  .fe-manual-form .fe-form-grid--manual > .kanm-input-group:nth-child(13) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .fe-doc-controls {
+    align-items: stretch;
+  }
+
+  .fe-doc-controls .admin-report-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .fe-doc-controls .admin-report-actions .kanm-button {
+    width: 100%;
+  }
+
+  .fe-config-form > .admin-form-actions .kanm-button,
+  .fe-manual-form > .admin-form-actions .kanm-button {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 699px) {
+  .fe-section-pill {
+    width: 100%;
+  }
+
+  .fe-config-form .fe-form-grid > .kanm-input-group:nth-child(-n + 3),
+  .fe-manual-form .fe-form-grid > .kanm-input-group:nth-child(-n + 3) {
+    padding: 14px 16px;
+  }
+}
+
 .factura-restante {
   padding: 12px 14px;
   border-radius: 12px;

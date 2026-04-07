@@ -489,12 +489,13 @@ const signXmlDocument = ({
   privateKeyPem,
   certPem,
   signatureLocation = { reference: '/*', action: 'append' },
+  canonicalizationAlgorithm = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
 }) => {
   const sig = new SignedXml({
     privateKey: privateKeyPem,
     publicCert: certPem,
     signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
-    canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+    canonicalizationAlgorithm,
     getKeyInfoContent: SignedXml.getKeyInfoContent,
   });
   sig.addReference({
@@ -1018,6 +1019,7 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
             xml: semillaText,
             privateKeyPem: cert.privateKeyPem,
             certPem: cert.certPem,
+            canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
           }).xml;
 
           const formData = new FormData();

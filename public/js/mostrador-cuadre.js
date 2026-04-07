@@ -43,6 +43,7 @@
     fecha: '',
     totalSistema: 0,
     totalGeneral: 0,
+    efectivoEsperado: 0,
     totalEfectivo: 0,
     totalTarjeta: 0,
     totalTransferencia: 0,
@@ -495,9 +496,9 @@
 
   const actualizarEfectivoEsperado = () => {
     const esperado = calcularEfectivoEsperado();
-    resumenCuadre.totalSistema = esperado;
+    resumenCuadre.efectivoEsperado = esperado;
 
-    setCampoCuadre('cuadre-total-sistema', esperado);
+    setCampoCuadre('cuadre-total-sistema', resumenCuadre.totalGeneral || resumenCuadre.totalSistema || 0);
     setCampoCuadre('cuadre-fondo-display', obtenerFondoInicial());
     setCampoCuadre('cuadre-salidas-display', obtenerSalidasEfectivo());
     setCampoCuadre('cuadre-efectivo-esperado', esperado);
@@ -765,8 +766,9 @@
 
       resumenCuadre = {
         fecha,
-        totalSistema: Number(data.total_sistema) || 0,
+        totalSistema: Number(data.total_general) || 0,
         totalGeneral: Number(data.total_general) || 0,
+        efectivoEsperado: 0,
         totalEfectivo: Number(data.total_efectivo) || 0,
         totalTarjeta: Number(data.total_tarjeta) || 0,
         totalTransferencia: Number(data.total_transferencia) || 0,
@@ -815,6 +817,7 @@
         fecha: fechaSeleccionada,
         totalSistema: 0,
         totalGeneral: 0,
+        efectivoEsperado: 0,
         totalEfectivo: 0,
         totalTarjeta: 0,
         totalTransferencia: 0,
