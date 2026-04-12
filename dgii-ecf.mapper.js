@@ -49,16 +49,19 @@ const ecfTipoNumerico = (ecfTipo) => ECF_TIPO_NUMERICO[ecfTipo] || '';
 // ---------------------------------------------------------------------------
 
 const UNIDAD_MEDIDA_MAP = {
-  UND: '99',
-  KG: '01',
-  LB: '02',
-  LT: '03',
-  ML: '04',
-  GR: '05',
-  OZ: '06',
+  UND: '5',
+  KG: '18',
+  LB: '19',
+  LT: '24',
+  ML: '24',
+  GR: '18',
+  OZ: '31',
+  CAJA: '55',
+  DOC: '13',
+  PAR: '6',
 };
 
-const mapUnidadBase = (unidadBase) => UNIDAD_MEDIDA_MAP[String(unidadBase || 'UND').toUpperCase()] || '99';
+const mapUnidadBase = (unidadBase) => UNIDAD_MEDIDA_MAP[String(unidadBase || 'UND').toUpperCase()] || '5';
 
 // ---------------------------------------------------------------------------
 // DGII payment method mapping
@@ -72,24 +75,24 @@ const buildFormasPago = (pedido) => {
   const transferencia = Number(pedido.pago_transferencia || 0);
 
   if (efectivo > 0) {
-    formas[`FormaPago[${idx}]`] = '01';
+    formas[`FormaPago[${idx}]`] = '1';
     formas[`MontoPago[${idx}]`] = formatMoney(efectivo).toFixed(2);
     idx++;
   }
   if (tarjeta > 0) {
-    formas[`FormaPago[${idx}]`] = '04';
+    formas[`FormaPago[${idx}]`] = '3';
     formas[`MontoPago[${idx}]`] = formatMoney(tarjeta).toFixed(2);
     idx++;
   }
   if (transferencia > 0) {
-    formas[`FormaPago[${idx}]`] = '02';
+    formas[`FormaPago[${idx}]`] = '2';
     formas[`MontoPago[${idx}]`] = formatMoney(transferencia).toFixed(2);
     idx++;
   }
 
   if (idx === 0) {
     const total = Number(pedido.total || 0);
-    formas['FormaPago[0]'] = '01';
+    formas['FormaPago[0]'] = '1';
     formas['MontoPago[0]'] = formatMoney(total).toFixed(2);
   }
 

@@ -2414,66 +2414,111 @@
       </div>
     </section>
 
-    <!-- Facturacion Electronica e-CF -->
+    <!-- Emision e-CF -->
     <section class="admin-panel hidden" data-admin-section="facturacionEcf" id="admin-section-ecf">
-      <div class="kanm-card-header">
-        <h2>Facturacion Electronica (e-CF)</h2>
-        <p class="kanm-subtitle">Emision directa de comprobantes fiscales electronicos a la DGII.</p>
+      <div class="kanm-card-header fe-section-header">
+        <h2>Emisi&oacute;n e-CF</h2>
+        <p class="kanm-subtitle">
+          Env&iacute;o directo de comprobantes fiscales electr&oacute;nicos a la DGII &mdash; autenticaci&oacute;n, emisi&oacute;n y seguimiento.
+        </p>
+        <div class="fe-section-strip" aria-hidden="true">
+          <span class="fe-section-pill">Autenticaci&oacute;n</span>
+          <span class="fe-section-pill">Secuencias</span>
+          <span class="fe-section-pill">Cola de emisi&oacute;n</span>
+        </div>
       </div>
 
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
-        <button class="btn btn-sm btn-primary" id="ecf-btn-test-auth">Probar Autenticacion</button>
-        <button class="btn btn-sm btn-success" id="ecf-btn-emitir-lote">Emitir Lote Pendiente</button>
-        <button class="btn btn-sm btn-secondary" id="ecf-btn-refresh">Actualizar</button>
-      </div>
+      <!-- Mensaje global -->
+      <div id="ecf-auth-msg" class="ecf-msg" hidden></div>
 
-      <div id="ecf-auth-msg" style="display:none;margin-bottom:12px;padding:8px;border-radius:4px;"></div>
+      <!-- Acciones + Resumen KPIs -->
+      <div class="admin-seccion-grid ecf-grid">
+        <!-- Acciones rapidas -->
+        <section class="kanm-card admin-card admin-seccion-panel fe-config-card ecf-actions-card">
+          <header class="kanm-card-header">
+            <h3>Acciones</h3>
+            <p class="kanm-subtitle">Controles principales de emisi&oacute;n e-CF.</p>
+          </header>
+          <div class="ecf-actions-row">
+            <button class="kanm-button kanm-button--primary" id="ecf-btn-test-auth">
+              <span class="ecf-btn-icon">&#x1F511;</span> Probar autenticaci&oacute;n
+            </button>
+            <button class="kanm-button kanm-button--success" id="ecf-btn-emitir-lote">
+              <span class="ecf-btn-icon">&#x1F4E4;</span> Emitir lote pendiente
+            </button>
+            <button class="kanm-button kanm-button--outline" id="ecf-btn-refresh">
+              <span class="ecf-btn-icon">&#x21BB;</span> Actualizar
+            </button>
+          </div>
+        </section>
 
-      <!-- Resumen -->
-      <h3 style="margin-top:20px;">Estado de Pruebas</h3>
-      <div id="ecf-resumen-container">
-        <p>Cargando...</p>
+        <!-- KPIs resumen -->
+        <section class="kanm-card admin-card admin-seccion-panel fe-config-card ecf-resumen-card">
+          <header class="kanm-card-header">
+            <h3>Estado de pruebas</h3>
+            <p class="kanm-subtitle">Resumen de comprobantes emitidos por tipo.</p>
+          </header>
+          <div id="ecf-resumen-container" class="ecf-resumen-body">
+            <p class="kanm-subtitle">Cargando&hellip;</p>
+          </div>
+        </section>
       </div>
 
       <!-- Secuencias -->
-      <h3 style="margin-top:20px;">Secuencias e-CF</h3>
-      <table class="tabla-generica" style="width:100%;margin-bottom:12px;">
-        <thead>
-          <tr>
-            <th>Tipo</th>
-            <th>RNC Emisor</th>
-            <th>Correlativo Actual</th>
-            <th>Fecha Vencimiento</th>
-          </tr>
-        </thead>
-        <tbody id="ecf-secuencias-tabla">
-          <tr><td colspan="4">Sin secuencias configuradas.</td></tr>
-        </tbody>
-      </table>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-        <button class="btn btn-sm btn-secondary" id="ecf-btn-init-secuencias">Inicializar Secuencias</button>
-      </div>
+      <section class="kanm-card admin-card admin-seccion-panel fe-config-card ecf-secuencias-card">
+        <header class="kanm-card-header">
+          <h3>Secuencias e-CF</h3>
+          <p class="kanm-subtitle">Control de correlativos activos para cada tipo de comprobante electr&oacute;nico.</p>
+        </header>
+        <div class="fe-table-wrap ecf-table-wrap">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>RNC Emisor</th>
+                <th>Correlativo actual</th>
+                <th>Fecha vencimiento</th>
+              </tr>
+            </thead>
+            <tbody id="ecf-secuencias-tabla">
+              <tr><td colspan="4">Sin secuencias configuradas.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="ecf-card-footer">
+          <button class="kanm-button kanm-button--outline kanm-button--sm" id="ecf-btn-init-secuencias">
+            Inicializar secuencias
+          </button>
+        </div>
+      </section>
 
       <!-- Pendientes -->
-      <h3 style="margin-top:20px;">Pedidos Pendientes de Emision</h3>
-      <table class="tabla-generica" style="width:100%;">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Cliente</th>
-            <th>Tipo</th>
-            <th>eNCF</th>
-            <th>Total</th>
-            <th>Estado</th>
-            <th>Mensaje DGII</th>
-            <th>Intentos</th>
-            <th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody id="ecf-pendientes-tabla">
-          <tr><td colspan="9">Cargando...</td></tr>
-        </tbody>
-      </table>
+      <section class="kanm-card admin-card admin-seccion-panel fe-config-card ecf-pendientes-card">
+        <header class="kanm-card-header">
+          <h3>Pedidos pendientes de emisi&oacute;n</h3>
+          <p class="kanm-subtitle">Documentos listos para env&iacute;o o en seguimiento con la DGII.</p>
+        </header>
+        <div class="fe-table-wrap ecf-table-wrap">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Cliente</th>
+                <th>Tipo</th>
+                <th>eNCF</th>
+                <th>Total</th>
+                <th>Estado</th>
+                <th>Mensaje DGII</th>
+                <th>Intentos</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="ecf-pendientes-tabla">
+              <tr><td colspan="9">Cargando&hellip;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </section>
 
     <!-- DGII Paso 2 -->

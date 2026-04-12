@@ -8982,10 +8982,13 @@ const ecfPendientesTabla = document.getElementById('ecf-pendientes-tabla');
 
 const mostrarEcfMsg = (el, texto, tipo = 'info') => {
   if (!el) return;
-  el.style.display = 'block';
+  el.hidden = false;
   el.textContent = texto;
-  el.style.background = tipo === 'ok' ? '#d4edda' : tipo === 'error' ? '#f8d7da' : '#d1ecf1';
-  el.style.color = tipo === 'ok' ? '#155724' : tipo === 'error' ? '#721c24' : '#0c5460';
+  el.className = 'ecf-msg ecf-msg--' + (tipo === 'ok' ? 'ok' : tipo === 'error' ? 'error' : 'info');
+};
+
+const ocultarEcfMsg = () => {
+  if (ecfAuthMsg) ecfAuthMsg.hidden = true;
 };
 
 const cargarEcfResumen = async () => {
@@ -8994,31 +8997,30 @@ const cargarEcfResumen = async () => {
     const res = await fetchConAutorizacion('/api/dgii/ecf/resumen');
     const data = await leerRespuestaApi(res);
     if (!data || !data.resumen) {
-      ecfResumenContainer.innerHTML = '<p>No hay datos de resumen.</p>';
+      ecfResumenContainer.innerHTML = '<p class="kanm-subtitle">No hay datos de resumen.</p>';
       return;
     }
-    const r = data.resumen;
-    const items = Array.isArray(r) ? r : [];
+    const items = Array.isArray(data.resumen) ? data.resumen : [];
     if (items.length === 0) {
-      ecfResumenContainer.innerHTML = '<p>No hay comprobantes emitidos aun.</p>';
+      ecfResumenContainer.innerHTML = '<p class="kanm-subtitle">No hay comprobantes emitidos a&uacute;n.</p>';
       return;
     }
-    let html = '<table class="tabla-generica" style="width:100%;"><thead><tr>' +
-      '<th>Tipo</th><th>Aceptados</th><th>Rechazados</th><th>Pendientes</th><th>Total</th>' +
-      '</tr></thead><tbody>';
-    items.forEach((row) => {
-      html += `<tr>
-        <td>${row.ecf_tipo || '-'}</td>
-        <td style="color:green;">${row.aceptados || 0}</td>
-        <td style="color:red;">${row.rechazados || 0}</td>
-        <td style="color:orange;">${row.pendientes || 0}</td>
-        <td>${row.total || 0}</td>
-      </tr>`;
+    let totalAceptados = 0, totalRechazados = 0, totalPendientes = 0, totalGeneral = 0;
+    items.forEach((r) => {
+      totalAceptados += Number(r.aceptados || 0);
+      totalRechazados += Number(r.rechazados || 0);
+      totalPendientes += Number(r.pendientes || 0);
+      totalGeneral += Number(r.total || 0);
     });
-    html += '</tbody></table>';
-    ecfResumenContainer.innerHTML = html;
+    ecfResumenContainer.innerHTML =
+      '<div class="ecf-kpi-row">' +
+        `<div class="ecf-kpi"><span class="ecf-kpi-label">Aceptados</span><span class="ecf-kpi-value ecf-kpi-value--ok">${totalAceptados}</span></div>` +
+        `<div class="ecf-kpi"><span class="ecf-kpi-label">Rechazados</span><span class="ecf-kpi-value ecf-kpi-value--error">${totalRechazados}</span></div>` +
+        `<div class="ecf-kpi"><span class="ecf-kpi-label">Pendientes</span><span class="ecf-kpi-value ecf-kpi-value--warn">${totalPendientes}</span></div>` +
+        `<div class="ecf-kpi"><span class="ecf-kpi-label">Total</span><span class="ecf-kpi-value ecf-kpi-value--default">${totalGeneral}</span></div>` +
+      '</div>';
   } catch (err) {
-    ecfResumenContainer.innerHTML = `<p style="color:red;">Error: ${err.message}</p>`;
+    ecfResumenContainer.innerHTML = `<p class="kanm-subtitle" style="color:#d63031;">Error: ${err.message}</p>`;
   }
 };
 
@@ -9034,14 +9036,14 @@ const cargarEcfSecuencias = async () => {
     }
     ecfSecuenciasTabla.innerHTML = seqs.map((s) =>
       `<tr>
-        <td>${s.tipo}</td>
+        <td><span class="ecf-badge ecf-badge--enviado">${s.tipo}</span></td>
         <td>${s.rnc_emisor || '-'}</td>
-        <td>${s.correlativo}</td>
+        <td><strong>${s.correlativo}</strong></td>
         <td>${s.fecha_vencimiento ? new Date(s.fecha_vencimiento).toLocaleDateString() : '-'}</td>
       </tr>`
     ).join('');
   } catch (err) {
-    ecfSecuenciasTabla.innerHTML = `<tr><td colspan="4" style="color:red;">Error: ${err.message}</td></tr>`;
+    ecfSecuenciasTabla.innerHTML = `<tr><td colspan="4" class="kanm-subtitle" style="color:#d63031;">Error: ${err.message}</td></tr>`;
   }
 };
 
@@ -9056,25 +9058,26 @@ const cargarEcfPendientes = async () => {
       return;
     }
     ecfPendientesTabla.innerHTML = pedidos.map((p) => {
-      const estadoColor = p.ecf_estado === 'ACEPTADO' ? 'green'
-        : p.ecf_estado === 'RECHAZADO' ? 'red'
-        : p.ecf_estado === 'PENDIENTE' ? 'orange' : '#666';
-      const acciones = (p.ecf_estado === 'PENDIENTE' || p.ecf_estado === 'ERROR' || p.ecf_estado === 'RECHAZADO')
-        ? `<button class="btn btn-sm btn-primary ecf-btn-emitir" data-pedido-id="${p.id}">Emitir</button>
-           <button class="btn btn-sm btn-secondary ecf-btn-reintentar" data-pedido-id="${p.id}">Reintentar</button>`
-        : (p.ecf_estado === 'ENVIADO'
-          ? `<button class="btn btn-sm btn-secondary ecf-btn-consultar" data-pedido-id="${p.id}">Consultar</button>`
+      const estado = (p.ecf_estado || 'PENDIENTE').toUpperCase();
+      const badgeClass = estado === 'ACEPTADO' ? 'aceptado'
+        : (estado === 'RECHAZADO' || estado === 'ERROR') ? 'rechazado'
+        : estado === 'ENVIADO' ? 'enviado' : 'pendiente';
+      const acciones = (estado === 'PENDIENTE' || estado === 'ERROR' || estado === 'RECHAZADO')
+        ? `<button class="kanm-button kanm-button--primary kanm-button--sm ecf-btn-emitir" data-pedido-id="${p.id}">Emitir</button>
+           <button class="kanm-button kanm-button--outline kanm-button--sm ecf-btn-reintentar" data-pedido-id="${p.id}">Reintentar</button>`
+        : (estado === 'ENVIADO'
+          ? `<button class="kanm-button kanm-button--outline kanm-button--sm ecf-btn-consultar" data-pedido-id="${p.id}">Consultar</button>`
           : '');
       return `<tr>
         <td>${p.id}</td>
         <td>${p.cliente_nombre || '-'}</td>
-        <td>${p.ecf_tipo || p.tipo_comprobante || '-'}</td>
-        <td>${p.ecf_encf || '-'}</td>
-        <td>${Number(p.total || 0).toFixed(2)}</td>
-        <td style="color:${estadoColor};font-weight:bold;">${p.ecf_estado || 'PENDIENTE'}</td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(p.ecf_mensaje_dgii || '').replace(/"/g, '&quot;')}">${p.ecf_mensaje_dgii || '-'}</td>
+        <td><span class="ecf-badge ecf-badge--enviado">${p.ecf_tipo || p.tipo_comprobante || '-'}</span></td>
+        <td><code>${p.ecf_encf || '-'}</code></td>
+        <td><strong>${Number(p.total || 0).toFixed(2)}</strong></td>
+        <td><span class="ecf-badge ecf-badge--${badgeClass}">${estado}</span></td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(p.ecf_mensaje_dgii || '').replace(/"/g, '&quot;')}">${p.ecf_mensaje_dgii || '-'}</td>
         <td>${p.ecf_intentos || 0}</td>
-        <td>${acciones}</td>
+        <td style="white-space:nowrap;">${acciones}</td>
       </tr>`;
     }).join('');
   } catch (err) {

@@ -13,34 +13,32 @@ const generarEncf = async (tipo, negocioId, db) => {
   const tipoNorm = String(tipo || '').toUpperCase().trim();
   if (!tipoNorm) throw new Error('Tipo e-CF requerido para generar eNCF.');
 
-  const conn = await db.getConnection();
   try {
-    await conn.query('START TRANSACTION');
-    const [rows] = await conn.query(
+    await db.run('BEGIN');
+    const row = await db.get(
       'SELECT correlativo, fecha_vencimiento, rnc_emisor FROM secuencias_ecf WHERE tipo = ? AND negocio_id = ? FOR UPDATE',
       [tipoNorm, negocioId]
     );
-    const row = rows?.[0] || (Array.isArray(rows) ? rows : null);
 
     if (!row || row.correlativo == null) {
-      await conn.query('ROLLBACK');
+      await db.run('ROLLBACK');
       throw new Error(`No existe secuencia e-CF para tipo ${tipoNorm}. Inicializa la secuencia primero.`);
     }
 
     const correlativo = Number(row.correlativo);
     if (correlativo > MAX_CORRELATIVO) {
-      await conn.query('ROLLBACK');
+      await db.run('ROLLBACK');
       throw new Error(`La secuencia e-CF tipo ${tipoNorm} alcanzo el limite de ${MAX_CORRELATIVO.toLocaleString()}.`);
     }
 
     const encf = formatEncf(tipoNorm, correlativo);
     const nuevoCorrelativo = correlativo + 1;
 
-    await conn.query(
+    await db.run(
       'UPDATE secuencias_ecf SET correlativo = ?, actualizado_en = CURRENT_TIMESTAMP WHERE tipo = ? AND negocio_id = ?',
       [nuevoCorrelativo, tipoNorm, negocioId]
     );
-    await conn.query('COMMIT');
+    await db.run('COMMIT');
 
     const fv = row.fecha_vencimiento;
     let fechaVencimiento = '';
@@ -61,10 +59,8 @@ const generarEncf = async (tipo, negocioId, db) => {
       rncEmisor: row.rnc_emisor || '',
     };
   } catch (error) {
-    try { await conn.query('ROLLBACK'); } catch (_) {}
+    try { await db.run('ROLLBACK'); } catch (_) {}
     throw error;
-  } finally {
-    if (conn.release) conn.release();
   }
 };
 

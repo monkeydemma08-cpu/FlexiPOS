@@ -8,8 +8,9 @@ try {
 } catch (_) {
   dgiiCoreMissingDeps.push('node-forge');
 }
+let C14nCanonicalization = null;
 try {
-  ({ SignedXml } = require('xml-crypto'));
+  ({ SignedXml, C14nCanonicalization } = require('xml-crypto'));
 } catch (_) {
   dgiiCoreMissingDeps.push('xml-crypto');
 }
@@ -169,24 +170,121 @@ const signXmlDocument = ({
   privateKeyPem,
   certPem,
   signatureLocation = { reference: '/*', action: 'append' },
+  canonicalizationAlgorithm = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+  transforms = [
+    'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
+    'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+  ],
 }) => {
   if (!SignedXml) throw new Error('xml-crypto no disponible. Ejecuta npm install.');
   const sig = new SignedXml({
     privateKey: privateKeyPem,
     publicCert: certPem,
     signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
-    canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+    canonicalizationAlgorithm,
     getKeyInfoContent: SignedXml.getKeyInfoContent,
   });
   sig.addReference({
     xpath: '/*',
-    transforms: ['http://www.w3.org/2000/09/xmldsig#enveloped-signature'],
+    transforms,
     digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
     isEmptyUri: true,
   });
   sig.computeSignature(xml, { location: signatureLocation });
   const signedXml = sig.getSignedXml();
   const signatureValue = String(signedXml.match(/<SignatureValue[^>]*>([\s\S]*?)<\/SignatureValue>/i)?.[1] || '').replace(/\s+/g, '');
+  return { xml: signedXml, signatureValue };
+};
+
+/**
+ * Custom digest for DGII XML signing.
+ *
+ * DGII's .NET server computes the reference digest by sorting namespace
+ * attributes alphabetically (xmlns:xsd before xmlns:xsi) then hashing
+ * with SHA-256. xml-crypto's built-in SHA-256 digest does NOT sort
+ * attributes, so the digest never matches what DGII expects.
+ *
+ * This class is registered on SignedXml.HashAlgorithms and used as the
+ * digestAlgorithm for DGII references.  Credit to victors1681/dgii-ecf
+ * for discovering this workaround.
+ */
+class DgiiDigest {
+  getHash(xml) {
+    const { DOMParser: DP } = require('@xmldom/xmldom');
+    const doc = new DP().parseFromString(xml);
+    const attrs = doc.childNodes[0].attributes;
+    if (attrs && attrs.length) {
+      const items = Array.from({ length: attrs.length }, (_, i) => attrs[i]);
+      items.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      Object.assign(doc.childNodes[0].attributes, items);
+    }
+    return crypto.createHash('sha256').update(doc.toString(), 'utf8').digest('base64');
+  }
+  getAlgorithmName() {
+    return 'http://www.w3.org/2001/04/xmlenc#sha256';
+  }
+}
+
+/** Remove whitespace-only text nodes and comments from an XML DOM tree. */
+const cleanXmlWhitespace = (node) => {
+  for (let n = 0; n < node.childNodes.length; n++) {
+    const child = node.childNodes[n];
+    if (child.nodeType === 8 || (child.nodeType === 3 && !/\S/.test(child.nodeValue))) {
+      node.removeChild(child);
+      n--;
+    } else if (child.nodeType === 1) {
+      cleanXmlWhitespace(child);
+    }
+  }
+};
+
+/**
+ * Signs XML for DGII using the custom digest approach that matches
+ * DGII's .NET server expectations.
+ *
+ * @param {object}  opts
+ * @param {string}  opts.xml           - Raw XML to sign
+ * @param {string}  opts.privateKeyPem - PEM-encoded private key
+ * @param {string}  opts.certPem       - PEM-encoded X509 certificate
+ * @param {string} [opts.rootTag='SemillaModel'] - Root element local name
+ */
+const signXmlForDgii = ({ xml, privateKeyPem, certPem, rootTag = 'SemillaModel' }) => {
+  if (!SignedXml) throw new Error('xml-crypto no disponible. Ejecuta npm install.');
+  if (!forge) throw new Error('node-forge no disponible. Ejecuta npm install.');
+  const { DOMParser } = require('@xmldom/xmldom');
+
+  const certBase64 = forge.util.encode64(forge.pem.decode(certPem)[0].body);
+
+  const sig = new SignedXml({
+    privateKey: privateKeyPem,
+    publicCert: certPem,
+    signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+    canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+    getKeyInfoContent: () =>
+      '<X509Data><X509Certificate>' + certBase64 + '</X509Certificate></X509Data>',
+  });
+
+  // Register custom digest that sorts namespace attributes
+  sig.HashAlgorithms['http://dgii-sorted-sha256'] = DgiiDigest;
+
+  sig.addReference({
+    xpath: `//*[local-name(.)='${rootTag}']`,
+    transforms: ['http://www.w3.org/2000/09/xmldsig#enveloped-signature'],
+    digestAlgorithm: 'http://dgii-sorted-sha256',
+    isEmptyUri: true,
+  });
+
+  // Clean whitespace nodes before signing (required for DGII compatibility)
+  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  cleanXmlWhitespace(doc);
+  const cleanedXml = doc.toString();
+
+  sig.computeSignature(cleanedXml, { location: { reference: '/*', action: 'append' } });
+  const signedXml = sig.getSignedXml();
+  const signatureValue = String(
+    signedXml.match(/<SignatureValue[^>]*>([\s\S]*?)<\/SignatureValue>/i)?.[1] || ''
+  ).replace(/\s+/g, '');
+
   return { xml: signedXml, signatureValue };
 };
 
@@ -352,16 +450,6 @@ const buildAuthCandidates = (baseUrl, mode = 'AUTO') => {
   const isDgiiCertAuth = isOfficialDgiiAuthBase(cleanBase);
   const effectiveMode = mode === 'AUTO' && isDgiiCertAuth ? 'SEMILLA' : mode;
 
-  if (isDgiiCertAuth) {
-    return [
-      {
-        mode: 'SEMILLA',
-        semillaUrl: withApiPath(cleanBase, '/api/Autenticacion/Semilla'),
-        validarUrl: withApiPath(cleanBase, '/api/Autenticacion/ValidarSemilla'),
-      },
-    ];
-  }
-
   const candidates = [];
   if (effectiveMode === 'SEMILLA' || effectiveMode === 'AUTO') {
     candidates.push({
@@ -440,6 +528,7 @@ const buildEmissionSortValue = ({ flujo, tipoDocumento, sourceOrder, excelRow })
 const autenticarDGII = async ({ config }) => {
   const endpoints = config?.endpoints || DGII_DEFAULT_ENDPOINTS;
   const configuredMode = String(config?.modo_autenticacion || 'AUTO').toUpperCase();
+  // Official DGII eCF URLs only support semilla-based auth (no credentials endpoint).
   const mode = isOfficialDgiiAuthBase(endpoints.autenticacion) ? 'SEMILLA' : configuredMode;
   const candidates = buildAuthCandidates(endpoints.autenticacion, mode);
   if (!candidates.length) throw new Error('No hay endpoint de autenticacion configurado.');
@@ -515,7 +604,7 @@ const autenticarDGII = async ({ config }) => {
           p12Base64: config.p12_base64,
           p12Password: config.p12_password || '',
         });
-        const semillaFirmada = signXmlDocument({
+        const semillaFirmada = signXmlForDgii({
           xml: semillaText,
           privateKeyPem: cert.privateKeyPem,
           certPem: cert.certPem,
@@ -799,11 +888,14 @@ const getSigningCredentials = (config) => {
 
 const signEcfXml = ({ xml, config, signatureLocation } = {}) => {
   const cert = getSigningCredentials(config);
-  return signXmlDocument({
+  // Detect root tag from the XML (ECF, RFCE, ARECF, etc.)
+  const rootMatch = xml.match(/<(\w+)[\s>]/);
+  const rootTag = rootMatch ? rootMatch[1] : 'ECF';
+  return signXmlForDgii({
     xml,
     privateKeyPem: cert.privateKeyPem,
     certPem: cert.certPem,
-    signatureLocation,
+    rootTag,
   });
 };
 
@@ -845,6 +937,7 @@ module.exports = {
   // XML / Crypto
   extractPemFromP12,
   signXmlDocument,
+  signXmlForDgii,
   extractSignatureValueFromXml,
   computeCodigoSeguridadeCF,
 
