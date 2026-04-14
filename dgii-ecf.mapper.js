@@ -114,8 +114,9 @@ const deriveTipoPago = (pedido) => {
 // ---------------------------------------------------------------------------
 
 const deriveIndicadorMontoGravado = (pedido) => {
-  const impuesto = Number(pedido.impuesto || 0);
-  return impuesto > 0 ? '1' : '0';
+  // 0 = montos no incluyen ITBIS (precios netos), 1 = montos incluyen ITBIS
+  // POS almacena precios netos, ITBIS se calcula por separado
+  return '0';
 };
 
 // ---------------------------------------------------------------------------
@@ -131,15 +132,36 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
   // IdDoc
   payload.TipoeCF = tipoEcf;
   payload.eNCF = encfData.encf;
-  if (encfData.fechaVencimiento) {
+  // FechaVencimientoSecuencia: solo para tipos que lo soportan (no E32/E34)
+  const tiposConFVS = ['31', '33', '41', '43', '44', '45', '46', '47'];
+  if (encfData.fechaVencimiento && tiposConFVS.includes(tipoEcf)) {
     payload.FechaVencimientoSecuencia = encfData.fechaVencimiento;
   }
-  payload.IndicadorMontoGravado = deriveIndicadorMontoGravado(pedido);
-  payload.TipoIngresos = '01';
-  payload.TipoPago = deriveTipoPago(pedido);
+  // IndicadorNotaCredito: requerido para E34
+  if (tipoEcf === '34') {
+    payload.IndicadorNotaCredito = '0';
+  }
 
-  // Formas de pago
-  Object.assign(payload, buildFormasPago(pedido));
+  // IndicadorMontoGravado: solo para 31, 32, 34, 41, 45
+  const tiposConIndicadorGravado = ['31', '32', '34', '41', '45'];
+  if (tiposConIndicadorGravado.includes(tipoEcf)) {
+    payload.IndicadorMontoGravado = deriveIndicadorMontoGravado(pedido);
+  }
+
+  // TipoIngresos: solo para 31, 32, 33, 44, 45, 46 (E34 no lo usa segun XSD)
+  const tiposConTipoIngresos = ['31', '32', '33', '44', '45', '46'];
+  if (tiposConTipoIngresos.includes(tipoEcf)) {
+    payload.TipoIngresos = '01';
+  }
+
+  // TipoPago: todos excepto 43
+  // FormasPago: todos excepto 43 y 34 (E34 no lleva TablaFormasPago)
+  if (tipoEcf !== '43') {
+    payload.TipoPago = deriveTipoPago(pedido);
+    if (tipoEcf !== '34') {
+      Object.assign(payload, buildFormasPago(pedido));
+    }
+  }
 
   // Emisor
   const rncEmisor = configDgii?.rnc_emisor || negocio.rnc || '';
@@ -149,24 +171,24 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
   if (negocio.telefono) payload['TelefonoEmisor[0]'] = negocio.telefono;
   payload.FechaEmision = fechaEmision;
 
-  // Comprador (solo para tipos que requieren datos del comprador)
-  const tiposConComprador = ['31', '33', '34', '41', '44', '45', '46', '47'];
-  if (tiposConComprador.includes(tipoEcf) && cliente) {
-    if (cliente.documento) {
+  // Comprador
+  // E43 no lleva comprador. E47 usa IdentificadorExtranjero. Los demas usan RNCComprador.
+  const tiposConRncComprador = ['31', '32', '33', '34', '41', '44', '45', '46'];
+  const tiposConIdExtranjero = ['46', '47'];
+  if (tipoEcf !== '43' && cliente) {
+    if (tiposConIdExtranjero.includes(tipoEcf) && !tiposConRncComprador.includes(tipoEcf)) {
+      // E47: solo IdentificadorExtranjero
+      if (cliente.documento) payload.IdentificadorExtranjero = String(cliente.documento).replace(/[^0-9A-Za-z]/g, '');
+    } else if (cliente.documento) {
       const tipoDoc = String(cliente.tipo_documento || '').toUpperCase();
-      if (tipoDoc === 'RNC' || tipoDoc === 'CEDULA' || /^\d{9,11}$/.test(cliente.documento)) {
-        payload.RNCComprador = String(cliente.documento).replace(/[^0-9]/g, '');
+      const docLimpio = String(cliente.documento).replace(/[^0-9]/g, '');
+      if (tipoDoc === 'RNC' || tipoDoc === 'CEDULA' || /^\d{9,11}$/.test(docLimpio)) {
+        payload.RNCComprador = docLimpio;
       }
     }
     if (cliente.nombre) payload.RazonSocialComprador = cliente.nombre;
     if (cliente.email) payload.CorreoComprador = cliente.email;
     if (cliente.direccion) payload.DireccionComprador = cliente.direccion;
-  } else if (tipoEcf === '32' && cliente?.documento) {
-    const docLimpio = String(cliente.documento).replace(/[^0-9]/g, '');
-    if (docLimpio.length >= 9) {
-      payload.RNCComprador = docLimpio;
-      if (cliente.nombre) payload.RazonSocialComprador = cliente.nombre;
-    }
   }
 
   // Detalle items
@@ -178,9 +200,32 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
     const montoItem = formatMoney(cantidad * precioUnit - descuento);
 
     payload[`NumeroLinea[${i}]`] = String(i + 1);
-    payload[`IndicadorFacturacion[${i}]`] = Number(pedido.impuesto || 0) > 0 ? '1' : '3';
+
+    // IndicadorFacturacion segun tipo e-CF
+    // E43: solo exento(3)/no facturable(4). E44: exento(3)/no facturable(4). E47: no facturable(4).
+    // IndicadorFacturacion segun tipo e-CF:
+    // 1=Gravado(18%), 2=Tasa cero(0%), 3=Exento, 4=No facturable
+    if (tipoEcf === '33' || tipoEcf === '43' || tipoEcf === '44' || tipoEcf === '47') {
+      payload[`IndicadorFacturacion[${i}]`] = '4';
+    } else if (tipoEcf === '46') {
+      payload[`IndicadorFacturacion[${i}]`] = '3';
+    } else {
+      payload[`IndicadorFacturacion[${i}]`] = Number(pedido.impuesto || 0) > 0 ? '1' : '3';
+    }
+
+    // E41/E47: Retencion section required before NombreItem in XSD
+    if (tipoEcf === '41') {
+      payload[`IndicadorAgenteRetencionoPercepcion[${i}]`] = '1';
+      payload[`MontoITBISRetenido[${i}]`] = '0.00';
+      payload[`MontoISRRetenido[${i}]`] = '0.00';
+    } else if (tipoEcf === '47') {
+      payload[`IndicadorAgenteRetencionoPercepcion[${i}]`] = '1';
+      payload[`MontoISRRetenido[${i}]`] = '0.00';
+    }
+
     payload[`NombreItem[${i}]`] = item.nombre_producto || item.nombre || `Producto ${item.producto_id}`;
-    payload[`IndicadorBienoServicio[${i}]`] = item.tipo_producto === 'INSUMO' ? '2' : '1';
+    // E47 (Pagos al Exterior): solo permite servicio (2)
+    payload[`IndicadorBienoServicio[${i}]`] = tipoEcf === '47' ? '2' : (item.tipo_producto === 'INSUMO' ? '2' : '1');
     payload[`CantidadItem[${i}]`] = String(cantidad);
     payload[`UnidadMedida[${i}]`] = mapUnidadBase(item.unidad_base);
     payload[`PrecioUnitarioItem[${i}]`] = formatMoney(precioUnit).toFixed(2);
@@ -195,12 +240,32 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
   const impuesto = Number(pedido.impuesto || 0);
   const total = Number(pedido.total || 0);
 
-  if (impuesto > 0) {
+  // Totales — cada tipo tiene campos permitidos distintos
+  const tiposSoloExento = ['33', '43', '44', '47'];
+  if (tiposSoloExento.includes(tipoEcf)) {
+    payload.MontoExento = formatMoney(subtotal).toFixed(2);
+    // E47 (Pagos al Exterior): requiere TotalISRRetencion
+    if (tipoEcf === '47') {
+      payload.TotalISRRetencion = '0.00';
+    }
+  } else if (tipoEcf === '46') {
+    // E46 (Exportaciones): gravado a tasa I3 (0%)
+    payload.MontoGravadoTotal = formatMoney(subtotal).toFixed(2);
+    payload.MontoGravadoI3 = formatMoney(subtotal).toFixed(2);
+    payload.ITBIS3 = '0';
+    payload.TotalITBIS = '0.00';
+    payload.TotalITBIS3 = '0.00';
+  } else if (impuesto > 0) {
     payload.MontoGravadoTotal = formatMoney(subtotal).toFixed(2);
     payload.MontoGravadoI1 = formatMoney(subtotal).toFixed(2);
     payload.ITBIS1 = '18';
     payload.TotalITBIS = formatMoney(impuesto).toFixed(2);
     payload.TotalITBIS1 = formatMoney(impuesto).toFixed(2);
+    // E41 (Compras): requiere totales de retencion
+    if (tipoEcf === '41') {
+      payload.TotalITBISRetenido = '0.00';
+      payload.TotalISRRetencion = '0.00';
+    }
   } else {
     payload.MontoExento = formatMoney(subtotal).toFixed(2);
   }
@@ -276,7 +341,8 @@ const buildNotaEcfPayload = ({ pedido, detalle, cliente, negocio, encfData, conf
   const payload = buildEcfPayloadFromPedido({ pedido, detalle, cliente, negocio, encfData, configDgii });
 
   if (referenciaEncf) payload.NCFModificado = referenciaEncf;
-  if (referenciaFecha) payload.FechaNCFModificado = normalizeDateDgii(referenciaFecha);
+  // FechaNCFModificado es requerido cuando hay NCFModificado
+  payload.FechaNCFModificado = normalizeDateDgii(referenciaFecha || new Date(), { fallbackToday: true });
   if (codigoModificacion) payload.CodigoModificacion = codigoModificacion;
 
   return payload;

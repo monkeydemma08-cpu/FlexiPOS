@@ -24,6 +24,7 @@ const {
   avanzarSecuenciaTrasDuplicado,
   inicializarSecuencia,
   obtenerSecuencias,
+  obtenerFechaVencimiento,
 } = require('./dgii-ecf.sequences');
 const {
   determineTipoEcf,
@@ -153,9 +154,10 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     // Generate eNCF if not already assigned
     let encfData;
     if (pedido.ecf_encf) {
+      const fv = await obtenerFechaVencimiento(ecfTipo, negocioId, db);
       encfData = {
         encf: pedido.ecf_encf,
-        fechaVencimiento: pedido.ecf_fecha_vencimiento || '',
+        fechaVencimiento: fv,
         rncEmisor,
       };
     } else {
@@ -179,7 +181,7 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
         configDgii: config,
         referenciaEncf: refPedido?.ecf_encf || '',
         referenciaFecha: refPedido?.fecha_factura || '',
-        codigoModificacion: '1',
+        codigoModificacion: pedido.codigo_modificacion || (tipoNumerico === '33' ? '3' : '1'),
       });
     } else {
       payload = buildEcfPayloadFromPedido({
@@ -201,11 +203,12 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
       ecf_ultimo_intento_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
     });
 
-    // Build XML
+    // Build XML — FechaVencimientoSecuencia solo para tipos que lo soportan (no E32/E34)
+    const tiposConFVS = ['31', '33', '41', '43', '44', '45', '46', '47'];
     const xmlGenerado = buildEcfXml({
       payload,
       rncEmisorFallback: rncEmisor,
-      fechaVencimientoSecuenciaFallback: encfData.fechaVencimiento || null,
+      fechaVencimientoSecuenciaFallback: tiposConFVS.includes(tipoNumerico) ? (encfData.fechaVencimiento || null) : null,
     });
 
     // Sign XML
@@ -339,9 +342,10 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     const rfceFirmado = signEcfXml({ xml: rfceXml, config });
 
     const endpoints = config.endpoints || DGII_DEFAULT_ENDPOINTS;
+    // FC endpoint ya incluye la ruta completa, no necesita apiPath adicional
     const envio = await sendXmlToDgii({
       endpoint: endpoints.recepcionFc,
-      apiPath: '/api/recepcion/ecf',
+      apiPath: '',
       xmlPayload: rfceFirmado.xml,
       token,
       fileName: buildDgiiXmlFileName({ rncEmisor, encf: encfData.encf, fallback: 'rfce.xml' }),

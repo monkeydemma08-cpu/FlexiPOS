@@ -2837,8 +2837,13 @@
 
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
-          <h3>Rankings de productos</h3>
-          <p class="kanm-subtitle">Productos lideres y con baja rotacion.</p>
+          <div style="display:flex;align-items:center;justify-content:space-between;width:100%">
+            <div>
+              <h3>Rankings de productos</h3>
+              <p class="kanm-subtitle">Productos lideres y con baja rotacion.</p>
+            </div>
+            <button type="button" class="kanm-button secondary" id="analisis-ver-ventas-productos">Ver ventas de productos</button>
+          </div>
         </header>
         <div class="analisis-rankings-grid">
           <div>
@@ -3131,6 +3136,43 @@
   </main>
 
   <!-- Modal Crear/Editar Negocio -->
+  <div class="kanm-modal oculto" id="modal-ventas-productos">
+    <div class="kanm-modal-backdrop"></div>
+    <div class="kanm-modal-panel" style="max-width:800px">
+      <div class="kanm-modal-header">
+        <h3>Ventas de productos</h3>
+        <button type="button" class="kanm-button ghost" id="modal-ventas-productos-cerrar">Cerrar</button>
+      </div>
+      <div class="kanm-modal-body">
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+          <input type="text" id="ventas-productos-buscar" placeholder="Buscar producto..." class="kanm-input" style="flex:1;min-width:200px" />
+          <select id="ventas-productos-orden" class="kanm-input" style="width:auto">
+            <option value="cantidad-desc">Mayor cantidad</option>
+            <option value="cantidad-asc">Menor cantidad</option>
+            <option value="ingresos-desc">Mayor ingresos</option>
+            <option value="ingresos-asc">Menor ingresos</option>
+            <option value="nombre-asc">Nombre A-Z</option>
+          </select>
+        </div>
+        <div style="max-height:500px;overflow-y:auto">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Producto</th>
+                <th>Categoria</th>
+                <th style="text-align:right">Cantidad</th>
+                <th style="text-align:right">Ingresos</th>
+              </tr>
+            </thead>
+            <tbody id="ventas-productos-tbody"></tbody>
+          </table>
+        </div>
+        <div id="ventas-productos-resumen" style="margin-top:12px;font-weight:600;text-align:right"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="kanm-modal oculto" id="kanm-negocios-modal">
     <div class="kanm-modal-backdrop"></div>
     <div class="kanm-modal-panel">

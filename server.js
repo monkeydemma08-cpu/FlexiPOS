@@ -3815,23 +3815,24 @@ const calcularTotalesConImpuestoConfigurado = (montoBase, configuracion = {}) =>
 };
 
 const construirCSV = (headers, rows) => {
+  const SEP = ';';
   const escapeValor = (valor) => {
     if (valor === null || valor === undefined) {
       return '';
     }
     const texto = String(valor);
-    if (/[",\n]/.test(texto)) {
+    if (/[";,\n]/.test(texto)) {
       return `"${texto.replace(/"/g, '""')}"`;
     }
     return texto;
   };
 
-  const lineas = [headers.join(',')];
+  const lineas = ['sep=' + SEP, headers.join(SEP)];
   rows.forEach((row) => {
     const linea = headers.map((header) => escapeValor(row[header]));
-    lineas.push(linea.join(','));
+    lineas.push(linea.join(SEP));
   });
-  return lineas.join('\n');
+  return '\uFEFF' + lineas.join('\n');
 };
 
 const obtenerRangoMensual = (anio, mes) => {
@@ -19651,7 +19652,7 @@ app.get('/api/empresa/gastos/export', (req, res) => {
       );
 
       const headers = ['Fecha', 'Concepto', 'Proveedor', 'Categoria', 'Monto', 'Metodo', 'Origen', 'Estado', 'Sucursal'];
-      const csvRows = [headers.join(',')];
+      const csvRows = ['sep=;', headers.join(';')];
       (rows || []).forEach((row) => {
         const values = [
           row.fecha,
@@ -19664,9 +19665,9 @@ app.get('/api/empresa/gastos/export', (req, res) => {
           row.estado || '',
           row.sucursal || '',
         ].map((val) => `"${String(val).replace(/\"/g, '\"\"')}"`);
-        csvRows.push(values.join(','));
+        csvRows.push(values.join(';'));
       });
-      const csv = csvRows.join('\n');
+      const csv = '\uFEFF' + csvRows.join('\n');
       const nombre = `gastos_empresa_${desde || 'inicio'}_a_${hasta || 'hoy'}.csv`;
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${nombre}"`);
@@ -27920,6 +27921,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           top_productos_cantidad: topProductosCantidad || [],
           top_productos_ingresos: topProductosIngresos || [],
           bottom_productos: bottomProductos || [],
+          todos_productos: ventasProductosLista || [],
           top_categorias: topCategoriasVentas || [],
           top_dias_semana: ventasDiaSemanaFormateadas.slice(0, 3),
           top_horas: ventasHoraFormateadas.slice(0, 5),

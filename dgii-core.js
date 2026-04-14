@@ -435,8 +435,8 @@ const normalizeDgiiServiceBase = (baseUrl = '') =>
     .replace(/\/Autenticacion$/i, '/autenticacion')
     .replace(/\/Recepcion$/i, '/recepcion')
     .replace(/\/ConsultaResultado$/i, '/consultaresultado')
-    .replace(/\/RecepcionFC$/i, '/recepcionfc')
-    .replace(/\/ConsultaRFCe$/i, '/consultarfce');
+    .replace(/\/RecepcionFC$/i, '/RecepcionFC')
+    .replace(/\/ConsultaRFCe$/i, '/ConsultaRFCe');
 
 const isOfficialDgiiAuthBase = (baseUrl = '') =>
   String(baseUrl || '')

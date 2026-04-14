@@ -227,6 +227,13 @@ const analisisSerieBody = document.getElementById('analisis-serie-body');
 const analisisTopCantidad = document.getElementById('analisis-top-cantidad');
 const analisisTopIngresos = document.getElementById('analisis-top-ingresos');
 const analisisBottomProductos = document.getElementById('analisis-bottom-productos');
+const analisisVerVentasBtn = document.getElementById('analisis-ver-ventas-productos');
+const modalVentasProductos = document.getElementById('modal-ventas-productos');
+const modalVentasProductosCerrar = document.getElementById('modal-ventas-productos-cerrar');
+const ventasProductosBuscar = document.getElementById('ventas-productos-buscar');
+const ventasProductosOrden = document.getElementById('ventas-productos-orden');
+const ventasProductosTbody = document.getElementById('ventas-productos-tbody');
+const ventasProductosResumen = document.getElementById('ventas-productos-resumen');
 const analisisTopDias = document.getElementById('analisis-top-dias');
 const analisisTopHoras = document.getElementById('analisis-top-horas');
 const analisisTopDiasMes = document.getElementById('analisis-top-dias-mes');
@@ -6530,6 +6537,86 @@ const renderRankingList = (container, items, formatter) => {
   });
 };
 
+// ---------------------------------------------------------------------------
+// Modal: Ventas de productos (lista completa)
+// ---------------------------------------------------------------------------
+let todosProductosVentas = [];
+
+const renderVentasProductosTabla = () => {
+  if (!ventasProductosTbody) return;
+  ventasProductosTbody.innerHTML = '';
+  const filtro = (ventasProductosBuscar?.value || '').toLowerCase().trim();
+  const orden = ventasProductosOrden?.value || 'cantidad-desc';
+
+  let lista = [...todosProductosVentas];
+  if (filtro) {
+    lista = lista.filter(
+      (p) =>
+        (p.nombre || '').toLowerCase().includes(filtro) ||
+        (p.categoria || '').toLowerCase().includes(filtro)
+    );
+  }
+
+  lista.sort((a, b) => {
+    switch (orden) {
+      case 'cantidad-asc':
+        return (a.cantidad || 0) - (b.cantidad || 0);
+      case 'ingresos-desc':
+        return (b.ingresos || 0) - (a.ingresos || 0);
+      case 'ingresos-asc':
+        return (a.ingresos || 0) - (b.ingresos || 0);
+      case 'nombre-asc':
+        return (a.nombre || '').localeCompare(b.nombre || '');
+      default:
+        return (b.cantidad || 0) - (a.cantidad || 0);
+    }
+  });
+
+  const fragment = document.createDocumentFragment();
+  let totalCantidad = 0;
+  let totalIngresos = 0;
+  lista.forEach((p, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td>${i + 1}</td>` +
+      `<td>${p.nombre || ''}</td>` +
+      `<td>${p.categoria || ''}</td>` +
+      `<td style="text-align:right">${Number(p.cantidad || 0).toLocaleString('es-DO', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</td>` +
+      `<td style="text-align:right">${Number(p.ingresos || 0).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>`;
+    fragment.appendChild(tr);
+    totalCantidad += Number(p.cantidad || 0);
+    totalIngresos += Number(p.ingresos || 0);
+  });
+  ventasProductosTbody.appendChild(fragment);
+
+  if (ventasProductosResumen) {
+    ventasProductosResumen.textContent =
+      `${lista.length} producto${lista.length !== 1 ? 's' : ''} | ` +
+      `Cantidad total: ${totalCantidad.toLocaleString('es-DO', { maximumFractionDigits: 2 })} | ` +
+      `Ingresos total: ${totalIngresos.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+};
+
+const abrirModalVentasProductos = () => {
+  if (!modalVentasProductos) return;
+  if (ventasProductosBuscar) ventasProductosBuscar.value = '';
+  if (ventasProductosOrden) ventasProductosOrden.value = 'cantidad-desc';
+  renderVentasProductosTabla();
+  modalVentasProductos.classList.remove('oculto');
+};
+
+const cerrarModalVentasProductos = () => {
+  if (modalVentasProductos) modalVentasProductos.classList.add('oculto');
+};
+
+if (analisisVerVentasBtn) analisisVerVentasBtn.addEventListener('click', abrirModalVentasProductos);
+if (modalVentasProductosCerrar) modalVentasProductosCerrar.addEventListener('click', cerrarModalVentasProductos);
+if (modalVentasProductos) {
+  modalVentasProductos.querySelector('.kanm-modal-backdrop')?.addEventListener('click', cerrarModalVentasProductos);
+}
+if (ventasProductosBuscar) ventasProductosBuscar.addEventListener('input', renderVentasProductosTabla);
+if (ventasProductosOrden) ventasProductosOrden.addEventListener('change', renderVentasProductosTabla);
+
 const renderAlertasAnalisis = (alertas, container = analisisAlertas) => {
   if (!container) return;
   container.innerHTML = '';
@@ -6711,6 +6798,8 @@ const renderAnalisis = (data) => {
   renderDelta(analisisKpiTicketDelta, comparacion.ticket_promedio?.porcentaje);
 
   renderAnalisisSerie(ingresos.serie_diaria || [], gastosData.serie_diaria || []);
+
+  todosProductosVentas = data.rankings?.todos_productos || [];
 
   renderRankingList(analisisTopCantidad, data.rankings?.top_productos_cantidad || [], (item) => ({
     label: item.nombre || `Producto ${item.id}`,
@@ -6957,7 +7046,7 @@ const cargarAnalisis = async () => {
 
 const csvEscape = (value) => {
   const text = value === null || value === undefined ? '' : String(value);
-  if (/[",\n\r]/.test(text)) {
+  if (/[";,\n\r]/.test(text)) {
     return `"${text.replace(/"/g, '""')}"`;
   }
   return text;
@@ -6997,8 +7086,9 @@ const combinarSerieDiariaAnalisis = (ventasSerie = [], gastosSerie = []) => {
 };
 
 const construirCSVAnalisisCompleto = (basico = {}, avanzado = {}, desde = '', hasta = '') => {
-  const rows = [];
-  const addRow = (...cells) => rows.push(cells.map(csvEscape).join(','));
+  const SEP = ';';
+  const rows = ['sep=' + SEP];
+  const addRow = (...cells) => rows.push(cells.map(csvEscape).join(SEP));
   const addSpacer = () => rows.push('');
 
   const ingresos = basico?.ingresos || {};
@@ -7093,6 +7183,19 @@ const construirCSVAnalisisCompleto = (basico = {}, avanzado = {}, desde = '', ha
   addRow('Top productos por ingresos');
   addRow('Producto', 'Categoria', 'Cantidad', 'Ingresos');
   (rankings.top_productos_ingresos || []).forEach((row) => {
+    addRow(
+      row?.nombre || '',
+      row?.categoria || '',
+      Number(row?.cantidad || 0).toFixed(2),
+      Number(row?.ingresos || 0).toFixed(2)
+    );
+  });
+  addSpacer();
+
+  addRow('Ventas por producto (todos)');
+  addRow('Producto', 'Categoria', 'Cantidad', 'Ingresos');
+  const todosOrdenados = [...(rankings.todos_productos || [])].sort((a, b) => (b.ingresos || 0) - (a.ingresos || 0));
+  todosOrdenados.forEach((row) => {
     addRow(
       row?.nombre || '',
       row?.categoria || '',
