@@ -6602,17 +6602,24 @@ const abrirModalVentasProductos = () => {
   if (ventasProductosBuscar) ventasProductosBuscar.value = '';
   if (ventasProductosOrden) ventasProductosOrden.value = 'cantidad-desc';
   renderVentasProductosTabla();
-  modalVentasProductos.classList.remove('oculto');
+  modalVentasProductos.hidden = false;
+  requestAnimationFrame(() => {
+    modalVentasProductos.classList.add('is-visible');
+  });
 };
 
 const cerrarModalVentasProductos = () => {
-  if (modalVentasProductos) modalVentasProductos.classList.add('oculto');
+  if (!modalVentasProductos) return;
+  modalVentasProductos.classList.remove('is-visible');
+  modalVentasProductos.hidden = true;
 };
 
 if (analisisVerVentasBtn) analisisVerVentasBtn.addEventListener('click', abrirModalVentasProductos);
 if (modalVentasProductosCerrar) modalVentasProductosCerrar.addEventListener('click', cerrarModalVentasProductos);
 if (modalVentasProductos) {
-  modalVentasProductos.querySelector('.kanm-modal-backdrop')?.addEventListener('click', cerrarModalVentasProductos);
+  modalVentasProductos.addEventListener('click', (e) => {
+    if (e.target === modalVentasProductos) cerrarModalVentasProductos();
+  });
 }
 if (ventasProductosBuscar) ventasProductosBuscar.addEventListener('input', renderVentasProductosTabla);
 if (ventasProductosOrden) ventasProductosOrden.addEventListener('change', renderVentasProductosTabla);
@@ -7476,6 +7483,7 @@ const renderDetalleCierre = (pedidos, cierreId) => {
     fila.appendChild(celdaFecha);
 
     const celdaFactura = document.createElement('td');
+    celdaFactura.style.whiteSpace = 'nowrap';
     const facturaId = esFacturaCliente ? idFacturaCliente : facturaPedidoId;
     const botonFactura = document.createElement('button');
     botonFactura.type = 'button';
@@ -7491,6 +7499,19 @@ const renderDetalleCierre = (pedidos, cierreId) => {
       botonFactura.disabled = true;
     }
     celdaFactura.appendChild(botonFactura);
+
+    if (!esFacturaCliente && Number.isInteger(facturaPedidoId) && facturaPedidoId > 0) {
+      const botonEditar = document.createElement('button');
+      botonEditar.type = 'button';
+      botonEditar.className = 'kanm-button ghost';
+      botonEditar.textContent = 'Editar';
+      botonEditar.style.marginLeft = '6px';
+      botonEditar.dataset.editarFacturaPedido = String(facturaPedidoId);
+      botonEditar.dataset.editarFacturaCliente = pedido.cliente || '';
+      botonEditar.dataset.editarFacturaDocumento = pedido.cliente_documento || '';
+      celdaFactura.appendChild(botonEditar);
+    }
+
     fila.appendChild(celdaFactura);
 
     fragment.appendChild(fila);
@@ -9913,6 +9934,326 @@ cierresTabla?.addEventListener('click', (event) => {
   }
 });
 
+// ---- Modal Editar Pedido (factura) ----
+const modalEditarFactura = document.getElementById('modal-editar-factura');
+const modalEditarFacturaCerrar = document.getElementById('modal-editar-factura-cerrar');
+const modalEditarFacturaCancelar = document.getElementById('modal-editar-factura-cancelar');
+const modalEditarFacturaGuardar = document.getElementById('modal-editar-factura-guardar');
+const modalEditarFacturaNum = document.getElementById('modal-editar-factura-num');
+const modalEditarFacturaCargando = document.getElementById('modal-editar-factura-cargando');
+const modalEditarFacturaContenido = document.getElementById('modal-editar-factura-contenido');
+const modalEditarFacturaCliente = document.getElementById('modal-editar-factura-cliente');
+const modalEditarFacturaDocumento = document.getElementById('modal-editar-factura-documento');
+const modalEditarFacturaItemsTbody = document.getElementById('modal-editar-factura-items');
+const modalEditarFacturaBuscarProducto = document.getElementById('modal-editar-factura-buscar-producto');
+const modalEditarFacturaListaProductos = document.getElementById('modal-editar-factura-lista-productos');
+const modalEditarFacturaAgregar = document.getElementById('modal-editar-factura-agregar');
+const modalEditarFacturaDescuento = document.getElementById('modal-editar-factura-descuento');
+const modalEditarFacturaPropina = document.getElementById('modal-editar-factura-propina');
+const modalEditarResumenSubtotal = document.getElementById('modal-editar-resumen-subtotal');
+const modalEditarResumenImpuesto = document.getElementById('modal-editar-resumen-impuesto');
+const modalEditarResumenDescuento = document.getElementById('modal-editar-resumen-descuento');
+const modalEditarResumenPropina = document.getElementById('modal-editar-resumen-propina');
+const modalEditarResumenTotal = document.getElementById('modal-editar-resumen-total');
+const modalEditarFacturaMensaje = document.getElementById('modal-editar-factura-mensaje');
+
+let editarFacturaPedidoId = null;
+let editarFacturaItems = []; // [{ producto_id, nombre, cantidad, precio_unitario }]
+let editarFacturaConfigImpuesto = null;
+let editarFacturaCatalogo = [];
+
+const _efFmt = (v) => new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP' }).format(Number(v) || 0);
+
+const editarFacturaCalcularTotales = () => {
+  const subtotalBruto = editarFacturaItems.reduce(
+    (acc, item) => acc + (Number(item.cantidad) || 0) * (Number(item.precio_unitario) || 0),
+    0
+  );
+  const descuento = Math.max(Number(modalEditarFacturaDescuento?.value) || 0, 0);
+  const propina = Math.max(Number(modalEditarFacturaPropina?.value) || 0, 0);
+
+  let subtotal = subtotalBruto;
+  let impuesto = 0;
+  const cfg = editarFacturaConfigImpuesto;
+  if (cfg) {
+    const tasaIncluida = Number(cfg.impuesto_incluido_valor) || 0;
+    const conImpuesto = Number(cfg.productos_con_impuesto) === 1;
+    const tasaNormal = Number(cfg.valor) || 0;
+    if (conImpuesto && tasaIncluida > 0) {
+      subtotal = subtotalBruto / (1 + tasaIncluida / 100);
+      impuesto = subtotalBruto - subtotal;
+    } else if (!conImpuesto && tasaNormal > 0) {
+      impuesto = subtotalBruto * (tasaNormal / 100);
+    }
+  }
+  subtotal = Math.round(subtotal * 100) / 100;
+  impuesto = Math.round(impuesto * 100) / 100;
+  const total = Math.max(subtotal + impuesto - descuento + propina, 0);
+
+  if (modalEditarResumenSubtotal) modalEditarResumenSubtotal.textContent = _efFmt(subtotal);
+  if (modalEditarResumenImpuesto) modalEditarResumenImpuesto.textContent = _efFmt(impuesto);
+  if (modalEditarResumenDescuento) modalEditarResumenDescuento.textContent = `- ${_efFmt(descuento)}`;
+  if (modalEditarResumenPropina) modalEditarResumenPropina.textContent = _efFmt(propina);
+  if (modalEditarResumenTotal) modalEditarResumenTotal.textContent = _efFmt(total);
+};
+
+const editarFacturaRenderItems = () => {
+  if (!modalEditarFacturaItemsTbody) return;
+  modalEditarFacturaItemsTbody.innerHTML = '';
+  if (!editarFacturaItems.length) {
+    const fila = document.createElement('tr');
+    const celda = document.createElement('td');
+    celda.colSpan = 5;
+    celda.textContent = 'Sin items.';
+    celda.style.cssText = 'text-align:center;color:#888;padding:12px';
+    fila.appendChild(celda);
+    modalEditarFacturaItemsTbody.appendChild(fila);
+    editarFacturaCalcularTotales();
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  editarFacturaItems.forEach((item, idx) => {
+    const fila = document.createElement('tr');
+
+    const tdNombre = document.createElement('td');
+    tdNombre.textContent = item.nombre || `Producto ${item.producto_id || idx + 1}`;
+    fila.appendChild(tdNombre);
+
+    const tdCantidad = document.createElement('td');
+    const inpCantidad = document.createElement('input');
+    inpCantidad.type = 'number';
+    inpCantidad.className = 'kanm-input';
+    inpCantidad.min = '0.01';
+    inpCantidad.step = '0.01';
+    inpCantidad.value = String(item.cantidad);
+    inpCantidad.style.width = '76px';
+    inpCantidad.dataset.itemIdx = String(idx);
+    inpCantidad.dataset.itemField = 'cantidad';
+    tdCantidad.appendChild(inpCantidad);
+    fila.appendChild(tdCantidad);
+
+    const tdPrecio = document.createElement('td');
+    const inpPrecio = document.createElement('input');
+    inpPrecio.type = 'number';
+    inpPrecio.className = 'kanm-input';
+    inpPrecio.min = '0';
+    inpPrecio.step = '0.01';
+    inpPrecio.value = String(item.precio_unitario);
+    inpPrecio.style.width = '96px';
+    inpPrecio.dataset.itemIdx = String(idx);
+    inpPrecio.dataset.itemField = 'precio_unitario';
+    tdPrecio.appendChild(inpPrecio);
+    fila.appendChild(tdPrecio);
+
+    const tdSubtotal = document.createElement('td');
+    tdSubtotal.id = `ef-item-sub-${idx}`;
+    tdSubtotal.textContent = _efFmt((item.cantidad || 0) * (item.precio_unitario || 0));
+    fila.appendChild(tdSubtotal);
+
+    const tdBorrar = document.createElement('td');
+    const btnBorrar = document.createElement('button');
+    btnBorrar.type = 'button';
+    btnBorrar.className = 'kanm-button ghost';
+    btnBorrar.textContent = '✕';
+    btnBorrar.dataset.efEliminarIdx = String(idx);
+    tdBorrar.appendChild(btnBorrar);
+    fila.appendChild(tdBorrar);
+
+    frag.appendChild(fila);
+  });
+  modalEditarFacturaItemsTbody.appendChild(frag);
+  editarFacturaCalcularTotales();
+};
+
+const editarFacturaActualizarDatalist = () => {
+  if (!modalEditarFacturaListaProductos) return;
+  modalEditarFacturaListaProductos.innerHTML = '';
+  editarFacturaCatalogo.forEach((prod) => {
+    const opt = document.createElement('option');
+    opt.value = prod.nombre;
+    modalEditarFacturaListaProductos.appendChild(opt);
+  });
+};
+
+const abrirModalEditarFactura = async (boton) => {
+  if (!modalEditarFactura) return;
+  const pedidoId = Number(boton.dataset.editarFacturaPedido);
+  if (!pedidoId) return;
+  editarFacturaPedidoId = pedidoId;
+  editarFacturaItems = [];
+
+  if (modalEditarFacturaNum) modalEditarFacturaNum.textContent = pedidoId;
+  if (modalEditarFacturaCargando) modalEditarFacturaCargando.hidden = false;
+  if (modalEditarFacturaContenido) modalEditarFacturaContenido.hidden = true;
+  if (modalEditarFacturaMensaje) setMessage(modalEditarFacturaMensaje, '', 'info');
+  if (modalEditarFacturaGuardar) modalEditarFacturaGuardar.disabled = true;
+  modalEditarFactura.hidden = false;
+  requestAnimationFrame(() => modalEditarFactura.classList.add('is-visible'));
+
+  try {
+    const promesas = [
+      fetchConAutorizacion(`/api/pedidos/${pedidoId}`),
+      fetchConAutorizacion('/api/configuracion/impuesto'),
+    ];
+    if (!productos.length) promesas.push(fetchConAutorizacion('/api/productos'));
+    const [respPedido, respImpuesto, respProductos] = await Promise.all(promesas);
+
+    if (!respPedido.ok) throw new Error('No se pudo cargar el pedido.');
+    const pedido = await respPedido.json();
+
+    if (respImpuesto?.ok) editarFacturaConfigImpuesto = await respImpuesto.json();
+
+    if (respProductos?.ok) {
+      const dataProd = await respProductos.json();
+      if (Array.isArray(dataProd)) productos = dataProd;
+    }
+    editarFacturaCatalogo = Array.isArray(productos) ? productos : [];
+    editarFacturaActualizarDatalist();
+
+    if (modalEditarFacturaCliente) modalEditarFacturaCliente.value = pedido.cliente || '';
+    if (modalEditarFacturaDocumento) modalEditarFacturaDocumento.value = pedido.cliente_documento || '';
+    if (modalEditarFacturaDescuento) modalEditarFacturaDescuento.value = Number(pedido.descuento_monto) || 0;
+    if (modalEditarFacturaPropina) modalEditarFacturaPropina.value = Number(pedido.propina_monto) || 0;
+
+    editarFacturaItems = (Array.isArray(pedido.items) ? pedido.items : []).map((item) => ({
+      producto_id: item.producto_id,
+      nombre: item.nombre || `Producto ${item.producto_id}`,
+      cantidad: Number(item.cantidad) || 1,
+      precio_unitario: Number(item.precio_unitario) || 0,
+    }));
+    editarFacturaRenderItems();
+
+    if (modalEditarFacturaCargando) modalEditarFacturaCargando.hidden = true;
+    if (modalEditarFacturaContenido) modalEditarFacturaContenido.hidden = false;
+    if (modalEditarFacturaGuardar) modalEditarFacturaGuardar.disabled = false;
+    modalEditarFacturaCliente?.focus();
+  } catch (e) {
+    setMessage(modalEditarFacturaMensaje, e.message || 'Error al cargar el pedido.', 'error');
+    if (modalEditarFacturaCargando) modalEditarFacturaCargando.hidden = true;
+  }
+};
+
+const cerrarModalEditarFactura = () => {
+  if (!modalEditarFactura) return;
+  modalEditarFactura.classList.remove('is-visible');
+  modalEditarFactura.hidden = true;
+  editarFacturaPedidoId = null;
+  editarFacturaItems = [];
+};
+
+const guardarEditarFactura = async () => {
+  if (!editarFacturaPedidoId) return;
+  if (!editarFacturaItems.length) {
+    setMessage(modalEditarFacturaMensaje, 'El pedido debe tener al menos un item.', 'error');
+    return;
+  }
+  for (const item of editarFacturaItems) {
+    if (Number(item.cantidad) <= 0) {
+      setMessage(modalEditarFacturaMensaje, 'Todas las cantidades deben ser mayores a cero.', 'error');
+      return;
+    }
+    if (Number(item.precio_unitario) < 0) {
+      setMessage(modalEditarFacturaMensaje, 'Los precios no pueden ser negativos.', 'error');
+      return;
+    }
+  }
+
+  const cliente = (modalEditarFacturaCliente?.value || '').trim();
+  const cliente_documento = (modalEditarFacturaDocumento?.value || '').trim();
+  const descuento_monto = Math.max(Number(modalEditarFacturaDescuento?.value) || 0, 0);
+  const propina_monto = Math.max(Number(modalEditarFacturaPropina?.value) || 0, 0);
+
+  setMessage(modalEditarFacturaMensaje, '', 'info');
+  if (modalEditarFacturaGuardar) modalEditarFacturaGuardar.disabled = true;
+  try {
+    const resp = await fetchJsonAutorizado(`/api/pedidos/${editarFacturaPedidoId}/factura`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        cliente: cliente || null,
+        cliente_documento: cliente_documento || null,
+        descuento_monto,
+        propina_monto,
+        items: editarFacturaItems.map((item) => ({
+          producto_id: item.producto_id,
+          nombre: item.nombre,
+          cantidad: Number(item.cantidad),
+          precio_unitario: Number(item.precio_unitario),
+        })),
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+      setMessage(modalEditarFacturaMensaje, data.error || 'No se pudo guardar.', 'error');
+      return;
+    }
+    cerrarModalEditarFactura();
+    setMessage(cierresMensaje, 'Pedido actualizado correctamente.', 'success');
+  } catch (e) {
+    setMessage(modalEditarFacturaMensaje, 'Error de conexion.', 'error');
+  } finally {
+    if (modalEditarFacturaGuardar) modalEditarFacturaGuardar.disabled = false;
+  }
+};
+
+// Editar items: cantidad y precio
+modalEditarFacturaItemsTbody?.addEventListener('input', (e) => {
+  const inp = e.target;
+  const idx = Number(inp.dataset.itemIdx);
+  const field = inp.dataset.itemField;
+  if (!field || !Number.isFinite(idx) || !editarFacturaItems[idx]) return;
+  editarFacturaItems[idx][field] = Number(inp.value) || 0;
+  if (field === 'cantidad' || field === 'precio_unitario') {
+    const cell = document.getElementById(`ef-item-sub-${idx}`);
+    if (cell) {
+      cell.textContent = _efFmt((editarFacturaItems[idx].cantidad || 0) * (editarFacturaItems[idx].precio_unitario || 0));
+    }
+    editarFacturaCalcularTotales();
+  }
+});
+
+// Eliminar item
+modalEditarFacturaItemsTbody?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-ef-eliminar-idx]');
+  if (!btn) return;
+  const idx = Number(btn.dataset.efEliminarIdx);
+  if (!Number.isFinite(idx)) return;
+  editarFacturaItems.splice(idx, 1);
+  editarFacturaRenderItems();
+});
+
+// Agregar producto
+const efAgregarProducto = () => {
+  const busqueda = (modalEditarFacturaBuscarProducto?.value || '').trim().toLowerCase();
+  if (!busqueda) return;
+  const prod = editarFacturaCatalogo.find((p) => (p.nombre || '').toLowerCase() === busqueda);
+  if (!prod) {
+    setMessage(modalEditarFacturaMensaje, 'Producto no encontrado. Usa el nombre exacto de la lista.', 'error');
+    return;
+  }
+  editarFacturaItems.push({
+    producto_id: prod.id,
+    nombre: prod.nombre,
+    cantidad: 1,
+    precio_unitario: Number(prod.precio) || 0,
+  });
+  if (modalEditarFacturaBuscarProducto) modalEditarFacturaBuscarProducto.value = '';
+  setMessage(modalEditarFacturaMensaje, '', 'info');
+  editarFacturaRenderItems();
+};
+modalEditarFacturaAgregar?.addEventListener('click', efAgregarProducto);
+modalEditarFacturaBuscarProducto?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); efAgregarProducto(); }
+});
+
+modalEditarFacturaDescuento?.addEventListener('input', () => editarFacturaCalcularTotales());
+modalEditarFacturaPropina?.addEventListener('input', () => editarFacturaCalcularTotales());
+modalEditarFacturaCerrar?.addEventListener('click', cerrarModalEditarFactura);
+modalEditarFacturaCancelar?.addEventListener('click', cerrarModalEditarFactura);
+modalEditarFacturaGuardar?.addEventListener('click', guardarEditarFactura);
+modalEditarFactura?.addEventListener('click', (e) => {
+  if (e.target === modalEditarFactura) cerrarModalEditarFactura();
+});
+
 cierresDetalleTabla?.addEventListener('change', (event) => {
   const selectorMetodo = event.target.closest('[data-cambiar-metodo-cierre]');
   if (!selectorMetodo) return;
@@ -9924,6 +10265,13 @@ cierresDetalleTabla?.addEventListener('change', (event) => {
 });
 
 cierresDetalleTabla?.addEventListener('click', (event) => {
+  const botonEditar = event.target.closest('[data-editar-factura-pedido]');
+  if (botonEditar) {
+    event.preventDefault();
+    abrirModalEditarFactura(botonEditar);
+    return;
+  }
+
   const botonFactura = event.target.closest('[data-ver-factura-pedido]');
   const botonFacturaDeuda = event.target.closest('[data-ver-factura-deuda]');
   if (!botonFactura && !botonFacturaDeuda) return;
@@ -9936,7 +10284,7 @@ cierresDetalleTabla?.addEventListener('click', (event) => {
       return;
     }
     const urlDeuda = `/cliente-factura.html?deudaId=${encodeURIComponent(deudaId)}&scope=admin`;
-    window.open(urlDeuda, '_blank', 'noopener');
+    window.open(urlDeuda, '_blank');
     return;
   }
 
@@ -9946,7 +10294,7 @@ cierresDetalleTabla?.addEventListener('click', (event) => {
     return;
   }
   const url = `/factura.html?id=${encodeURIComponent(pedidoId)}`;
-  window.open(url, '_blank', 'noopener');
+  window.open(url, '_blank');
 });
 
 modalEliminarCancelar?.addEventListener('click', (event) => {

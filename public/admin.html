@@ -3135,12 +3135,11 @@
     </section>
   </main>
 
-  <!-- Modal Crear/Editar Negocio -->
-  <div class="kanm-modal oculto" id="modal-ventas-productos">
-    <div class="kanm-modal-backdrop"></div>
-    <div class="kanm-modal-panel" style="max-width:800px">
+  <!-- Modal Ventas de productos -->
+  <div class="kanm-modal-overlay" id="modal-ventas-productos" hidden>
+    <div class="kanm-modal kanm-modal--wide" role="dialog" aria-modal="true" aria-labelledby="modal-ventas-productos-titulo">
       <div class="kanm-modal-header">
-        <h3>Ventas de productos</h3>
+        <h3 id="modal-ventas-productos-titulo">Ventas de productos</h3>
         <button type="button" class="kanm-button ghost" id="modal-ventas-productos-cerrar">Cerrar</button>
       </div>
       <div class="kanm-modal-body">
@@ -3169,6 +3168,79 @@
           </table>
         </div>
         <div id="ventas-productos-resumen" style="margin-top:12px;font-weight:600;text-align:right"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Editar Factura -->
+  <div class="kanm-modal-overlay" id="modal-editar-factura" hidden>
+    <div class="kanm-modal kanm-modal--wide" role="dialog" aria-modal="true" aria-labelledby="modal-editar-factura-titulo">
+      <div class="kanm-modal-header">
+        <h3 id="modal-editar-factura-titulo">Editar pedido #<span id="modal-editar-factura-num"></span></h3>
+        <button type="button" class="kanm-button ghost" id="modal-editar-factura-cerrar">Cerrar</button>
+      </div>
+      <div class="kanm-modal-body" style="overflow-y:auto;max-height:62vh">
+        <div id="modal-editar-factura-cargando" style="text-align:center;padding:24px;color:#666">Cargando...</div>
+        <div id="modal-editar-factura-contenido" hidden>
+          <!-- Datos del cliente -->
+          <p style="font-weight:600;margin:0 0 8px">Datos del cliente</p>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+            <div class="kanm-input-group" style="flex:1;min-width:160px">
+              <label for="modal-editar-factura-cliente">Cliente</label>
+              <input type="text" id="modal-editar-factura-cliente" class="kanm-input" placeholder="Nombre del cliente" />
+            </div>
+            <div class="kanm-input-group" style="flex:1;min-width:160px">
+              <label for="modal-editar-factura-documento">Documento (RNC / Cédula)</label>
+              <input type="text" id="modal-editar-factura-documento" class="kanm-input" placeholder="00000000000" />
+            </div>
+          </div>
+          <!-- Items -->
+          <p style="font-weight:600;margin:0 0 8px">Items del pedido</p>
+          <div class="kanm-table-wrapper" style="margin-bottom:8px">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th style="width:90px">Cant.</th>
+                  <th style="width:110px">Precio unit.</th>
+                  <th style="width:100px">Subtotal</th>
+                  <th style="width:36px"></th>
+                </tr>
+              </thead>
+              <tbody id="modal-editar-factura-items"></tbody>
+            </table>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <input type="text" id="modal-editar-factura-buscar-producto" class="kanm-input" placeholder="Buscar y agregar producto..." list="modal-editar-factura-lista-productos" style="flex:1" autocomplete="off" />
+            <datalist id="modal-editar-factura-lista-productos"></datalist>
+            <button type="button" class="kanm-button primary" id="modal-editar-factura-agregar">Agregar</button>
+          </div>
+          <!-- Descuento y propina -->
+          <p style="font-weight:600;margin:0 0 8px">Ajustes</p>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+            <div class="kanm-input-group" style="flex:1;min-width:140px">
+              <label for="modal-editar-factura-descuento">Descuento (DOP)</label>
+              <input type="number" id="modal-editar-factura-descuento" class="kanm-input" min="0" step="0.01" value="0" />
+            </div>
+            <div class="kanm-input-group" style="flex:1;min-width:140px">
+              <label for="modal-editar-factura-propina">Propina (DOP)</label>
+              <input type="number" id="modal-editar-factura-propina" class="kanm-input" min="0" step="0.01" value="0" />
+            </div>
+          </div>
+          <!-- Resumen de totales -->
+          <div style="background:var(--color-fondo,#f8f9fb);padding:12px 14px;border-radius:8px;font-size:.95em">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Subtotal</span><span id="modal-editar-resumen-subtotal">DOP 0.00</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>ITBIS</span><span id="modal-editar-resumen-impuesto">DOP 0.00</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Descuento</span><span id="modal-editar-resumen-descuento">- DOP 0.00</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Propina</span><span id="modal-editar-resumen-propina">DOP 0.00</span></div>
+            <div style="display:flex;justify-content:space-between;font-weight:600;border-top:1px solid #dde;padding-top:8px;margin-top:4px"><span>Total</span><span id="modal-editar-resumen-total">DOP 0.00</span></div>
+          </div>
+        </div>
+        <div id="modal-editar-factura-mensaje" class="kanm-message" style="margin-top:10px"></div>
+      </div>
+      <div class="kanm-modal-actions">
+        <button type="button" class="kanm-button ghost" id="modal-editar-factura-cancelar">Cancelar</button>
+        <button type="button" class="kanm-button primary" id="modal-editar-factura-guardar">Guardar cambios</button>
       </div>
     </div>
   </div>

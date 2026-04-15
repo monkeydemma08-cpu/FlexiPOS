@@ -14746,6 +14746,128 @@ app.get('/api/pedidos/:id/factura', (req, res) => {
   });
 });
 
+app.patch('/api/pedidos/:id/factura', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!esUsuarioAdmin(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const pedidoId = Number(req.params.id);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Pedido no valido.' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const { cliente, cliente_documento, descuento_monto, propina_monto, items } = req.body || {};
+
+    try {
+      const pedido = await db.get(
+        `SELECT id, estado FROM pedidos WHERE id = ? AND negocio_id = ?`,
+        [pedidoId, negocioId]
+      );
+      if (!pedido) {
+        return res.status(404).json({ ok: false, error: 'Pedido no encontrado.' });
+      }
+
+      const clienteFinal = normalizarCampoTexto(cliente);
+      const documentoFinal = normalizarCampoTexto(cliente_documento);
+      const descuentoFinal =
+        descuento_monto !== undefined && descuento_monto !== null
+          ? Math.max(Number(descuento_monto) || 0, 0)
+          : null;
+      const propinaFinal =
+        propina_monto !== undefined && propina_monto !== null
+          ? Math.max(Number(propina_monto) || 0, 0)
+          : null;
+
+      if (Array.isArray(items) && items.length > 0) {
+        // Validate items
+        for (const item of items) {
+          const cantidad = Number(item.cantidad);
+          const precio = Number(item.precio_unitario);
+          if (!Number.isFinite(cantidad) || cantidad <= 0) {
+            return res.status(400).json({ ok: false, error: 'Todas las cantidades deben ser mayores a cero.' });
+          }
+          if (!Number.isFinite(precio) || precio < 0) {
+            return res.status(400).json({ ok: false, error: 'Los precios no pueden ser negativos.' });
+          }
+        }
+
+        // Calculate new totals (no inventory adjustment — administrative correction only)
+        const subtotalBruto = items.reduce(
+          (acc, item) => acc + Number(item.cantidad) * Number(item.precio_unitario),
+          0
+        );
+        const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+        const totales = calcularTotalesConImpuestoConfigurado(subtotalBruto, configImpuesto);
+
+        const descuentoMonto = descuentoFinal !== null ? descuentoFinal : 0;
+        const propinaMonto = propinaFinal !== null ? propinaFinal : 0;
+        const totalFinal = Number(
+          Math.max(totales.subtotal + totales.impuesto - descuentoMonto + propinaMonto, 0).toFixed(2)
+        );
+
+        await db.run('BEGIN');
+        try {
+          await db.run(
+            'DELETE FROM detalle_pedido WHERE pedido_id = ? AND negocio_id = ?',
+            [pedidoId, negocioId]
+          );
+          for (const item of items) {
+            const productoId = Number(item.producto_id) || null;
+            await db.run(
+              'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id) VALUES (?, ?, ?, ?, ?)',
+              [pedidoId, productoId, Number(item.cantidad), Number(item.precio_unitario), negocioId]
+            );
+          }
+
+          const sets = ['subtotal = ?', 'impuesto = ?', 'descuento_monto = ?', 'propina_monto = ?', 'total = ?'];
+          const params = [totales.subtotal, totales.impuesto, descuentoMonto, propinaMonto, totalFinal];
+          if (clienteFinal !== null) { sets.push('cliente = ?'); params.push(clienteFinal); }
+          if (documentoFinal !== null) { sets.push('cliente_documento = ?'); params.push(documentoFinal); }
+          params.push(pedidoId, negocioId);
+
+          await db.run(`UPDATE pedidos SET ${sets.join(', ')} WHERE id = ? AND negocio_id = ?`, params);
+          await db.run('COMMIT');
+        } catch (txErr) {
+          await db.run('ROLLBACK').catch(() => {});
+          throw txErr;
+        }
+      } else {
+        // Update only the provided scalar fields
+        const sets = [];
+        const params = [];
+        if (clienteFinal !== null) { sets.push('cliente = ?'); params.push(clienteFinal); }
+        if (documentoFinal !== null) { sets.push('cliente_documento = ?'); params.push(documentoFinal); }
+        if (descuentoFinal !== null) { sets.push('descuento_monto = ?'); params.push(descuentoFinal); }
+        if (propinaFinal !== null) { sets.push('propina_monto = ?'); params.push(propinaFinal); }
+
+        if (!sets.length) {
+          return res.json({ ok: true });
+        }
+        params.push(pedidoId, negocioId);
+        await db.run(`UPDATE pedidos SET ${sets.join(', ')} WHERE id = ? AND negocio_id = ?`, params);
+
+        if (descuentoFinal !== null || propinaFinal !== null) {
+          await db.run(
+            `UPDATE pedidos
+                SET total = (
+                  CASE WHEN (subtotal + impuesto - descuento_monto + propina_monto) > 0
+                       THEN (subtotal + impuesto - descuento_monto + propina_monto)
+                       ELSE 0 END
+                )
+              WHERE id = ? AND negocio_id = ?`,
+            [pedidoId, negocioId]
+          );
+        }
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al editar factura:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar la factura.' });
+    }
+  });
+});
+
 app.get('/api/cocina/pedidos-activos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     if (!esUsuarioCocina(usuarioSesion) && !esUsuarioAdmin(usuarioSesion)) {
