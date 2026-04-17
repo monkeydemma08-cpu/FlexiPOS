@@ -115,8 +115,8 @@ const deriveTipoPago = (pedido) => {
 
 const deriveIndicadorMontoGravado = (pedido) => {
   // 0 = montos no incluyen ITBIS (precios netos), 1 = montos incluyen ITBIS
-  // POS almacena precios netos, ITBIS se calcula por separado
-  return '0';
+  // POS almacena precios con ITBIS incluido (precios brutos)
+  return '1';
 };
 
 // ---------------------------------------------------------------------------
@@ -203,9 +203,9 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
 
     // IndicadorFacturacion segun tipo e-CF
     // E43: solo exento(3)/no facturable(4). E44: exento(3)/no facturable(4). E47: no facturable(4).
-    // IndicadorFacturacion segun tipo e-CF:
+    // E33 (Nota de Debito): sigue la misma logica que E31/E32 (gravado si hay ITBIS, exento si no).
     // 1=Gravado(18%), 2=Tasa cero(0%), 3=Exento, 4=No facturable
-    if (tipoEcf === '33' || tipoEcf === '43' || tipoEcf === '44' || tipoEcf === '47') {
+    if (tipoEcf === '43' || tipoEcf === '44' || tipoEcf === '47') {
       payload[`IndicadorFacturacion[${i}]`] = '4';
     } else if (tipoEcf === '46') {
       payload[`IndicadorFacturacion[${i}]`] = '3';
@@ -241,7 +241,8 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
   const total = Number(pedido.total || 0);
 
   // Totales — cada tipo tiene campos permitidos distintos
-  const tiposSoloExento = ['33', '43', '44', '47'];
+  // E33 (Nota de Debito): usa los mismos campos de totales que E31/E32 (gravado/exento segun ITBIS).
+  const tiposSoloExento = ['43', '44', '47'];
   if (tiposSoloExento.includes(tipoEcf)) {
     payload.MontoExento = formatMoney(subtotal).toFixed(2);
     // E47 (Pagos al Exterior): requiere TotalISRRetencion

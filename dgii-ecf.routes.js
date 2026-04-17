@@ -342,10 +342,9 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     const rfceFirmado = signEcfXml({ xml: rfceXml, config });
 
     const endpoints = config.endpoints || DGII_DEFAULT_ENDPOINTS;
-    // FC endpoint ya incluye la ruta completa, no necesita apiPath adicional
     const envio = await sendXmlToDgii({
       endpoint: endpoints.recepcionFc,
-      apiPath: '',
+      apiPath: '/api/recepcion/ecf',
       xmlPayload: rfceFirmado.xml,
       token,
       fileName: buildDgiiXmlFileName({ rncEmisor, encf: encfData.encf, fallback: 'rfce.xml' }),
@@ -376,6 +375,17 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
         ecf_mensaje_dgii: mensaje,
       });
       return { ok: false, message: mensaje, encf: encfData.encf, estado: 'RECHAZADO' };
+    }
+
+    // Si RecepcionFC ya acepto, no necesitamos consultar
+    if (envio.extracted?.accepted) {
+      const mensajeDgii = envio.extracted?.message || 'Aceptado';
+      await actualizarPedidoEcf(pedidoId, {
+        ecf_estado: 'ACEPTADO',
+        ecf_codigo_dgii: envio.extracted?.code || null,
+        ecf_mensaje_dgii: mensajeDgii,
+      });
+      return { ok: true, message: mensajeDgii, encf: encfData.encf, estado: 'ACEPTADO' };
     }
 
     // Consult RFCE result

@@ -716,7 +716,7 @@ const renderSetsDgii = () => {
 const renderCasosDgii = () => {
   if (!dgiiCasosTabla) return;
   if (!Array.isArray(dgiiCasos) || !dgiiCasos.length) {
-    dgiiCasosTabla.innerHTML = '<tr><td colspan=\"9\">Sin casos para este lote.</td></tr>';
+    dgiiCasosTabla.innerHTML = '<tr><td colspan=\"10\">Sin casos para este lote.</td></tr>';
     return;
   }
 
@@ -726,6 +726,7 @@ const renderCasosDgii = () => {
       const estado = caso.estado_local || '--';
       const puedeUsarXmlFirmado = caso.flujo === 'RESUMEN_FC';
       const puedeUsarXmlBaseFirmado = caso.flujo === 'FC_MENOR_250K';
+      const msgCorto = caso.dgii_mensaje ? String(caso.dgii_mensaje).slice(0, 80) + (caso.dgii_mensaje.length > 80 ? '…' : '') : '--';
       return `
         <tr>
           <td>${Number(caso.orden_envio || 0)}</td>
@@ -734,10 +735,11 @@ const renderCasosDgii = () => {
           <td>${formatCurrency(caso.monto_total || 0)}</td>
           <td>${estado}</td>
           <td>${caso.dgii_codigo || '--'}</td>
+          <td title="${(caso.dgii_mensaje || '').replace(/"/g, '&quot;')}">${msgCorto}</td>
           <td>${caso.dgii_track_id || '--'}</td>
           <td>${Number(caso.intentos || 0)}</td>
           <td>
-            ${caso.flujo === 'RESUMEN_FC' ? '' : `<button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-procesar-caso=\"${caso.id}\">Procesar</button>`}
+            <button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-procesar-caso=\"${caso.id}\">Procesar</button>
             <button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-consultar-caso=\"${caso.id}\">Consultar</button>
             ${puedeUsarXmlFirmado ? `<button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-xml-firmado-caso=\"${caso.id}\">XML firmado</button>` : ''}
             ${puedeUsarXmlBaseFirmado ? `<button type=\"button\" class=\"kanm-button ghost sm\" data-dgii-xml-base-firmado-caso=\"${caso.id}\">XML base firmado</button>` : ''}

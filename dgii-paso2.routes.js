@@ -1472,6 +1472,29 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
         }
       }
 
+      // Si el RFCE relacionado ya fue aceptado, no necesitamos consultar ConsultaRFCe
+      // (el endpoint ConsultaRFCe no esta disponible en el dominio de certificacion)
+      const resumenAceptado = await findRelatedCaso({
+        negocioId,
+        setId: caso.set_id,
+        flujo: 'RESUMEN_FC',
+        encf: encfCaso,
+        ncf: ncfCaso,
+      });
+      if (resumenAceptado && resumenAceptado.estado_local === 'ACEPTADO') {
+        const mensajeAceptado = resumenAceptado.dgii_mensaje || 'Aceptado';
+        await actualizarCaso({
+          casoId: caso.id,
+          xmlGenerado: firmado.xmlGenerado,
+          xmlFirmado: firmado.xmlFirmado,
+          estadoLocal: 'ACEPTADO',
+          dgiiEstado: 'ACEPTADO',
+          dgiiCodigo: resumenAceptado.dgii_codigo || null,
+          dgiiMensaje: mensajeAceptado,
+        });
+        return { casoId: caso.id, estado: 'ACEPTADO', codigo: resumenAceptado.dgii_codigo || null, mensaje: mensajeAceptado, trackId: null };
+      }
+
       const consulta = await consultRfceResult({
         endpoint: endpoints.consultaRfce,
         token,
@@ -1537,24 +1560,106 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
         codigoSeguridadeCF: firmadoFactura.codigoSeguridadeCF,
       });
 
-      const message =
-        'RFCE pendiente de firma externa. Usa el boton "XML firmado" para subir el resumen firmado antes de enviar la factura 32 menor a 250k.';
+      // Firmar el RFCE y enviarlo directamente a la DGII
+      const rfceFirmado = signCaseXml({ xml: xmlGenerado, config });
 
       await actualizarCaso({
         casoId: caso.id,
         xmlGenerado,
-        xmlFirmado: null,
-        estadoLocal: 'PENDIENTE',
-        dgiiEstado: 'PENDIENTE',
-        dgiiCodigo: null,
-        dgiiMensaje: message,
+        xmlFirmado: rfceFirmado.xml,
+        estadoLocal: 'PROCESANDO',
+        incrementarIntentos: true,
+      });
+
+      const envioRfce = await sendXmlToDgii({
+        endpoint: endpoints.recepcionFc,
+        apiPath: '/api/recepcion/ecf',
+        xmlPayload: rfceFirmado.xml,
+        token,
+        fileName: buildDgiiXmlFileName({ rncEmisor, encf: encfCaso, fallback: 'rfce.xml' }),
+      });
+
+      await registrarIntento({
+        casoId: caso.id,
+        negocioId,
+        tipoEnvio: 'RFCE',
+        endpoint: envioRfce.endpoint || endpoints.recepcionFc,
+        requestHeaders: envioRfce.requestHeaders,
+        requestBody: rfceFirmado.xml,
+        responseStatus: envioRfce.status,
+        responseHeaders: envioRfce.headers,
+        responseBody: envioRfce.raw,
+        resultado: envioRfce.extracted?.accepted ? 'ACEPTADO' : envioRfce.extracted?.rejected ? 'RECHAZADO' : 'ENVIADO',
+        codigo: envioRfce.extracted?.code,
+        mensaje: envioRfce.extracted?.message || envioRfce.extracted?.statusText,
+        trackId: null,
+      });
+
+      if (!envioRfce.ok) {
+        const mensaje = envioRfce.extracted?.message || envioRfce.raw?.slice(0, 500) || 'Error envio RFCE';
+        await actualizarCaso({
+          casoId: caso.id,
+          estadoLocal: 'RECHAZADO',
+          dgiiEstado: 'RECHAZADO',
+          dgiiCodigo: envioRfce.extracted?.code || null,
+          dgiiMensaje: mensaje,
+        });
+        return { casoId: caso.id, estado: 'RECHAZADO', codigo: envioRfce.extracted?.code || null, mensaje, trackId: null };
+      }
+
+      // Si RecepcionFC ya acepto, no necesitamos consultar
+      if (envioRfce.extracted?.accepted) {
+        const mensaje = envioRfce.extracted?.message || 'Aceptado';
+        await actualizarCaso({
+          casoId: caso.id,
+          estadoLocal: 'ACEPTADO',
+          dgiiEstado: 'ACEPTADO',
+          dgiiCodigo: envioRfce.extracted?.code || null,
+          dgiiMensaje: mensaje,
+        });
+        return { casoId: caso.id, estado: 'ACEPTADO', codigo: envioRfce.extracted?.code || null, mensaje, trackId: null };
+      }
+
+      // Consultar resultado RFCE
+      const consultaRfce = await consultRfceResult({
+        endpoint: endpoints.consultaRfce,
+        token,
+        rncEmisor,
+        encf: encfCaso,
+        codigoSeguridadeCF: firmadoFactura.codigoSeguridadeCF,
+      });
+      const finalState = resolveRemoteCaseState(consultaRfce.extracted, 'ENVIADO');
+
+      await registrarIntento({
+        casoId: caso.id,
+        negocioId,
+        tipoEnvio: 'CONSULTA_RFCE',
+        endpoint: consultaRfce.endpoint || endpoints.consultaRfce,
+        requestHeaders: consultaRfce.requestHeaders,
+        requestBody: consultaRfce.requestBody || '',
+        responseStatus: consultaRfce.status,
+        responseHeaders: consultaRfce.headers,
+        responseBody: consultaRfce.raw,
+        resultado: finalState,
+        codigo: consultaRfce.extracted?.code,
+        mensaje: consultaRfce.extracted?.message || consultaRfce.extracted?.statusText,
+        trackId: null,
+      });
+
+      await actualizarCaso({
+        casoId: caso.id,
+        estadoLocal: finalState,
+        dgiiEstado: finalState,
+        dgiiCodigo: consultaRfce.extracted?.code || null,
+        dgiiMensaje: consultaRfce.extracted?.message || consultaRfce.extracted?.statusText || null,
+        dgiiTrackId: null,
       });
 
       return {
         casoId: caso.id,
-        estado: 'PENDIENTE',
-        codigo: null,
-        mensaje: message,
+        estado: finalState,
+        codigo: consultaRfce.extracted?.code || null,
+        mensaje: consultaRfce.extracted?.message || consultaRfce.extracted?.statusText || null,
         trackId: null,
       };
     }

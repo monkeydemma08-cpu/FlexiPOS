@@ -23,8 +23,8 @@ const DGII_DEFAULT_ENDPOINTS = Object.freeze({
   autenticacion: 'https://eCF.dgii.gov.do/CerteCF/Autenticacion',
   recepcion: 'https://eCF.dgii.gov.do/CerteCF/Recepcion',
   consultaResultado: 'https://eCF.dgii.gov.do/CerteCF/ConsultaResultado',
-  recepcionFc: 'https://fc.dgii.gov.do/CerteCF/RecepcionFC',
-  consultaRfce: 'https://fc.dgii.gov.do/CerteCF/ConsultaRFCe',
+  recepcionFc: 'https://eCF.dgii.gov.do/CerteCF/RecepcionFC',
+  consultaRfce: 'https://eCF.dgii.gov.do/CerteCF/ConsultaRFCe',
 });
 
 const DEFAULT_TIMEOUT_MS = 40000;
