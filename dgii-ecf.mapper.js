@@ -115,8 +115,9 @@ const deriveTipoPago = (pedido) => {
 
 const deriveIndicadorMontoGravado = (pedido) => {
   // 0 = montos no incluyen ITBIS (precios netos), 1 = montos incluyen ITBIS
-  // POS almacena precios con ITBIS incluido (precios brutos)
-  return '1';
+  // En este sistema: subtotal NO incluye ITBIS, impuesto se suma aparte
+  // (subtotal + impuesto = total). Por lo tanto los precios son NETOS -> '0'
+  return '0';
 };
 
 // ---------------------------------------------------------------------------
@@ -203,10 +204,13 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
 
     // IndicadorFacturacion segun tipo e-CF
     // E43: solo exento(3)/no facturable(4). E44: exento(3)/no facturable(4). E47: no facturable(4).
-    // E33 (Nota de Debito): sigue la misma logica que E31/E32 (gravado si hay ITBIS, exento si no).
+    // E33 (Nota de Credito): usar '4' (no facturable), cuando no hay ITBIS, para evitar
+    // validacion DGII de IndicadorMontoGravado en IdDoc.
     // 1=Gravado(18%), 2=Tasa cero(0%), 3=Exento, 4=No facturable
     if (tipoEcf === '43' || tipoEcf === '44' || tipoEcf === '47') {
       payload[`IndicadorFacturacion[${i}]`] = '4';
+    } else if (tipoEcf === '33') {
+      payload[`IndicadorFacturacion[${i}]`] = Number(pedido.impuesto || 0) > 0 ? '1' : '4';
     } else if (tipoEcf === '46') {
       payload[`IndicadorFacturacion[${i}]`] = '3';
     } else {
