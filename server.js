@@ -5096,6 +5096,7 @@ const obtenerDetallePedidosPorIds = async (pedidoIds, negocioId, opciones = {}) 
              COALESCE(dp.cantidad_descuento, 0) AS cantidad_descuento,
              COALESCE(dp.estado_preparacion, 'pendiente') AS estado_preparacion,
              COALESCE(dp.cantidad_lista, 0) AS cantidad_lista,
+             dp.created_at AS detalle_creado_at,
              p.nombre,
              COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
       FROM detalle_pedido dp
@@ -5152,6 +5153,7 @@ const obtenerDetallePedidosPorIds = async (pedidoIds, negocioId, opciones = {}) 
       area_preparacion: areaPreparacion,
       subtotal_sin_descuento: subtotalBruto,
       total_linea: Math.max(subtotalBruto - descuentoMonto, 0),
+      created_at: row.detalle_creado_at || null,
     });
     itemsMap.set(row.pedido_id, lista);
   });
@@ -5470,8 +5472,19 @@ const agruparPedidosEnCuentas = (pedidos = [], itemsMap = new Map()) => {
   return cuentas;
 };
 
-const agruparItemsCuenta = (itemsMap = new Map()) => {
+const agruparItemsCuenta = (itemsMap = new Map(), opciones = {}) => {
   const agrupados = new Map();
+
+  // fechaPrimerPago: si el item se creo en o antes de esta fecha, queda bloqueado
+  // (es decir, ya estaba en la cuenta cuando se hizo el primer prepago).
+  // Items creados despues son nuevos y permiten edicion/eliminacion.
+  const fechaPrimerPago = opciones?.fechaPrimerPago
+    ? new Date(opciones.fechaPrimerPago)
+    : null;
+  const tsPrimerPago =
+    fechaPrimerPago && !Number.isNaN(fechaPrimerPago.getTime())
+      ? fechaPrimerPago.getTime()
+      : null;
 
   (itemsMap || new Map()).forEach((items) => {
     (items || []).forEach((item) => {
@@ -5481,7 +5494,21 @@ const agruparItemsCuenta = (itemsMap = new Map()) => {
       const porcentaje = Number(item.descuento_porcentaje) || 0;
       const monto = Number(item.descuento_monto) || 0;
       const descuentoPorUnidad = cantidad ? monto / cantidad : 0;
-      const key = `${item.producto_id || ''}|${precio}|${porcentaje}|${descuentoPorUnidad.toFixed(8)}`;
+
+      // Determinar si este item quedo bloqueado por el primer prepago.
+      // Tolerancia: items creados en los 2s posteriores al primer pago tambien quedan bloqueados,
+      // porque pueden formar parte del mismo flujo del cierre/pago (race conditions de UI).
+      let bloqueadoPorPago = false;
+      if (tsPrimerPago !== null && item.created_at) {
+        const tsItem = new Date(item.created_at).getTime();
+        if (Number.isFinite(tsItem) && tsItem <= tsPrimerPago + 2000) {
+          bloqueadoPorPago = true;
+        }
+      }
+
+      // La key incluye el flag para que items pre-pago y post-pago queden en lineas separadas
+      // (permite habilitar/deshabilitar botones por linea en el frontend).
+      const key = `${item.producto_id || ''}|${precio}|${porcentaje}|${descuentoPorUnidad.toFixed(8)}|${bloqueadoPorPago ? 1 : 0}`;
 
       if (!agrupados.has(key)) {
         agrupados.set(key, {
@@ -5494,6 +5521,7 @@ const agruparItemsCuenta = (itemsMap = new Map()) => {
           descuento_monto: 0,
           total_linea: 0,
           detalles: [],
+          bloqueado_por_pago: bloqueadoPorPago,
         });
       }
 
@@ -5511,6 +5539,8 @@ const agruparItemsCuenta = (itemsMap = new Map()) => {
         descuento_porcentaje: porcentaje,
         descuento_monto: monto,
         cantidad_descuento: item.cantidad_descuento,
+        created_at: item.created_at || null,
+        bloqueado_por_pago: bloqueadoPorPago,
       });
     });
   });
@@ -7474,6 +7504,7 @@ const crearResumenPagosVacio = () => ({
   cambio: 0,
   total: 0,
   ultimo_pago: null,
+  primer_pago: null,
 });
 
 const redondearMontoPago = (valor) => Number((Number(valor) || 0).toFixed(2));
@@ -7515,6 +7546,16 @@ const combinarResumenesPago = (base = {}, extra = {}) => {
     resumen.ultimo_pago = base?.ultimo_pago || extra?.ultimo_pago || null;
   }
 
+  // primer_pago = el mas antiguo de ambos
+  const primerBase = base?.primer_pago ? new Date(base.primer_pago) : null;
+  const primerExtra = extra?.primer_pago ? new Date(extra.primer_pago) : null;
+  if (primerBase && !Number.isNaN(primerBase.getTime()) && primerExtra && !Number.isNaN(primerExtra.getTime())) {
+    resumen.primer_pago =
+      primerBase.getTime() <= primerExtra.getTime() ? base.primer_pago : extra.primer_pago;
+  } else {
+    resumen.primer_pago = base?.primer_pago || extra?.primer_pago || null;
+  }
+
   return resumen;
 };
 
@@ -7529,10 +7570,16 @@ const resumirMovimientosPago = (rows = []) => {
 
     const fechaPago = row?.fecha_pago || row?.created_at || null;
     if (fechaPago) {
-      const actual = resumen.ultimo_pago ? new Date(resumen.ultimo_pago) : null;
       const candidata = new Date(fechaPago);
-      if (!actual || Number.isNaN(actual.getTime()) || (!Number.isNaN(candidata.getTime()) && candidata > actual)) {
-        resumen.ultimo_pago = fechaPago;
+      if (!Number.isNaN(candidata.getTime())) {
+        const actual = resumen.ultimo_pago ? new Date(resumen.ultimo_pago) : null;
+        if (!actual || Number.isNaN(actual.getTime()) || candidata > actual) {
+          resumen.ultimo_pago = fechaPago;
+        }
+        const primer = resumen.primer_pago ? new Date(resumen.primer_pago) : null;
+        if (!primer || Number.isNaN(primer.getTime()) || candidata < primer) {
+          resumen.primer_pago = fechaPago;
+        }
       }
     }
   });
@@ -8718,13 +8765,37 @@ function resumirPagosCuenta(pedidos = []) {
   let tarjeta = 0;
   let transferencia = 0;
   let cambio = 0;
+  // primer_pago: usado por agruparItemsCuenta para bloquear items previos al primer pago.
+  // Para cuentas legacy sin tabla `pagos`, lo derivamos de fecha_cierre de pedidos pagados.
+  let primerPago = null;
+  let ultimoPago = null;
 
   (pedidos || []).forEach((pedido) => {
+    const aportoPago =
+      (Number(pedido?.pago_efectivo) || 0) > 0 ||
+      (Number(pedido?.pago_tarjeta) || 0) > 0 ||
+      (Number(pedido?.pago_transferencia) || 0) > 0;
+
     efectivo += obtenerPagoEfectivoAplicado(pedido);
     efectivoEntregado += Number(pedido?.pago_efectivo_entregado) || 0;
     tarjeta += Number(pedido?.pago_tarjeta) || 0;
     transferencia += Number(pedido?.pago_transferencia) || 0;
     cambio += Number(pedido?.pago_cambio) || 0;
+
+    if (aportoPago) {
+      const fechaCandidata = pedido?.fecha_cierre || pedido?.fecha_pago || null;
+      if (fechaCandidata) {
+        const candidata = new Date(fechaCandidata);
+        if (!Number.isNaN(candidata.getTime())) {
+          if (!primerPago || candidata < new Date(primerPago)) {
+            primerPago = fechaCandidata;
+          }
+          if (!ultimoPago || candidata > new Date(ultimoPago)) {
+            ultimoPago = fechaCandidata;
+          }
+        }
+      }
+    }
   });
 
   const total = efectivo + tarjeta + transferencia;
@@ -8735,6 +8806,8 @@ function resumirPagosCuenta(pedidos = []) {
     transferencia: Number(transferencia.toFixed(2)),
     cambio: Number(cambio.toFixed(2)),
     total: Number(total.toFixed(2)),
+    primer_pago: primerPago,
+    ultimo_pago: ultimoPago,
   };
 }
 
@@ -12969,12 +13042,16 @@ app.get('/api/cuentas/:id/detalle', (req, res) => {
       }
 
       const detalle = await obtenerDetallePedidosPorIds(pedidos.map((pedido) => pedido.id), negocioId);
-      const itemsAgrupados = agruparItemsCuenta(detalle);
       const pagosRegistradosTabla = await obtenerResumenPagosRegistradosCuenta(cuentaId, negocioId).catch(() =>
         crearResumenPagosVacio()
       );
       const pagosRegistrados =
         pagosRegistradosTabla.total > 0.009 ? pagosRegistradosTabla : resumirPagosCuenta(pedidos);
+      // Si hay pagos registrados, marcar items creados antes del primer pago como bloqueados
+      // (no editables/eliminables). Items agregados despues son editables.
+      const itemsAgrupados = agruparItemsCuenta(detalle, {
+        fechaPrimerPago: pagosRegistrados.total > 0.009 ? pagosRegistrados.primer_pago : null,
+      });
       const totalCuenta = pedidos.reduce(
         (acc, pedido) =>
           acc +
@@ -14378,10 +14455,15 @@ app.post('/api/pedidos', (req, res) => {
         );
       }
 
+      // Si el pedido entra como 'listo' (envio directo a caja, delivery directo o sin areas
+      // de preparacion), debemos marcar cada detalle como totalmente preparado. Si no, el item
+      // queda en 'pendiente' con cantidad_lista=0 y mesera no lo ve en la pestana "Listos".
+      const estadoPreparacionDetalleInicial = marcarListo ? 'listo' : 'pendiente';
       for (const item of itemsProcesados) {
+        const cantidadListaInicial = marcarListo ? item.cantidad : 0;
         const detalleResult = await db.run(
-          'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id) VALUES (?, ?, ?, ?, ?)',
-          [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId]
+          'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id, estado_preparacion, cantidad_lista) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId, estadoPreparacionDetalleInicial, cantidadListaInicial]
         );
         const detalleId = detalleResult?.lastID;
         if (detalleId && Array.isArray(item.consumos) && item.consumos.length) {
@@ -23650,10 +23732,14 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
       ]);
     }
 
+    // Si el menu publico crea el pedido directo en estado 'listo' (no requiere preparacion),
+    // marcar cada detalle como totalmente preparado para que la vista de mesera lo refleje.
+    const estadoPreparacionDetalleMenuPublico = estadoInicial === 'listo' ? 'listo' : 'pendiente';
     for (const item of resultadoItems.itemsProcesados) {
+      const cantidadListaInicial = estadoInicial === 'listo' ? item.cantidad : 0;
       const detalleResult = await db.run(
-        'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id) VALUES (?, ?, ?, ?, ?)',
-        [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId]
+        'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id, estado_preparacion, cantidad_lista) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId, estadoPreparacionDetalleMenuPublico, cantidadListaInicial]
       );
       const detalleId = detalleResult?.lastID;
       if (detalleId && Array.isArray(item.consumos) && item.consumos.length) {
@@ -30460,12 +30546,15 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
 
       const consumoRegistros = [];
 
+      // Cotizacion -> pedido siempre se crea como 'listo' (es una venta directa para facturar).
+      // Marcamos cada detalle tambien como 'listo' para que aparezca en la vista de listos.
       for (let index = 0; index < totales.items.length; index += 1) {
         const item = totales.items[index];
         const detalleResult = await db.run(
           `INSERT INTO detalle_pedido (
-            pedido_id, producto_id, cantidad, precio_unitario, descuento_porcentaje, descuento_monto, negocio_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            pedido_id, producto_id, cantidad, precio_unitario, descuento_porcentaje, descuento_monto,
+            estado_preparacion, cantidad_lista, negocio_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             pedidoId,
             item.producto_id,
@@ -30473,6 +30562,8 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
             item.precio_unitario,
             item.descuento_porcentaje,
             item.descuento_monto,
+            'listo',
+            item.cantidad,
             negocioIdFactura,
           ]
         );

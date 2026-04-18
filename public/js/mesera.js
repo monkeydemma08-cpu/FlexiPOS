@@ -1852,12 +1852,43 @@ const restaurarEstadoScrollListaMesera = (contenedor, estadoScroll) => {
     : Math.min(Math.max(estadoScroll.scrollTop, 0), maxScroll);
 };
 
+// Genera una firma estable para una lista de cuentas en una vista dada.
+// Si la firma no cambia entre refrescos (cada 2s), evitamos re-renderizar
+// el contenedor — esto elimina el flicker que hacia que la barra de scroll
+// "saltara" hacia arriba mientras el usuario estaba scrolleando.
+const construirFirmaCuentasMesera = (cuentasOrdenadas, vista) => {
+  const partes = cuentasOrdenadas.map((cuenta) => {
+    const pedidos = (cuenta.pedidos || []).map((pedido) => {
+      const itemsVista = obtenerItemsPedidoParaVistaMesera(pedido, vista);
+      const itemsClave = itemsVista
+        .map((item) => `${item.id || item.producto_id || ''}:${item.cantidad_mostrar ?? item.cantidad ?? ''}:${item.estado || ''}`)
+        .join(',');
+      return [
+        pedido.id,
+        pedido.estado || '',
+        pedido.fecha_listo || '',
+        pedido.fecha_cierre || '',
+        pedido.fecha_cancelacion || '',
+        pedido.nota || '',
+        itemsClave,
+      ].join('~');
+    }).join('||');
+    return [
+      cuenta.cuenta_id || cuenta.id || '',
+      cuenta.estadoCuentaMesera || '',
+      cuenta.estadoCocina || '',
+      cuenta.estadoBar || '',
+      cuenta.modo_servicio || '',
+      pedidos,
+    ].join('|');
+  });
+  return `${vista}::${partes.join(';;')}`;
+};
+
 const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVacio, vista = null) => {
   if (!contenedor) return;
 
   const vistaActual = vista || (estadosFiltro.includes('listo') ? 'listo' : estadosFiltro[0] || 'pendiente');
-  const estadoScroll = capturarEstadoScrollListaMesera(contenedor);
-  contenedor.innerHTML = '';
   const cuentasFiltradas = estado.pedidosActivos.filter((cuenta) => {
     if (vistaActual === 'listo') {
       return cuentaTieneItemsParaVistaMesera(cuenta, 'listo');
@@ -1870,12 +1901,12 @@ const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVac
 
   if (!cuentasFiltradas.length) {
     mostrarMensajeTab(mensajeEl, mensajeVacio, 'info');
-    restaurarEstadoScrollListaMesera(contenedor, estadoScroll);
+    if (contenedor.dataset.renderSignature !== 'EMPTY') {
+      contenedor.innerHTML = '';
+      contenedor.dataset.renderSignature = 'EMPTY';
+    }
     return;
   }
-
-  mostrarMensajeTab(mensajeEl, '');
-  const fragment = document.createDocumentFragment();
 
   const preferirRecientes = vistaActual === 'listo';
   const obtenerMarcaTiempo = (cuenta, usarMaximo) => {
@@ -1892,6 +1923,17 @@ const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVac
     return preferirRecientes ? tiempoB - tiempoA : tiempoA - tiempoB;
   });
 
+  // Si la data no cambio desde el ultimo render, no hacemos nada — esto es
+  // lo que evita que el scroll "salte" cuando el usuario esta interactuando.
+  const firma = construirFirmaCuentasMesera(cuentasOrdenadas, vistaActual);
+  if (contenedor.dataset.renderSignature === firma) {
+    mostrarMensajeTab(mensajeEl, '');
+    return;
+  }
+
+  mostrarMensajeTab(mensajeEl, '');
+  const fragment = document.createDocumentFragment();
+
   cuentasOrdenadas.forEach((cuenta) => {
     const card = crearCardCuenta(cuenta, vistaActual);
     if (card) {
@@ -1901,11 +1943,17 @@ const renderPedidosPorEstado = (estadosFiltro, contenedor, mensajeEl, mensajeVac
 
   if (!fragment.childNodes.length) {
     mostrarMensajeTab(mensajeEl, mensajeVacio, 'info');
-    restaurarEstadoScrollListaMesera(contenedor, estadoScroll);
+    if (contenedor.dataset.renderSignature !== 'EMPTY') {
+      contenedor.innerHTML = '';
+      contenedor.dataset.renderSignature = 'EMPTY';
+    }
     return;
   }
 
+  const estadoScroll = capturarEstadoScrollListaMesera(contenedor);
+  contenedor.innerHTML = '';
   contenedor.appendChild(fragment);
+  contenedor.dataset.renderSignature = firma;
   restaurarEstadoScrollListaMesera(contenedor, estadoScroll);
 };
 
@@ -1917,9 +1965,11 @@ const cargarPedidosActivos = async (mostrarCarga = true) => {
 
   try {
     const [pendientesResp, preparandoResp, listosResp] = await Promise.all([
-      fetchAutorizadoMesera('/api/pedidos?estado=pendiente'),
-      fetchAutorizadoMesera('/api/pedidos?estado=preparando'),
-      fetchAutorizadoMesera('/api/pedidos?estado=listo'),
+      // origen_caja=caja: excluye pedidos creados desde mostrador.
+      // Mostrador es un flujo separado (vendedor) y no debe aparecer en la vista del mesero.
+      fetchAutorizadoMesera('/api/pedidos?estado=pendiente&origen_caja=caja'),
+      fetchAutorizadoMesera('/api/pedidos?estado=preparando&origen_caja=caja'),
+      fetchAutorizadoMesera('/api/pedidos?estado=listo&origen_caja=caja'),
     ]);
 
     if (!pendientesResp.ok || !preparandoResp.ok || !listosResp.ok) {

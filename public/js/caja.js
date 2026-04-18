@@ -1620,6 +1620,25 @@ const cuentaPermiteCambiosEstructurales = (cuenta = null) => {
   return Boolean(cuentaObjetivo) && cuentaEstaListaParaCobro(cuentaObjetivo) && !cuentaTienePagosRegistrados(cuentaObjetivo);
 };
 
+// Permiso a nivel de item: la cuenta puede tener pagos registrados (prepago), pero
+// los items agregados DESPUES del primer pago siguen siendo editables/eliminables.
+// Items con bloqueado_por_pago=true son los que ya estaban en el momento del prepago.
+const itemEstaBloqueadoPorPago = (item) => {
+  if (!item) return false;
+  if (item.bloqueado_por_pago === true) return true;
+  if (Array.isArray(item.detalles) && item.detalles.length) {
+    return item.detalles.every((d) => d?.bloqueado_por_pago === true);
+  }
+  return false;
+};
+
+const itemPermiteCambios = (item, cuenta = null) => {
+  const cuentaObjetivo = cuenta || cuentaSeleccionada;
+  if (!cuentaObjetivo || !item) return false;
+  if (!cuentaEstaListaParaCobro(cuentaObjetivo)) return false;
+  return !itemEstaBloqueadoPorPago(item);
+};
+
 const combinarCuentasCaja = (...listas) => {
   const mapa = new Map();
   listas.flat().forEach((cuenta) => {
@@ -3250,7 +3269,7 @@ const renderDetallePedido = () => {
 
   const itemsAgrupados = cuentaSeleccionada.items_agregados || [];
   const bloquearDescuentos = cuentaTienePagosRegistrados(cuentaSeleccionada);
-  const bloquearCambiosEstructurales = !cuentaPermiteCambiosEstructurales(cuentaSeleccionada);
+  const cuentaListaParaCobro = cuentaEstaListaParaCobro(cuentaSeleccionada);
 
   if (!itemsAgrupados.length) {
 
@@ -3288,6 +3307,10 @@ const renderDetallePedido = () => {
 
     const cantidadAplicada = descuentoActual?.cantidad || cantidad || 1;
 
+    const itemBloqueadoPorPago = itemEstaBloqueadoPorPago(item);
+    const itemBloqueado = !cuentaListaParaCobro || itemBloqueadoPorPago;
+    const descuentoBloqueado = bloquearDescuentos || itemBloqueadoPorPago;
+
     const resumenDescuento = descuentoActual
 
       ? `<div class="kanm-badge" style="margin-top: 4px;">Desc: ${
@@ -3300,6 +3323,10 @@ const renderDetallePedido = () => {
 
         } = -${formatCurrency(descuentoActual.montoCalculado)}</div>`
 
+      : '';
+
+    const candadoPagado = itemBloqueadoPorPago
+      ? '<div class="kanm-badge" style="margin-top: 4px; background: #fdecea; color: #c0392b;" title="Este producto fue cobrado en un prepago y no puede modificarse.">🔒 Pagado</div>'
       : '';
 
     const nombreItem = item.nombre || `Producto ${item.producto_id || ''}`;
@@ -3323,7 +3350,7 @@ const renderDetallePedido = () => {
             data-item-key="${key}"
 
             ${descuentoActual ? 'checked' : ''}
-            ${bloquearDescuentos ? 'disabled' : ''}
+            ${descuentoBloqueado ? 'disabled' : ''}
 
             style="margin-top: 4px;"
 
@@ -3334,6 +3361,7 @@ const renderDetallePedido = () => {
             <div class="caja-item-nombre" style="font-weight: 600;">${nombreItem}</div>
             <div class="caja-item-meta">${cantidad} x ${formatCurrency(precioLinea)} = ${formatCurrency(subtotal)}</div>
 
+            ${candadoPagado}
             ${resumenDescuento}
 
           </div>
@@ -3352,7 +3380,7 @@ const renderDetallePedido = () => {
             min="0"
             step="0.01"
             value="${Number(precioLinea).toFixed(2)}"
-            ${bloquearCambiosEstructurales ? 'disabled' : ''}
+            ${itemBloqueado ? 'disabled' : ''}
           />
         </div>
         <div class="caja-acciones caja-item-tools-actions">
@@ -3360,7 +3388,7 @@ const renderDetallePedido = () => {
             type="button"
             class="kanm-button ghost caja-item-actualizar-precio"
             data-item-index="${itemIndex}"
-            ${bloquearCambiosEstructurales ? 'disabled' : ''}
+            ${itemBloqueado ? 'disabled' : ''}
           >
             Guardar precio
           </button>
@@ -3369,7 +3397,7 @@ const renderDetallePedido = () => {
             class="kanm-button ghost-danger caja-item-eliminar"
             data-item-index="${itemIndex}"
             data-nombre="${nombreSeguro}"
-            ${bloquearCambiosEstructurales ? 'disabled' : ''}
+            ${itemBloqueado ? 'disabled' : ''}
           >
             Eliminar producto
           </button>
@@ -5257,14 +5285,18 @@ const actualizarPrecioProductoCuenta = async (itemIndex, boton = null) => {
     setMensajeDetalle('Selecciona una cuenta.', 'error');
     return;
   }
-  if (!cuentaPermiteCambiosEstructurales(cuentaSeleccionada)) {
-    setMensajeDetalle('No se puede cambiar precios en una cuenta en curso o con pagos registrados.', 'error');
+  if (!cuentaEstaListaParaCobro(cuentaSeleccionada)) {
+    setMensajeDetalle('La cuenta no esta lista para cobro todavia.', 'error');
     return;
   }
 
   const item = cuentaSeleccionada?.items_agregados?.[itemIndex];
   if (!item) {
     setMensajeDetalle('No se encontro el producto seleccionado.', 'error');
+    return;
+  }
+  if (itemEstaBloqueadoPorPago(item)) {
+    setMensajeDetalle('Este producto fue cobrado en un prepago y no puede modificarse.', 'error');
     return;
   }
 
@@ -5339,14 +5371,18 @@ const eliminarProductoCuenta = async (itemIndex, nombreProducto, boton = null) =
     setMensajeDetalle('Selecciona una cuenta.', 'error');
     return;
   }
-  if (!cuentaPermiteCambiosEstructurales(cuentaSeleccionada)) {
-    setMensajeDetalle('No se pueden eliminar productos de una cuenta en curso o con pagos registrados.', 'error');
+  if (!cuentaEstaListaParaCobro(cuentaSeleccionada)) {
+    setMensajeDetalle('La cuenta no esta lista para cobro todavia.', 'error');
     return;
   }
 
   const item = cuentaSeleccionada?.items_agregados?.[itemIndex];
   if (!item) {
     setMensajeDetalle('No se encontro el producto seleccionado.', 'error');
+    return;
+  }
+  if (itemEstaBloqueadoPorPago(item)) {
+    setMensajeDetalle('Este producto fue cobrado en un prepago y no puede eliminarse.', 'error');
     return;
   }
 

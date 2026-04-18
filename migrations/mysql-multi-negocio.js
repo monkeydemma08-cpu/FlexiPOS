@@ -2121,6 +2121,9 @@ async function runMigrations() {
     "estado_preparacion ENUM('pendiente', 'preparando', 'listo') NOT NULL DEFAULT 'pendiente'"
   );
   await ensureColumn('detalle_pedido', 'cantidad_lista DECIMAL(12,4) NOT NULL DEFAULT 0');
+  // created_at: necesario para distinguir items creados antes vs despues del primer pago
+  // (permite editar/eliminar items agregados despues de un prepago en caja).
+  await ensureColumn('detalle_pedido', 'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
   try {
     await query(
       `UPDATE detalle_pedido dp
