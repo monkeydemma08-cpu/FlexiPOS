@@ -323,7 +323,8 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
 
     await actualizarPedidoEcf(pedidoId, { ecf_codigo_seguridad: codigoSeguridad });
 
-    // Build RFCE
+    // Build RFCE — pasar ecfPayload para que herede los totales ya derivados de items
+    // (garantiza coherencia entre el ECF firmado y el RFCE que se envia a DGII)
     const rfcePayload = buildResumenFcPayload({
       pedido: { ...pedido, ecf_tipo: encfData.encf.slice(0, 3) },
       cliente,
@@ -331,6 +332,7 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
       encfData,
       configDgii: config,
       codigoSeguridadeCF: codigoSeguridad,
+      ecfPayload: payload,
     });
 
     const rfceXml = buildResumenFcXml({

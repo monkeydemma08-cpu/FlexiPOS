@@ -192,8 +192,14 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
     if (cliente.direccion) payload.DireccionComprador = cliente.direccion;
   }
 
-  // Detalle items
+  // Detalle items — acumular sumas por IndicadorFacturacion para garantizar coherencia
+  // con los totales del header (DGII valida MontoGravadoI1 == sum(MontoItem WHERE IndFact='1'))
   const items = Array.isArray(detalle) ? detalle : [];
+  let sumGravado18 = 0;
+  let sumTasaCero = 0;
+  let sumExento = 0;
+  let sumNoFacturable = 0;
+
   items.forEach((item, i) => {
     const cantidad = Number(item.cantidad || 1);
     const precioUnit = Number(item.precio_unitario || 0);
@@ -207,15 +213,23 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
     // E33 (Nota de Credito): usar '4' (no facturable), cuando no hay ITBIS, para evitar
     // validacion DGII de IndicadorMontoGravado en IdDoc.
     // 1=Gravado(18%), 2=Tasa cero(0%), 3=Exento, 4=No facturable
+    let indicadorFact;
     if (tipoEcf === '43' || tipoEcf === '44' || tipoEcf === '47') {
-      payload[`IndicadorFacturacion[${i}]`] = '4';
+      indicadorFact = '4';
     } else if (tipoEcf === '33') {
-      payload[`IndicadorFacturacion[${i}]`] = Number(pedido.impuesto || 0) > 0 ? '1' : '4';
+      indicadorFact = Number(pedido.impuesto || 0) > 0 ? '1' : '4';
     } else if (tipoEcf === '46') {
-      payload[`IndicadorFacturacion[${i}]`] = '3';
+      indicadorFact = '3';
     } else {
-      payload[`IndicadorFacturacion[${i}]`] = Number(pedido.impuesto || 0) > 0 ? '1' : '3';
+      indicadorFact = Number(pedido.impuesto || 0) > 0 ? '1' : '3';
     }
+    payload[`IndicadorFacturacion[${i}]`] = indicadorFact;
+
+    // Acumular suma por categoria — los totales del header se derivan de aqui
+    if (indicadorFact === '1') sumGravado18 += montoItem;
+    else if (indicadorFact === '2') sumTasaCero += montoItem;
+    else if (indicadorFact === '3') sumExento += montoItem;
+    else if (indicadorFact === '4') sumNoFacturable += montoItem;
 
     // E41/E47: Retencion section required before NombreItem in XSD
     if (tipoEcf === '41') {
@@ -239,45 +253,71 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
     payload[`MontoItem[${i}]`] = montoItem.toFixed(2);
   });
 
-  // Totales
-  const subtotal = Number(pedido.subtotal || 0);
-  const impuesto = Number(pedido.impuesto || 0);
-  const total = Number(pedido.total || 0);
+  // Normalizar sumas a 2 decimales
+  sumGravado18 = formatMoney(sumGravado18);
+  sumTasaCero = formatMoney(sumTasaCero);
+  sumExento = formatMoney(sumExento);
+  sumNoFacturable = formatMoney(sumNoFacturable);
 
-  // Totales — cada tipo tiene campos permitidos distintos
-  // E33 (Nota de Debito): usa los mismos campos de totales que E31/E32 (gravado/exento segun ITBIS).
+  // Descuentos globales (DoR) — afectan MontoTotal pero no la base gravada del header
+  const descuentoMonto = Number(pedido.descuento_monto || 0);
+
+  // Totales — DERIVADOS de las sumas reales de los items (NO de pedido.subtotal/impuesto)
+  // para garantizar que el XSD de DGII valide:
+  //   MontoGravadoI1 == sum(MontoItem WHERE IndicadorFacturacion='1')
+  //   TotalITBIS1   == round(MontoGravadoI1 * 0.18, 2)
+  //   MontoTotal    == sum(items por categoria) + ITBIS - descuentos globales
   const tiposSoloExento = ['43', '44', '47'];
+  let totalItbis1 = 0;
+
   if (tiposSoloExento.includes(tipoEcf)) {
-    payload.MontoExento = formatMoney(subtotal).toFixed(2);
-    // E47 (Pagos al Exterior): requiere TotalISRRetencion
+    // Estos tipos solo permiten MontoExento (items marcados '4' o '3')
+    payload.MontoExento = formatMoney(sumNoFacturable + sumExento).toFixed(2);
     if (tipoEcf === '47') {
       payload.TotalISRRetencion = '0.00';
     }
   } else if (tipoEcf === '46') {
-    // E46 (Exportaciones): gravado a tasa I3 (0%)
-    payload.MontoGravadoTotal = formatMoney(subtotal).toFixed(2);
-    payload.MontoGravadoI3 = formatMoney(subtotal).toFixed(2);
+    // E46 (Exportaciones): gravado a tasa I3 (0%) — items se suman a MontoGravadoI3
+    const totalGravadoI3 = formatMoney(sumExento + sumTasaCero);
+    payload.MontoGravadoTotal = totalGravadoI3.toFixed(2);
+    payload.MontoGravadoI3 = totalGravadoI3.toFixed(2);
     payload.ITBIS3 = '0';
     payload.TotalITBIS = '0.00';
     payload.TotalITBIS3 = '0.00';
-  } else if (impuesto > 0) {
-    payload.MontoGravadoTotal = formatMoney(subtotal).toFixed(2);
-    payload.MontoGravadoI1 = formatMoney(subtotal).toFixed(2);
+  } else if (sumGravado18 > 0) {
+    // ITBIS calculado sobre la suma real de items gravados (no usar pedido.impuesto)
+    totalItbis1 = formatMoney(sumGravado18 * 0.18);
+    payload.MontoGravadoTotal = sumGravado18.toFixed(2);
+    payload.MontoGravadoI1 = sumGravado18.toFixed(2);
     payload.ITBIS1 = '18';
-    payload.TotalITBIS = formatMoney(impuesto).toFixed(2);
-    payload.TotalITBIS1 = formatMoney(impuesto).toFixed(2);
+    payload.TotalITBIS = totalItbis1.toFixed(2);
+    payload.TotalITBIS1 = totalItbis1.toFixed(2);
+    if (sumExento + sumNoFacturable > 0) {
+      payload.MontoExento = formatMoney(sumExento + sumNoFacturable).toFixed(2);
+    }
     // E41 (Compras): requiere totales de retencion
     if (tipoEcf === '41') {
       payload.TotalITBISRetenido = '0.00';
       payload.TotalISRRetencion = '0.00';
     }
   } else {
-    payload.MontoExento = formatMoney(subtotal).toFixed(2);
+    // Sin items gravados — todo va a MontoExento
+    payload.MontoExento = formatMoney(sumExento + sumNoFacturable).toFixed(2);
   }
-  payload.MontoTotal = formatMoney(total).toFixed(2);
+
+  // MontoTotal — derivado de las sumas de items + ITBIS calculado - descuentos globales
+  // Esto garantiza coherencia con todas las lineas del detalle.
+  let montoTotalCalc;
+  if (tipoEcf === '46') {
+    montoTotalCalc = formatMoney(sumExento + sumTasaCero + sumNoFacturable - descuentoMonto);
+  } else {
+    montoTotalCalc = formatMoney(
+      sumGravado18 + sumTasaCero + sumExento + sumNoFacturable + totalItbis1 - descuentoMonto
+    );
+  }
+  payload.MontoTotal = montoTotalCalc.toFixed(2);
 
   // Descuentos globales
-  const descuentoMonto = Number(pedido.descuento_monto || 0);
   if (descuentoMonto > 0) {
     payload['NumeroLineaDoR[0]'] = '1';
     payload['TipoAjuste[0]'] = '1';
@@ -292,7 +332,7 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
 // Resumen FC mapper (for E32 < 250k)
 // ---------------------------------------------------------------------------
 
-const buildResumenFcPayload = ({ pedido, cliente, negocio, encfData, configDgii, codigoSeguridadeCF }) => {
+const buildResumenFcPayload = ({ pedido, cliente, negocio, encfData, configDgii, codigoSeguridadeCF, ecfPayload = null }) => {
   const tipoEcf = ecfTipoNumerico(pedido.ecf_tipo || 'E32');
   const fechaEmision = normalizeDateDgii(pedido.fecha_factura || pedido.fecha_cierre || pedido.fecha_creacion, { fallbackToday: true });
 
@@ -317,19 +357,33 @@ const buildResumenFcPayload = ({ pedido, cliente, negocio, encfData, configDgii,
     }
   }
 
-  const subtotal = Number(pedido.subtotal || 0);
-  const impuesto = Number(pedido.impuesto || 0);
-  const total = Number(pedido.total || 0);
-
-  if (impuesto > 0) {
-    payload.MontoGravadoTotal = formatMoney(subtotal).toFixed(2);
-    payload.MontoGravadoI1 = formatMoney(subtotal).toFixed(2);
-    payload.TotalITBIS = formatMoney(impuesto).toFixed(2);
-    payload.TotalITBIS1 = formatMoney(impuesto).toFixed(2);
+  // Si recibimos el payload ECF ya calculado, copiamos los totales para garantizar
+  // coherencia perfecta entre ECF y RFCE (DGII compara ambos).
+  if (ecfPayload && typeof ecfPayload === 'object') {
+    const camposTotales = [
+      'MontoGravadoTotal', 'MontoGravadoI1', 'MontoGravadoI2', 'MontoGravadoI3',
+      'TotalITBIS', 'TotalITBIS1', 'TotalITBIS2', 'TotalITBIS3',
+      'MontoExento', 'MontoTotal',
+    ];
+    for (const campo of camposTotales) {
+      if (ecfPayload[campo] !== undefined) payload[campo] = ecfPayload[campo];
+    }
   } else {
-    payload.MontoExento = formatMoney(subtotal).toFixed(2);
+    // Fallback (sin payload ECF): usar pedido.subtotal/impuesto/total
+    const subtotal = Number(pedido.subtotal || 0);
+    const impuesto = Number(pedido.impuesto || 0);
+    const total = Number(pedido.total || 0);
+
+    if (impuesto > 0) {
+      payload.MontoGravadoTotal = formatMoney(subtotal).toFixed(2);
+      payload.MontoGravadoI1 = formatMoney(subtotal).toFixed(2);
+      payload.TotalITBIS = formatMoney(impuesto).toFixed(2);
+      payload.TotalITBIS1 = formatMoney(impuesto).toFixed(2);
+    } else {
+      payload.MontoExento = formatMoney(subtotal).toFixed(2);
+    }
+    payload.MontoTotal = formatMoney(total).toFixed(2);
   }
-  payload.MontoTotal = formatMoney(total).toFixed(2);
 
   if (codigoSeguridadeCF) {
     payload.CodigoSeguridadeCF = codigoSeguridadeCF;
