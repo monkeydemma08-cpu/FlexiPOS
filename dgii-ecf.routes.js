@@ -778,7 +778,7 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     })
   );
 
-  return router;
+  return { router, emitirEcfParaPedido };
 };
 
 module.exports = { createDgiiEcfRouter };

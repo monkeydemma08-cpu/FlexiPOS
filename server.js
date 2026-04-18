@@ -8277,6 +8277,11 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
       if (!esCobroAdelantado && tipoFinal && /^E(31|32|33|34|41|43|44|45|46|47)$/i.test(tipoFinal)) {
         const ecfTipoFinal = tipoFinal.toUpperCase();
         const pedidoRefId = pedidoReferencia.id;
+        // Tipos que se pueden emitir automaticamente (sin datos extra como referencias):
+        // E31, E32, E43, E44, E45, E46. Los demas (E33, E34, E41, E47) requieren
+        // datos especiales y se quedan en PENDIENTE para emision manual desde admin.
+        const puedeEmitirAuto = /^E(31|32|43|44|45|46)$/i.test(ecfTipoFinal);
+        const negocioIdEcf = negocioIdOperacion;
         setImmediate(async () => {
           try {
             await db.run(
@@ -8285,6 +8290,19 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
             );
           } catch (ecfErr) {
             console.error('Error marcando pedido para e-CF', pedidoRefId, ':', ecfErr?.message || ecfErr);
+            return;
+          }
+
+          // Disparar emision automatica fire-and-forget si el tipo es elegible
+          if (puedeEmitirAuto && typeof global.__emitirEcfParaPedido === 'function') {
+            try {
+              console.log(`[e-CF auto] Emitiendo ${ecfTipoFinal} para pedido ${pedidoRefId}...`);
+              const r = await global.__emitirEcfParaPedido(pedidoRefId, negocioIdEcf);
+              const estado = r?.estado || (r?.ok ? 'OK' : 'FAIL');
+              console.log(`[e-CF auto] Pedido ${pedidoRefId} ${ecfTipoFinal}: ${estado} eNCF=${r?.encf || '-'} ${r?.message || ''}`);
+            } catch (emitErr) {
+              console.error(`[e-CF auto] Error emitiendo pedido ${pedidoRefId}:`, emitErr?.message || emitErr);
+            }
           }
         });
       }
@@ -9426,15 +9444,15 @@ if (ENABLE_DGII_PASO2) {
 }
 
 const { createDgiiEcfRouter } = require('./dgii-ecf.routes');
-app.use(
-  '/api/dgii/ecf',
-  createDgiiEcfRouter({
-    db,
-    requireUsuarioSesion,
-    tienePermisoAdmin: esSuperAdmin,
-    obtenerNegocioIdUsuario,
-  })
-);
+const { router: __dgiiEcfRouter, emitirEcfParaPedido: __emitirEcfParaPedido } = createDgiiEcfRouter({
+  db,
+  requireUsuarioSesion,
+  tienePermisoAdmin: esSuperAdmin,
+  obtenerNegocioIdUsuario,
+});
+app.use('/api/dgii/ecf', __dgiiEcfRouter);
+// Expose emitirEcfParaPedido globally for auto-emission on cierre
+global.__emitirEcfParaPedido = __emitirEcfParaPedido;
 
 app.post('/api/caja/cierres', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
