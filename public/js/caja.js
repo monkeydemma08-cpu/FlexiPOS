@@ -2123,6 +2123,51 @@ const setMensajePasswordAdmin = (texto, tipo = 'info') => {
   adminPasswordModalMensaje.dataset.type = texto ? tipo : '';
 };
 
+// e-CF: poll status after sale closure for electronic comprobantes (E31..E47).
+// Updates setMensajeDetalle as the auto-emission progresses in the backend.
+const seguirEstadoEcfPedido = (pedidoId) => {
+  if (!pedidoId) return;
+  let intentos = 0;
+  const maxIntentos = 12; // 12 * 2.5s = ~30s total
+  const intervalo = 2500;
+  let cancelado = false;
+
+  const poll = async () => {
+    if (cancelado) return;
+    intentos += 1;
+    try {
+      const respuesta = await fetch(`/api/dgii/ecf/estado/${pedidoId}`, {
+        headers: { ...obtenerAuthHeadersCaja() },
+      });
+      if (!respuesta.ok) {
+        if (intentos < maxIntentos) setTimeout(poll, intervalo);
+        return;
+      }
+      const data = await respuesta.json().catch(() => ({}));
+      const estado = String(data?.ecf_estado || '').toUpperCase();
+      const encf = data?.ecf_encf || '';
+      const mensaje = data?.ecf_mensaje_dgii || '';
+      if (estado === 'ACEPTADO') {
+        setMensajeDetalle(`e-CF aceptado por DGII${encf ? ` (${encf})` : ''}.`, 'success');
+        return;
+      }
+      if (estado === 'RECHAZADO') {
+        const detalle = mensaje ? ` Motivo: ${String(mensaje).slice(0, 140)}` : '';
+        setMensajeDetalle(`e-CF rechazado por DGII.${detalle} Reintenta desde Admin > Emision e-CF.`, 'error');
+        return;
+      }
+      if (estado === 'PROCESANDO' || estado === 'ENVIADO' || estado === 'PENDIENTE') {
+        setMensajeDetalle(`e-CF en proceso${encf ? ` (${encf})` : ''}... esperando confirmacion DGII.`, 'info');
+      }
+      if (intentos < maxIntentos) setTimeout(poll, intervalo);
+    } catch (_) {
+      if (intentos < maxIntentos) setTimeout(poll, intervalo);
+    }
+  };
+  // Primer intento ligeramente diferido para dar tiempo a la emision asincrona.
+  setTimeout(poll, 1500);
+};
+
 const mostrarModal = (overlay) => {
   if (!overlay) return;
   overlay.hidden = false;
@@ -4897,6 +4942,11 @@ const cerrarCuenta = async () => {
     );
 
     const facturaGenerada = data.factura;
+    const pedidoIdParaSeguir = Number(facturaGenerada?.id) || Number(cuentaSeleccionada?.pedidos?.[0]?.id) || 0;
+
+    if (esEcf && pedidoIdParaSeguir) {
+      seguirEstadoEcfPedido(pedidoIdParaSeguir);
+    }
 
     if (facturaGenerada?.id) {
 

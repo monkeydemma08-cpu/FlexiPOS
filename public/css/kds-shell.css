@@ -13,12 +13,19 @@
   --kds-shadow: 0 14px 36px -22px rgba(15, 23, 42, 0.45);
   --kds-shadow-strong: 0 22px 56px -28px rgba(15, 23, 42, 0.55);
 
-  /* Acentos por modulo (cocina = naranja, bar = azul violeta) */
-  --kds-accent: #f97316;
-  --kds-accent-soft: rgba(249, 115, 22, 0.14);
-  --kds-accent-strong: #ea580c;
+  /*
+   * Acento del KDS — sigue el tema configurado del negocio.
+   * Si el negocio tiene --color-primario lo usa; de lo contrario, usa el
+   * fallback por rol (cocina = naranja, bar = indigo).
+   * --kds-accent-soft y --kds-accent-strong se derivan via color-mix para
+   * que cualquier color del negocio quede consistente.
+   */
+  --kds-accent-fallback: #f97316;
+  --kds-accent: var(--color-primario, var(--kds-accent-fallback));
+  --kds-accent-soft: color-mix(in srgb, var(--kds-accent) 14%, transparent);
+  --kds-accent-strong: color-mix(in srgb, var(--kds-accent) 78%, #000000);
 
-  /* Estados */
+  /* Estados (semanticos, no dependen del tema del negocio) */
   --kds-pendiente: #f59e0b;
   --kds-pendiente-soft: rgba(245, 158, 11, 0.16);
   --kds-preparando: #2563eb;
@@ -30,9 +37,8 @@
 }
 
 body[data-role='bar'] {
-  --kds-accent: #6366f1;
-  --kds-accent-soft: rgba(99, 102, 241, 0.16);
-  --kds-accent-strong: #4f46e5;
+  /* Bar: si no hay tema del negocio, usa indigo como fallback. */
+  --kds-accent-fallback: #6366f1;
 }
 
 body[data-role='cocina'],
@@ -861,39 +867,47 @@ body[data-role='bar'] .kanm-card-header .kanm-subtitle {
 
 /* ============================================================
  * 10. ALARMA BANNER (cocina)
+ * El banner completo es un boton: tocarlo en cualquier punto silencia la
+ * alarma. Se oculta por defecto y solo aparece con .is-active.
  * ============================================================ */
 .cocina-alarma-banner {
+  display: none;
   position: fixed;
   top: 70px;
   right: 22px;
   z-index: 80;
-  display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 14px 18px;
   background: linear-gradient(135deg, var(--kds-cancelado) 0%, #b91c1c 100%);
   color: #fff;
+  border: none;
   border-radius: 14px;
-  box-shadow: 0 14px 28px -10px rgba(239, 68, 68, 0.5);
+  box-shadow: 0 14px 28px -10px rgba(239, 68, 68, 0.55);
+  font-family: inherit;
   font-size: 13px;
   font-weight: 600;
+  cursor: pointer;
+  text-align: left;
   animation: kdsAlarmaPulse 1.2s ease-in-out infinite;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 .cocina-alarma-banner.is-active {
-  display: flex;
+  display: inline-flex;
+}
+.cocina-alarma-banner:hover,
+.cocina-alarma-banner:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 34px -10px rgba(239, 68, 68, 0.6);
+  outline: none;
+}
+.cocina-alarma-banner:active {
+  transform: translateY(0);
 }
 .cocina-alarma-banner__texto {
   font-size: 13px;
-}
-.cocina-alarma-banner__ok {
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  color: #fff;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
+  line-height: 1.3;
 }
 
 @keyframes kdsAlarmaPulse {

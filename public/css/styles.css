@@ -8079,3 +8079,84 @@ body[data-role='mesera'] .kanm-main {
     width: 100%;
   }
 }
+
+/* ============================================================
+ * Scroll vertical para tablas largas en paneles administrativos
+ * (usuarios, categorias, compras, gastos, ventas, cierres, etc.)
+ * y para el carrito en mesera. Asi las pantallas no se extienden
+ * indefinidamente cuando hay mucha informacion.
+ * ============================================================ */
+[id^="admin-section-"] .kanm-table-wrapper {
+  max-height: clamp(360px, 60vh, 600px);
+  overflow-y: auto;
+  /* mantener overflow-x heredado para tablas anchas */
+  overflow-x: auto;
+}
+
+/* Cabecera sticky para que se vea siempre el encabezado al scrollear */
+[id^="admin-section-"] .kanm-table-wrapper .kanm-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--tone-08);
+  box-shadow: inset 0 -1px 0 var(--tone-12);
+}
+
+/* Items de cotizacion (admin -> cotizaciones) */
+.cotizacion-items-wrapper {
+  max-height: clamp(320px, 55vh, 520px);
+  overflow-y: auto;
+}
+.cotizacion-items-wrapper .cotizacion-items-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--tone-08);
+  box-shadow: inset 0 -1px 0 var(--tone-12);
+}
+
+/* Carrito de mesera: limita altura y permite scroll cuando hay muchos items */
+.lista-carrito {
+  max-height: clamp(220px, 40vh, 360px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+/* Scrollbar discreto en los contenedores con scroll vertical (chrome/firefox) */
+[id^="admin-section-"] .kanm-table-wrapper,
+.cotizacion-items-wrapper,
+.lista-carrito {
+  scrollbar-width: thin;
+  scrollbar-color: var(--tone-20, #cbd5e1) transparent;
+}
+[id^="admin-section-"] .kanm-table-wrapper::-webkit-scrollbar,
+.cotizacion-items-wrapper::-webkit-scrollbar,
+.lista-carrito::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+[id^="admin-section-"] .kanm-table-wrapper::-webkit-scrollbar-thumb,
+.cotizacion-items-wrapper::-webkit-scrollbar-thumb,
+.lista-carrito::-webkit-scrollbar-thumb {
+  background: var(--tone-20, #cbd5e1);
+  border-radius: 8px;
+}
+[id^="admin-section-"] .kanm-table-wrapper::-webkit-scrollbar-thumb:hover,
+.cotizacion-items-wrapper::-webkit-scrollbar-thumb:hover,
+.lista-carrito::-webkit-scrollbar-thumb:hover {
+  background: var(--tone-30, #94a3b8);
+}
+
+@media (max-width: 720px) {
+  /* En celular, que el scroll sea mas compacto para no comerse la pantalla */
+  [id^="admin-section-"] .kanm-table-wrapper {
+    max-height: 50vh;
+  }
+  .cotizacion-items-wrapper {
+    max-height: 45vh;
+  }
+  .lista-carrito {
+    max-height: 35vh;
+  }
+}

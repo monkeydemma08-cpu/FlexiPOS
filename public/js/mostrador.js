@@ -290,6 +290,51 @@ const fetchAutorizado = async (url, options = {}) => {
   return respuesta;
 };
 
+const seguirEstadoEcfPedido = (pedidoId) => {
+  if (!pedidoId) return;
+  let intentos = 0;
+  const maxIntentos = 12; // 12 * 2.5s = ~30s total
+  const intervalo = 2500;
+  const poll = async () => {
+    intentos += 1;
+    try {
+      const respuesta = await fetch(`/api/dgii/ecf/estado/${pedidoId}`, {
+        headers: { ...obtenerAuthHeaders() },
+      });
+      if (!respuesta.ok) {
+        if (intentos < maxIntentos) setTimeout(poll, intervalo);
+        return;
+      }
+      const data = await respuesta.json().catch(() => ({}));
+      const estadoEcf = String(data?.ecf_estado || '').toUpperCase();
+      const encf = data?.ecf_encf || '';
+      const mensaje = data?.ecf_mensaje_dgii || '';
+      if (estadoEcf === 'ACEPTADO') {
+        mostrarMensajeCobro(`e-CF aceptado por DGII${encf ? ` (${encf})` : ''}.`, 'success');
+        return;
+      }
+      if (estadoEcf === 'RECHAZADO') {
+        const detalle = mensaje ? ` Motivo: ${String(mensaje).slice(0, 140)}` : '';
+        mostrarMensajeCobro(
+          `e-CF rechazado por DGII.${detalle} Reintenta desde Admin > Emision e-CF.`,
+          'error'
+        );
+        return;
+      }
+      if (estadoEcf === 'PROCESANDO' || estadoEcf === 'ENVIADO' || estadoEcf === 'PENDIENTE') {
+        mostrarMensajeCobro(
+          `e-CF en proceso${encf ? ` (${encf})` : ''}... esperando confirmacion DGII.`,
+          'info'
+        );
+      }
+      if (intentos < maxIntentos) setTimeout(poll, intervalo);
+    } catch (_) {
+      if (intentos < maxIntentos) setTimeout(poll, intervalo);
+    }
+  };
+  setTimeout(poll, 1500);
+};
+
 const normalizarOpcionesPrecioProducto = (producto = {}) => {
   const opciones = [];
   const baseValor = Number(producto.precio) || 0;
@@ -1831,6 +1876,11 @@ const confirmarPago = async () => {
       'info'
     );
     const facturaGenerada = data.factura;
+    const pedidoIdParaSeguir =
+      Number(facturaGenerada?.id) || Number(estado.ventaActual?.id) || 0;
+    if (esEcf && pedidoIdParaSeguir) {
+      seguirEstadoEcfPedido(pedidoIdParaSeguir);
+    }
     if (facturaGenerada?.id) {
       const facturaId = Number(facturaGenerada.id);
       if (Number.isFinite(facturaId)) {

@@ -325,7 +325,7 @@ const actualizarBannerAlarma = () => {
 
   const ordenes = alarmaNuevasOrdenes === 1 ? 'Nueva orden en cocina.' : `${alarmaNuevasOrdenes} nuevas ordenes en cocina.`;
   const ayudaAudio = audioAlarmaDisponible ? '' : ' Verifica permisos de sonido/notificaciones del navegador.';
-  alarmaTexto.textContent = `${ordenes} Presiona OK para detener la alarma.${ayudaAudio}`;
+  alarmaTexto.textContent = `${ordenes} Toca para silenciar.${ayudaAudio}`;
   alarmaBanner.classList.add('is-active');
 };
 
@@ -400,23 +400,22 @@ const crearBannerAlarma = () => {
   const main = document.querySelector('.cocina-main');
   if (!main) return null;
 
-  const banner = document.createElement('div');
+  // El banner completo actua como boton: tocarlo en cualquier parte detiene la alarma.
+  // Se removio el boton OK separado para evitar toques accidentales / molestos en celular.
+  const banner = document.createElement('button');
+  banner.type = 'button';
   banner.className = 'cocina-alarma-banner';
   banner.setAttribute('role', 'alert');
   banner.setAttribute('aria-live', 'assertive');
+  banner.setAttribute('aria-label', 'Alarma de nueva orden. Toca para silenciar.');
 
   const texto = document.createElement('span');
   texto.className = 'cocina-alarma-banner__texto';
   banner.appendChild(texto);
 
-  const botonOk = document.createElement('button');
-  botonOk.type = 'button';
-  botonOk.className = 'kanm-button primary cocina-alarma-banner__ok';
-  botonOk.textContent = 'OK';
-  botonOk.addEventListener('click', () => {
+  banner.addEventListener('click', () => {
     detenerAlarmaNuevaOrden();
   });
-  banner.appendChild(botonOk);
 
   main.insertBefore(banner, main.firstChild);
   alarmaBanner = banner;
