@@ -16,6 +16,16 @@ try {
   missingDeps.push('xml-crypto');
 }
 
+// Importamos el firmador con custom digest DGII (ordena atributos namespace
+// alfabeticamente antes del SHA-256). Sin esto la Semilla es rechazada con
+// "Firma del certificado invalida" por DGII.
+let signXmlForDgii = null;
+try {
+  ({ signXmlForDgii } = require('./dgii-core'));
+} catch (error) {
+  // Si dgii-core no esta disponible se cae a signXmlDocument local (legacy).
+}
+
 const DGII_DEFAULT_ENDPOINTS = Object.freeze({
   autenticacion: 'https://eCF.dgii.gov.do/CerteCF/Autenticacion',
   recepcion: 'https://eCF.dgii.gov.do/CerteCF/Recepcion',
@@ -425,12 +435,20 @@ const autenticarDgii = async ({ config }) => {
           p12Base64: config.p12_base64,
           p12Password: config.p12_password || '',
         });
-        const semillaFirmada = signXmlDocument({
-          xml: semillaText,
-          privateKeyPem: cert.privateKeyPem,
-          certPem: cert.certPem,
-          canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
-        }).xml;
+        // DGII requiere el custom digest (atributos namespace ordenados antes del
+        // SHA-256). Si no esta disponible, caemos al firmador local legacy.
+        const semillaFirmada = signXmlForDgii
+          ? signXmlForDgii({
+              xml: semillaText,
+              privateKeyPem: cert.privateKeyPem,
+              certPem: cert.certPem,
+            }).xml
+          : signXmlDocument({
+              xml: semillaText,
+              privateKeyPem: cert.privateKeyPem,
+              certPem: cert.certPem,
+              canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+            }).xml;
 
         const formData = new FormData();
         formData.append('xml', new Blob([semillaFirmada], { type: 'application/xml' }), 'semilla_firmada.xml');

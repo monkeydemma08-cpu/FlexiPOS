@@ -7,10 +7,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/kds-shell.css?v=20260425a" />
     <script src="js/auth.js" defer></script>
     <script src="js/cocina.js" defer></script>
   </head>
@@ -21,7 +22,6 @@
           <img id="kanm-header-logo" alt="" />
           <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
         </div>
-
         <div class="kanm-header-texts">
           <div
             id="kanm-header-negocio-nombre-principal"
@@ -34,9 +34,9 @@
 
       <div class="kanm-header-right">
         <div class="kanm-header-actions">
-          <span class="tag-rol">Cocina</span>
-          <a class="kanm-button ghost chat-link" href="/chat.html">Chat interno <span id="chat-unread-badge" class="chat-unread-badge"></span></a>
-          <button class="kanm-button ghost" type="button" onclick="logout()">Cerrar sesión</button>
+          <span class="tag-rol">👨‍🍳 Cocina</span>
+          <a class="kanm-button ghost chat-link" href="/chat.html">💬 Chat <span id="chat-unread-badge" class="chat-unread-badge"></span></a>
+          <button class="kanm-button ghost" type="button" onclick="logout()">↩ Salir</button>
         </div>
       </div>
     </header>
@@ -48,17 +48,17 @@
       </section>
       <div class="kanm-tabs cocina-tabs" role="tablist">
         <button class="kanm-tab active" data-tab="activos" type="button" role="tab" aria-selected="true">
-          Activos
+          🔥 Activos
         </button>
         <button class="kanm-tab" data-tab="finalizados" type="button" role="tab" aria-selected="false">
-          Finalizados del día
+          ✅ Finalizados del día
         </button>
       </div>
 
       <section class="kanm-card kanm-card--panel cocina-panel" id="panel-activos" role="tabpanel">
         <div class="kanm-card-header">
           <h2>Pedidos activos</h2>
-          <p class="kanm-subtitle">Pedidos pendientes y en preparación.</p>
+          <p class="kanm-subtitle">Pendientes y en preparación. Toca una tarjeta para abrir el detalle.</p>
         </div>
         <div id="cocina-pedidos-activos" class="cocina-grid" aria-live="polite"></div>
       </section>
@@ -79,11 +79,11 @@
       <div class="cocina-focus-card" role="dialog" aria-modal="true">
         <div class="cocina-focus-header">
           <div>
-            <p class="cocina-focus-label">Cuenta</p>
+            <p class="cocina-focus-label">📋 Cuenta</p>
             <h3 id="focus-cuenta"></h3>
             <p id="focus-servicio" class="kanm-subtitle"></p>
           </div>
-          <button class="kanm-button ghost" type="button" id="focus-cerrar">Volver al tablero</button>
+          <button class="kanm-button ghost" type="button" id="focus-cerrar">✕ Cerrar</button>
         </div>
         <div class="cocina-focus-body">
           <div class="cocina-focus-meta" id="focus-meta"></div>
@@ -91,9 +91,9 @@
           <div class="cocina-focus-items" id="focus-items"></div>
         </div>
         <div class="cocina-focus-actions">
-          <button class="kanm-button secondary" type="button" id="focus-preparar">Marcar preparando</button>
-          <button class="kanm-button primary" type="button" id="focus-listo">Marcar listo</button>
-          <button class="kanm-button ghost-danger" type="button" id="focus-cancelar">Cancelar pedido</button>
+          <button class="kanm-button secondary" type="button" id="focus-preparar">🍳 Marcar preparando</button>
+          <button class="kanm-button primary" type="button" id="focus-listo">✅ Marcar listo</button>
+          <button class="kanm-button ghost-danger" type="button" id="focus-cancelar">✕ Cancelar pedido</button>
         </div>
       </div>
     </div>

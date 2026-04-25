@@ -163,10 +163,6 @@ let secuenciasConfig = {
   permitir_b14: 1,
   permitir_e31: 1,
   permitir_e32: 1,
-  permitir_e43: 1,
-  permitir_e44: 1,
-  permitir_e45: 1,
-  permitir_e46: 1,
   facturacion_electronica_habilitada: 0,
 };
 
@@ -292,7 +288,7 @@ const normalizarTipoComprobante = (valor) => {
   if (['sin comprobante', 'sin_comprobante', 'sin'].includes(lower)) {
     return 'Sin comprobante';
   }
-  if (['b01', 'b02', 'b14', 'e31', 'e32', 'e43', 'e44', 'e45', 'e46'].includes(lower)) {
+  if (['b01', 'b02', 'b14', 'e31', 'e32'].includes(lower)) {
     return lower.toUpperCase();
   }
   return texto;
@@ -301,7 +297,7 @@ const normalizarTipoComprobante = (valor) => {
 const esSinComprobante = (valor) => normalizarTipoComprobante(valor).toLowerCase() === 'sin comprobante';
 
 const esTipoComprobanteElectronico = (valor) =>
-  ['E31', 'E32', 'E43', 'E44', 'E45', 'E46'].includes(normalizarTipoComprobante(valor).toUpperCase());
+  ['E31', 'E32'].includes(normalizarTipoComprobante(valor).toUpperCase());
 
 const esFacturacionElectronicaActiva = () =>
   Number(secuenciasConfig.facturacion_electronica_habilitada) === 1;
@@ -316,12 +312,11 @@ const adaptarTipoComprobanteAlModoFiscal = (valor) => {
   if (esFacturacionElectronicaActiva()) {
     if (tipo === 'B01') return 'E31';
     if (tipo === 'B02') return 'E32';
-    if (tipo === 'B14') return 'E43';
+    if (tipo === 'B14') return 'B14';
     return tipo;
   }
   if (tipo === 'E31') return 'B01';
   if (tipo === 'E32') return 'B02';
-  if (tipo === 'E43') return 'B14';
   return tipo;
 };
 
@@ -341,34 +336,6 @@ const resolverConfigSecuencias = (tema = {}) => ({
       tema?.permitirE32 ??
       tema?.facturacionElectronica?.permitir_e32 ??
       tema?.facturacion_electronica?.permitir_e32,
-    1
-  ),
-  permitir_e43: normalizarFlagUI(
-    tema?.permitir_e43 ??
-      tema?.permitirE43 ??
-      tema?.facturacionElectronica?.permitir_e43 ??
-      tema?.facturacion_electronica?.permitir_e43,
-    1
-  ),
-  permitir_e44: normalizarFlagUI(
-    tema?.permitir_e44 ??
-      tema?.permitirE44 ??
-      tema?.facturacionElectronica?.permitir_e44 ??
-      tema?.facturacion_electronica?.permitir_e44,
-    1
-  ),
-  permitir_e45: normalizarFlagUI(
-    tema?.permitir_e45 ??
-      tema?.permitirE45 ??
-      tema?.facturacionElectronica?.permitir_e45 ??
-      tema?.facturacion_electronica?.permitir_e45,
-    1
-  ),
-  permitir_e46: normalizarFlagUI(
-    tema?.permitir_e46 ??
-      tema?.permitirE46 ??
-      tema?.facturacionElectronica?.permitir_e46 ??
-      tema?.facturacion_electronica?.permitir_e46,
     1
   ),
   facturacion_electronica_habilitada: normalizarFlagUI(
@@ -407,10 +374,6 @@ const seleccionarTipoComprobantePermitido = (preferido) => {
   const permitirB14 = !esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_b14) !== 0;
   const permitirE31 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e31) !== 0;
   const permitirE32 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e32) !== 0;
-  const permitirE43 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e43) !== 0;
-  const permitirE44 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e44) !== 0;
-  const permitirE45 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e45) !== 0;
-  const permitirE46 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e46) !== 0;
 
   let valorFinal = valorPreferido;
   if (valorPreferidoUpper === 'B01' && !permitirB01) {
@@ -426,18 +389,6 @@ const seleccionarTipoComprobantePermitido = (preferido) => {
     valorFinal = null;
   }
   if (valorPreferidoUpper === 'E32' && !permitirE32) {
-    valorFinal = null;
-  }
-  if (valorPreferidoUpper === 'E43' && !permitirE43) {
-    valorFinal = null;
-  }
-  if (valorPreferidoUpper === 'E44' && !permitirE44) {
-    valorFinal = null;
-  }
-  if (valorPreferidoUpper === 'E45' && !permitirE45) {
-    valorFinal = null;
-  }
-  if (valorPreferidoUpper === 'E46' && !permitirE46) {
     valorFinal = null;
   }
 
@@ -458,10 +409,6 @@ const aplicarConfigSecuencias = (config = {}) => {
     permitir_b14: normalizarFlagUI(config.permitir_b14 ?? config.permitirB14, 1),
     permitir_e31: normalizarFlagUI(config.permitir_e31 ?? config.permitirE31, 1),
     permitir_e32: normalizarFlagUI(config.permitir_e32 ?? config.permitirE32, 1),
-    permitir_e43: normalizarFlagUI(config.permitir_e43 ?? config.permitirE43, 1),
-    permitir_e44: normalizarFlagUI(config.permitir_e44 ?? config.permitirE44, 1),
-    permitir_e45: normalizarFlagUI(config.permitir_e45 ?? config.permitirE45, 1),
-    permitir_e46: normalizarFlagUI(config.permitir_e46 ?? config.permitirE46, 1),
     facturacion_electronica_habilitada: normalizarFlagUI(
       config.facturacion_electronica_habilitada ??
         config.facturacionElectronicaHabilitada ??
@@ -478,10 +425,6 @@ const aplicarConfigSecuencias = (config = {}) => {
   const permitirB14 = !esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_b14) !== 0;
   const permitirE31 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e31) !== 0;
   const permitirE32 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e32) !== 0;
-  const permitirE43 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e43) !== 0;
-  const permitirE44 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e44) !== 0;
-  const permitirE45 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e45) !== 0;
-  const permitirE46 = esFacturacionElectronicaActiva() && Number(secuenciasConfig.permitir_e46) !== 0;
   const opciones = Array.from(selectTipoComprobante.options || []);
 
   opciones.forEach((opt) => {
@@ -504,22 +447,6 @@ const aplicarConfigSecuencias = (config = {}) => {
     if (opt.value === 'E32') {
       opt.hidden = !permitirE32;
       opt.disabled = !permitirE32;
-    }
-    if (opt.value === 'E43') {
-      opt.hidden = !permitirE43;
-      opt.disabled = !permitirE43;
-    }
-    if (opt.value === 'E44') {
-      opt.hidden = !permitirE44;
-      opt.disabled = !permitirE44;
-    }
-    if (opt.value === 'E45') {
-      opt.hidden = !permitirE45;
-      opt.disabled = !permitirE45;
-    }
-    if (opt.value === 'E46') {
-      opt.hidden = !permitirE46;
-      opt.disabled = !permitirE46;
     }
   });
 
@@ -2681,7 +2608,7 @@ const abrirSplitModal = () => {
     const mesaCliente = [];
     if (cuentaSeleccionada.mesa) mesaCliente.push(cuentaSeleccionada.mesa);
     if (cuentaSeleccionada.cliente) mesaCliente.push(cuentaSeleccionada.cliente);
-    splitModalSubtitle.textContent = `Cuenta #${cuentaSeleccionada.cuenta_id}${
+    splitModalSubtitle.textContent = `Cuenta #${cuentaSeleccionada.numero_cuenta_negocio || cuentaSeleccionada.cuenta_id}${
       mesaCliente.length ? ` • ${mesaCliente.join(' - ')}` : ''
     }`;
   }
@@ -2805,7 +2732,7 @@ const renderMergeModalContenido = () => {
 
     const info = document.createElement('div');
     const nombre = document.createElement('div');
-    nombre.textContent = `Cuenta #${cuentaId}`;
+    nombre.textContent = `Cuenta #${cuenta.numero_cuenta_negocio || cuentaId}`;
     const meta = document.createElement('div');
     meta.className = 'caja-merge-item-meta';
     const mesaTexto = cuenta.mesa ? `Mesa ${cuenta.mesa}` : 'Sin mesa';
@@ -3029,7 +2956,7 @@ const renderPedidos = () => {
 
       <div>
 
-        <h3 style="margin: 0;">Cuenta #${cuenta.cuenta_id}</h3>
+        <h3 style="margin: 0;">Cuenta #${cuenta.numero_cuenta_negocio || cuenta.cuenta_id}</h3>
 
         <p class="kanm-subtitle" style="margin: 4px 0 0; color: inherit;">
 
@@ -4028,7 +3955,7 @@ const renderDetalleCuadreActual = () => {
           data-cambiar-metodo="1"
           data-cuenta-id="${pedido.id}"
           data-metodo-actual="${metodoValor}"
-          aria-label="Metodo de pago para cuenta #${pedido.id}"
+          aria-label="Metodo de pago para cuenta #${pedido.numero_cuenta_negocio || pedido.cuenta_id || pedido.id}"
           title="Metodo de pago actual: ${metodoLabel}"
         >
           ${opcionActual}
@@ -5229,13 +5156,14 @@ const eliminarCuentaSeleccionada = async () => {
     setMensajeDetalle('Cuenta invalida.', 'error');
     return;
   }
+  const numeroVisible = cuentaSeleccionada.numero_cuenta_negocio || cuentaId;
 
   const confirmar = window.confirm(
-    `Esta accion eliminara la cuenta #${cuentaId} del flujo de cobro. Deseas continuar?`
+    `Esta accion eliminara la cuenta #${numeroVisible} del flujo de cobro. Deseas continuar?`
   );
   if (!confirmar) return;
 
-  const passwordAdmin = await solicitarPasswordAdmin(`eliminar la cuenta #${cuentaId}`);
+  const passwordAdmin = await solicitarPasswordAdmin(`eliminar la cuenta #${numeroVisible}`);
   if (!passwordAdmin) {
     setMensajeDetalle('Debes ingresar la contrasena de admin.', 'error');
     return;
@@ -5267,7 +5195,7 @@ const eliminarCuentaSeleccionada = async () => {
     limpiarDescuentosItems();
     await recargarEstadoCaja(false);
     limpiarSeleccion();
-    setMensajeLista(`Cuenta #${cuentaId} eliminada correctamente.`, 'info');
+    setMensajeLista(`Cuenta #${numeroVisible} eliminada correctamente.`, 'info');
     notificarActualizacionGlobal('pedido-actualizado', { cuentaId });
   } catch (error) {
     console.error('Error al eliminar cuenta:', error);

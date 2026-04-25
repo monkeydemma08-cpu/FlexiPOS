@@ -1964,10 +1964,51 @@ async function ensurePedidosEcfColumns() {
   await ensureColumn('pedidos', 'ecf_mensaje_dgii LONGTEXT NULL');
   await ensureColumn('pedidos', 'ecf_xml_generado LONGTEXT NULL');
   await ensureColumn('pedidos', 'ecf_xml_firmado LONGTEXT NULL');
+  // Para E32<250k guardamos tambien el RFCE firmado para que el usuario pueda
+  // descargarlo y ver el flujo completo (RFCE + Factura) que se envio a DGII.
+  await ensureColumn('pedidos', 'ecf_xml_rfce_firmado LONGTEXT NULL');
   await ensureColumn('pedidos', 'ecf_codigo_seguridad VARCHAR(10) NULL');
   await ensureColumn('pedidos', 'ecf_qr_url TEXT NULL');
   await ensureColumn('pedidos', 'ecf_intentos INT DEFAULT 0');
   await ensureColumn('pedidos', 'ecf_ultimo_intento_at DATETIME NULL');
+}
+
+async function ensureTableEcfDocumentosExternos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS ecf_documentos_externos (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      modulo VARCHAR(40) NOT NULL,
+      referencia_externa VARCHAR(120) NULL,
+      ecf_tipo VARCHAR(10) NOT NULL,
+      ecf_encf VARCHAR(20) NULL,
+      ecf_estado VARCHAR(30) NULL,
+      ecf_track_id VARCHAR(120) NULL,
+      ecf_codigo_dgii VARCHAR(80) NULL,
+      ecf_mensaje_dgii LONGTEXT NULL,
+      ecf_xml_generado LONGTEXT NULL,
+      ecf_xml_firmado LONGTEXT NULL,
+      ecf_codigo_seguridad VARCHAR(10) NULL,
+      payload_emision LONGTEXT NULL,
+      cliente_documento VARCHAR(60) NULL,
+      cliente_nombre VARCHAR(255) NULL,
+      monto_total DECIMAL(14,2) NULL,
+      intentos_log LONGTEXT NULL,
+      ecf_intentos INT DEFAULT 0,
+      ecf_ultimo_intento_at DATETIME NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_ecf_doc_ext_negocio (negocio_id),
+      KEY idx_ecf_doc_ext_modulo_ref (modulo, referencia_externa),
+      KEY idx_ecf_doc_ext_estado (negocio_id, ecf_estado),
+      CONSTRAINT fk_ecf_doc_ext_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureEcfDocumentosExternosColumns() {
+  // Idempotente: agrega columnas faltantes a tabla existente
+  await ensureColumn('ecf_documentos_externos', 'ecf_qr_url TEXT NULL');
 }
 
 async function ensureTablePagosCuenta() {
@@ -2181,6 +2222,129 @@ async function runMigrations() {
   await ensureTableSecuenciasEcf();
   await ensureTableEcfIntentos();
   await ensurePedidosEcfColumns();
+  await ensureTableEcfDocumentosExternos();
+  await ensureEcfDocumentosExternosColumns();
+  await ensureTableSecuenciasCuenta();
+  await ensurePedidosNumeroCuentaNegocio();
+}
+
+async function ensureTableSecuenciasCuenta() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS secuencias_cuenta (
+      negocio_id INT NOT NULL,
+      correlativo INT NOT NULL DEFAULT 0,
+      actualizado_en DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (negocio_id),
+      CONSTRAINT fk_secuencias_cuenta_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensurePedidosNumeroCuentaNegocio() {
+  await ensureColumn('pedidos', 'numero_cuenta_negocio INT NULL');
+  await ensureIndexByName(
+    'pedidos',
+    'idx_pedidos_negocio_num_cuenta',
+    '(negocio_id, numero_cuenta_negocio)'
+  );
+
+  // Backfill: para pedidos existentes sin numero_cuenta_negocio, asignamos
+  // numeros correlativos por negocio en orden cronologico de la cuenta.
+  let pendientes = [];
+  try {
+    pendientes = await query(
+      'SELECT COUNT(*) AS total FROM pedidos WHERE numero_cuenta_negocio IS NULL'
+    );
+  } catch (error) {
+    console.warn('No se pudo evaluar backfill numero_cuenta_negocio:', error?.message || error);
+    return;
+  }
+  const total = Number(pendientes?.[0]?.total || 0);
+  if (total === 0) {
+    return;
+  }
+
+  let negocios = [];
+  try {
+    negocios = await query(
+      'SELECT DISTINCT negocio_id FROM pedidos WHERE numero_cuenta_negocio IS NULL AND negocio_id IS NOT NULL'
+    );
+  } catch (error) {
+    console.warn('No se pudieron obtener negocios para backfill:', error?.message || error);
+    return;
+  }
+
+  for (const fila of negocios) {
+    const negocioId = Number(fila.negocio_id);
+    if (!Number.isFinite(negocioId) || negocioId <= 0) continue;
+
+    let cuentas = [];
+    try {
+      cuentas = await query(
+        `SELECT COALESCE(cuenta_id, id) AS cuenta_clave,
+                MIN(id) AS primer_pedido_id
+           FROM pedidos
+          WHERE negocio_id = ?
+            AND numero_cuenta_negocio IS NULL
+       GROUP BY COALESCE(cuenta_id, id)
+       ORDER BY MIN(id) ASC`,
+        [negocioId]
+      );
+    } catch (error) {
+      console.warn(
+        `No se pudieron obtener cuentas pendientes (negocio ${negocioId}):`,
+        error?.message || error
+      );
+      continue;
+    }
+
+    let arranque = 0;
+    try {
+      const previas = await query(
+        'SELECT MAX(numero_cuenta_negocio) AS maxn FROM pedidos WHERE negocio_id = ?',
+        [negocioId]
+      );
+      arranque = Number(previas?.[0]?.maxn || 0);
+    } catch (error) {
+      arranque = 0;
+    }
+
+    let contador = arranque;
+    for (const cuenta of cuentas) {
+      contador += 1;
+      try {
+        await query(
+          `UPDATE pedidos
+              SET numero_cuenta_negocio = ?
+            WHERE negocio_id = ?
+              AND COALESCE(cuenta_id, id) = ?
+              AND numero_cuenta_negocio IS NULL`,
+          [contador, negocioId, cuenta.cuenta_clave]
+        );
+      } catch (error) {
+        console.warn(
+          `Error backfill numero_cuenta_negocio (negocio ${negocioId}, cuenta ${cuenta.cuenta_clave}):`,
+          error?.message || error
+        );
+      }
+    }
+
+    if (contador > 0) {
+      try {
+        await query(
+          `INSERT INTO secuencias_cuenta (negocio_id, correlativo)
+           VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE correlativo = GREATEST(correlativo, VALUES(correlativo))`,
+          [negocioId, contador]
+        );
+      } catch (error) {
+        console.warn(
+          `Error inicializando secuencias_cuenta para negocio ${negocioId}:`,
+          error?.message || error
+        );
+      }
+    }
+  }
 }
 
 module.exports = runMigrations;

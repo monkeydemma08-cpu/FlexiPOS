@@ -271,7 +271,10 @@
     if (ncfSpan) ncfSpan.textContent = pedido.ncf || '-';
     if (fechaSpan) fechaSpan.textContent = formatDateTime(pedido.fecha_cierre || pedido.fecha_factura);
     if (pedidoSpan) {
-      pedidoSpan.textContent = vistaPreviaFactura.activa ? `#${pedido.id} (Vista previa)` : `#${pedido.id}`;
+      const numeroCuenta = pedido.numero_cuenta_negocio || pedido.cuenta_id || pedido.id;
+      pedidoSpan.textContent = vistaPreviaFactura.activa
+        ? `#${numeroCuenta} (Vista previa)`
+        : `#${numeroCuenta}`;
     }
     if (clienteSpan) clienteSpan.textContent = pedido.cliente || 'Consumidor final';
     if (documentoSpan) documentoSpan.textContent = pedido.cliente_documento || '00000000000';

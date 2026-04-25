@@ -1391,13 +1391,9 @@ const validarPedido = () => {
   return true;
 };
 
-const cancelarEdicion = () => {
-  estado.pedidoEditandoId = null;
-  estado.modoEdicion = null;
-  estado.cuentaReferenciaId = null;
-  estado.carrito.clear();
-  if (botonEnviar) botonEnviar.textContent = 'Enviar a preparar orden';
-  if (botonCancelarEdicion) botonCancelarEdicion.hidden = true;
+// Restablece todos los campos del formulario al estado inicial (post envio o post cancelacion)
+const limpiarFormularioMesera = () => {
+  if (campoMesa) campoMesa.value = '';
   if (selectServicio) selectServicio.value = 'en_local';
   if (notaInput) notaInput.value = '';
   if (deliveryClienteInput) deliveryClienteInput.value = '';
@@ -1405,6 +1401,16 @@ const cancelarEdicion = () => {
   if (deliveryDireccionInput) deliveryDireccionInput.value = '';
   if (deliveryReferenciaInput) deliveryReferenciaInput.value = '';
   if (deliveryNotaInput) deliveryNotaInput.value = '';
+};
+
+const cancelarEdicion = () => {
+  estado.pedidoEditandoId = null;
+  estado.modoEdicion = null;
+  estado.cuentaReferenciaId = null;
+  estado.carrito.clear();
+  if (botonEnviar) botonEnviar.textContent = 'Enviar a preparar orden';
+  if (botonCancelarEdicion) botonCancelarEdicion.hidden = true;
+  limpiarFormularioMesera();
   actualizarCarritoUI();
   mostrarMensaje('Edición cancelada.', 'info');
 };
@@ -1427,8 +1433,10 @@ const iniciarEdicion = (pedido) => {
   if (botonEnviar) botonEnviar.textContent = 'Agregar nueva orden a la cuenta';
   if (botonCancelarEdicion) botonCancelarEdicion.hidden = false;
 
+  const cuentaVisible =
+    pedido.numero_cuenta_negocio || pedido.cuenta_id || estado.cuentaReferenciaId;
   mostrarMensaje(
-    `Agrega una nueva orden para la cuenta #${estado.cuentaReferenciaId} (pedido #${pedido.id}).`,
+    `Agrega una nueva orden para la cuenta #${cuentaVisible} (pedido #${pedido.id}).`,
     'info'
   );
   actualizarCarritoUI();
@@ -1684,7 +1692,7 @@ const crearCardCuenta = (cuenta, vista = 'pendiente') => {
   if (cuenta.cliente) mesaCliente.push(cuenta.cliente);
 
   const servicioTexto = obtenerTextoServicio(cuenta.modo_servicio);
-  const cuentaTexto = `Cuenta #${cuenta.cuenta_id}`;
+  const cuentaTexto = `Cuenta #${cuenta.numero_cuenta_negocio || cuenta.cuenta_id}`;
   info.innerHTML = `
       <h3>${cuentaTexto}</h3>
       <p class="kanm-subtitle">${mesaCliente.length ? mesaCliente.join(' · ') : 'Sin mesa asignada'}</p>
@@ -2181,12 +2189,7 @@ const enviarPedido = async (destino = 'cocina') => {
     }
     notificarActualizacionGlobal('stock-actualizado', { tipo: esEdicion ? 'actualizado' : 'creado' });
     estado.carrito.clear();
-    if (notaInput) notaInput.value = '';
-    if (deliveryClienteInput) deliveryClienteInput.value = '';
-    if (deliveryTelefonoInput) deliveryTelefonoInput.value = '';
-    if (deliveryDireccionInput) deliveryDireccionInput.value = '';
-    if (deliveryReferenciaInput) deliveryReferenciaInput.value = '';
-    if (deliveryNotaInput) deliveryNotaInput.value = '';
+    limpiarFormularioMesera();
     actualizarCarritoUI();
     if (esEdicion) {
       cancelarEdicion();

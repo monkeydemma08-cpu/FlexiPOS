@@ -881,7 +881,7 @@ const abrirFoco = (cuenta, pedido) => {
   focoPedido = pedido;
   focoCuenta = cuenta;
 
-  focusCuenta.textContent = `Cuenta #${cuenta.cuenta_id || cuenta.id || '—'}`;
+  focusCuenta.textContent = `Cuenta #${cuenta.numero_cuenta_negocio || cuenta.cuenta_id || cuenta.id || '—'}`;
   focusServicio.textContent = `${textoMesaCliente(cuenta)}  ${textoServicio(cuenta)}`;
   const cocineroLabel =
     pedido.cocinero_nombre ||
@@ -1165,7 +1165,7 @@ const renderActivos = (cuentas) => {
     header.className = 'cocina-sticky__header';
 
     const titulo = document.createElement('h3');
-    titulo.textContent = `Cuenta #${cuenta.cuenta_id || cuenta.id || '—'}`;
+    titulo.textContent = `Cuenta #${cuenta.numero_cuenta_negocio || cuenta.cuenta_id || cuenta.id || '—'}`;
     header.appendChild(titulo);
 
     const estadoCuenta = estadoCocinaDeCuenta(cuenta);
@@ -1223,7 +1223,7 @@ const renderFinalizados = (cuentas) => {
     header.className = 'kanm-pedido-header';
 
     const titulo = document.createElement('h3');
-    titulo.textContent = `Cuenta #${cuenta.cuenta_id || cuenta.id || '—'}`;
+    titulo.textContent = `Cuenta #${cuenta.numero_cuenta_negocio || cuenta.cuenta_id || cuenta.id || '—'}`;
     header.appendChild(titulo);
 
     const estadoCuenta = estadoCocinaDeCuenta(cuenta);

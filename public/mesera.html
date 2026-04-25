@@ -1,268 +1,510 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
     <title>Mesera - KANM</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/mesera-shell.css?v=20260424b" />
     <script src="js/auth.js" defer></script>
     <script src="js/mesera.js" defer></script>
   </head>
-  <body data-role="mesera">
-    <header class="kanm-header">
-      <div class="kanm-header-left">
-        <div class="kanm-header-logo-container">
-          <img id="kanm-header-logo" alt="" />
-          <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
-        </div>
-
-        <div class="kanm-header-texts">
-          <div
-            id="kanm-header-negocio-nombre-principal"
-            class="kanm-header-title"
-            data-negocio-titulo
-          ></div>
-          <div id="kanm-header-negocio-subtitulo" class="kanm-header-subtitle">Panel de mesera</div>
-        </div>
+  <body data-role="mesera" class="mesera-shell-body">
+    <!-- Header viejo escondido por CSS pero conservamos IDs por compatibilidad con tema/logo -->
+    <header class="kanm-header" hidden aria-hidden="true">
+      <div class="kanm-header-logo-container">
+        <img id="kanm-header-logo" alt="" />
+        <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
       </div>
-
-      <div class="kanm-header-right">
-        <div class="kanm-header-actions">
-          <span class="tag-rol">Mesera</span>
-          <a class="kanm-button ghost chat-link" href="/chat.html">Chat interno <span id="chat-unread-badge" class="chat-unread-badge"></span></a>
-          <button class="kanm-button ghost" type="button" onclick="logout()">Cerrar sesión</button>
-        </div>
+      <div class="kanm-header-texts">
+        <div id="kanm-header-negocio-nombre-principal" data-negocio-titulo></div>
+        <div id="kanm-header-negocio-subtitulo">Panel de mesera</div>
       </div>
     </header>
 
-    <main class="kanm-main">
-      <section class="kanm-page-header">
-        <h1 class="kanm-page-title">Toma de pedidos</h1>
-        <p class="kanm-page-subtitle">Selecciona la mesa y agrega los productos al pedido.</p>
-      </section>
-      <div class="mesera-tabs">
-        <button class="mesera-tab-btn active" data-tab="tomar" type="button">Tomar pedido</button>
-        <button class="mesera-tab-btn" data-tab="delivery" type="button">Delivery</button>
-        <button class="mesera-tab-btn" data-tab="pendientes" type="button">Pendientes</button>
-        <button class="mesera-tab-btn" data-tab="preparando" type="button">En preparación</button>
-        <button class="mesera-tab-btn" data-tab="listos" type="button">
-          Listos
-          <span id="mesera-listos-badge" class="mesera-tab-badge" hidden>0</span>
-        </button>
-      </div>
-
-      <div class="mesera-tab-panel active" data-tab="tomar">
-        <section class="kanm-card datos-mesa">
-          <div class="kanm-card-header">
-            <h2>Datos del pedido</h2>
-            <p class="kanm-subtitle">Identifica la mesa o el cliente para personalizar la atención.</p>
+    <div class="mesera-shell" id="mesera-shell">
+      <!-- ====== TOPBAR ====== -->
+      <header class="mesera-topbar">
+        <div class="mesera-topbar-left">
+          <div class="mesera-topbar-logo">
+            <img id="mesera-logo-img" alt="" />
+            <div id="mesera-logo-fallback" class="mesera-logo-fallback">M</div>
           </div>
-          <label for="campo-mesa" class="kanm-label">Mesa o cliente</label>
-          <input
-            type="text"
-            id="campo-mesa"
-            class="kanm-input"
-            placeholder="Ej. Mesa 5 o Juan Pérez"
-            autocomplete="off"
-          />
-          <p class="kanm-helper" id="mesera-identidad"></p>
-          <div class="kanm-input-group">
-            <label for="tipo-servicio" class="kanm-label">Tipo de servicio</label>
-            <select id="tipo-servicio" class="kanm-input">
-              <option value="en_local">Para consumir en el negocio</option>
-              <option value="para_llevar">Para llevar</option>
-            </select>
-          </div>
-          <div class="kanm-input-group">
-            <label for="nota-pedido" class="kanm-label">Nota para preparación (opcional)</label>
-            <textarea
-              id="nota-pedido"
-              class="kanm-input"
-              rows="2"
-              maxlength="200"
-              placeholder="Ej. Sin cebolla, extra queso..."
-            ></textarea>
-            <p class="kanm-helper">Máx. 200 caracteres</p>
-          </div>
-        </section>
-
-      </div>
-
-      <div class="mesera-tab-panel" data-tab="delivery">
-        <section class="kanm-card delivery-datos">
-          <div class="kanm-card-header">
-            <h2>Delivery</h2>
-            <p class="kanm-subtitle">Registra la información de entrega antes de enviar el pedido.</p>
-          </div>
-          <div class="kanm-form-grid delivery-form-grid">
-            <div class="kanm-input-group">
-              <label for="delivery-cliente" class="kanm-label">Cliente</label>
-              <input
-                type="text"
-                id="delivery-cliente"
-                class="kanm-input"
-                placeholder="Nombre del cliente"
-                autocomplete="off"
-              />
-            </div>
-            <div class="kanm-input-group">
-              <label for="delivery-telefono" class="kanm-label">Teléfono</label>
-              <input
-                type="text"
-                id="delivery-telefono"
-                class="kanm-input"
-                placeholder="809-000-0000"
-                autocomplete="off"
-              />
-            </div>
-            <div class="kanm-input-group delivery-span-full">
-              <label for="delivery-direccion" class="kanm-label">Dirección</label>
-              <input
-                type="text"
-                id="delivery-direccion"
-                class="kanm-input"
-                placeholder="Ej. Calle 8, Res. Las Flores, #12"
-                autocomplete="off"
-              />
-            </div>
-            <div class="kanm-input-group">
-              <label for="delivery-referencia" class="kanm-label">Referencia (opcional)</label>
-              <input
-                type="text"
-                id="delivery-referencia"
-                class="kanm-input"
-                placeholder="Apto, piso, color de casa..."
-                autocomplete="off"
-              />
-            </div>
-            <div class="kanm-input-group delivery-span-full">
-              <label for="delivery-nota" class="kanm-label">Nota de entrega (opcional)</label>
-              <textarea
-                id="delivery-nota"
-                class="kanm-input"
-                rows="2"
-                maxlength="200"
-                placeholder="Ej. Llamar al llegar, dejar en conserjería..."
-              ></textarea>
-              <p class="kanm-helper">Máx. 200 caracteres</p>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <section class="kanm-card productos" data-tab-shared="tomar,delivery">
-        <div class="kanm-mesera-productos-top">
-          <div class="kanm-card-header">
-            <h2>Productos</h2>
-            <p class="kanm-subtitle">Explora el menú, filtra por nombre y selecciona los favoritos.</p>
-          </div>
-          <div class="busqueda-productos">
-            <div class="buscador-input">
-              <span class="buscador-icono">🔍</span>
-              <input
-                type="search"
-                id="buscador-productos"
-                class="kanm-input"
-                placeholder="Buscar por nombre..."
-                autocomplete="off"
-              />
-            </div>
-            <p class="search-results-info" id="contador-productos"></p>
+          <div class="mesera-topbar-textwrap">
+            <span class="mesera-topbar-business" data-negocio-titulo>KANM</span>
+            <span class="mesera-topbar-role">Panel de mesera</span>
           </div>
         </div>
-        <div class="kanm-mesera-productos-lista-scroll">
-          <div id="lista-productos" class="lista-productos"></div>
-        </div>
-      </section>
-      <section class="kanm-card carrito" data-tab-shared="tomar,delivery">
-        <div class="kanm-card-header">
-          <h2>Carrito</h2>
-          <p class="kanm-subtitle">
-            Revisa los artículos agregados, ajusta cantidades y valida el pedido antes de enviarlo.
-          </p>
-        </div>
-        <div id="carrito" class="lista-carrito"></div>
-        <div class="carrito-resumen" id="resumen-carrito">
-          <div class="resumen-item">
-            <span>Subtotal</span>
-            <span id="resumen-subtotal">DOP 0.00</span>
-          </div>
-          <div class="resumen-item">
-            <span>ITBIS(18%) estimado</span>
-            <span id="resumen-impuesto">DOP 0.00</span>
-          </div>
-          <div class="resumen-item total">
-            <span>Total estimado</span>
-            <span id="resumen-total">DOP 0.00</span>
-          </div>
-        </div>
-      </section>
 
-      <footer class="kanm-footer" id="mesera-footer" data-tab-shared="tomar,delivery">
-        <div class="flex-between" style="width: 100%; gap: 16px; flex-wrap: wrap;">
-          <div id="mesera-mensaje" class="kanm-message"></div>
-          <div class="acciones-pedido" data-acciones="tomar">
-            <button id="boton-cancelar-edicion" type="button" class="kanm-button secondary" hidden>
+        <div class="mesera-topbar-right">
+          <span class="mesera-topbar-tag">Mesera</span>
+          <a class="mesera-topbar-action chat-link" href="/chat.html" title="Chat interno">
+            <span class="mesera-topbar-action-icon" aria-hidden="true">💬</span>
+            <span class="mesera-topbar-action-label">Chat</span>
+            <span id="chat-unread-badge" class="chat-unread-badge"></span>
+          </a>
+          <button
+            type="button"
+            class="mesera-topbar-action mesera-topbar-action--logout"
+            onclick="logout()"
+            title="Cerrar sesión"
+          >
+            <span class="mesera-topbar-action-icon" aria-hidden="true">↩</span>
+            <span class="mesera-topbar-action-label">Salir</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- ====== TABS BAR ====== -->
+      <nav class="mesera-tabsbar" role="tablist" aria-label="Vistas del panel de mesera">
+        <div class="mesera-tabs">
+          <button
+            class="mesera-tab-btn active"
+            data-tab="tomar"
+            type="button"
+            role="tab"
+            aria-selected="true"
+          >
+            <span class="mesera-tab-icon" aria-hidden="true">🪑</span>
+            <span class="mesera-tab-label">Tomar pedido</span>
+          </button>
+          <button class="mesera-tab-btn" data-tab="delivery" type="button" role="tab" aria-selected="false">
+            <span class="mesera-tab-icon" aria-hidden="true">🛵</span>
+            <span class="mesera-tab-label">Delivery</span>
+          </button>
+          <button class="mesera-tab-btn" data-tab="pendientes" type="button" role="tab" aria-selected="false">
+            <span class="mesera-tab-icon" aria-hidden="true">⏳</span>
+            <span class="mesera-tab-label">Pendientes</span>
+          </button>
+          <button class="mesera-tab-btn" data-tab="preparando" type="button" role="tab" aria-selected="false">
+            <span class="mesera-tab-icon" aria-hidden="true">👨‍🍳</span>
+            <span class="mesera-tab-label">En preparación</span>
+          </button>
+          <button class="mesera-tab-btn" data-tab="listos" type="button" role="tab" aria-selected="false">
+            <span class="mesera-tab-icon" aria-hidden="true">🔔</span>
+            <span class="mesera-tab-label">Listos</span>
+            <span id="mesera-listos-badge" class="mesera-tab-badge" hidden>0</span>
+          </button>
+        </div>
+      </nav>
+
+      <!-- ====== MAIN ====== -->
+      <main class="kanm-main mesera-main">
+        <div class="mesera-workspace">
+          <!-- ===== Columna izquierda: contenido principal ===== -->
+          <div class="mesera-content">
+            <!-- Panel: Tomar pedido (datos de mesa) -->
+            <div class="mesera-tab-panel active" data-tab="tomar">
+              <section class="kanm-card datos-mesa mesera-card-info">
+                <div class="kanm-card-header">
+                  <h2>Datos del pedido</h2>
+                  <p class="kanm-subtitle">Identifica la mesa o cliente para personalizar la atención.</p>
+                </div>
+                <div class="mesera-form-grid">
+                  <div class="kanm-input-group">
+                    <label for="campo-mesa" class="kanm-label">
+                      <span class="mesera-label-icon" aria-hidden="true">🪑</span>
+                      Mesa o cliente
+                    </label>
+                    <input
+                      type="text"
+                      id="campo-mesa"
+                      class="kanm-input"
+                      placeholder="Ej. Mesa 5 o Juan Pérez"
+                      autocomplete="off"
+                    />
+                    <p class="kanm-helper" id="mesera-identidad"></p>
+                  </div>
+                  <div class="kanm-input-group">
+                    <label for="tipo-servicio" class="kanm-label">
+                      <span class="mesera-label-icon" aria-hidden="true">🍽️</span>
+                      Tipo de servicio
+                    </label>
+                    <select id="tipo-servicio" class="kanm-input">
+                      <option value="en_local">Para consumir en el negocio</option>
+                      <option value="para_llevar">Para llevar</option>
+                    </select>
+                  </div>
+                  <div class="kanm-input-group mesera-span-full">
+                    <label for="nota-pedido" class="kanm-label">
+                      <span class="mesera-label-icon" aria-hidden="true">📝</span>
+                      Nota para preparación
+                      <span class="mesera-label-opt">(opcional)</span>
+                    </label>
+                    <textarea
+                      id="nota-pedido"
+                      class="kanm-input"
+                      rows="2"
+                      maxlength="200"
+                      placeholder="Ej. Sin cebolla, extra queso..."
+                    ></textarea>
+                    <p class="kanm-helper">Máx. 200 caracteres</p>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <!-- Panel: Delivery -->
+            <div class="mesera-tab-panel" data-tab="delivery">
+              <section class="kanm-card delivery-datos mesera-card-info">
+                <div class="kanm-card-header">
+                  <h2>Delivery</h2>
+                  <p class="kanm-subtitle">Registra la información de entrega antes de enviar el pedido.</p>
+                </div>
+                <div class="kanm-form-grid delivery-form-grid mesera-form-grid">
+                  <div class="kanm-input-group">
+                    <label for="delivery-cliente" class="kanm-label">
+                      <span class="mesera-label-icon" aria-hidden="true">👤</span>
+                      Cliente
+                    </label>
+                    <input
+                      type="text"
+                      id="delivery-cliente"
+                      class="kanm-input"
+                      placeholder="Nombre del cliente"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="kanm-input-group">
+                    <label for="delivery-telefono" class="kanm-label">
+                      <span class="mesera-label-icon" aria-hidden="true">📞</span>
+                      Teléfono
+                    </label>
+                    <input
+                      type="text"
+                      id="delivery-telefono"
+                      class="kanm-input"
+                      placeholder="809-000-0000"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="kanm-input-group delivery-span-full mesera-span-full">
+                    <label for="delivery-direccion" class="kanm-label">
+                      <span class="mesera-label-icon" aria-hidden="true">📍</span>
+                      Dirección
+                    </label>
+                    <input
+                      type="text"
+                      id="delivery-direccion"
+                      class="kanm-input"
+                      placeholder="Ej. Calle 8, Res. Las Flores, #12"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="kanm-input-group">
+                    <label for="delivery-referencia" class="kanm-label">
+                      <span class="mesera-label-icon" aria-hidden="true">🏷️</span>
+                      Referencia
+                      <span class="mesera-label-opt">(opcional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="delivery-referencia"
+                      class="kanm-input"
+                      placeholder="Apto, piso, color de casa..."
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="kanm-input-group delivery-span-full mesera-span-full">
+                    <label for="delivery-nota" class="kanm-label">
+                      <span class="mesera-label-icon" aria-hidden="true">🛵</span>
+                      Nota de entrega
+                      <span class="mesera-label-opt">(opcional)</span>
+                    </label>
+                    <textarea
+                      id="delivery-nota"
+                      class="kanm-input"
+                      rows="2"
+                      maxlength="200"
+                      placeholder="Ej. Llamar al llegar, dejar en conserjería..."
+                    ></textarea>
+                    <p class="kanm-helper">Máx. 200 caracteres</p>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <!-- Productos (compartido entre tomar/delivery) -->
+            <section class="kanm-card productos mesera-card-productos" data-tab-shared="tomar,delivery">
+              <div class="mesera-productos-header">
+                <div class="kanm-card-header mesera-productos-title">
+                  <h2>Productos</h2>
+                  <p class="kanm-subtitle">Explora el menú, filtra por nombre y agrega al carrito.</p>
+                </div>
+                <div class="busqueda-productos mesera-productos-search">
+                  <div class="buscador-input">
+                    <span class="buscador-icono" aria-hidden="true">🔍</span>
+                    <input
+                      type="search"
+                      id="buscador-productos"
+                      class="kanm-input"
+                      placeholder="Buscar por nombre..."
+                      autocomplete="off"
+                    />
+                  </div>
+                  <p class="search-results-info" id="contador-productos"></p>
+                </div>
+              </div>
+              <div class="kanm-mesera-productos-lista-scroll mesera-productos-scroll">
+                <div id="lista-productos" class="lista-productos mesera-productos-grid"></div>
+              </div>
+            </section>
+
+            <!-- Panel: Pendientes -->
+            <div class="mesera-tab-panel" data-tab="pendientes">
+              <section class="kanm-card pedidos-activos mesera-card-pedidos">
+                <div class="kanm-card-header">
+                  <h2>Pedidos pendientes</h2>
+                  <p class="kanm-subtitle">Cuentas con pedidos aún sin preparar.</p>
+                </div>
+                <div id="mesera-pendientes-mensaje" class="kanm-message"></div>
+                <div id="lista-pedidos-pendientes" class="lista-pedidos-activos mesera-pedidos-grid"></div>
+              </section>
+            </div>
+
+            <!-- Panel: Preparando -->
+            <div class="mesera-tab-panel" data-tab="preparando">
+              <section class="kanm-card pedidos-activos mesera-card-pedidos">
+                <div class="kanm-card-header">
+                  <h2>En preparación</h2>
+                  <p class="kanm-subtitle">Pedidos en preparación (cocina / bar).</p>
+                </div>
+                <div id="mesera-preparando-mensaje" class="kanm-message"></div>
+                <div id="lista-pedidos-preparando" class="lista-pedidos-activos mesera-pedidos-grid"></div>
+              </section>
+            </div>
+
+            <!-- Panel: Listos -->
+            <div class="mesera-tab-panel" data-tab="listos">
+              <section class="kanm-card pedidos-activos mesera-card-pedidos">
+                <div class="kanm-card-header">
+                  <h2>Pedidos listos</h2>
+                  <p class="kanm-subtitle">Pedidos listos para servir o cobrar.</p>
+                </div>
+                <div id="mesera-listos-mensaje" class="kanm-message"></div>
+                <div id="lista-pedidos-listos" class="lista-pedidos-activos mesera-pedidos-grid"></div>
+              </section>
+            </div>
+          </div>
+
+          <!-- ===== Columna derecha: carrito persistente (sticky) ===== -->
+          <aside
+            class="mesera-cart-aside"
+            data-tab-shared="tomar,delivery"
+            id="mesera-cart-aside"
+            aria-label="Carrito"
+          >
+            <section class="kanm-card carrito mesera-cart-card">
+              <div class="mesera-cart-head">
+                <div class="kanm-card-header" style="gap:2px;">
+                  <h2 class="mesera-cart-title">
+                    <span class="mesera-cart-title-icon" aria-hidden="true">🛒</span>
+                    Carrito
+                  </h2>
+                  <p class="kanm-subtitle">Revisa, ajusta y envía el pedido.</p>
+                </div>
+                <button
+                  type="button"
+                  class="mesera-cart-close"
+                  id="mesera-cart-close"
+                  aria-label="Cerrar carrito"
+                >×</button>
+              </div>
+
+              <div id="carrito" class="lista-carrito mesera-cart-list"></div>
+
+              <div class="carrito-resumen mesera-cart-resumen" id="resumen-carrito">
+                <div class="resumen-item">
+                  <span>Subtotal</span>
+                  <span id="resumen-subtotal">DOP 0.00</span>
+                </div>
+                <div class="resumen-item">
+                  <span>ITBIS (18%) estimado</span>
+                  <span id="resumen-impuesto">DOP 0.00</span>
+                </div>
+                <div class="resumen-item total">
+                  <span>Total estimado</span>
+                  <span id="resumen-total">DOP 0.00</span>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+
+      <!-- ====== FOOTER FIJO CON ACCIONES ====== -->
+      <footer
+        class="kanm-footer mesera-footer-bar"
+        id="mesera-footer"
+        data-tab-shared="tomar,delivery"
+      >
+        <div class="mesera-footer-inner">
+          <div class="mesera-footer-msg">
+            <div id="mesera-mensaje" class="kanm-message"></div>
+          </div>
+
+          <div class="acciones-pedido mesera-footer-acciones" data-acciones="tomar">
+            <button
+              id="boton-cancelar-edicion"
+              type="button"
+              class="kanm-button secondary mesera-btn"
+              hidden
+            >
               Cancelar edición
             </button>
-            <button id="boton-enviar" type="button" class="kanm-button primary" data-accion="enviar-cocina">
-              Enviar a preparar orden
+            <button
+              id="boton-enviar"
+              type="button"
+              class="kanm-button primary mesera-btn"
+              data-accion="enviar-cocina"
+            >
+              <span aria-hidden="true">👨‍🍳</span>
+              Enviar a preparar
             </button>
-            <button id="boton-enviar-caja" type="button" class="kanm-button primary">
-              Enviar pedido a caja
+            <button id="boton-enviar-caja" type="button" class="kanm-button primary mesera-btn">
+              <span aria-hidden="true">💵</span>
+              Enviar a caja
             </button>
           </div>
-          <div class="acciones-pedido acciones-pedido--delivery" data-acciones="delivery" hidden>
-            <button id="boton-delivery-prep" type="button" class="kanm-button secondary">
+
+          <div
+            class="acciones-pedido acciones-pedido--delivery mesera-footer-acciones"
+            data-acciones="delivery"
+            hidden
+          >
+            <button id="boton-delivery-prep" type="button" class="kanm-button secondary mesera-btn">
+              <span aria-hidden="true">👨‍🍳</span>
               Enviar a preparación
             </button>
-            <button id="boton-delivery-directo" type="button" class="kanm-button primary">
+            <button id="boton-delivery-directo" type="button" class="kanm-button primary mesera-btn">
+              <span aria-hidden="true">🛵</span>
               Enviar directo a delivery
             </button>
           </div>
         </div>
       </footer>
 
-      <div class="mesera-tab-panel" data-tab="pendientes">
-        <section class="kanm-card pedidos-activos">
-          <div class="kanm-card-header">
-            <h2>Pedidos pendientes</h2>
-            <p class="kanm-subtitle">Consulta las cuentas con pedidos aún sin preparar.</p>
-          </div>
-          <div id="mesera-pendientes-mensaje" class="kanm-message"></div>
-          <div id="lista-pedidos-pendientes" class="lista-pedidos-activos"></div>
-        </section>
-      </div>
+      <!-- ====== FAB CARRITO (movil) ====== -->
+      <button
+        type="button"
+        class="mesera-cart-fab"
+        id="mesera-cart-fab"
+        data-tab-shared="tomar,delivery"
+        aria-label="Abrir carrito"
+        title="Carrito"
+      >
+        <span class="mesera-cart-fab-icon" aria-hidden="true">🛒</span>
+        <span class="mesera-cart-fab-text">
+          <span class="mesera-cart-fab-label">Ver carrito</span>
+          <span class="mesera-cart-fab-total" id="mesera-cart-fab-total">DOP 0.00</span>
+        </span>
+        <span class="mesera-cart-fab-badge" id="mesera-cart-fab-badge" hidden>0</span>
+      </button>
 
-      <div class="mesera-tab-panel" data-tab="preparando">
-        <section class="kanm-card pedidos-activos">
-          <div class="kanm-card-header">
-            <h2>En preparación</h2>
-            <p class="kanm-subtitle">Pedidos en preparación (cocina / bar).</p>
-          </div>
-          <div id="mesera-preparando-mensaje" class="kanm-message"></div>
-          <div id="lista-pedidos-preparando" class="lista-pedidos-activos"></div>
-        </section>
-      </div>
+      <!-- Overlay para drawer del carrito en movil -->
+      <button
+        type="button"
+        class="mesera-cart-overlay"
+        id="mesera-cart-overlay"
+        aria-hidden="true"
+        tabindex="-1"
+      ></button>
+    </div>
 
-      <div class="mesera-tab-panel" data-tab="listos">
-        <section class="kanm-card pedidos-activos">
-          <div class="kanm-card-header">
-            <h2>Pedidos listos</h2>
-            <p class="kanm-subtitle">Pedidos listos para servir o cobrar.</p>
-          </div>
-          <div id="mesera-listos-mensaje" class="kanm-message"></div>
-          <div id="lista-pedidos-listos" class="lista-pedidos-activos"></div>
-        </section>
-      </div>
-    </main>
     <div id="toast-container"></div>
+
+    <!-- ===== JS auxiliar para el shell de mesera (drawer carrito + sincroniza FAB con carrito) ===== -->
+    <script>
+      (function () {
+        const shell = document.getElementById('mesera-shell');
+        const aside = document.getElementById('mesera-cart-aside');
+        const fab = document.getElementById('mesera-cart-fab');
+        const closeBtn = document.getElementById('mesera-cart-close');
+        const overlay = document.getElementById('mesera-cart-overlay');
+        const fabBadge = document.getElementById('mesera-cart-fab-badge');
+        const fabTotal = document.getElementById('mesera-cart-fab-total');
+        const totalEl = document.getElementById('resumen-total');
+        const carrito = document.getElementById('carrito');
+        if (!shell) return;
+
+        const isMobile = () => window.matchMedia('(max-width: 980px)').matches;
+
+        function openCart() {
+          shell.setAttribute('data-cart-open', '1');
+          aside?.classList.add('mesera-cart-aside--open');
+          overlay?.classList.add('mesera-cart-overlay--visible');
+          document.body.classList.add('mesera-cart-locked');
+        }
+
+        function closeCart() {
+          shell.removeAttribute('data-cart-open');
+          aside?.classList.remove('mesera-cart-aside--open');
+          overlay?.classList.remove('mesera-cart-overlay--visible');
+          document.body.classList.remove('mesera-cart-locked');
+        }
+
+        fab?.addEventListener('click', () => {
+          if (isMobile()) openCart();
+        });
+        closeBtn?.addEventListener('click', closeCart);
+        overlay?.addEventListener('click', closeCart);
+
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && shell.getAttribute('data-cart-open') === '1') {
+            closeCart();
+          }
+        });
+
+        // Sincroniza FAB con el contenido del carrito
+        function actualizarFab() {
+          if (!fab || !carrito) return;
+          const items = carrito.querySelectorAll('.carrito-item');
+          const count = items.length;
+          if (fabBadge) {
+            if (count > 0) {
+              fabBadge.textContent = String(count);
+              fabBadge.hidden = false;
+            } else {
+              fabBadge.hidden = true;
+            }
+          }
+          if (fabTotal && totalEl) {
+            fabTotal.textContent = totalEl.textContent || 'DOP 0.00';
+          }
+          fab.classList.toggle('mesera-cart-fab--has-items', count > 0);
+        }
+
+        // Observa cambios en el carrito y los totales
+        if (carrito) {
+          const obs = new MutationObserver(actualizarFab);
+          obs.observe(carrito, { childList: true, subtree: true });
+        }
+        if (totalEl) {
+          const obsTotal = new MutationObserver(actualizarFab);
+          obsTotal.observe(totalEl, { characterData: true, childList: true, subtree: true });
+        }
+        actualizarFab();
+
+        // Si el usuario gira la pantalla a desktop con drawer abierto, ciérralo
+        const mq = window.matchMedia('(min-width: 981px)');
+        const handleBp = () => {
+          if (mq.matches) closeCart();
+        };
+        if (typeof mq.addEventListener === 'function') {
+          mq.addEventListener('change', handleBp);
+        } else if (typeof mq.addListener === 'function') {
+          mq.addListener(handleBp);
+        }
+      })();
+    </script>
+
     <script src="/socket.io/socket.io.js"></script>
     <script src="/js/notifications.js" defer></script>
   </body>

@@ -424,7 +424,7 @@ const abrirFoco = (cuenta, pedido) => {
   focoPedido = pedido;
   focoCuenta = cuenta;
 
-  focusCuenta.textContent = `Cuenta #${cuenta.cuenta_id || cuenta.id || '—'}`;
+  focusCuenta.textContent = `Cuenta #${cuenta.numero_cuenta_negocio || cuenta.cuenta_id || cuenta.id || '—'}`;
   focusServicio.textContent = `${textoMesaCliente(cuenta)} • ${textoServicio(cuenta)}`;
   const bartenderLabel =
     pedido.bartender_nombre ||
@@ -659,7 +659,7 @@ const renderActivos = (cuentas) => {
     header.className = 'bar-sticky__header';
 
     const titulo = document.createElement('h3');
-    titulo.textContent = `Cuenta #${cuenta.cuenta_id || cuenta.id || '—'}`;
+    titulo.textContent = `Cuenta #${cuenta.numero_cuenta_negocio || cuenta.cuenta_id || cuenta.id || '—'}`;
     header.appendChild(titulo);
 
     const estadoCuenta = estadoBarDeCuenta(cuenta);
@@ -717,7 +717,7 @@ const renderFinalizados = (cuentas) => {
     header.className = 'kanm-pedido-header';
 
     const titulo = document.createElement('h3');
-    titulo.textContent = `Cuenta #${cuenta.cuenta_id || cuenta.id || '—'}`;
+    titulo.textContent = `Cuenta #${cuenta.numero_cuenta_negocio || cuenta.cuenta_id || cuenta.id || '—'}`;
     header.appendChild(titulo);
 
     const estadoCuenta = estadoBarDeCuenta(cuenta);

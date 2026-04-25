@@ -1,0 +1,1507 @@
+/* =====================================================================
+   KANM Caja Shell - Layout profesional, elegante e interactivo
+   ---------------------------------------------------------------------
+   PC (>=1100px): Topbar + Tabs + Workspace 2 columnas (lista | detalle)
+   Tablet (981-1099): Topbar + Tabs + 2 columnas mas estrechas
+   Movil (<=980px): Topbar compacto + Tabs scroll-x + 1 columna
+   --------------------------------------------------------------------- */
+
+:root {
+  --caja-topbar-h: 60px;
+  --caja-tabs-h: 60px;
+  --caja-list-w: 380px;
+  --caja-shell-bg: #f5f6f8;
+  --caja-card-bg: #ffffff;
+  --caja-border: rgba(15, 23, 42, 0.08);
+  --caja-text: #1e293b;
+  --caja-muted: #64748b;
+  --caja-primary: var(--color-boton-primario, #ec4899);
+  --caja-primary-soft: color-mix(in srgb, var(--color-boton-primario, #ec4899) 14%, transparent);
+  --caja-success: #16a34a;
+  --caja-warning: #f59e0b;
+  --caja-danger: #dc2626;
+  --caja-info: #3b82f6;
+  --caja-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --caja-shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08);
+  --caja-shadow-lg: 0 12px 30px rgba(15, 23, 42, 0.12);
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
+body.caja-shell-body {
+  margin: 0;
+  background: var(--caja-shell-bg);
+  color: var(--caja-text);
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+/* Oculta el header viejo siempre */
+.caja-shell-body > .kanm-header,
+.caja-shell-body .kanm-page-header {
+  display: none !important;
+}
+
+.caja-shell {
+  display: grid;
+  grid-template-rows: var(--caja-topbar-h) var(--caja-tabs-h) 1fr;
+  min-height: 100vh;
+  min-height: 100dvh;
+  position: relative;
+  isolation: isolate;
+}
+
+/* ============================================================
+   TOPBAR
+   ============================================================ */
+.caja-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 22px;
+  background: var(--caja-card-bg);
+  border-bottom: 1px solid var(--caja-border);
+  height: var(--caja-topbar-h);
+}
+
+.caja-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.caja-topbar-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--color-boton-primario, #ec4899), var(--color-boton-secundario, #7b8fb8));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: var(--caja-shadow-sm);
+}
+
+.caja-topbar-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.caja-topbar-logo img:not([src]),
+.caja-topbar-logo img[src=""] {
+  display: none;
+}
+
+.caja-logo-fallback {
+  font-size: 1rem;
+}
+
+.caja-topbar-textwrap {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  min-width: 0;
+}
+
+.caja-topbar-business {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--caja-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.caja-topbar-role {
+  font-size: 0.75rem;
+  color: var(--caja-muted);
+}
+
+.caja-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.caja-topbar-tag {
+  display: inline-flex;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--caja-primary-soft);
+  color: var(--caja-primary);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.caja-topbar-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--caja-border);
+  background: #fff;
+  color: var(--caja-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.caja-topbar-action:hover {
+  background: var(--caja-primary-soft);
+  border-color: color-mix(in srgb, var(--caja-primary) 25%, transparent);
+  color: var(--caja-primary);
+}
+
+.caja-topbar-action-icon {
+  font-size: 0.95rem;
+}
+
+.caja-shell-body .chat-link .chat-unread-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+}
+
+/* ============================================================
+   TABS BAR
+   ============================================================ */
+.caja-tabsbar {
+  position: sticky;
+  top: var(--caja-topbar-h);
+  z-index: 25;
+  background: var(--caja-shell-bg);
+  padding: 10px 22px;
+  border-bottom: 1px solid var(--caja-border);
+  height: var(--caja-tabs-h);
+  display: flex;
+  align-items: center;
+}
+
+.caja-shell-body .caja-tabsbar .caja-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: var(--caja-shadow-sm);
+  border: 1px solid var(--caja-border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  scrollbar-width: none;
+  margin: 0;
+}
+
+.caja-tabsbar .caja-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.caja-shell-body .caja-tabsbar .kanm-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: auto;
+  height: auto;
+  padding: 9px 16px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--caja-muted);
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.1s ease;
+  white-space: nowrap;
+  position: relative;
+  box-shadow: none;
+}
+
+.caja-shell-body .caja-tabsbar .kanm-tab .caja-tab-icon {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.caja-shell-body .caja-tabsbar .kanm-tab:hover {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--caja-text);
+}
+
+.caja-shell-body .caja-tabsbar .kanm-tab.active {
+  background: linear-gradient(135deg, var(--caja-primary), color-mix(in srgb, var(--caja-primary) 75%, #6366f1));
+  color: #fff;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--caja-primary) 30%, transparent);
+}
+
+.caja-shell-body .caja-tabsbar .kanm-tab.active:hover {
+  transform: translateY(-1px);
+}
+
+/* ============================================================
+   MAIN
+   ============================================================ */
+.caja-shell .caja-main {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 18px 22px;
+  display: block;
+  gap: 0;
+}
+
+.caja-shell .caja-panel.hidden,
+.caja-shell .caja-panel[hidden] {
+  display: none !important;
+}
+
+/* ============================================================
+   COBROS: 2 columnas (lista cuentas | detalle/form)
+   ============================================================ */
+.caja-shell .caja-cobros-grid {
+  display: grid;
+  grid-template-columns: var(--caja-list-w) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+/* Cards generales (lista, detalle, cuadre) */
+.caja-shell .kanm-card.caja-lista-card,
+.caja-shell .kanm-card.caja-detalle-card,
+.caja-shell .kanm-card.caja-cuadre-card {
+  background: var(--caja-card-bg);
+  border: 1px solid var(--caja-border);
+  border-radius: 16px;
+  box-shadow: var(--caja-shadow-sm);
+  padding: 18px 20px;
+}
+
+/* Header de cards refinado */
+.caja-shell .kanm-card-header h2 {
+  margin: 0 0 2px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--caja-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.caja-shell .kanm-card-header h3 {
+  margin: 0 0 2px;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--caja-text);
+}
+
+.caja-shell .kanm-card-header .kanm-subtitle {
+  margin: 0;
+  color: var(--caja-muted);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+/* ============================================================
+   LISTA DE CUENTAS (left card)
+   ============================================================ */
+.caja-shell .caja-lista-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: calc(var(--caja-topbar-h) + var(--caja-tabs-h) + 18px);
+  max-height: calc(100vh - var(--caja-topbar-h) - var(--caja-tabs-h) - 36px);
+  align-self: start;
+  overflow: hidden;
+  padding: 0 0 12px 0;
+}
+
+.caja-shell .caja-lista-card .kanm-card-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--caja-card-bg);
+  padding: 18px 20px 12px;
+  border-bottom: 1px dashed var(--caja-border);
+  border-radius: 16px 16px 0 0;
+}
+
+.caja-shell .caja-lista-card .kanm-card-header h2::before {
+  content: "💼";
+  font-size: 1rem;
+}
+
+.caja-shell .caja-lista-card .caja-toggle-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--caja-primary-soft);
+  color: var(--caja-text);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.caja-shell .caja-lista-card .caja-toggle-inline input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--caja-primary);
+}
+
+.caja-shell .caja-pedidos-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.caja-shell .caja-pedidos-lista::-webkit-scrollbar {
+  width: 6px;
+}
+
+.caja-shell .caja-pedidos-lista::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 3px;
+}
+
+/* Tarjeta individual de cuenta */
+.caja-shell .caja-pedidos-lista .kanm-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid var(--caja-border);
+  border-left: 4px solid var(--caja-success);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: var(--caja-shadow-sm);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.caja-shell .caja-pedidos-lista .kanm-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--caja-shadow-md);
+  border-color: color-mix(in srgb, var(--caja-primary) 30%, transparent);
+  border-left-color: var(--caja-primary);
+}
+
+/* Cuenta seleccionada: borde marca y fondo suave */
+.caja-shell .caja-pedidos-lista .kanm-card.caja-cuenta-seleccionada {
+  border: 2px solid var(--caja-primary);
+  border-left-width: 4px;
+  border-left-color: var(--caja-primary);
+  background: color-mix(in srgb, var(--caja-primary-soft) 60%, #fff);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--caja-primary) 22%, transparent);
+}
+
+.caja-shell .caja-pedidos-lista .kanm-card .flex-between:first-child {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.caja-shell .caja-pedidos-lista .kanm-card h3 {
+  margin: 0 !important;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--caja-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.caja-shell .caja-pedidos-lista .kanm-card h3::before {
+  content: "🧾";
+  font-size: 0.9rem;
+}
+
+.caja-shell .caja-pedidos-lista .kanm-card .kanm-subtitle {
+  margin: 4px 0 0 !important;
+  font-size: 0.82rem;
+  color: var(--caja-muted) !important;
+}
+
+/* Badges de cuenta */
+.caja-shell .caja-cuenta-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.caja-shell .caja-cuenta-badges .kanm-badge {
+  font-size: 0.68rem;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.caja-shell .caja-cuenta-badges .kanm-badge.estado-listo {
+  background: color-mix(in srgb, var(--caja-success) 14%, transparent);
+  color: #15803d;
+  border: 1px solid color-mix(in srgb, var(--caja-success) 30%, transparent);
+}
+
+.caja-shell .caja-cuenta-badges .kanm-badge.estado-pendiente,
+.caja-shell .caja-cuenta-badges .kanm-badge.estado-preparando {
+  background: color-mix(in srgb, var(--caja-info) 14%, transparent);
+  color: #1d4ed8;
+  border: 1px solid color-mix(in srgb, var(--caja-info) 30%, transparent);
+}
+
+.caja-shell .caja-cuenta-badges .badge-prepago {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--caja-warning) 14%, transparent);
+  color: #b45309;
+  border: 1px solid color-mix(in srgb, var(--caja-warning) 30%, transparent);
+}
+
+.caja-shell .caja-cuenta-badges .badge-prepago::before {
+  content: "💵";
+  font-size: 0.74rem;
+}
+
+/* Subcards de pedido dentro de cuenta */
+.caja-shell .caja-cuenta-pedidos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.caja-shell .caja-subcard {
+  background: linear-gradient(180deg, #fafbfc 0%, #f4f6f9 100%);
+  border: 1px solid var(--caja-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+}
+
+.caja-shell .caja-subcard .item-meta {
+  font-size: 0.7rem;
+  color: var(--caja-muted);
+}
+
+.caja-shell .caja-subcard .pill-label {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--caja-text);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.caja-shell .caja-subcard .estado-pill {
+  font-size: 0.68rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-transform: capitalize;
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--caja-muted);
+}
+
+.caja-shell .caja-subcard .estado-pill.estado-listo {
+  background: color-mix(in srgb, var(--caja-success) 12%, transparent);
+  color: var(--caja-success);
+}
+
+.caja-shell .caja-subcard .estado-pill.estado-preparando,
+.caja-shell .caja-subcard .estado-pill.estado-pendiente {
+  background: color-mix(in srgb, var(--caja-info) 12%, transparent);
+  color: #1d4ed8;
+}
+
+/* Acciones dentro de la card de cuenta */
+.caja-shell .caja-pedidos-lista .kanm-card .caja-acciones {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.caja-shell .caja-pedidos-lista .kanm-card .caja-acciones .kanm-button {
+  flex: 1 1 auto;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  border-radius: 9px;
+  font-weight: 600;
+}
+
+.caja-shell .caja-pedidos-lista .kanm-card.caja-cuenta-seleccionada .caja-acciones .kanm-button.primary {
+  background: linear-gradient(135deg, var(--caja-success), color-mix(in srgb, var(--caja-success) 80%, #16a34a));
+}
+
+/* Empty state lista */
+.caja-shell .caja-lista-card #caja-mensaje-lista:not(:empty) {
+  margin: 12px 16px 0;
+  padding: 14px;
+  text-align: center;
+  background: #fafbfc;
+  border-radius: 10px;
+  border: 1px dashed var(--caja-border);
+  color: var(--caja-muted);
+  font-size: 0.85rem;
+}
+
+/* ============================================================
+   DETALLE DE COBRO (right card)
+   ============================================================ */
+.caja-shell .caja-detalle-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.caja-shell .caja-detalle-card > .kanm-card-header {
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--caja-border);
+}
+
+.caja-shell .caja-detalle-card > .kanm-card-header h2::before {
+  content: "🧮";
+  font-size: 1rem;
+}
+
+/* Placeholder cuando no hay cuenta seleccionada */
+.caja-shell .caja-detalle-placeholder {
+  text-align: center;
+  padding: 40px 24px;
+  border-radius: 12px;
+  background: #fafbfc;
+  border: 2px dashed var(--caja-border);
+  color: var(--caja-muted);
+  font-size: 0.92rem;
+  margin: 0;
+}
+
+.caja-shell .caja-detalle-placeholder::before {
+  content: "👈";
+  display: block;
+  font-size: 2.4rem;
+  margin-bottom: 10px;
+  opacity: 0.7;
+}
+
+/* Form de detalle */
+.caja-shell .caja-detalle-card .kanm-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Info del cliente (mesa, hora, etc.) */
+.caja-shell .caja-detalle-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #fbfbfd 0%, #f6f7fa 100%);
+  border: 1px solid var(--caja-border);
+  border-radius: 12px;
+}
+
+.caja-shell .caja-detalle-linea {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.caja-shell .caja-detalle-etiqueta {
+  font-weight: 600;
+  color: var(--caja-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+/* Acciones de cuenta (separar/juntar/eliminar) */
+.caja-shell .caja-detalle-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.caja-shell .caja-detalle-acciones .kanm-button {
+  flex: 1 1 auto;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  border-radius: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Items del detalle */
+.caja-shell .caja-items {
+  border-radius: 12px;
+  border: 1px solid var(--caja-border);
+  background: linear-gradient(180deg, #fbfbfd 0%, #f6f7fa 100%);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.caja-shell .caja-items .caja-empty {
+  margin: 0;
+  text-align: center;
+  padding: 16px;
+  color: var(--caja-muted);
+  font-size: 0.88rem;
+  font-style: italic;
+}
+
+.caja-shell .caja-items .caja-items-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.caja-shell .caja-items .caja-items-lista > li {
+  background: #fff;
+  border: 1px solid var(--caja-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--caja-text);
+}
+
+.caja-shell .caja-items .caja-item-nombre {
+  font-weight: 600;
+  color: var(--caja-text);
+  font-size: 0.9rem;
+}
+
+.caja-shell .caja-items .caja-item-meta {
+  font-size: 0.78rem;
+  color: var(--caja-muted);
+}
+
+.caja-shell .caja-items .caja-item-tools {
+  border-top: 1px dashed var(--caja-border);
+  padding-top: 8px;
+  margin-top: 2px;
+}
+
+.caja-shell .caja-items .caja-item-precio-group {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.caja-shell .caja-items .caja-item-precio-group label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--caja-muted);
+}
+
+.caja-shell .caja-items .caja-item-precio-input {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--caja-border);
+  padding: 7px 10px;
+  font-size: 0.88rem;
+  background: #fff;
+}
+
+.caja-shell .caja-items .caja-item-tools-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+}
+
+.caja-shell .caja-items .caja-item-tools-actions .kanm-button {
+  flex: 1 1 auto;
+  padding: 7px 10px;
+  font-size: 0.78rem;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.caja-shell .caja-items .caja-item-descuento-panel {
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--caja-warning) 8%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--caja-warning) 30%, transparent);
+  border-radius: 9px;
+}
+
+.caja-shell .caja-items .caja-item-descuento-panel[hidden] {
+  display: none !important;
+}
+
+/* ============================================================
+   FORM GRID en detalle (descuento, propina, cliente, etc.)
+   ============================================================ */
+.caja-shell .caja-detalle-card .kanm-form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.caja-shell .caja-detalle-card .kanm-form-grid > .kanm-card-subsection {
+  grid-column: 1 / -1;
+}
+
+.caja-shell .caja-detalle-card .kanm-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, #fbfbfd 0%, #f6f7fa 100%);
+  border: 1px solid var(--caja-border);
+  border-radius: 10px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  min-width: 0;
+}
+
+.caja-shell .caja-detalle-card .kanm-input-group:focus-within {
+  border-color: color-mix(in srgb, var(--caja-primary) 45%, transparent);
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--caja-primary-soft);
+}
+
+.caja-shell .caja-detalle-card .kanm-input-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--caja-text);
+  text-transform: uppercase;
+}
+
+.caja-shell .caja-detalle-card .kanm-input-group label .caja-label-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--caja-primary-soft);
+  color: var(--caja-primary);
+  font-size: 0.74rem;
+  flex-shrink: 0;
+  text-transform: none;
+}
+
+.caja-shell .caja-detalle-card .kanm-input-group label .caja-label-opt {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--caja-muted);
+  text-transform: none;
+  font-style: italic;
+  margin-left: auto;
+}
+
+.caja-shell .caja-detalle-card .kanm-input-group input,
+.caja-shell .caja-detalle-card .kanm-input-group select,
+.caja-shell .caja-detalle-card .kanm-input-group textarea {
+  border-radius: 9px;
+  border: 1px solid var(--caja-border);
+  padding: 9px 11px;
+  background: #fff;
+  font-size: 0.9rem;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.caja-shell .caja-detalle-card .kanm-input-group input:focus,
+.caja-shell .caja-detalle-card .kanm-input-group select:focus,
+.caja-shell .caja-detalle-card .kanm-input-group textarea:focus {
+  outline: none;
+  border-color: var(--caja-primary);
+  box-shadow: 0 0 0 2px var(--caja-primary-soft);
+}
+
+.caja-shell .caja-detalle-card .kanm-input-help {
+  font-size: 0.72rem;
+  color: var(--caja-muted);
+  margin: 0;
+  line-height: 1.3;
+}
+
+/* Display de cambio (no es input) */
+.caja-shell .pago-cambio-display {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--caja-success) 12%, transparent);
+  color: var(--caja-success);
+  font-size: 1.05rem;
+  font-weight: 700;
+  border: 1px solid color-mix(in srgb, var(--caja-success) 25%, transparent);
+}
+
+/* Subsection (Métodos de pago) */
+.caja-shell .caja-detalle-card .kanm-card-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid var(--caja-border);
+  border-radius: 12px;
+}
+
+.caja-shell .caja-detalle-card .kanm-card-subsection > .kanm-card-header {
+  padding: 0;
+  border: 0;
+}
+
+.caja-shell .caja-detalle-card .kanm-card-subsection > .kanm-card-header h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.caja-shell .caja-detalle-card .kanm-card-subsection > .kanm-card-header h3::before {
+  content: "💳";
+  font-size: 0.95rem;
+}
+
+.caja-shell .caja-detalle-card .kanm-card-subsection .kanm-form-grid {
+  margin: 0;
+}
+
+.caja-shell .caja-detalle-card .kanm-form-grid.cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* ============================================================
+   RESUMEN (totales)
+   ============================================================ */
+.caja-shell .caja-resumen {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, #fff 0%, #fafbfd 100%);
+  border: 1px solid var(--caja-border);
+  border-radius: 12px;
+}
+
+.caja-shell .caja-resumen .flex-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.88rem;
+  color: var(--caja-muted);
+  padding: 4px 0;
+}
+
+.caja-shell .caja-resumen .flex-between span:last-child {
+  font-weight: 600;
+  color: var(--caja-text);
+}
+
+.caja-shell .caja-resumen .flex-between.total {
+  border-top: 1px dashed var(--caja-border);
+  padding-top: 10px;
+  margin-top: 6px;
+  font-size: 1rem;
+  color: var(--caja-text);
+  font-weight: 700;
+}
+
+.caja-shell .caja-resumen .flex-between.total span:last-child {
+  color: var(--caja-primary);
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.caja-shell .caja-resumen .caja-resumen-secundario {
+  font-size: 0.82rem;
+  color: var(--caja-success);
+}
+
+.caja-shell .caja-resumen .caja-resumen-secundario span:last-child {
+  color: var(--caja-success);
+}
+
+.caja-shell .caja-resumen .caja-resumen-restante {
+  background: color-mix(in srgb, var(--caja-primary) 8%, transparent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 4px;
+  border: 1px solid color-mix(in srgb, var(--caja-primary) 22%, transparent);
+}
+
+.caja-shell .caja-resumen .caja-resumen-restante span:last-child {
+  color: var(--caja-primary);
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+/* ============================================================
+   ACCIONES (botones grandes)
+   ============================================================ */
+.caja-shell .caja-detalle-card .caja-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--caja-border);
+}
+
+.caja-shell .caja-detalle-card .caja-acciones .kanm-button {
+  flex: 1 1 auto;
+  padding: 11px 16px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  border-radius: 11px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.caja-shell .caja-detalle-card .caja-acciones .kanm-button.primary {
+  background: linear-gradient(135deg, var(--caja-primary), color-mix(in srgb, var(--caja-primary) 78%, #6366f1));
+  border: none;
+  color: #fff;
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--caja-primary) 30%, transparent);
+  transition: transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.caja-shell .caja-detalle-card .caja-acciones .kanm-button.primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--caja-primary) 40%, transparent);
+}
+
+.caja-shell .caja-detalle-card .caja-acciones .kanm-button.primary::before {
+  content: "✓";
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.caja-shell .caja-detalle-card .caja-acciones .kanm-button.secondary::before {
+  content: "👁";
+  font-size: 0.92rem;
+}
+
+/* Caja factura (post-cobro) */
+.caja-shell .caja-factura {
+  margin-top: 4px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--caja-success) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--caja-success) 25%, transparent);
+  border-radius: 12px;
+}
+
+.caja-shell .caja-factura .kanm-subtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--caja-success);
+  margin: 0 0 8px;
+}
+
+.caja-shell .caja-factura .kanm-subtitle::before {
+  content: "✅";
+}
+
+.caja-shell .caja-factura-info {
+  font-size: 0.88rem;
+  color: var(--caja-text);
+  margin-bottom: 10px;
+}
+
+/* ============================================================
+   CUADRE: card unica con secciones
+   ============================================================ */
+.caja-shell .caja-cuadre-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.caja-shell .caja-cuadre-card > .kanm-card-header {
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--caja-border);
+}
+
+.caja-shell .caja-cuadre-card > .kanm-card-header h2::before {
+  content: "📊";
+  font-size: 1rem;
+}
+
+.caja-shell .caja-cuadre-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.caja-shell .caja-cuadre-columns {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.caja-shell .caja-cuadre-section {
+  padding: 14px 16px;
+  background: linear-gradient(180deg, #fff 0%, #fafbfd 100%);
+  border: 1px solid var(--caja-border);
+  border-radius: 12px;
+}
+
+.caja-shell .caja-cuadre-title {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--caja-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.caja-shell .caja-cuadre-section:nth-child(1) .caja-cuadre-title::before {
+  content: "📅";
+}
+
+.caja-shell .caja-cuadre-section:nth-child(2) .caja-cuadre-title::before {
+  content: "⚖️";
+}
+
+.caja-shell .caja-cuadre-card .caja-cuadre-col:nth-child(2) .caja-cuadre-section .caja-cuadre-title::before {
+  content: "💳";
+}
+
+.caja-shell .caja-cuadre-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.caja-shell .caja-cuadre-grid .kanm-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--caja-border);
+  border-radius: 10px;
+}
+
+.caja-shell .caja-cuadre-grid .kanm-input-group:focus-within {
+  border-color: color-mix(in srgb, var(--caja-primary) 45%, transparent);
+  box-shadow: 0 0 0 3px var(--caja-primary-soft);
+}
+
+.caja-shell .caja-cuadre-grid label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--caja-muted);
+  text-transform: uppercase;
+}
+
+.caja-shell .caja-cuadre-grid input,
+.caja-shell .caja-cuadre-grid select {
+  border-radius: 8px;
+  border: 1px solid var(--caja-border);
+  padding: 8px 10px;
+  background: #fff;
+  font-size: 0.92rem;
+  width: 100%;
+  box-sizing: border-box;
+  font-weight: 600;
+  color: var(--caja-text);
+}
+
+.caja-shell .caja-cuadre-grid input:focus,
+.caja-shell .caja-cuadre-grid select:focus {
+  outline: none;
+  border-color: var(--caja-primary);
+  box-shadow: 0 0 0 2px var(--caja-primary-soft);
+}
+
+.caja-shell .caja-cuadre-grid input[readonly],
+.caja-shell .caja-cuadre-grid input[disabled] {
+  background: #f5f6f8;
+  color: var(--caja-text);
+}
+
+.caja-shell .cuadre-diferencia {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 700;
+  text-align: center;
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--caja-text);
+}
+
+.caja-shell .cuadre-diferencia[data-sign="positive"] {
+  background: color-mix(in srgb, var(--caja-success) 12%, transparent);
+  color: var(--caja-success);
+}
+
+.caja-shell .cuadre-diferencia[data-sign="negative"] {
+  background: color-mix(in srgb, var(--caja-danger) 12%, transparent);
+  color: var(--caja-danger);
+}
+
+/* Resumen cards del cuadre */
+.caja-shell .cuadre-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.caja-shell .cuadre-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #fff 0%, #fafbfd 100%);
+  border: 1px solid var(--caja-border);
+  border-radius: 12px;
+  box-shadow: var(--caja-shadow-sm);
+}
+
+.caja-shell .cuadre-summary-card .pill-label {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--caja-muted);
+}
+
+.caja-shell .cuadre-summary-card strong {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--caja-text);
+}
+
+.caja-shell .cuadre-summary-card.destacado {
+  background: linear-gradient(135deg, var(--caja-primary-soft), #fff);
+  border-color: color-mix(in srgb, var(--caja-primary) 30%, transparent);
+}
+
+.caja-shell .cuadre-summary-card.destacado strong {
+  color: var(--caja-primary);
+}
+
+/* Salidas y subseccion */
+.caja-shell .caja-cuadre-card .kanm-card-subsection {
+  padding: 14px 16px;
+  background: linear-gradient(180deg, #fff 0%, #fafbfd 100%);
+  border: 1px solid var(--caja-border);
+  border-radius: 12px;
+}
+
+.caja-shell .cuadre-salidas-form {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 10px;
+}
+
+.caja-shell .cuadre-salidas-acciones {
+  display: flex;
+  align-items: center;
+}
+
+.caja-shell .salidas-lista {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.caja-shell .caja-cuadre-card .caja-acciones {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.caja-shell .caja-cuadre-card .caja-acciones .kanm-button {
+  padding: 11px 18px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  border-radius: 11px;
+}
+
+.caja-shell .caja-cuadre-card .caja-acciones .kanm-button.primary {
+  background: linear-gradient(135deg, var(--caja-primary), color-mix(in srgb, var(--caja-primary) 78%, #6366f1));
+  border: none;
+  color: #fff;
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--caja-primary) 30%, transparent);
+}
+
+/* Tabla cuadre */
+.caja-shell .kanm-table-wrapper {
+  margin-top: 12px;
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid var(--caja-border);
+}
+
+/* ============================================================
+   RESPONSIVE: TABLET (981 - 1099 px)
+   ============================================================ */
+@media (max-width: 1099px) {
+  :root {
+    --caja-list-w: 320px;
+  }
+
+  .caja-shell .caja-main {
+    padding: 14px 16px;
+  }
+
+  .caja-tabsbar {
+    padding: 8px 16px;
+  }
+
+  .caja-topbar {
+    padding: 10px 16px;
+  }
+
+  .caja-shell .caja-detalle-card .kanm-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .caja-shell .caja-cuadre-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   RESPONSIVE: TABLET / MOVIL (<= 980 px)
+   ============================================================ */
+@media (max-width: 980px) {
+  :root {
+    --caja-topbar-h: 56px;
+    --caja-tabs-h: 56px;
+  }
+
+  .caja-shell {
+    grid-template-rows: var(--caja-topbar-h) var(--caja-tabs-h) 1fr;
+  }
+
+  /* Topbar compacto */
+  .caja-topbar {
+    padding: 8px 14px;
+  }
+
+  .caja-topbar-business {
+    font-size: 0.92rem;
+  }
+
+  .caja-topbar-role,
+  .caja-topbar-tag {
+    display: none;
+  }
+
+  .caja-topbar-action-label {
+    display: none;
+  }
+
+  .caja-topbar-action {
+    padding: 8px;
+    border-radius: 10px;
+  }
+
+  /* Tabs compactos */
+  .caja-tabsbar {
+    padding: 8px 12px;
+  }
+
+  .caja-shell-body .caja-tabsbar .kanm-tab {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+  }
+
+  /* Workspace 1 columna - lista arriba, detalle abajo */
+  .caja-shell .caja-cobros-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .caja-shell .caja-main {
+    padding: 12px 12px;
+  }
+
+  /* Lista de cuentas: ya no sticky en movil, max-height controlado */
+  .caja-shell .caja-lista-card {
+    position: relative;
+    top: auto;
+    max-height: 540px;
+  }
+
+  /* Form en 1 columna */
+  .caja-shell .caja-detalle-card .kanm-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .caja-shell .caja-detalle-card .kanm-form-grid.cols-2 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Cuadre en 1 columna */
+  .caja-shell .caja-cuadre-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .caja-shell .cuadre-salidas-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   RESPONSIVE: MOVIL PEQUENO (<= 480 px)
+   ============================================================ */
+@media (max-width: 480px) {
+  .caja-topbar-textwrap {
+    display: none;
+  }
+
+  .caja-topbar-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+  }
+
+  .caja-shell-body .caja-tabsbar .kanm-tab .caja-tab-label {
+    display: none;
+  }
+
+  .caja-shell-body .caja-tabsbar .kanm-tab {
+    padding: 9px 14px;
+    min-width: 44px;
+    justify-content: center;
+  }
+
+  .caja-shell-body .caja-tabsbar .kanm-tab .caja-tab-icon {
+    font-size: 1.2rem;
+  }
+
+  .caja-shell-body .caja-tabsbar .kanm-tab.active .caja-tab-label {
+    display: inline;
+    font-size: 0.78rem;
+  }
+
+  .caja-shell .caja-detalle-card .kanm-form-grid.cols-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .caja-shell .cuadre-summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* ============================================================
+   ANIMACIONES
+   ============================================================ */
+@keyframes cajaFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.caja-shell .caja-panel:not(.hidden):not([hidden]) {
+  animation: cajaFadeIn 0.2s ease-out;
+}
+
+@keyframes cajaCardPulse {
+  0%, 100% { box-shadow: 0 6px 18px color-mix(in srgb, var(--caja-primary) 22%, transparent); }
+  50%      { box-shadow: 0 8px 24px color-mix(in srgb, var(--caja-primary) 32%, transparent); }
+}
+
+.caja-shell .caja-pedidos-lista .kanm-card.caja-cuenta-seleccionada {
+  animation: cajaCardPulse 2s ease-in-out infinite;
+}
+
+/* ============================================================
+   ACCESIBILIDAD: foco visible
+   ============================================================ */
+.caja-shell button:focus-visible,
+.caja-shell a:focus-visible,
+.caja-shell input:focus-visible,
+.caja-shell select:focus-visible,
+.caja-shell textarea:focus-visible {
+  outline: 2px solid var(--caja-primary);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   EDGE CASE: notch / safe-area en iOS
+   ============================================================ */
+@supports (padding: max(0px)) {
+  .caja-topbar {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+}
+
+/* ============================================================
+   COMPATIBILIDAD: oculta header viejo
+   ============================================================ */
+.caja-shell-body > .kanm-header,
+.caja-shell-body .kanm-page-header,
+.caja-shell-body > .kanm-header-actions {
+  display: none !important;
+}
+
+/* La tabs vieja .caja-tabs en location vieja -> resetea */
+.caja-shell-body .caja-tabs:not(.caja-tabsbar .caja-tabs) {
+  display: none;
+}
+
+/* En el shell, .caja-tabs dentro de tabsbar usa estilos nuevos */
+.caja-shell-body .caja-tabsbar .caja-tabs {
+  display: flex;
+}

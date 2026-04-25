@@ -160,6 +160,7 @@ const gastosResumenTotal = document.getElementById('gastos-resumen-total');
 const gastosResumenPromedio = document.getElementById('gastos-resumen-promedio');
 const gastosResumenTop = document.getElementById('gastos-resumen-top');
 const gastoForm = document.getElementById('gasto-form');
+const gastoTipoComprobanteInput = document.getElementById('gasto-tipo-comprobante');
 const gastoIdInput = document.getElementById('gasto-id');
 const gastoFechaInput = document.getElementById('gasto-fecha');
 const gastoMontoInput = document.getElementById('gasto-monto');
@@ -393,32 +394,7 @@ const feE44CorrelativoInput = document.getElementById('fe-e44-correlativo');
 const feE44InicioInput = document.getElementById('fe-e44-inicio');
 const feE44FinInput = document.getElementById('fe-e44-fin');
 const feE44VencimientoInput = document.getElementById('fe-e44-vencimiento');
-const feDocEstadoSelect = document.getElementById('fe-doc-estado');
-const feDocRefrescarBtn = document.getElementById('fe-doc-refrescar');
-const feDocTotalEl = document.getElementById('fe-doc-total');
-const feDocPendienteEl = document.getElementById('fe-doc-pendiente');
-const feDocConfigPendienteEl = document.getElementById('fe-doc-config-pendiente');
-const feDocTotalMontoEl = document.getElementById('fe-doc-total-monto');
-const feDocumentosMensaje = document.getElementById('fe-documentos-mensaje');
-const feDocumentosTabla = document.getElementById('fe-documentos-tabla');
-const feManualForm = document.getElementById('fe-manual-form');
-const feManualTipoInput = document.getElementById('fe-manual-tipo');
-const feManualFechaInput = document.getElementById('fe-manual-fecha');
-const feManualRolInput = document.getElementById('fe-manual-rol');
-const feManualNombreInput = document.getElementById('fe-manual-nombre');
-const feManualDocumentoInput = document.getElementById('fe-manual-documento');
-const feManualReferenciaTipoInput = document.getElementById('fe-manual-referencia-tipo');
-const feManualReferenciaEncfInput = document.getElementById('fe-manual-referencia-encf');
-const feManualMotivoInput = document.getElementById('fe-manual-motivo');
-const feManualDescripcionInput = document.getElementById('fe-manual-descripcion');
-const feManualSubtotalInput = document.getElementById('fe-manual-subtotal');
-const feManualImpuestoInput = document.getElementById('fe-manual-impuesto');
-const feManualTotalInput = document.getElementById('fe-manual-total');
-const feManualNotasInput = document.getElementById('fe-manual-notas');
-const feManualGuardarBtn = document.getElementById('fe-manual-guardar');
-const feManualMensaje = document.getElementById('fe-manual-mensaje');
-const feOrigenesTabla = document.getElementById('fe-origenes-tabla');
-const feOrigenesMensaje = document.getElementById('fe-origenes-mensaje');
+// (Elementos DOM del panel viejo 'Facturacion Electronica' removidos.)
 const adminTabs = Array.from(document.querySelectorAll('[data-admin-tab]'));
 const adminSections = Array.from(document.querySelectorAll('[data-admin-section]'));
 const menuPublicoRefrescarBtn = document.getElementById('menu-publico-refrescar');
@@ -443,8 +419,6 @@ let datosReporte607 = [];
 let datosReporte606 = [];
 let cierresCaja = [];
 let feConfigCache = null;
-let feDocumentos = [];
-let feOrigenes = [];
 let detalleCierreActivo = null;
 let detalleAbastecimientoActivo = null;
 let abastecimientoEditId = null;
@@ -1391,257 +1365,9 @@ const guardarConfigFacturacionElectronica = async () => {
   }
 };
 
-const renderDocumentosFacturacionElectronica = (documentos = [], resumen = {}) => {
-  feDocumentos = Array.isArray(documentos) ? documentos : [];
-  if (feDocTotalEl) feDocTotalEl.textContent = String(Number(resumen.total || 0));
-  if (feDocPendienteEl) feDocPendienteEl.textContent = String(Number(resumen.pendiente_xml || 0));
-  if (feDocConfigPendienteEl) feDocConfigPendienteEl.textContent = String(Number(resumen.config_pendiente || 0));
-  if (feDocTotalMontoEl) feDocTotalMontoEl.textContent = formatCurrency(Number(resumen.total_monto || 0));
+// (Funciones del panel viejo 'Facturacion Electronica' eliminadas — el flujo e-CF
+// vive ahora en dgii-ecf.routes.js / public/js admin section 'facturacionEcf')
 
-  if (!feDocumentosTabla) return;
-  if (!feDocumentos.length) {
-    feDocumentosTabla.innerHTML = '<tr><td colspan="9">Sin documentos en cola para este filtro.</td></tr>';
-    return;
-  }
-  feDocumentosTabla.innerHTML = feDocumentos
-    .map((doc) => {
-      const accionLabel = doc.xml_disponible ? 'Regenerar XML' : 'Generar XML';
-      const descargarDisabled = doc.xml_disponible ? '' : 'disabled';
-      return `
-        <tr>
-          <td>${formatDateTime(doc.fecha_emision)}</td>
-          <td>${doc.encf || '--'}</td>
-          <td>${doc.tipo_documento || '--'}</td>
-          <td>${doc.cliente || '--'}<br /><small>${doc.cliente_documento || '--'}</small></td>
-          <td>${doc.mesa || '--'}</td>
-          <td>${formatCurrency(doc.total || 0)}</td>
-          <td>${doc.estado_local || '--'}</td>
-          <td>${doc.track_id || '--'}</td>
-          <td>
-            <div class="admin-report-actions">
-              <button type="button" class="kanm-button ghost" data-fe-doc-action="generar" data-fe-doc-id="${doc.id}">
-                ${accionLabel}
-              </button>
-              <button type="button" class="kanm-button" data-fe-doc-action="enviar" data-fe-doc-id="${doc.id}">
-                Enviar DGII
-              </button>
-              <button
-                type="button"
-                class="kanm-button ghost"
-                data-fe-doc-action="descargar"
-                data-fe-doc-id="${doc.id}"
-                ${descargarDisabled}
-              >
-                Descargar
-              </button>
-            </div>
-          </td>
-        </tr>
-      `;
-    })
-    .join('');
-};
-
-const cargarDocumentosFacturacionElectronica = async (mostrarCarga = true) => {
-  if (!feDocumentosTabla) return;
-  try {
-    if (mostrarCarga) {
-      setMessage(feDocumentosMensaje, 'Cargando documentos e-CF...', 'info');
-    }
-    const params = new URLSearchParams();
-    if (feDocEstadoSelect?.value) {
-      params.set('estado', feDocEstadoSelect.value);
-    }
-    params.set('limit', '100');
-    const resp = await fetchConAutorizacion(`/api/facturacion-electronica/documentos?${params.toString()}`);
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data?.ok === false) {
-      throw new Error(data?.error || 'No se pudieron cargar los documentos e-CF.');
-    }
-    renderDocumentosFacturacionElectronica(data.documentos || [], data.resumen || {});
-    setMessage(feDocumentosMensaje, '', 'info');
-  } catch (error) {
-    console.error('Error cargando documentos de facturación electrónica:', error);
-    setMessage(
-      feDocumentosMensaje,
-      error.message || 'No se pudieron cargar los documentos de facturación electrónica.',
-      'error'
-    );
-  }
-};
-
-const generarXmlDocumentoFacturacionElectronica = async (documentoId, { descargar = false } = {}) => {
-  const id = Number(documentoId);
-  if (!Number.isFinite(id) || id <= 0) {
-    setMessage(feDocumentosMensaje, 'Documento FE inválido.', 'error');
-    return;
-  }
-  try {
-    setMessage(feDocumentosMensaje, 'Generando XML e-CF...', 'info');
-    const resp = await fetchJsonAutorizado(`/api/facturacion-electronica/documentos/${id}/generar-xml`, {
-      method: 'POST',
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data?.ok === false) {
-      throw new Error(data?.error || 'No se pudo generar el XML del documento.');
-    }
-    if (descargar && data?.xml_borrador) {
-      descargarBlob(
-        data?.nombre_archivo || `${data?.documento?.encf || 'ecf'}.xml`,
-        new Blob([data.xml_borrador], { type: 'application/xml;charset=utf-8' })
-      );
-    }
-    await cargarDocumentosFacturacionElectronica(false);
-    setMessage(
-      feDocumentosMensaje,
-      `XML ${descargar ? 'generado y descargado' : 'generado'} para ${data?.documento?.encf || 'el documento'}.`,
-      'info'
-    );
-  } catch (error) {
-    console.error('Error generando XML FE:', error);
-    setMessage(feDocumentosMensaje, error.message || 'No se pudo generar el XML del documento.', 'error');
-  }
-};
-
-const enviarDocumentoFacturacionElectronica = async (documentoId) => {
-  const id = Number(documentoId);
-  if (!Number.isFinite(id) || id <= 0) {
-    setMessage(feDocumentosMensaje, 'Documento FE inválido.', 'error');
-    return;
-  }
-  try {
-    setMessage(feDocumentosMensaje, 'Enviando e-CF a DGII...', 'info');
-    const resp = await fetchJsonAutorizado(`/api/facturacion-electronica/documentos/${id}/enviar`, {
-      method: 'POST',
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data?.ok === false) {
-      throw new Error(data?.error || 'No se pudo enviar el documento FE.');
-    }
-    await cargarDocumentosFacturacionElectronica(false);
-    const trackId = data?.documento?.track_id || data?.envio?.extracted?.trackId || '--';
-    setMessage(
-      feDocumentosMensaje,
-      `Documento ${data?.documento?.encf || ''} enviado. Estado: ${data?.documento?.estado_local || '--'} | Track: ${trackId}`,
-      'info'
-    );
-  } catch (error) {
-    console.error('Error enviando documento FE:', error);
-    setMessage(feDocumentosMensaje, error.message || 'No se pudo enviar el documento FE.', 'error');
-  }
-};
-
-const renderOrigenesFacturacionElectronica = (origenes = []) => {
-  feOrigenes = Array.isArray(origenes) ? origenes : [];
-  if (!feOrigenesTabla) return;
-  if (!feOrigenes.length) {
-    feOrigenesTabla.innerHTML = '<tr><td colspan="5">Sin cobertura configurada.</td></tr>';
-    return;
-  }
-  feOrigenesTabla.innerHTML = feOrigenes
-    .map((item) => {
-      const filas = Array.isArray(item.origenes) && item.origenes.length ? item.origenes : [{ descripcion: '--' }];
-      return filas
-        .map(
-          (origen, index) => `
-            <tr>
-              <td>${index === 0 ? item.label || item.tipo_documento || '--' : ''}</td>
-              <td>${origen.modulo || '--'}<br /><small>${origen.origen_documento || '--'}</small></td>
-              <td>${origen.modo || '--'}</td>
-              <td>${Number(item.secuencia_activa || 0) === 1 ? 'Activa' : 'Pendiente'}</td>
-              <td>${origen.descripcion || '--'}</td>
-            </tr>
-          `
-        )
-        .join('');
-    })
-    .join('');
-};
-
-const cargarOrigenesFacturacionElectronica = async () => {
-  if (!feOrigenesTabla) return;
-  try {
-    setMessage(feOrigenesMensaje, 'Cargando cobertura e-CF...', 'info');
-    const resp = await fetchConAutorizacion('/api/facturacion-electronica/origenes');
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data?.ok === false) {
-      throw new Error(data?.error || 'No se pudo cargar la cobertura de facturación electrónica.');
-    }
-    renderOrigenesFacturacionElectronica(data.origenes || []);
-    setMessage(feOrigenesMensaje, '', 'info');
-  } catch (error) {
-    console.error('Error cargando cobertura de facturación electrónica:', error);
-    setMessage(
-      feOrigenesMensaje,
-      error.message || 'No se pudo cargar la cobertura de facturación electrónica.',
-      'error'
-    );
-  }
-};
-
-const recalcularTotalManualFacturacionElectronica = () => {
-  if (!feManualTotalInput) return;
-  if (feManualTotalInput.dataset.userEdited === '1') return;
-  const subtotal = parseFloat(feManualSubtotalInput?.value || '0') || 0;
-  const impuesto = parseFloat(feManualImpuestoInput?.value || '0') || 0;
-  feManualTotalInput.value = String((subtotal + impuesto).toFixed(2));
-};
-
-const limpiarFormularioManualFacturacionElectronica = () => {
-  if (!feManualForm) return;
-  feManualForm.reset();
-  if (feManualFechaInput) feManualFechaInput.value = getLocalDateISO(new Date());
-  if (feManualImpuestoInput) feManualImpuestoInput.value = '0';
-  if (feManualTotalInput) {
-    feManualTotalInput.value = '';
-    feManualTotalInput.dataset.userEdited = '0';
-  }
-};
-
-const guardarDocumentoFacturacionElectronicaManual = async () => {
-  if (!feManualForm) return;
-  try {
-    if (feManualGuardarBtn) {
-      feManualGuardarBtn.disabled = true;
-      feManualGuardarBtn.classList.add('is-loading');
-    }
-    setMessage(feManualMensaje, '', 'info');
-    const payload = {
-      tipo_documento: feManualTipoInput?.value || 'E33',
-      fecha: feManualFechaInput?.value || getLocalDateISO(new Date()),
-      rol_contraparte: feManualRolInput?.value || 'cliente',
-      contraparte_nombre: feManualNombreInput?.value?.trim() || '',
-      contraparte_documento: feManualDocumentoInput?.value?.trim() || '',
-      referencia_tipo_documento: feManualReferenciaTipoInput?.value?.trim() || '',
-      referencia_encf: feManualReferenciaEncfInput?.value?.trim() || '',
-      referencia_motivo: feManualMotivoInput?.value?.trim() || '',
-      descripcion: feManualDescripcionInput?.value?.trim() || '',
-      subtotal: parseFloat(feManualSubtotalInput?.value || '0') || 0,
-      impuesto: parseFloat(feManualImpuestoInput?.value || '0') || 0,
-      total: parseFloat(feManualTotalInput?.value || '0') || 0,
-      notas: feManualNotasInput?.value?.trim() || '',
-    };
-    const resp = await fetchJsonAutorizado('/api/facturacion-electronica/documentos/manual', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data?.ok === false) {
-      throw new Error(data?.error || 'No se pudo registrar el documento manual.');
-    }
-    setMessage(feManualMensaje, `Documento ${data?.documento?.encf || ''} registrado.`, 'info');
-    limpiarFormularioManualFacturacionElectronica();
-    await Promise.all([cargarDocumentosFacturacionElectronica(false), cargarOrigenesFacturacionElectronica()]);
-  } catch (error) {
-    console.error('Error registrando documento FE manual:', error);
-    setMessage(feManualMensaje, error.message || 'No se pudo registrar el documento.', 'error');
-  } finally {
-    if (feManualGuardarBtn) {
-      feManualGuardarBtn.disabled = false;
-      feManualGuardarBtn.classList.remove('is-loading');
-    }
-  }
-};
 
 const restaurarSesionEmpresa = () => {
   const sessionApi = window.KANMSession;
@@ -2128,7 +1854,6 @@ const tabsSoloAdmin = [
   'gastos',
   'menuPublico',
   'ventas',
-  'facturacionElectronica',
   'facturacionEcf',
   'analisis',
   'cuadres',
@@ -5702,6 +5427,7 @@ const obtenerValoresGasto = () => {
   const proveedor = gastoProveedorInput?.value.trim();
   const descripcion = gastoDescripcionInput?.value.trim();
   const comprobante_ncf = gastoNcfInput?.value.trim();
+  const tipo_comprobante = gastoTipoComprobanteInput?.value.trim() || '';
   const referencia = gastoReferenciaInput?.value.trim();
   const es_recurrente = gastoRecurrenteInput?.checked ?? false;
   const frecuencia = gastoFrecuenciaInput?.value || '';
@@ -5717,6 +5443,7 @@ const obtenerValoresGasto = () => {
     proveedor,
     descripcion,
     comprobante_ncf,
+    tipo_comprobante,
     referencia,
     es_recurrente,
     frecuencia,
@@ -7394,6 +7121,7 @@ const crearControlMetodoPagoCierre = (pedido, cierreId) => {
     return texto;
   }
 
+  const cuentaVisible = pedido?.numero_cuenta_negocio || cuentaId;
   const metodoLabel = obtenerMetodoPagoLabelCuadre(pedido);
   const metodoValor = obtenerMetodoPagoValorCuadre(pedido);
   const wrapper = document.createElement('div');
@@ -7405,7 +7133,7 @@ const crearControlMetodoPagoCierre = (pedido, cierreId) => {
   select.dataset.cierreId = String(cierreId);
   select.dataset.cuentaId = String(cuentaId);
   select.dataset.metodoActual = metodoValor;
-  select.setAttribute('aria-label', `Metodo de pago para cuenta #${cuentaId}`);
+  select.setAttribute('aria-label', `Metodo de pago para cuenta #${cuentaVisible}`);
   select.title = `Metodo de pago actual: ${metodoLabel}`;
 
   if (metodoValor === 'mixto' || metodoValor === 'sin_registrar') {
@@ -7763,7 +7491,7 @@ const renderHistorialCocina = (items = []) => {
         item.preparador_nombre || item.cocinero_nombre || item.bartender_nombre || 'No asignado';
       return `
         <tr>
-          <td>${item.cuenta_id || 'N/D'}</td>
+          <td>${item.numero_cuenta_negocio || item.cuenta_id || 'N/D'}</td>
           <td>${item.pedido_id}</td>
           <td>${item.item_nombre || 'N/D'}</td>
           <td>${item.cantidad}</td>
@@ -7933,14 +7661,6 @@ const recargarEstadoAdmin = async (mostrarCarga = false) => {
     }
     if (permitirB01Input || permitirB02Input || permitirB14Input) {
       tareas.push(cargarConfigSecuencias());
-    }
-
-    const feSectionActiva = !document
-      .getElementById('admin-section-facturacion-electronica')
-      ?.classList.contains('hidden');
-    if (feSectionActiva && feDocumentosTabla) {
-      tareas.push(cargarDocumentosFacturacionElectronica(false));
-      tareas.push(cargarOrigenesFacturacionElectronica());
     }
 
     const dgiiSectionActiva = !document.getElementById('admin-section-dgii-paso2')?.classList.contains('hidden');
@@ -9101,6 +8821,85 @@ const initNegociosAdmin = () => {
 
 let ecfPanelCargado = false;
 
+// Helper: abre una URL del API inyectando el header de autorizacion.
+// - opciones.download === true => fuerza la descarga del archivo (no se abre el visor del navegador)
+// - opciones.filename            => nombre sugerido para la descarga; si no se pasa, se intenta
+//                                   leer del header Content-Disposition que envia el API.
+// Necesario porque <a target="_blank"> no envia headers, y el API requiere Bearer token.
+const abrirEcfEnNuevaPestana = async (url, opciones = {}) => {
+  try {
+    const res = await fetchConAutorizacion(url);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      let msg = `HTTP ${res.status}`;
+      try { msg = JSON.parse(txt).error || msg; } catch (_) { if (txt) msg = txt.slice(0, 200); }
+      alert('No se pudo abrir el documento: ' + msg);
+      return;
+    }
+    // Si la URL pide auto-print (?print=1) o el caller lo solicita, modificamos el
+    // HTML antes de blobificarlo: el query string se pierde en blob:URLs.
+    const wantPrint = opciones.autoprint === true || /[?&]print=1\b/.test(url);
+    let blob;
+    if (wantPrint && !opciones.download) {
+      let html = await res.text();
+      const printScript = '<script>window.addEventListener(\'load\',function(){setTimeout(function(){window.print();},400);});</script>';
+      if (/<\/body>/i.test(html)) {
+        html = html.replace(/<\/body>/i, printScript + '</body>');
+      } else {
+        html += printScript;
+      }
+      blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    } else {
+      blob = await res.blob();
+    }
+    const blobUrl = URL.createObjectURL(blob);
+    if (opciones.download) {
+      // Forzar descarga real (la DGII pide subir el .xml firmado tal cual)
+      let filename = opciones.filename || '';
+      if (!filename) {
+        const cd = res.headers.get('Content-Disposition') || '';
+        const match = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+        filename = match ? decodeURIComponent(match[1]) : 'documento.xml';
+      }
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      return;
+    }
+    const win = window.open(blobUrl, '_blank');
+    if (!win) {
+      alert('Tu navegador bloque\u00f3 la ventana emergente. Permite popups para localhost:3000 e int\u00e9ntalo de nuevo.');
+      URL.revokeObjectURL(blobUrl);
+      return;
+    }
+    // Liberar el Blob URL despues de un rato para no acumular memoria
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+};
+
+// Delegacion global para enlaces .ecf-link (Ver RI / XML / RFCE) sin importar que tabla los renderice.
+// Si el atributo data-ecf-download="1" esta presente, o la URL apunta a un endpoint XML,
+// se fuerza la descarga en disco. Las URLs de representacion (HTML/PDF) se siguen abriendo en pestana.
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('a.ecf-link');
+  if (!link) return;
+  e.preventDefault();
+  const url = link.dataset.ecfUrl || link.getAttribute('href') || '';
+  if (!url) return;
+  const explicitDownload = link.dataset.ecfDownload;
+  let download;
+  if (explicitDownload === '1' || explicitDownload === 'true') download = true;
+  else if (explicitDownload === '0' || explicitDownload === 'false') download = false;
+  else download = /\/api\/dgii\/ecf\/xml(\/|-rfce|-externo)/.test(url);
+  abrirEcfEnNuevaPestana(url, { download, filename: link.dataset.ecfFilename || '' });
+});
+
 const ecfAuthMsg = document.getElementById('ecf-auth-msg');
 const ecfResumenContainer = document.getElementById('ecf-resumen-container');
 const ecfSecuenciasTabla = document.getElementById('ecf-secuencias-tabla');
@@ -9188,12 +8987,16 @@ const cargarEcfPendientes = async () => {
       const badgeClass = estado === 'ACEPTADO' ? 'aceptado'
         : (estado === 'RECHAZADO' || estado === 'ERROR') ? 'rechazado'
         : estado === 'ENVIADO' ? 'enviado' : 'pendiente';
+      const verRi = p.ecf_encf
+        ? `<a class="kanm-button kanm-button--ghost kanm-button--sm ecf-link" href="#" data-ecf-url="/api/dgii/ecf/representacion/${p.id}">Ver RI</a>`
+        : '';
       const acciones = (estado === 'PENDIENTE' || estado === 'ERROR' || estado === 'RECHAZADO')
         ? `<button class="kanm-button kanm-button--primary kanm-button--sm ecf-btn-emitir" data-pedido-id="${p.id}">Emitir</button>
-           <button class="kanm-button kanm-button--outline kanm-button--sm ecf-btn-reintentar" data-pedido-id="${p.id}">Reintentar</button>`
+           <button class="kanm-button kanm-button--outline kanm-button--sm ecf-btn-reintentar" data-pedido-id="${p.id}">Reintentar</button>
+           ${verRi}`
         : (estado === 'ENVIADO'
-          ? `<button class="kanm-button kanm-button--outline kanm-button--sm ecf-btn-consultar" data-pedido-id="${p.id}">Consultar</button>`
-          : '');
+          ? `<button class="kanm-button kanm-button--outline kanm-button--sm ecf-btn-consultar" data-pedido-id="${p.id}">Consultar</button> ${verRi}`
+          : verRi);
       return `<tr>
         <td>${p.id}</td>
         <td>${p.cliente_nombre || '-'}</td>
@@ -9211,10 +9014,100 @@ const cargarEcfPendientes = async () => {
   }
 };
 
+const cargarEcfEmitidos = async () => {
+  const tbody = document.getElementById('ecf-emitidos-tabla');
+  if (!tbody) return;
+  const filtro = document.getElementById('ecf-emitidos-filtro')?.value || '';
+  const qs = filtro ? `?estado=${encodeURIComponent(filtro)}&limit=200` : '?limit=200';
+  try {
+    const res = await fetchConAutorizacion('/api/dgii/ecf/emitidos' + qs);
+    const data = await leerRespuestaApi(res);
+    const pedidos = data?.pedidos || [];
+    if (!pedidos.length) {
+      tbody.innerHTML = '<tr><td colspan="9">No hay e-CF emitidos con ese filtro.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = pedidos.map((p) => {
+      const estado = (p.ecf_estado || 'PENDIENTE').toUpperCase();
+      const badgeClass = estado === 'ACEPTADO' ? 'aceptado'
+        : (estado === 'RECHAZADO' || estado === 'ERROR') ? 'rechazado'
+        : estado === 'ENVIADO' ? 'enviado' : 'pendiente';
+      const verRi = p.ecf_encf
+        ? `<a class="kanm-button kanm-button--ghost kanm-button--sm ecf-link" href="#" data-ecf-url="/api/dgii/ecf/representacion/${p.id}">Ver RI</a>`
+        : '';
+      const verXml = p.ecf_encf
+        ? ` <a class="kanm-button kanm-button--ghost kanm-button--sm ecf-link" href="#" data-ecf-url="/api/dgii/ecf/xml/${p.id}?firmado=1" title="Descargar XML firmado">XML</a>`
+        : '';
+      const verRfce = (p.ecf_encf && Number(p.tiene_rfce) === 1)
+        ? ` <a class="kanm-button kanm-button--ghost kanm-button--sm ecf-link" href="#" data-ecf-url="/api/dgii/ecf/xml-rfce/${p.id}" title="Descargar Resumen de Factura de Consumo (RFCE) firmado">RFCE</a>`
+        : '';
+      return `<tr>
+        <td>${p.id}</td>
+        <td>${p.cliente || '-'}</td>
+        <td><span class="ecf-badge ecf-badge--enviado">${p.ecf_tipo || p.tipo_comprobante || '-'}</span></td>
+        <td><code>${p.ecf_encf || '-'}</code></td>
+        <td><strong>${Number(p.total || 0).toFixed(2)}</strong></td>
+        <td><span class="ecf-badge ecf-badge--${badgeClass}">${estado}</span></td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(p.ecf_mensaje_dgii || '').replace(/"/g, '&quot;')}">${p.ecf_mensaje_dgii || '-'}</td>
+        <td><code>${p.ecf_codigo_seguridad || '-'}</code></td>
+        <td style="white-space:nowrap;">${verRi}${verXml}${verRfce}</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="9" style="color:red;">Error: ${err.message}</td></tr>`;
+  }
+};
+
+const cargarEcfExternosTodos = async () => {
+  const tbody = document.getElementById('ecf-externos-todos-tabla');
+  if (!tbody) return;
+  try {
+    const res = await fetchConAutorizacion('/api/dgii/ecf/documentos-externos?limit=200');
+    const data = await leerRespuestaApi(res);
+    const docs = data?.documentos || [];
+    if (!docs.length) {
+      tbody.innerHTML = '<tr><td colspan="10">No hay documentos e-CF auto-emitidos todav&iacute;a.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = docs.map((d) => {
+      const estado = (d.ecf_estado || 'PENDIENTE').toUpperCase();
+      const badge = estado === 'ACEPTADO' ? 'aceptado'
+        : (estado === 'RECHAZADO' || estado === 'ERROR') ? 'rechazado'
+        : estado === 'ENVIADO' ? 'enviado' : 'pendiente';
+      const verRi = d.ecf_encf
+        ? `<a class="kanm-button kanm-button--ghost kanm-button--sm ecf-link" href="#" data-ecf-url="/api/dgii/ecf/representacion-externo/${d.id}">Ver RI</a>`
+        : '';
+      return `<tr>
+        <td>${d.id}</td>
+        <td>${d.modulo || '-'}</td>
+        <td>${d.referencia_externa || '-'}</td>
+        <td><span class="ecf-badge ecf-badge--enviado">E${d.ecf_tipo}</span></td>
+        <td><code>${d.ecf_encf || '-'}</code></td>
+        <td>${d.cliente_nombre || '-'}</td>
+        <td><strong>${Number(d.monto_total || 0).toFixed(2)}</strong></td>
+        <td><span class="ecf-badge ecf-badge--${badge}">${estado}</span></td>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(d.ecf_mensaje_dgii || '').replace(/"/g, '&quot;')}">${d.ecf_mensaje_dgii || '-'}</td>
+        <td style="white-space:nowrap;">${verRi}</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="10" style="color:red;">Error: ${err.message}</td></tr>`;
+  }
+};
+
 const cargarEcfPanel = async () => {
-  await Promise.all([cargarEcfResumen(), cargarEcfSecuencias(), cargarEcfPendientes()]);
+  await Promise.all([
+    cargarEcfResumen(),
+    cargarEcfSecuencias(),
+    cargarEcfPendientes(),
+    cargarEcfEmitidos(),
+    cargarEcfExternosTodos(),
+  ]);
   ecfPanelCargado = true;
 };
+
+document.getElementById('ecf-emitidos-filtro')?.addEventListener('change', () => { cargarEcfEmitidos(); });
+document.getElementById('ecf-btn-refresh-emitidos')?.addEventListener('click', () => { cargarEcfEmitidos(); });
 
 // e-CF button handlers (delegated)
 document.getElementById('admin-section-ecf')?.addEventListener('click', async (e) => {
@@ -9737,6 +9630,7 @@ gastoForm?.addEventListener('submit', async (event) => {
     proveedor: valores.proveedor || null,
     descripcion: valores.descripcion || null,
     comprobante_ncf: valores.comprobante_ncf || null,
+    tipo_comprobante: valores.tipo_comprobante || null,
     referencia: valores.referencia || null,
     es_recurrente: valores.es_recurrente ? 1 : 0,
     frecuencia: valores.es_recurrente ? valores.frecuencia : null,
@@ -10320,48 +10214,8 @@ feConfigGuardarBtn?.addEventListener('click', (event) => {
   guardarConfigFacturacionElectronica();
 });
 
-feDocRefrescarBtn?.addEventListener('click', (event) => {
-  event.preventDefault();
-  cargarDocumentosFacturacionElectronica();
-});
-
-feDocEstadoSelect?.addEventListener('change', () => {
-  cargarDocumentosFacturacionElectronica();
-});
-
-feDocumentosTabla?.addEventListener('click', (event) => {
-  const boton = event.target.closest('[data-fe-doc-action]');
-  if (!boton) return;
-  event.preventDefault();
-  const accion = boton.dataset.feDocAction || '';
-  const documentoId = boton.dataset.feDocId || '';
-  if (accion === 'generar') {
-    generarXmlDocumentoFacturacionElectronica(documentoId, { descargar: false });
-    return;
-  }
-  if (accion === 'enviar') {
-    enviarDocumentoFacturacionElectronica(documentoId);
-    return;
-  }
-  if (accion === 'descargar') {
-    generarXmlDocumentoFacturacionElectronica(documentoId, { descargar: true });
-  }
-});
-
-feManualGuardarBtn?.addEventListener('click', (event) => {
-  event.preventDefault();
-  guardarDocumentoFacturacionElectronicaManual();
-});
-
-[feManualSubtotalInput, feManualImpuestoInput].forEach((input) => {
-  input?.addEventListener('input', () => {
-    recalcularTotalManualFacturacionElectronica();
-  });
-});
-
-feManualTotalInput?.addEventListener('input', () => {
-  feManualTotalInput.dataset.userEdited = feManualTotalInput.value ? '1' : '0';
-});
+// Panel "Facturacion Electronica" eliminado. La emision e-CF (incluido el flujo
+// RFCE para E32<250k) vive en la tab "e-CF" (dgii-ecf.routes.js).
 
 dgiiConfigGuardarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
@@ -10517,18 +10371,6 @@ adminTabs.forEach((btn) =>
         console.warn('No se pudieron cargar los accesos del menu publico:', error);
       });
     }
-    if (tab === 'facturacionElectronica') {
-      cargarConfigFacturacionElectronica().catch((error) => {
-        console.warn('No se pudo cargar la configuración FE:', error);
-      });
-      cargarDocumentosFacturacionElectronica().catch((error) => {
-        console.warn('No se pudieron cargar los documentos FE:', error);
-      });
-      cargarOrigenesFacturacionElectronica().catch((error) => {
-        console.warn('No se pudo cargar la cobertura FE:', error);
-      });
-      limpiarFormularioManualFacturacionElectronica();
-    }
     if (tab === 'facturacionEcf') {
       cargarEcfPanel();
     }
@@ -10653,7 +10495,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     cargarConfiguracionFactura(),
     cargarConfigSecuencias(),
     cargarConfigFacturacionElectronica(),
-    cargarOrigenesFacturacionElectronica(),
     cargarCompras(),
     cargarComprasInventario(),
     cargarGastos(),
@@ -10673,11 +10514,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   await consultarReporte607();
   await consultarReporte606();
   await consultarCierresCaja();
-  if (tabInicial === 'facturacionElectronica') {
-    limpiarFormularioManualFacturacionElectronica();
-    await cargarOrigenesFacturacionElectronica();
-    await cargarDocumentosFacturacionElectronica();
-  }
   await cargarHistorialCocina();
   limpiarFormularioUsuario();
   iniciarActualizacionPeriodicaAdmin();
@@ -10701,6 +10537,477 @@ document.addEventListener('visibilitychange', () => {
       console.error('Error al refrescar el panel administrativo al volver a la pesta?a:', error);
     });
   }
+});
+
+/* ==============================================================
+ * Notas Fiscales E33/E34 + Documentos Especiales E44/E45/E46
+ * ============================================================== */
+
+const buildItemRowEcfExterno = (prefix) => {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'admin-detalle-fila';
+  wrapper.style.cssText = 'display: grid; grid-template-columns: 3fr 1fr 1.5fr 1.5fr auto; gap: 8px; margin-bottom: 6px; align-items: end;';
+  wrapper.innerHTML = `
+    <div class="kanm-input-group"><label>Descripción</label><input type="text" class="${prefix}-item-desc" placeholder="Concepto" /></div>
+    <div class="kanm-input-group"><label>Cantidad</label><input type="number" class="${prefix}-item-cant" min="0" step="0.01" value="1" /></div>
+    <div class="kanm-input-group"><label>Precio unitario</label><input type="number" class="${prefix}-item-precio" min="0" step="0.01" value="0.00" /></div>
+    <div class="kanm-input-group"><label>Total línea</label><input type="number" class="${prefix}-item-total" min="0" step="0.01" value="0.00" readonly /></div>
+    <button type="button" class="kanm-button ghost ${prefix}-item-remove" title="Eliminar">×</button>
+  `;
+  const cantInput = wrapper.querySelector(`.${prefix}-item-cant`);
+  const precioInput = wrapper.querySelector(`.${prefix}-item-precio`);
+  const totalInput = wrapper.querySelector(`.${prefix}-item-total`);
+  const recalc = () => {
+    const cant = parseFloat(cantInput.value || 0);
+    const pu = parseFloat(precioInput.value || 0);
+    totalInput.value = (cant * pu).toFixed(2);
+  };
+  cantInput.addEventListener('input', recalc);
+  precioInput.addEventListener('input', recalc);
+  wrapper.querySelector(`.${prefix}-item-remove`).addEventListener('click', () => wrapper.remove());
+  return wrapper;
+};
+
+const recolectarItemsEcfExterno = (containerId, prefix) => {
+  const container = document.getElementById(containerId);
+  if (!container) return [];
+  const filas = Array.from(container.querySelectorAll('.admin-detalle-fila'));
+  return filas.map((fila) => {
+    const desc = fila.querySelector(`.${prefix}-item-desc`)?.value.trim() || '';
+    const cant = parseFloat(fila.querySelector(`.${prefix}-item-cant`)?.value || 0);
+    const pu = parseFloat(fila.querySelector(`.${prefix}-item-precio`)?.value || 0);
+    return { nombre: desc, cantidad: cant, precio_unitario: pu, tipo: 'PRODUCTO' };
+  }).filter((it) => it.nombre && it.cantidad > 0);
+};
+
+// --- Notas Fiscales E33/E34 ---
+const notaFiscalForm = document.getElementById('nota-fiscal-form');
+const notaFiscalMensaje = document.getElementById('nota-fiscal-mensaje');
+const notaItemsContainer = document.getElementById('nota-items-container');
+const notaAddItemBtn = document.getElementById('nota-add-item');
+const notasFiscalesTabla = document.getElementById('notas-fiscales-tabla');
+
+const renderNotasFiscalesTabla = (lista) => {
+  if (!notasFiscalesTabla) return;
+  notasFiscalesTabla.innerHTML = '';
+  if (!lista.length) {
+    notasFiscalesTabla.innerHTML = '<tr><td colspan="8">Sin notas emitidas.</td></tr>';
+    return;
+  }
+  lista.forEach((doc) => {
+    const tr = document.createElement('tr');
+    const verRi = doc.ecf_encf
+      ? `<a class="kanm-button kanm-button--ghost kanm-button--sm ecf-link" href="#" data-ecf-url="/api/dgii/ecf/representacion-externo/${doc.id}">Ver RI</a>`
+      : '';
+    tr.innerHTML = `
+      <td>${doc.id}</td>
+      <td>E${doc.ecf_tipo}</td>
+      <td>${doc.ecf_encf || '-'}</td>
+      <td>${doc.cliente_nombre || '-'}</td>
+      <td>${formatCurrency(doc.monto_total || 0)}</td>
+      <td>${doc.ecf_estado || '-'}</td>
+      <td>${doc.ecf_mensaje_dgii ? String(doc.ecf_mensaje_dgii).slice(0, 80) : '-'}</td>
+      <td>${doc.created_at || '-'} ${verRi}</td>
+    `;
+    notasFiscalesTabla.appendChild(tr);
+  });
+};
+
+const cargarNotasFiscales = async () => {
+  try {
+    const res = await fetchJsonAutorizado('/api/dgii/ecf/documentos-externos?modulo=notas');
+    const data = await res.json().catch(() => ({}));
+    if (data?.ok) renderNotasFiscalesTabla(data.documentos || []);
+  } catch (err) {
+    console.error('Error cargando notas fiscales:', err);
+  }
+};
+
+notaAddItemBtn?.addEventListener('click', () => {
+  notaItemsContainer?.appendChild(buildItemRowEcfExterno('nota'));
+});
+
+// Helper: rellena una fila de items recien creada con valores
+const fillItemRowValues = (fila, prefix, item) => {
+  const desc = fila.querySelector(`.${prefix}-item-desc`);
+  const cant = fila.querySelector(`.${prefix}-item-cant`);
+  const precio = fila.querySelector(`.${prefix}-item-precio`);
+  const total = fila.querySelector(`.${prefix}-item-total`);
+  if (desc) desc.value = item.nombre || '';
+  if (cant) cant.value = Number(item.cantidad || 0);
+  if (precio) precio.value = Number(item.precio_unitario || 0).toFixed(2);
+  if (total) {
+    const tl = Number(item.monto || (Number(item.cantidad || 0) * Number(item.precio_unitario || 0)));
+    total.value = tl.toFixed(2);
+  }
+};
+
+// Auto-completar formulario de nota al ingresar el eNCF referenciado.
+// Busca el comprobante origen (POS o documento externo), trae cliente, items, totales,
+// y popula los campos. El usuario puede luego editar cualquier valor antes de emitir.
+const notaRefEncfInput = document.getElementById('nota-referencia-encf');
+let notaLookupAbort = null;
+let notaLookupUltimo = '';
+const notaLookupEncf = async () => {
+  if (!notaRefEncfInput) return;
+  const encf = notaRefEncfInput.value.trim().toUpperCase();
+  if (!encf) return;
+  if (!/^E\d{12}$/.test(encf)) {
+    setMessage(notaFiscalMensaje, 'eNCF invalido. Formato esperado: E + 12 digitos.', 'error');
+    return;
+  }
+  if (encf === notaLookupUltimo) return;  // evitar relookup de lo mismo
+  notaLookupUltimo = encf;
+  if (notaLookupAbort) try { notaLookupAbort.abort(); } catch (_) {}
+  notaLookupAbort = new AbortController();
+  setMessage(notaFiscalMensaje, `Buscando ${encf}...`, 'info');
+  try {
+    const res = await fetchConAutorizacion(`/api/dgii/ecf/lookup-encf?encf=${encodeURIComponent(encf)}`, {
+      signal: notaLookupAbort.signal,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setMessage(notaFiscalMensaje, data?.error || `No se encontro ${encf}.`, 'error');
+      return;
+    }
+    const data = await res.json();
+    if (!data?.ok) {
+      setMessage(notaFiscalMensaje, data?.error || 'Sin datos.', 'error');
+      return;
+    }
+    // Popular campos referencia
+    const refFechaInput = document.getElementById('nota-referencia-fecha');
+    if (refFechaInput && data.fecha_emision) {
+      // Aceptar tanto YYYY-MM-DD como DD-MM-YYYY
+      let iso = String(data.fecha_emision).slice(0, 10);
+      if (/^\d{2}-\d{2}-\d{4}$/.test(iso)) {
+        const [d, m, y] = iso.split('-');
+        iso = `${y}-${m}-${d}`;
+      }
+      refFechaInput.value = iso;
+    }
+    // Popular cliente
+    const c = data.cliente || {};
+    const rncEl = document.getElementById('nota-cliente-rnc');
+    const nomEl = document.getElementById('nota-cliente-nombre');
+    const dirEl = document.getElementById('nota-cliente-direccion');
+    if (rncEl) rncEl.value = c.documento || '';
+    if (nomEl) nomEl.value = c.nombre || '';
+    if (dirEl) dirEl.value = c.direccion || '';
+    // Popular items: limpiar y crear filas con valores
+    if (notaItemsContainer) {
+      notaItemsContainer.innerHTML = '';
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!items.length) {
+        notaItemsContainer.appendChild(buildItemRowEcfExterno('nota'));
+      } else {
+        items.forEach((it) => {
+          const fila = buildItemRowEcfExterno('nota');
+          fillItemRowValues(fila, 'nota', it);
+          notaItemsContainer.appendChild(fila);
+        });
+      }
+    }
+    // Popular totales
+    const t = data.totales || {};
+    const subEl = document.getElementById('nota-subtotal');
+    const impEl = document.getElementById('nota-impuesto');
+    const totEl = document.getElementById('nota-total');
+    if (subEl) subEl.value = Number(t.subtotal || 0).toFixed(2);
+    if (impEl) impEl.value = Number(t.impuesto || 0).toFixed(2);
+    if (totEl) totEl.value = Number(t.total || 0).toFixed(2);
+
+    const origenLabel = data.origen === 'pedido' ? 'venta POS' : 'documento externo';
+    setMessage(
+      notaFiscalMensaje,
+      `Datos cargados desde ${origenLabel} (${data.ecf_tipo || ''} - ${data.cliente?.nombre || 'sin cliente'}). Revisa antes de emitir.`,
+      'info'
+    );
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    setMessage(notaFiscalMensaje, 'Error: ' + (err.message || err), 'error');
+  }
+};
+
+if (notaRefEncfInput) {
+  notaRefEncfInput.addEventListener('change', notaLookupEncf);
+  notaRefEncfInput.addEventListener('blur', notaLookupEncf);
+}
+
+notaFiscalForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const tipo = document.getElementById('nota-tipo').value;
+  const fecha = document.getElementById('nota-fecha').value;
+  const refEncf = document.getElementById('nota-referencia-encf').value.trim();
+  const refFecha = document.getElementById('nota-referencia-fecha').value;
+  const codigoMod = document.getElementById('nota-codigo-modificacion').value;
+  const items = recolectarItemsEcfExterno('nota-items-container', 'nota');
+
+  if (!refEncf) {
+    setMessage(notaFiscalMensaje, 'eNCF referenciado es obligatorio.', 'error');
+    return;
+  }
+  if (!items.length) {
+    setMessage(notaFiscalMensaje, 'Agrega al menos un concepto.', 'error');
+    return;
+  }
+
+  const subtotal = parseFloat(document.getElementById('nota-subtotal').value || 0);
+  const impuesto = parseFloat(document.getElementById('nota-impuesto').value || 0);
+  const total = parseFloat(document.getElementById('nota-total').value || (subtotal + impuesto));
+
+  const payload = {
+    modulo: 'notas',
+    referencia_externa: refEncf,
+    ecf_tipo: tipo,
+    fecha_emision: fecha || null,
+    referencia_encf: refEncf,
+    referencia_fecha: refFecha || null,
+    codigo_modificacion: codigoMod,
+    comprador: {
+      documento: document.getElementById('nota-cliente-rnc').value.trim(),
+      tipo_documento: 'RNC',
+      nombre: document.getElementById('nota-cliente-nombre').value.trim(),
+      direccion: document.getElementById('nota-cliente-direccion').value.trim(),
+    },
+    items,
+    totales: { subtotal, impuesto, total, descuento: 0 },
+    pagos: { efectivo: total },
+  };
+
+  try {
+    setMessage(notaFiscalMensaje, 'Emitiendo nota...', 'info');
+    const res = await fetchJsonAutorizado('/api/dgii/ecf/emitir-documento', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data?.ok) {
+      setMessage(notaFiscalMensaje, `Nota emitida: ${data.encf || ''} - ${data.estado || ''}`, 'info');
+      notaFiscalForm.reset();
+      notaItemsContainer.innerHTML = '';
+      notaItemsContainer.appendChild(buildItemRowEcfExterno('nota'));
+      await cargarNotasFiscales();
+    } else {
+      setMessage(notaFiscalMensaje, data?.error || data?.mensaje || 'Error al emitir nota.', 'error');
+    }
+  } catch (err) {
+    setMessage(notaFiscalMensaje, err.message || 'Error de red.', 'error');
+  }
+});
+
+// Inicializar primera fila de items
+if (notaItemsContainer && !notaItemsContainer.children.length) {
+  notaItemsContainer.appendChild(buildItemRowEcfExterno('nota'));
+}
+
+// --- Documentos Especiales E44/E45/E46 ---
+const docEspecialForm = document.getElementById('doc-especial-form');
+const docEspecialMensaje = document.getElementById('doc-especial-mensaje');
+const docEspItemsContainer = document.getElementById('doc-esp-items-container');
+const docEspAddItemBtn = document.getElementById('doc-esp-add-item');
+const documentosEspecialesTabla = document.getElementById('documentos-especiales-tabla');
+
+const renderDocumentosEspecialesTabla = (lista) => {
+  if (!documentosEspecialesTabla) return;
+  documentosEspecialesTabla.innerHTML = '';
+  if (!lista.length) {
+    documentosEspecialesTabla.innerHTML = '<tr><td colspan="8">Sin documentos emitidos.</td></tr>';
+    return;
+  }
+  lista.forEach((doc) => {
+    const tr = document.createElement('tr');
+    const verRi = doc.ecf_encf
+      ? `<a class="kanm-button kanm-button--ghost kanm-button--sm ecf-link" href="#" data-ecf-url="/api/dgii/ecf/representacion-externo/${doc.id}">Ver RI</a>`
+      : '';
+    tr.innerHTML = `
+      <td>${doc.id}</td>
+      <td>E${doc.ecf_tipo}</td>
+      <td>${doc.ecf_encf || '-'}</td>
+      <td>${doc.cliente_nombre || '-'}</td>
+      <td>${formatCurrency(doc.monto_total || 0)}</td>
+      <td>${doc.ecf_estado || '-'}</td>
+      <td>${doc.ecf_mensaje_dgii ? String(doc.ecf_mensaje_dgii).slice(0, 80) : '-'}</td>
+      <td>${doc.created_at || '-'} ${verRi}</td>
+    `;
+    documentosEspecialesTabla.appendChild(tr);
+  });
+};
+
+const cargarDocumentosEspeciales = async () => {
+  try {
+    const res = await fetchJsonAutorizado('/api/dgii/ecf/documentos-externos?modulo=especial');
+    const data = await res.json().catch(() => ({}));
+    if (data?.ok) renderDocumentosEspecialesTabla(data.documentos || []);
+  } catch (err) {
+    console.error('Error cargando documentos especiales:', err);
+  }
+};
+
+docEspAddItemBtn?.addEventListener('click', () => {
+  docEspItemsContainer?.appendChild(buildItemRowEcfExterno('doc-esp'));
+});
+
+docEspecialForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const tipo = document.getElementById('doc-esp-tipo').value;
+  const fecha = document.getElementById('doc-esp-fecha').value;
+  const items = recolectarItemsEcfExterno('doc-esp-items-container', 'doc-esp');
+
+  if (!items.length) {
+    setMessage(docEspecialMensaje, 'Agrega al menos un concepto.', 'error');
+    return;
+  }
+
+  const subtotal = parseFloat(document.getElementById('doc-esp-subtotal').value || 0);
+  const impuesto = parseFloat(document.getElementById('doc-esp-impuesto').value || 0);
+  const total = parseFloat(document.getElementById('doc-esp-total').value || (subtotal + impuesto));
+
+  const payload = {
+    modulo: 'especial',
+    referencia_externa: null,
+    ecf_tipo: tipo,
+    fecha_emision: fecha || null,
+    comprador: {
+      documento: document.getElementById('doc-esp-cliente-rnc').value.trim(),
+      tipo_documento: tipo === 'E46' ? 'EXTRANJERO' : 'RNC',
+      nombre: document.getElementById('doc-esp-cliente-nombre').value.trim(),
+      direccion: document.getElementById('doc-esp-cliente-direccion').value.trim(),
+    },
+    items,
+    totales: { subtotal, impuesto, total, descuento: 0 },
+    pagos: { efectivo: total },
+  };
+
+  try {
+    setMessage(docEspecialMensaje, 'Emitiendo e-CF...', 'info');
+    const res = await fetchJsonAutorizado('/api/dgii/ecf/emitir-documento', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data?.ok) {
+      setMessage(docEspecialMensaje, `e-CF emitido: ${data.encf || ''} - ${data.estado || ''}`, 'info');
+      docEspecialForm.reset();
+      docEspItemsContainer.innerHTML = '';
+      docEspItemsContainer.appendChild(buildItemRowEcfExterno('doc-esp'));
+      await cargarDocumentosEspeciales();
+    } else {
+      setMessage(docEspecialMensaje, data?.error || data?.mensaje || 'Error al emitir e-CF.', 'error');
+    }
+  } catch (err) {
+    setMessage(docEspecialMensaje, err.message || 'Error de red.', 'error');
+  }
+});
+
+if (docEspItemsContainer && !docEspItemsContainer.children.length) {
+  docEspItemsContainer.appendChild(buildItemRowEcfExterno('doc-esp'));
+}
+
+// Cargar listas cuando se abren los tabs
+adminTabs.forEach((tab) => {
+  tab.addEventListener('click', () => {
+    const target = tab.dataset.adminTab;
+    if (target === 'notasFiscales') cargarNotasFiscales();
+    if (target === 'documentosEspeciales') cargarDocumentosEspeciales();
+    if (target === 'facturacionEcf') cargarPaso5();
+  });
+});
+
+// ===========================================================================
+// Paso 5 - Representaciones Impresas (Certificacion DGII)
+// ===========================================================================
+const paso5Tabla = document.getElementById('paso5-tabla');
+const paso5Mensaje = document.getElementById('paso5-mensaje');
+const paso5BtnRefresh = document.getElementById('paso5-btn-refresh');
+const paso5BtnAbrirTodas = document.getElementById('paso5-btn-abrir-todas');
+let paso5Slots = [];
+
+const renderPaso5Tabla = (slots) => {
+  if (!paso5Tabla) return;
+  paso5Tabla.innerHTML = '';
+  if (!slots || !slots.length) {
+    paso5Tabla.innerHTML = '<tr><td colspan="7">Sin candidatos.</td></tr>';
+    return;
+  }
+  slots.forEach((s) => {
+    const tr = document.createElement('tr');
+    if (s.disponible && s.documento) {
+      const d = s.documento;
+      tr.innerHTML = `
+        <td><strong>${s.label}</strong></td>
+        <td><code>${d.ecf_encf || '-'}</code></td>
+        <td>${d.cliente_nombre || '-'}</td>
+        <td style="text-align:right;">${formatCurrency(d.monto_total || 0)}</td>
+        <td><span style="color:#064e3b;font-weight:700;">ACEPTADO</span></td>
+        <td>${d.origen === 'pedido' ? 'POS (pedido)' : 'Externo'}</td>
+        <td>
+          <a class="kanm-button kanm-button--primary kanm-button--sm ecf-link"
+             href="#" data-paso5-url="${d.url}">
+            Abrir RI &amp; PDF
+          </a>
+        </td>
+      `;
+    } else {
+      tr.innerHTML = `
+        <td><strong>${s.label}</strong></td>
+        <td colspan="5" style="color:#7f1d1d;font-style:italic;">
+          Sin e-CF ACEPTADO disponible para este tipo. Em&iacute;telo primero.
+        </td>
+        <td><button class="kanm-button kanm-button--ghost kanm-button--sm" disabled>N/A</button></td>
+      `;
+    }
+    paso5Tabla.appendChild(tr);
+  });
+};
+
+const cargarPaso5 = async () => {
+  if (!paso5Tabla) return;
+  try {
+    paso5Tabla.innerHTML = '<tr><td colspan="7">Cargando&hellip;</td></tr>';
+    const res = await fetchJsonAutorizado('/api/dgii/ecf/paso5-candidatos');
+    const data = await res.json().catch(() => ({}));
+    if (data?.ok) {
+      paso5Slots = data.slots || [];
+      renderPaso5Tabla(paso5Slots);
+    } else {
+      paso5Tabla.innerHTML = `<tr><td colspan="7">Error: ${data?.error || 'desconocido'}</td></tr>`;
+    }
+  } catch (err) {
+    paso5Tabla.innerHTML = `<tr><td colspan="7">Error de red: ${err.message || ''}</td></tr>`;
+  }
+};
+
+paso5BtnRefresh?.addEventListener('click', cargarPaso5);
+
+paso5BtnAbrirTodas?.addEventListener('click', async () => {
+  const disponibles = paso5Slots.filter((s) => s.disponible && s.documento?.url);
+  if (!disponibles.length) {
+    setMessage(paso5Mensaje, 'No hay representaciones disponibles para abrir.', 'error');
+    return;
+  }
+  if (disponibles.length < paso5Slots.length) {
+    const faltantes = paso5Slots.filter((s) => !s.disponible).map((s) => s.label).join(', ');
+    if (!confirm(`Faltan ${paso5Slots.length - disponibles.length} tipo(s):\n\n${faltantes}\n\n¿Abrir las ${disponibles.length} disponibles?`)) {
+      return;
+    }
+  }
+  setMessage(paso5Mensaje, `Abriendo ${disponibles.length} pesta\u00f1as. El navegador puede pedir permiso para pop-ups.`, 'info');
+  for (let i = 0; i < disponibles.length; i++) {
+    const s = disponibles[i];
+    // Espaciar 350ms entre aperturas para evitar bloqueo de pop-ups.
+    if (i > 0) await new Promise((r) => setTimeout(r, 350));
+    abrirEcfEnNuevaPestana(s.documento.url, { autoprint: true });
+  }
+});
+
+// Delegacion: links Abrir RI & PDF — usar abrirEcfEnNuevaPestana para enviar
+// el JWT de admin (el endpoint requiere session header, no cookie).
+paso5Tabla?.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-paso5-url]');
+  if (!a) return;
+  e.preventDefault();
+  abrirEcfEnNuevaPestana(a.dataset.paso5Url, { autoprint: true });
 });
 
 

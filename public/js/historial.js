@@ -49,6 +49,7 @@ const expandirPedidosAgrupados = (grupos = []) =>
     (cuenta.pedidos || []).map((pedido) => ({
       ...pedido,
       cuenta_id: cuenta.cuenta_id,
+      numero_cuenta_negocio: cuenta.numero_cuenta_negocio ?? pedido.numero_cuenta_negocio ?? null,
       mesa: pedido.mesa ?? cuenta.mesa,
       cliente: pedido.cliente ?? cuenta.cliente,
       modo_servicio: pedido.modo_servicio ?? cuenta.modo_servicio,
@@ -248,9 +249,10 @@ const renderTabla = (pedidos) => {
       const descuento = Number(pedido.descuento_monto) || 0;
       const totalFinal = calcularTotalFinal(pedido);
 
+      const cuentaVisible = pedido.numero_cuenta_negocio || pedido.cuenta_id || pedido.id;
       return `
         <tr>
-          <td>${pedido.id}</td>
+          <td>${cuentaVisible}</td>
           <td>${fechaFormateada}</td>
           <td>${mesaCliente}</td>
           <td>${formatearMoneda(pedido.subtotal)}</td>
@@ -269,7 +271,7 @@ const renderTabla = (pedidos) => {
             <div class="tabla-acciones">
               <button type="button" class="kanm-button ghost-danger historial-eliminar" data-id="${
                 pedido.id
-              }">Eliminar</button>
+              }" data-cuenta="${cuentaVisible}">Eliminar</button>
             </div>
           </td>
         </tr>
@@ -444,10 +446,11 @@ const inicializarFiltros = () => {
     if (botonEliminar) {
       event.preventDefault();
       const idEliminar = Number(botonEliminar.dataset.id);
+      const cuentaVisible = botonEliminar.dataset.cuenta || idEliminar;
       if (Number.isInteger(idEliminar) && idEliminar > 0) {
         abrirModalEliminar({
           pedidoId: idEliminar,
-          descripcion: `Se eliminará el pedido #${idEliminar} del historial y reportes asociados.`,
+          descripcion: `Se eliminará la cuenta #${cuentaVisible} del historial y reportes asociados.`,
         });
       }
       return;

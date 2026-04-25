@@ -42,7 +42,18 @@ const determineTipoEcf = (tipoComprobante) => {
   return TIPO_COMPROBANTE_MAP[raw] || null;
 };
 
-const ecfTipoNumerico = (ecfTipo) => ECF_TIPO_NUMERICO[ecfTipo] || '';
+const ecfTipoNumerico = (ecfTipo) => {
+  const raw = String(ecfTipo || '').toUpperCase().trim();
+  if (!raw) return '';
+  // Aceptar forma con prefijo: 'E33' -> '33'
+  if (ECF_TIPO_NUMERICO[raw]) return ECF_TIPO_NUMERICO[raw];
+  // Aceptar forma sin prefijo: '33' -> '33' (siempre que sea un valor conocido)
+  if (/^\d{2}$/.test(raw)) {
+    const valoresValidos = Object.values(ECF_TIPO_NUMERICO);
+    if (valoresValidos.includes(raw)) return raw;
+  }
+  return '';
+};
 
 // ---------------------------------------------------------------------------
 // DGII unit mapping
@@ -143,14 +154,18 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
     payload.IndicadorNotaCredito = '0';
   }
 
-  // IndicadorMontoGravado: solo para 31, 32, 34, 41, 45
-  const tiposConIndicadorGravado = ['31', '32', '34', '41', '45'];
+  // IndicadorMontoGravado: requerido para 31, 32, 33, 34, 41, 45
+  // (E33 lo exige tras el reset de pruebas DGII de 04/2026 — antes era opcional.)
+  const tiposConIndicadorGravado = ['31', '32', '33', '34', '41', '45'];
   if (tiposConIndicadorGravado.includes(tipoEcf)) {
     payload.IndicadorMontoGravado = deriveIndicadorMontoGravado(pedido);
   }
 
-  // TipoIngresos: solo para 31, 32, 33, 44, 45, 46 (E34 no lo usa segun XSD)
-  const tiposConTipoIngresos = ['31', '32', '33', '44', '45', '46'];
+  // TipoIngresos: requerido para 31, 32, 33, 34, 44, 45, 46.
+  // (E33 y E34 lo requieren tras el reset de pruebas DGII de 04/2026 — antes era
+  //  opcional para E34, ahora la DGII rechaza con "TipoIngresos no es válido"
+  //  si falta. E41/E43/E47 NO lo usan.)
+  const tiposConTipoIngresos = ['31', '32', '33', '34', '44', '45', '46'];
   if (tiposConTipoIngresos.includes(tipoEcf)) {
     payload.TipoIngresos = '01';
   }
@@ -208,20 +223,20 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
 
     payload[`NumeroLinea[${i}]`] = String(i + 1);
 
-    // IndicadorFacturacion segun tipo e-CF
-    // E43: solo exento(3)/no facturable(4). E44: exento(3)/no facturable(4). E47: no facturable(4).
-    // E33 (Nota de Credito): usar '4' (no facturable), cuando no hay ITBIS, para evitar
-    // validacion DGII de IndicadorMontoGravado en IdDoc.
-    // 1=Gravado(18%), 2=Tasa cero(0%), 3=Exento, 4=No facturable
+    // IndicadorFacturacion segun tipo e-CF (codigos DGII):
+    //   1 = Gravado tasa 18%      → MontoGravadoI1
+    //   2 = Gravado tasa 16%      → MontoGravadoI2
+    //   3 = Gravado tasa 0%       → MontoGravadoI3 (E46 Exportaciones)
+    //   4 = Exento                → MontoExento
+    // E43/E44/E47 solo permiten exento (4). E46 (Exportaciones) usa tasa cero (3).
+    // Para el resto (E31/E32/E33/E34/E45): si hay ITBIS usa '1', si no usa '4' (Exento).
     let indicadorFact;
     if (tipoEcf === '43' || tipoEcf === '44' || tipoEcf === '47') {
       indicadorFact = '4';
-    } else if (tipoEcf === '33') {
-      indicadorFact = Number(pedido.impuesto || 0) > 0 ? '1' : '4';
     } else if (tipoEcf === '46') {
       indicadorFact = '3';
     } else {
-      indicadorFact = Number(pedido.impuesto || 0) > 0 ? '1' : '3';
+      indicadorFact = Number(pedido.impuesto || 0) > 0 ? '1' : '4';
     }
     payload[`IndicadorFacturacion[${i}]`] = indicadorFact;
 
@@ -419,6 +434,97 @@ const determineEcfFlujo = (ecfTipo, montoTotal) => {
   return 'ECF_NORMAL';
 };
 
+// ---------------------------------------------------------------------------
+// Direct payload builder (compras / gastos / notas / especiales)
+// Adapts raw external data to the format expected by buildEcfPayloadFromPedido
+// ---------------------------------------------------------------------------
+
+const buildEcfPayloadDirecto = ({
+  ecfTipo,
+  emisor = {},
+  comprador = {},
+  items = [],
+  totales = {},
+  fechaEmision = null,
+  pagos = {},
+  encfData,
+  configDgii,
+  // Solo para notas (E33/E34)
+  referenciaEncf = null,
+  referenciaFecha = null,
+  codigoModificacion = null,
+}) => {
+  const tipoNum = ecfTipoNumerico(ecfTipo);
+  if (!tipoNum) throw new Error(`Tipo e-CF '${ecfTipo}' no valido`);
+
+  // Construir pseudo-pedido con campos que espera buildEcfPayloadFromPedido
+  const pseudoPedido = {
+    ecf_tipo: tipoNum,
+    fecha_factura: fechaEmision || null,
+    subtotal: Number(totales.subtotal || 0),
+    impuesto: Number(totales.impuesto || 0),
+    total: Number(totales.total || 0),
+    descuento_monto: Number(totales.descuento || 0),
+    pago_efectivo: Number(pagos.efectivo || 0),
+    pago_tarjeta: Number(pagos.tarjeta || 0),
+    pago_transferencia: Number(pagos.transferencia || 0),
+    pago_credito: Number(pagos.credito || 0),
+  };
+
+  // Pseudo-detalle: items en formato de detalle_pedido
+  const pseudoDetalle = items.map((it, idx) => ({
+    cantidad: Number(it.cantidad || 1),
+    precio_unitario: Number(it.precio_unitario || 0),
+    descuento_monto: Number(it.descuento_monto || 0),
+    nombre_producto: it.nombre || it.descripcion || `Item ${idx + 1}`,
+    tipo_producto: it.tipo === 'SERVICIO' ? 'INSUMO' : 'PRODUCTO',
+    unidad_base: it.unidad_base || 'UND',
+    producto_id: it.producto_id || null,
+  }));
+
+  // Pseudo-cliente
+  const pseudoCliente = {
+    documento: comprador.documento || null,
+    tipo_documento: comprador.tipo_documento || null,
+    nombre: comprador.nombre || null,
+    email: comprador.email || null,
+    direccion: comprador.direccion || null,
+  };
+
+  // Pseudo-negocio (datos del emisor)
+  const pseudoNegocio = {
+    rnc: emisor.rnc || configDgii?.rnc_emisor || '',
+    nombre: emisor.nombre || '',
+    direccion: emisor.direccion || null,
+    telefono: emisor.telefono || null,
+  };
+
+  // Notas (E33/E34) usan buildNotaEcfPayload
+  if (tipoNum === '33' || tipoNum === '34') {
+    return buildNotaEcfPayload({
+      pedido: pseudoPedido,
+      detalle: pseudoDetalle,
+      cliente: pseudoCliente,
+      negocio: pseudoNegocio,
+      encfData,
+      configDgii,
+      referenciaEncf: referenciaEncf || '',
+      referenciaFecha: referenciaFecha || '',
+      codigoModificacion: codigoModificacion || (tipoNum === '33' ? '3' : '1'),
+    });
+  }
+
+  // Resto: usar el builder estandar
+  return buildEcfPayloadFromPedido({
+    pedido: pseudoPedido,
+    detalle: pseudoDetalle,
+    cliente: pseudoCliente,
+    negocio: pseudoNegocio,
+    encfData,
+    configDgii,
+  });
+};
+
 module.exports = {
   TIPO_COMPROBANTE_MAP,
   ECF_TIPO_NUMERICO,
@@ -430,5 +536,6 @@ module.exports = {
   buildEcfPayloadFromPedido,
   buildResumenFcPayload,
   buildNotaEcfPayload,
+  buildEcfPayloadDirecto,
   determineEcfFlujo,
 };

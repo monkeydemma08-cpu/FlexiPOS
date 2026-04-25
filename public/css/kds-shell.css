@@ -1,0 +1,1069 @@
+/*
+ * KDS Shell (Kitchen Display System) - cocina + bar
+ * Estructura compartida: topbar + tabs + workspace de tarjetas grandes.
+ * Diseño optimizado para visibilidad rápida en PC, tablet y celular.
+ */
+
+:root {
+  --kds-bg: #f4f6fb;
+  --kds-card: #ffffff;
+  --kds-text: #1f2937;
+  --kds-muted: #64748b;
+  --kds-border: #e2e8f0;
+  --kds-shadow: 0 14px 36px -22px rgba(15, 23, 42, 0.45);
+  --kds-shadow-strong: 0 22px 56px -28px rgba(15, 23, 42, 0.55);
+
+  /* Acentos por modulo (cocina = naranja, bar = azul violeta) */
+  --kds-accent: #f97316;
+  --kds-accent-soft: rgba(249, 115, 22, 0.14);
+  --kds-accent-strong: #ea580c;
+
+  /* Estados */
+  --kds-pendiente: #f59e0b;
+  --kds-pendiente-soft: rgba(245, 158, 11, 0.16);
+  --kds-preparando: #2563eb;
+  --kds-preparando-soft: rgba(37, 99, 235, 0.16);
+  --kds-listo: #10b981;
+  --kds-listo-soft: rgba(16, 185, 129, 0.16);
+  --kds-cancelado: #ef4444;
+  --kds-cancelado-soft: rgba(239, 68, 68, 0.16);
+}
+
+body[data-role='bar'] {
+  --kds-accent: #6366f1;
+  --kds-accent-soft: rgba(99, 102, 241, 0.16);
+  --kds-accent-strong: #4f46e5;
+}
+
+body[data-role='cocina'],
+body[data-role='bar'] {
+  background: var(--kds-bg) !important;
+  color: var(--kds-text);
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+}
+
+/* ============================================================
+ * 1. TOPBAR (60px sticky)
+ * ============================================================ */
+body[data-role='cocina'] .kanm-header,
+body[data-role='bar'] .kanm-header {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+  padding: 0 22px;
+  background: linear-gradient(180deg, #ffffff 0%, #fafbff 100%);
+  border-bottom: 1px solid var(--kds-border);
+  box-shadow: 0 8px 22px -18px rgba(15, 23, 42, 0.4);
+  margin: 0;
+}
+
+body[data-role='cocina'] .kanm-header-left,
+body[data-role='bar'] .kanm-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+body[data-role='cocina'] .kanm-header-logo-container,
+body[data-role='bar'] .kanm-header-logo-container {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--kds-accent-soft);
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--kds-border);
+}
+
+body[data-role='cocina'] .kanm-header-logo-container img,
+body[data-role='bar'] .kanm-header-logo-container img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+body[data-role='cocina'] .kanm-logo-fallback,
+body[data-role='bar'] .kanm-logo-fallback {
+  font-weight: 700;
+  color: var(--kds-accent-strong);
+  font-size: 14px;
+}
+
+body[data-role='cocina'] .kanm-header-texts,
+body[data-role='bar'] .kanm-header-texts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+body[data-role='cocina'] .kanm-header-title,
+body[data-role='bar'] .kanm-header-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--kds-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+  line-height: 1.1;
+}
+
+body[data-role='cocina'] .kanm-header-subtitle,
+body[data-role='bar'] .kanm-header-subtitle {
+  font-size: 11px;
+  color: var(--kds-muted);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+body[data-role='cocina'] .kanm-header-right,
+body[data-role='bar'] .kanm-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+body[data-role='cocina'] .kanm-header-actions,
+body[data-role='bar'] .kanm-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+body[data-role='cocina'] .tag-rol,
+body[data-role='bar'] .tag-rol {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--kds-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  box-shadow: 0 6px 14px -8px rgba(15, 23, 42, 0.4);
+}
+
+body[data-role='cocina'] .kanm-button.ghost,
+body[data-role='bar'] .kanm-button.ghost {
+  padding: 7px 14px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid var(--kds-border);
+  color: var(--kds-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+body[data-role='cocina'] .kanm-button.ghost:hover,
+body[data-role='bar'] .kanm-button.ghost:hover {
+  background: var(--kds-accent-soft);
+  border-color: var(--kds-accent);
+  transform: translateY(-1px);
+}
+
+body[data-role='cocina'] .chat-unread-badge,
+body[data-role='bar'] .chat-unread-badge {
+  background: var(--kds-cancelado);
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 4px;
+  display: none;
+}
+body[data-role='cocina'] .chat-unread-badge.is-visible,
+body[data-role='bar'] .chat-unread-badge.is-visible {
+  display: inline-flex;
+}
+
+/* ============================================================
+ * 2. TABS BAR (sticky 60px)
+ * ============================================================ */
+body[data-role='cocina'] .kanm-main,
+body[data-role='bar'] .kanm-main {
+  padding: 0;
+  margin: 0;
+  max-width: none;
+}
+
+body[data-role='cocina'] .kanm-page-header,
+body[data-role='bar'] .kanm-page-header {
+  display: none;
+}
+
+body[data-role='cocina'] .kanm-tabs,
+body[data-role='bar'] .kanm-tabs {
+  position: sticky;
+  top: 60px;
+  z-index: 50;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fafd 100%);
+  border-bottom: 1px solid var(--kds-border);
+  padding: 12px 22px;
+  margin: 0;
+  box-shadow: 0 6px 16px -16px rgba(15, 23, 42, 0.35);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+body[data-role='cocina'] .kanm-tabs::-webkit-scrollbar,
+body[data-role='bar'] .kanm-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+body[data-role='cocina'] .kanm-tab,
+body[data-role='bar'] .kanm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--kds-border);
+  background: #ffffff;
+  color: var(--kds-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.18s ease;
+}
+body[data-role='cocina'] .kanm-tab:hover,
+body[data-role='bar'] .kanm-tab:hover {
+  border-color: var(--kds-accent);
+  color: var(--kds-accent-strong);
+}
+body[data-role='cocina'] .kanm-tab.active,
+body[data-role='bar'] .kanm-tab.active {
+  background: linear-gradient(135deg, var(--kds-accent) 0%, var(--kds-accent-strong) 100%);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 10px 22px -12px rgba(15, 23, 42, 0.45);
+}
+
+/* ============================================================
+ * 3. WORKSPACE / PANELES
+ * ============================================================ */
+body[data-role='cocina'] .kanm-card--panel,
+body[data-role='bar'] .kanm-card--panel {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 18px 22px 32px;
+  margin: 0;
+  border-radius: 0;
+  max-width: none;
+}
+
+body[data-role='cocina'] .kanm-card-header,
+body[data-role='bar'] .kanm-card-header {
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+body[data-role='cocina'] .kanm-card-header h2,
+body[data-role='bar'] .kanm-card-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--kds-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+body[data-role='cocina'] .kanm-card-header h2::before,
+body[data-role='bar'] .kanm-card-header h2::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--kds-accent);
+}
+body[data-role='cocina'] .kanm-card-header .kanm-subtitle,
+body[data-role='bar'] .kanm-card-header .kanm-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--kds-muted);
+  padding-left: 16px;
+}
+
+/* ============================================================
+ * 4. GRID DE CUENTAS (cocina + bar)
+ * ============================================================ */
+.cocina-grid,
+.kanm-bar-pedidos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+  align-items: start;
+  margin: 0;
+  padding: 0;
+}
+
+/* ============================================================
+ * 5. TARJETA DE CUENTA (sticky con multiples pedidos)
+ * ============================================================ */
+.cocina-sticky,
+.kanm-bar-pedido-card {
+  position: relative;
+  background: var(--kds-card);
+  border: 1px solid var(--kds-border);
+  border-radius: 16px;
+  padding: 0;
+  box-shadow: var(--kds-shadow);
+  overflow: hidden;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.cocina-sticky:hover,
+.kanm-bar-pedido-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--kds-shadow-strong);
+}
+
+/* Stripe lateral indicador de estado de la cuenta */
+.cocina-sticky::before,
+.kanm-bar-pedido-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  background: var(--kds-pendiente);
+}
+.cocina-sticky:has(.kanm-badge.estado-preparando)::before,
+.kanm-bar-pedido-card:has(.kanm-badge.estado-preparando)::before {
+  background: var(--kds-preparando);
+}
+.cocina-sticky:has(.kanm-badge.estado-listo)::before,
+.kanm-bar-pedido-card:has(.kanm-badge.estado-listo)::before {
+  background: var(--kds-listo);
+}
+.cocina-sticky:has(.kanm-badge.estado-cancelado)::before,
+.kanm-bar-pedido-card:has(.kanm-badge.estado-cancelado)::before {
+  background: var(--kds-cancelado);
+}
+
+/* Header de la tarjeta con cuenta + estado */
+.cocina-sticky__header,
+.kanm-bar-pedido-card .kanm-pedido-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px 10px 22px;
+  border-bottom: 1px dashed var(--kds-border);
+}
+.cocina-sticky__header h3,
+.kanm-bar-pedido-card .kanm-pedido-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--kds-text);
+  letter-spacing: 0.01em;
+}
+
+.cocina-sticky__meta,
+.kanm-bar-pedido-card .kanm-pedido-meta {
+  padding: 8px 16px 12px 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.cocina-sticky__meta p,
+.kanm-bar-pedido-card .kanm-pedido-meta p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--kds-muted);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cuenta-pedidos {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 14px 14px;
+}
+
+/* ============================================================
+ * 6. SUB-CARD POR PEDIDO DENTRO DE LA CUENTA
+ * ============================================================ */
+.pedido-subcard {
+  background: linear-gradient(180deg, #fafbff 0%, #f4f6fb 100%);
+  border: 1px solid var(--kds-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-top: 12px;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.pedido-subcard:hover {
+  border-color: var(--kds-accent);
+  transform: translateX(2px);
+}
+
+.pedido-subcard:has(.kanm-badge.estado-pendiente) {
+  background: linear-gradient(180deg, #fffaf0 0%, #fef3c7 100%);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+.pedido-subcard:has(.kanm-badge.estado-preparando) {
+  background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+  border-color: rgba(37, 99, 235, 0.45);
+}
+.pedido-subcard:has(.kanm-badge.estado-listo) {
+  background: linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%);
+  border-color: rgba(16, 185, 129, 0.45);
+}
+.pedido-subcard:has(.kanm-badge.estado-cancelado) {
+  background: linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%);
+  border-color: rgba(239, 68, 68, 0.45);
+  opacity: 0.85;
+}
+
+.pedido-subcard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.estado-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--kds-text);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.kanm-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.kanm-badge.estado-pendiente {
+  background: var(--kds-pendiente-soft);
+  color: #b45309;
+}
+.kanm-badge.estado-preparando {
+  background: var(--kds-preparando-soft);
+  color: #1d4ed8;
+  animation: kdsPulsoPrep 1.6s ease-in-out infinite;
+}
+.kanm-badge.estado-listo {
+  background: var(--kds-listo-soft);
+  color: #047857;
+}
+.kanm-badge.estado-cancelado {
+  background: var(--kds-cancelado-soft);
+  color: #b91c1c;
+}
+
+@keyframes kdsPulsoPrep {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(37, 99, 235, 0); }
+}
+
+.pedido-info {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--kds-muted);
+  line-height: 1.4;
+}
+.pedido-info strong {
+  color: var(--kds-text);
+  font-weight: 600;
+}
+
+.pedido-note {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(245, 158, 11, 0.12);
+  border-left: 3px solid var(--kds-pendiente);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #92400e;
+  font-style: italic;
+}
+
+/* ============================================================
+ * 7. ITEMS DE CADA PEDIDO
+ * ============================================================ */
+.kanm-pedido-items {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.kanm-pedido-items li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(15, 23, 42, 0.05);
+  font-size: 13px;
+  color: var(--kds-text);
+}
+.kanm-pedido-items li strong {
+  color: var(--kds-accent-strong);
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+/* Acciones */
+.kanm-pedido-acciones {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(15, 23, 42, 0.1);
+}
+.kanm-button {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.kanm-button.primary {
+  background: linear-gradient(135deg, var(--kds-listo) 0%, #059669 100%);
+  color: #fff;
+  box-shadow: 0 8px 18px -10px rgba(16, 185, 129, 0.6);
+}
+.kanm-button.primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px -8px rgba(16, 185, 129, 0.7);
+}
+.kanm-button.secondary {
+  background: linear-gradient(135deg, var(--kds-preparando) 0%, #1d4ed8 100%);
+  color: #fff;
+  box-shadow: 0 8px 18px -10px rgba(37, 99, 235, 0.55);
+}
+.kanm-button.secondary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px -8px rgba(37, 99, 235, 0.65);
+}
+.kanm-button.ghost-danger {
+  background: #ffffff;
+  color: var(--kds-cancelado);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+.kanm-button.ghost-danger:hover {
+  background: var(--kds-cancelado-soft);
+  border-color: var(--kds-cancelado);
+}
+.kanm-button.is-loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.kanm-helper-text {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--kds-muted);
+  font-style: italic;
+}
+
+.kanm-empty-message {
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--kds-muted);
+  font-size: 14px;
+  background: var(--kds-card);
+  border: 2px dashed var(--kds-border);
+  border-radius: 12px;
+  margin: 0;
+}
+
+/* ============================================================
+ * 8. TARJETAS DE PEDIDOS FINALIZADOS
+ * ============================================================ */
+.kanm-card.kanm-pedido-card {
+  background: var(--kds-card);
+  border: 1px solid var(--kds-border);
+  border-radius: 16px;
+  padding: 0;
+  box-shadow: var(--kds-shadow);
+  overflow: hidden;
+  position: relative;
+  margin: 0;
+}
+.kanm-card.kanm-pedido-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  background: var(--kds-listo);
+  opacity: 0.7;
+}
+.kanm-card.kanm-pedido-card:has(.kanm-badge.estado-cancelado)::before {
+  background: var(--kds-cancelado);
+}
+
+.kanm-card.kanm-pedido-card .kanm-pedido-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px 10px 22px;
+  border-bottom: 1px dashed var(--kds-border);
+}
+.kanm-card.kanm-pedido-card .kanm-pedido-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--kds-text);
+}
+
+/* ============================================================
+ * 9. FOCUS MODAL (detalle de pedido)
+ * ============================================================ */
+.cocina-focus {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.cocina-focus.hidden {
+  display: none;
+}
+
+.cocina-focus-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(6px);
+}
+
+.cocina-focus-card {
+  position: relative;
+  z-index: 1;
+  background: #ffffff;
+  border-radius: 18px;
+  width: 100%;
+  max-width: 720px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 30px 60px -20px rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--kds-border);
+}
+
+.cocina-focus-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid var(--kds-border);
+  background: linear-gradient(180deg, #ffffff 0%, var(--kds-accent-soft) 100%);
+}
+.cocina-focus-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cocina-focus-label {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--kds-muted);
+  font-weight: 700;
+}
+.cocina-focus-card #focus-cuenta {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--kds-text);
+}
+.cocina-focus-card .kanm-subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--kds-muted);
+}
+
+.cocina-focus-body {
+  padding: 18px 24px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cocina-focus-meta {
+  font-size: 12px;
+  color: var(--kds-muted);
+  background: rgba(15, 23, 42, 0.04);
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--kds-border);
+  line-height: 1.5;
+}
+
+.cocina-focus-nota {
+  font-size: 13px;
+  background: rgba(245, 158, 11, 0.12);
+  border-left: 4px solid var(--kds-pendiente);
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #92400e;
+  font-style: italic;
+}
+.cocina-focus-nota.hidden {
+  display: none;
+}
+
+.cocina-focus-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cocina-focus-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cocina-focus-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--kds-border);
+  background: #fafbff;
+  transition: background 0.15s ease;
+}
+.cocina-focus-item-row.is-pendiente {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+.cocina-focus-item-row.is-listo {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.cocina-focus-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.cocina-focus-item-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--kds-text);
+}
+.cocina-focus-item-subinfo {
+  font-size: 11px;
+  color: var(--kds-muted);
+}
+
+.cocina-focus-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.cocina-item-estado {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--kds-text);
+}
+.cocina-item-estado[data-estado='pendiente'] {
+  background: var(--kds-pendiente-soft);
+  color: #b45309;
+}
+.cocina-item-estado[data-estado='listo'] {
+  background: var(--kds-listo-soft);
+  color: #047857;
+}
+
+.cocina-item-action {
+  padding: 5px 9px;
+  font-size: 11px;
+  border-radius: 8px;
+}
+
+.cocina-focus-actions {
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--kds-border);
+  background: rgba(15, 23, 42, 0.02);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ============================================================
+ * 10. ALARMA BANNER (cocina)
+ * ============================================================ */
+.cocina-alarma-banner {
+  position: fixed;
+  top: 70px;
+  right: 22px;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, var(--kds-cancelado) 0%, #b91c1c 100%);
+  color: #fff;
+  border-radius: 14px;
+  box-shadow: 0 14px 28px -10px rgba(239, 68, 68, 0.5);
+  font-size: 13px;
+  font-weight: 600;
+  animation: kdsAlarmaPulse 1.2s ease-in-out infinite;
+}
+.cocina-alarma-banner.is-active {
+  display: flex;
+}
+.cocina-alarma-banner__texto {
+  font-size: 13px;
+}
+.cocina-alarma-banner__ok {
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@keyframes kdsAlarmaPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
+
+/* ============================================================
+ * 11. RESPONSIVE
+ * ============================================================ */
+@media (max-width: 1099px) {
+  body[data-role='cocina'] .kanm-header,
+  body[data-role='bar'] .kanm-header {
+    padding: 0 14px;
+  }
+  body[data-role='cocina'] .kanm-tabs,
+  body[data-role='bar'] .kanm-tabs {
+    padding: 10px 14px;
+    top: 60px;
+  }
+  body[data-role='cocina'] .kanm-card--panel,
+  body[data-role='bar'] .kanm-card--panel {
+    padding: 14px 14px 28px;
+  }
+  .cocina-grid,
+  .kanm-bar-pedidos-grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 14px;
+  }
+}
+
+@media (max-width: 720px) {
+  body[data-role='cocina'] .kanm-header,
+  body[data-role='bar'] .kanm-header {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  body[data-role='cocina'] .kanm-header-left,
+  body[data-role='bar'] .kanm-header-left {
+    gap: 10px;
+  }
+  body[data-role='cocina'] .kanm-header-title,
+  body[data-role='bar'] .kanm-header-title {
+    max-width: 140px;
+    font-size: 13px;
+  }
+  body[data-role='cocina'] .kanm-header-actions,
+  body[data-role='bar'] .kanm-header-actions {
+    gap: 6px;
+  }
+  body[data-role='cocina'] .kanm-header-actions .chat-link,
+  body[data-role='bar'] .kanm-header-actions .chat-link {
+    display: none;
+  }
+  body[data-role='cocina'] .kanm-tabs,
+  body[data-role='bar'] .kanm-tabs {
+    top: auto;
+    position: sticky;
+  }
+  body[data-role='cocina'] .kanm-tab,
+  body[data-role='bar'] .kanm-tab {
+    padding: 9px 14px;
+    font-size: 12px;
+  }
+  body[data-role='cocina'] .kanm-card--panel,
+  body[data-role='bar'] .kanm-card--panel {
+    padding: 12px 12px 24px;
+  }
+  body[data-role='cocina'] .kanm-card-header h2,
+  body[data-role='bar'] .kanm-card-header h2 {
+    font-size: 16px;
+  }
+  .cocina-grid,
+  .kanm-bar-pedidos-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .cocina-sticky__header,
+  .kanm-bar-pedido-card .kanm-pedido-header,
+  .kanm-card.kanm-pedido-card .kanm-pedido-header {
+    padding: 12px 14px 8px 18px;
+  }
+  .cocina-sticky__header h3,
+  .kanm-bar-pedido-card .kanm-pedido-header h3 {
+    font-size: 16px;
+  }
+  .cuenta-pedidos {
+    padding: 0 12px 12px;
+  }
+  .pedido-subcard {
+    padding: 10px 12px;
+  }
+  .kanm-pedido-items li {
+    font-size: 12px;
+  }
+  .kanm-pedido-acciones {
+    gap: 6px;
+  }
+  .kanm-button {
+    padding: 7px 10px;
+    font-size: 11px;
+    flex: 1 1 calc(50% - 6px);
+    justify-content: center;
+  }
+  .kanm-button.ghost-danger {
+    flex: 1 1 100%;
+  }
+  .cocina-focus {
+    padding: 12px;
+  }
+  .cocina-focus-card {
+    max-height: 95vh;
+  }
+  .cocina-focus-header {
+    padding: 16px 16px 12px;
+  }
+  .cocina-focus-card #focus-cuenta {
+    font-size: 18px;
+  }
+  .cocina-focus-body {
+    padding: 14px 16px;
+  }
+  .cocina-focus-actions {
+    padding: 12px 16px 14px;
+  }
+  .cocina-focus-actions .kanm-button {
+    flex: 1 1 100%;
+  }
+  .cocina-alarma-banner {
+    top: auto;
+    bottom: 14px;
+    right: 14px;
+    left: 14px;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  body[data-role='cocina'] .kanm-header-title,
+  body[data-role='bar'] .kanm-header-title {
+    max-width: 110px;
+    font-size: 12px;
+  }
+  body[data-role='cocina'] .kanm-header-subtitle,
+  body[data-role='bar'] .kanm-header-subtitle {
+    display: none;
+  }
+  .cocina-sticky__header h3,
+  .kanm-bar-pedido-card .kanm-pedido-header h3,
+  .kanm-card.kanm-pedido-card .kanm-pedido-header h3 {
+    font-size: 15px;
+  }
+  .kanm-pedido-items li {
+    font-size: 12px;
+    padding: 5px 8px;
+  }
+}
+
+/* ============================================================
+ * 12. ALIAS DE COMPATIBILIDAD
+ * ============================================================ */
+.bar-sticky {
+  /* Si bar.js algun dia agrega esta clase, hereda los mismos estilos */
+  position: relative;
+  background: var(--kds-card);
+  border: 1px solid var(--kds-border);
+  border-radius: 16px;
+  padding: 0;
+  box-shadow: var(--kds-shadow);
+  overflow: hidden;
+}

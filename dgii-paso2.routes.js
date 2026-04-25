@@ -513,14 +513,13 @@ const signXmlDocument = ({
 const extractSignatureValueFromXml = (xml = '') =>
   String(xml.match(/<SignatureValue[^>]*>([\s\S]*?)<\/SignatureValue>/i)?.[1] || '').replace(/\s+/g, '');
 
+// CodigoSeguridadeCF segun DGII = primeros 6 caracteres del SignatureValue crudo del e-CF.
+// (No es un hash. La DGII compara literalmente "los 6 primeros digitos de la propiedad
+//  signature value" entre la Factura y el CodigoSeguridadeCF declarado en el Resumen.)
 const computeCodigoSeguridadeCF = (signatureValue = '') => {
   const clean = String(signatureValue || '').replace(/\s+/g, '');
   if (!clean) return '';
-  return crypto
-    .createHash('sha256')
-    .update(clean, 'utf8')
-    .digest('base64')
-    .slice(0, 6);
+  return clean.slice(0, 6);
 };
 const parseXlsxCases = ({ fileBuffer, fileName }) => {
   const workbook = XLSX.read(fileBuffer, {

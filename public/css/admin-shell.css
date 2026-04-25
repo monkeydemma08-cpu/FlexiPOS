@@ -1,0 +1,771 @@
+/* =====================================================================
+   KANM Admin Shell — Sidebar + Topbar layout
+   ---------------------------------------------------------------------
+   - Desktop:  sidebar fixed 260px (collapsable to 72px) + main scrollable
+   - Tablet:   sidebar collapsed by default (icons only)
+   - Mobile:   sidebar oculto, abre como drawer con overlay
+   --------------------------------------------------------------------- */
+
+:root {
+  --kanm-sidebar-width: 264px;
+  --kanm-sidebar-width-collapsed: 72px;
+  --kanm-topbar-height: 60px;
+  --kanm-shell-bg: #f4f5f7;
+  --kanm-sidebar-bg: #ffffff;
+  --kanm-sidebar-border: rgba(15, 23, 42, 0.08);
+  --kanm-sidebar-text: #334155;
+  --kanm-sidebar-text-muted: #94a3b8;
+  --kanm-sidebar-active-bg: color-mix(in srgb, var(--color-boton-primario, #ec4899) 14%, transparent);
+  --kanm-sidebar-active-text: var(--color-boton-primario, #ec4899);
+  --kanm-sidebar-hover-bg: rgba(15, 23, 42, 0.04);
+  --kanm-topbar-bg: #ffffff;
+  --kanm-topbar-border: rgba(15, 23, 42, 0.08);
+  --kanm-shell-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+}
+
+/* ---------- Reset shell context (only when body uses .kanm-shell-body) ---------- */
+body.kanm-shell-body {
+  background: var(--kanm-shell-bg);
+  margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+body.kanm-shell-body .kanm-header {
+  display: none !important; /* old header replaced by sidebar+topbar */
+}
+
+/* ---------- Shell grid ---------- */
+.kanm-shell {
+  display: grid;
+  grid-template-columns: var(--kanm-sidebar-width) 1fr;
+  height: 100vh;
+  width: 100%;
+  background: var(--kanm-shell-bg);
+  position: relative;
+  isolation: isolate;
+}
+
+.kanm-shell[data-shell-state="collapsed"] {
+  grid-template-columns: var(--kanm-sidebar-width-collapsed) 1fr;
+}
+
+.kanm-shell-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  border: 0;
+  padding: 0;
+  z-index: 50;
+  cursor: pointer;
+}
+
+/* ---------- Sidebar ---------- */
+.kanm-sidebar {
+  background: var(--kanm-sidebar-bg);
+  border-right: 1px solid var(--kanm-sidebar-border);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  overflow: hidden;
+  transition: width 0.2s ease;
+}
+
+.kanm-sidebar-brand {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--kanm-sidebar-border);
+  min-height: var(--kanm-topbar-height);
+}
+
+.kanm-sidebar-brand-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--color-secundario, #fce7f3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.kanm-sidebar-brand-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.kanm-sidebar-brand-logo img:not([src]),
+.kanm-sidebar-brand-logo img[src=""] {
+  display: none;
+}
+
+.kanm-sidebar-brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
+
+.kanm-sidebar-brand-name {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--color-texto, #1e293b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kanm-sidebar-brand-subtitle {
+  font-size: 0.78rem;
+  color: var(--kanm-sidebar-text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kanm-sidebar-close {
+  display: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: var(--kanm-sidebar-text);
+  cursor: pointer;
+}
+
+.kanm-sidebar-close:hover {
+  background: var(--kanm-sidebar-hover-bg);
+}
+
+/* ---------- Sidebar nav ---------- */
+.kanm-sidebar-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 10px 16px;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 14px;
+  margin: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+
+.kanm-sidebar-nav::-webkit-scrollbar {
+  width: 6px;
+}
+
+.kanm-sidebar-nav::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 4px;
+}
+
+.kanm-sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.kanm-sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kanm-sidebar-group-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--kanm-sidebar-text-muted);
+  padding: 8px 14px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Sidebar items (override .kanm-tab) ---------- */
+.kanm-sidebar-nav .kanm-tab.kanm-sidebar-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--kanm-sidebar-text);
+  font-size: 0.92rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  position: relative;
+  margin: 0;
+  box-shadow: none;
+  outline: none;
+}
+
+.kanm-sidebar-nav .kanm-tab.kanm-sidebar-item:hover:not(.active) {
+  background: var(--kanm-sidebar-hover-bg);
+  color: var(--color-texto, #1e293b);
+}
+
+.kanm-sidebar-nav .kanm-tab.kanm-sidebar-item.active {
+  background: var(--kanm-sidebar-active-bg);
+  color: var(--kanm-sidebar-active-text);
+  font-weight: 600;
+}
+
+.kanm-sidebar-nav .kanm-tab.kanm-sidebar-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--kanm-sidebar-active-text);
+}
+
+.kanm-sidebar-nav .kanm-tab.kanm-sidebar-item:focus-visible {
+  outline: 2px solid var(--kanm-sidebar-active-text);
+  outline-offset: 2px;
+}
+
+.kanm-sidebar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 1.05rem;
+  flex-shrink: 0;
+}
+
+.kanm-sidebar-label {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Sidebar footer ---------- */
+.kanm-sidebar-footer {
+  border-top: 1px solid var(--kanm-sidebar-border);
+  padding: 10px;
+  display: flex;
+  justify-content: stretch;
+}
+
+.kanm-sidebar-collapse-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--kanm-sidebar-border);
+  background: transparent;
+  color: var(--kanm-sidebar-text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.kanm-sidebar-collapse-btn:hover {
+  background: var(--kanm-sidebar-hover-bg);
+}
+
+.kanm-sidebar-collapse-icon {
+  display: inline-flex;
+  width: 22px;
+  justify-content: center;
+  font-size: 1rem;
+  transition: transform 0.2s ease;
+}
+
+/* ---------- Collapsed state (desktop) ---------- */
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar {
+  width: var(--kanm-sidebar-width-collapsed);
+}
+
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-brand {
+  grid-template-columns: 44px;
+  justify-content: center;
+  padding: 14px 12px;
+}
+
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-brand-text,
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-close,
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-group-label,
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-label,
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-collapse-label {
+  display: none;
+}
+
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-nav .kanm-tab.kanm-sidebar-item {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-collapse-icon {
+  transform: rotate(180deg);
+}
+
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-collapse-btn {
+  justify-content: center;
+}
+
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-group {
+  border-top: 1px solid transparent;
+}
+
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-group + .kanm-sidebar-group {
+  border-top: 1px solid var(--kanm-sidebar-border);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+/* Tooltip on collapsed icons */
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-nav .kanm-tab.kanm-sidebar-item {
+  position: relative;
+}
+
+.kanm-shell[data-shell-state="collapsed"] .kanm-sidebar-nav .kanm-tab.kanm-sidebar-item:hover .kanm-sidebar-label {
+  display: block;
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: #1e293b;
+  color: #ffffff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
+/* ---------- Main area + topbar ---------- */
+.kanm-shell-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.kanm-topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  height: var(--kanm-topbar-height);
+  background: var(--kanm-topbar-bg);
+  border-bottom: 1px solid var(--kanm-topbar-border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
+}
+
+.kanm-topbar-burger {
+  display: none;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--kanm-sidebar-border);
+  background: #ffffff;
+  font-size: 1.15rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.kanm-topbar-burger:hover {
+  background: var(--kanm-sidebar-hover-bg);
+}
+
+.kanm-topbar-titlewrap {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.kanm-topbar-section-label {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-texto, #1e293b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kanm-topbar-business {
+  font-size: 0.78rem;
+  color: var(--kanm-sidebar-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kanm-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+
+.kanm-topbar-actions .tag-rol {
+  font-size: 0.72rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-boton-primario, #ec4899) 14%, transparent);
+  color: var(--color-boton-primario, #ec4899);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.kanm-topbar-actions .kanm-button {
+  padding: 7px 12px;
+  font-size: 0.85rem;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.kanm-topbar-actions .chat-link {
+  position: relative;
+}
+
+.kanm-topbar-action-short {
+  display: none;
+}
+
+/* ---------- Main scroll container ---------- */
+.kanm-shell-main > .admin-container {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: clamp(16px, 2.4vw, 28px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(16px, 2vw, 24px);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+
+.kanm-shell-main > .admin-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.kanm-shell-main > .admin-container::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 4px;
+}
+
+.kanm-shell-main > .admin-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.32);
+}
+
+/* When admin-tabs lives inside sidebar, hide its old horizontal pill style */
+.kanm-shell .admin-container > .admin-tabs {
+  display: none;
+}
+
+/* admin-tabs that lives inside sidebar must NOT inherit the old margin */
+.kanm-sidebar-nav.admin-tabs {
+  margin: 0;
+}
+
+/* Ensure the section panels keep working — they're toggled via .hidden by admin.js */
+.kanm-shell .admin-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.kanm-shell .admin-panel.hidden {
+  display: none !important;
+}
+
+/* ---------- Responsive: tablet (collapse sidebar by default) ---------- */
+@media (max-width: 1180px) {
+  .kanm-shell {
+    grid-template-columns: var(--kanm-sidebar-width-collapsed) 1fr;
+  }
+
+  .kanm-shell:not([data-shell-state="expanded-mobile"]) .kanm-sidebar-brand {
+    grid-template-columns: 44px;
+    justify-content: center;
+    padding: 14px 12px;
+  }
+
+  .kanm-shell:not([data-shell-state="expanded-mobile"]) .kanm-sidebar-brand-text,
+  .kanm-shell:not([data-shell-state="expanded-mobile"]) .kanm-sidebar-group-label,
+  .kanm-shell:not([data-shell-state="expanded-mobile"]) .kanm-sidebar-label,
+  .kanm-shell:not([data-shell-state="expanded-mobile"]) .kanm-sidebar-collapse-label {
+    display: none;
+  }
+
+  .kanm-shell:not([data-shell-state="expanded-mobile"]) .kanm-sidebar-nav .kanm-tab.kanm-sidebar-item {
+    justify-content: center;
+    padding: 10px 0;
+  }
+
+  .kanm-shell:not([data-shell-state="expanded-mobile"]) .kanm-sidebar-collapse-btn {
+    justify-content: center;
+  }
+
+  .kanm-shell:not([data-shell-state="expanded-mobile"]) .kanm-sidebar-collapse-icon {
+    transform: rotate(180deg);
+  }
+
+  /* Tooltip on hover when collapsed */
+  .kanm-shell:not([data-shell-state="expanded-mobile"]) .kanm-sidebar-nav .kanm-tab.kanm-sidebar-item:hover .kanm-sidebar-label {
+    display: block;
+    position: absolute;
+    left: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: #1e293b;
+    color: #ffffff;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+    pointer-events: none;
+  }
+
+  /* Hide Chat label on tablet topbar — keep icon/badge */
+  .kanm-topbar-actions .kanm-button .kanm-topbar-action-text {
+    display: none;
+  }
+
+  .kanm-topbar-actions .kanm-button .kanm-topbar-action-short {
+    display: inline-block;
+  }
+
+  .kanm-topbar-actions .chat-link::after {
+    content: "💬";
+    font-size: 1rem;
+  }
+}
+
+/* ---------- Responsive: mobile (sidebar becomes drawer) ---------- */
+@media (max-width: 820px) {
+  .kanm-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .kanm-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: var(--kanm-sidebar-width);
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    z-index: 60;
+    box-shadow: 4px 0 24px rgba(15, 23, 42, 0.18);
+  }
+
+  .kanm-shell[data-shell-state="open"] .kanm-sidebar {
+    transform: translateX(0);
+  }
+
+  /* Force expanded labels visible inside drawer regardless of tablet rule */
+  .kanm-shell .kanm-sidebar-brand {
+    grid-template-columns: 44px 1fr auto !important;
+    padding: 14px 18px !important;
+  }
+
+  .kanm-shell .kanm-sidebar-brand-text,
+  .kanm-shell .kanm-sidebar-group-label,
+  .kanm-shell .kanm-sidebar-label,
+  .kanm-shell .kanm-sidebar-collapse-label {
+    display: initial !important;
+  }
+
+  .kanm-shell .kanm-sidebar-brand-text {
+    display: flex !important;
+  }
+
+  .kanm-shell .kanm-sidebar-nav .kanm-tab.kanm-sidebar-item {
+    justify-content: flex-start !important;
+    padding: 10px 14px !important;
+  }
+
+  .kanm-shell .kanm-sidebar-collapse-btn {
+    justify-content: flex-start !important;
+  }
+
+  .kanm-shell .kanm-sidebar-collapse-icon {
+    transform: none !important;
+  }
+
+  /* Hide collapse button on mobile (irrelevant for drawer) */
+  .kanm-sidebar-footer {
+    display: none;
+  }
+
+  .kanm-sidebar-close {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .kanm-topbar-burger {
+    display: inline-flex;
+  }
+
+  .kanm-shell[data-shell-state="open"] .kanm-shell-overlay {
+    display: block;
+  }
+
+  .kanm-shell-main {
+    grid-column: 1 / -1;
+  }
+
+  .kanm-topbar-business {
+    display: none;
+  }
+
+  .kanm-topbar-actions .kanm-button {
+    padding: 6px 10px;
+    font-size: 0.8rem;
+  }
+
+  .kanm-topbar-actions .tag-rol {
+    display: none;
+  }
+}
+
+@media (max-width: 540px) {
+  .kanm-shell-main > .admin-container {
+    padding: 12px;
+  }
+
+  .kanm-topbar {
+    padding: 0 10px;
+  }
+
+  .kanm-topbar-section-label {
+    font-size: 0.95rem;
+  }
+
+  /* On very small screens, simplify topbar actions */
+  .kanm-topbar-actions {
+    gap: 4px;
+  }
+
+  .kanm-topbar-actions .chat-link {
+    padding: 6px 8px;
+  }
+}
+
+/* ---------- Tweaks for content cards inside new shell ---------- */
+.kanm-shell-main .kanm-card {
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+.kanm-shell-main .kanm-card h2,
+.kanm-shell-main .kanm-card h3 {
+  margin-top: 0;
+}
+
+/* Modal overlays must escape the shell stacking context — keep above sidebar */
+.kanm-shell-body .kanm-modal-overlay {
+  z-index: 200;
+}
+
+#kanm-negocios-modal {
+  z-index: 250 !important;
+}
+
+/* ---------- Tablas con scroll horizontal interno ---------- */
+.kanm-shell-main .kanm-table-wrapper {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.kanm-shell-main .kanm-table-wrapper::-webkit-scrollbar {
+  height: 6px;
+}
+
+.kanm-shell-main .kanm-table-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 4px;
+}
+
+/* ---------- Mejor uso del espacio horizontal en pantallas grandes ---------- */
+@media (min-width: 1600px) {
+  .kanm-shell-main > .admin-container {
+    padding-left: clamp(28px, 3vw, 48px);
+    padding-right: clamp(28px, 3vw, 48px);
+  }
+}
+
+/* ---------- Compatibilidad: oculta elementos del header viejo si quedaron ---------- */
+.kanm-shell-body .kanm-header-actions {
+  display: none;
+}
+
+/* ---------- Foco accesible en burger ---------- */
+.kanm-topbar-burger:focus-visible,
+.kanm-sidebar-collapse-btn:focus-visible,
+.kanm-sidebar-close:focus-visible {
+  outline: 2px solid var(--color-boton-primario, #255bc7);
+  outline-offset: 2px;
+}
+
+/* ---------- Print: oculta navegación al imprimir ---------- */
+@media print {
+  .kanm-sidebar,
+  .kanm-topbar,
+  .kanm-shell-overlay {
+    display: none !important;
+  }
+
+  .kanm-shell {
+    grid-template-columns: 1fr !important;
+    height: auto !important;
+  }
+
+  .kanm-shell-main,
+  .kanm-shell-main > .admin-container {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  body.kanm-shell-body {
+    overflow: visible !important;
+  }
+}

@@ -32,8 +32,16 @@ const {
   buildEcfPayloadFromPedido,
   buildResumenFcPayload,
   buildNotaEcfPayload,
+  buildEcfPayloadDirecto,
   determineEcfFlujo,
 } = require('./dgii-ecf.mapper');
+const {
+  buildQrUrl,
+  generateQrDataUrl,
+  buildRepresentacionImpresa,
+  detectarAmbiente,
+  extractFechaFirmaFromXml,
+} = require('./dgii-ri');
 
 const MAX_INTENTOS = 5;
 
@@ -214,9 +222,28 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     // Sign XML
     const firmado = signEcfXml({ xml: xmlGenerado, config });
 
+    // Compute CodigoSeguridad y QR URL para Representacion Impresa
+    const sigValue = extractSignatureValueFromXml(firmado.xml);
+    const codigoSeguridad = computeCodigoSeguridadeCF(sigValue);
+    const ambiente = detectarAmbiente(config.endpoints?.recepcion || DGII_DEFAULT_ENDPOINTS.recepcion);
+    const fechaFirma = extractFechaFirmaFromXml(firmado.xml);
+    const qrUrl = buildQrUrl({
+      ambiente,
+      flujo,
+      rncEmisor,
+      rncComprador: payload.RNCComprador || null,
+      encf: encfData.encf,
+      fechaEmision: payload.FechaEmision,
+      montoTotal: payload.MontoTotal,
+      fechaFirma,
+      codigoSeguridad,
+    });
+
     await actualizarPedidoEcf(pedidoId, {
       ecf_xml_generado: xmlGenerado,
       ecf_xml_firmado: firmado.xml,
+      ecf_codigo_seguridad: codigoSeguridad,
+      ecf_qr_url: qrUrl,
     });
 
     // Get DGII token
@@ -343,6 +370,10 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
 
     const rfceFirmado = signEcfXml({ xml: rfceXml, config });
 
+    // Persistimos el RFCE firmado para que el admin pueda descargarlo despues
+    // (necesario para validar manualmente el flujo completo en el portal DGII).
+    await actualizarPedidoEcf(pedidoId, { ecf_xml_rfce_firmado: rfceFirmado.xml });
+
     const endpoints = config.endpoints || DGII_DEFAULT_ENDPOINTS;
     const envio = await sendXmlToDgii({
       endpoint: endpoints.recepcionFc,
@@ -423,9 +454,398 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     return { ok: estadoFinal !== 'RECHAZADO', message: mensajeDgii, encf: encfData.encf, estado: estadoFinal };
   };
 
+  // ---------------------------------------------------------------------------
+  // External documents (compras, gastos, notas, especiales)
+  // ---------------------------------------------------------------------------
+
+  const registrarIntentoExterno = async ({ documentoId, tipoEnvio, endpoint, responseStatus, responseBody, resultado, codigo, mensaje, trackId }) => {
+    if (!documentoId) return;
+    try {
+      const doc = await db.get('SELECT intentos_log, ecf_intentos FROM ecf_documentos_externos WHERE id = ?', [documentoId]);
+      let log = [];
+      try { log = doc?.intentos_log ? JSON.parse(doc.intentos_log) : []; } catch (_) { log = []; }
+      log.push({
+        ts: new Date().toISOString(),
+        tipo_envio: tipoEnvio,
+        endpoint: endpoint || null,
+        response_status: responseStatus || null,
+        resultado: resultado || 'ERROR',
+        codigo: codigo || null,
+        mensaje: mensaje || null,
+        track_id: trackId || null,
+        response_body: responseBody ? String(responseBody).slice(0, 4000) : null,
+      });
+      // Limitar a ultimos 30 intentos
+      if (log.length > 30) log = log.slice(-30);
+      await db.run(
+        'UPDATE ecf_documentos_externos SET intentos_log = ?, ecf_intentos = ?, ecf_ultimo_intento_at = ? WHERE id = ?',
+        [JSON.stringify(log), (doc?.ecf_intentos || 0) + 1, new Date().toISOString().slice(0, 19).replace('T', ' '), documentoId]
+      );
+    } catch (err) {
+      console.error('Error registrando intento externo e-CF:', err.message);
+    }
+  };
+
+  const actualizarDocumentoExterno = async (documentoId, fields) => {
+    const sets = [];
+    const params = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      params.push(v);
+    }
+    if (!sets.length) return;
+    params.push(documentoId);
+    await db.run(`UPDATE ecf_documentos_externos SET ${sets.join(', ')} WHERE id = ?`, params);
+  };
+
+  const emitirEcfDocumentoExterno = async ({
+    negocioId,
+    modulo,
+    referenciaExterna,
+    ecfTipo,
+    emisor = {},
+    comprador = {},
+    items = [],
+    totales = {},
+    fechaEmision = null,
+    pagos = {},
+    referenciaEncf = null,
+    referenciaFecha = null,
+    codigoModificacion = null,
+  }) => {
+    if (!negocioId || !modulo || !ecfTipo) {
+      throw new Error('emitirEcfDocumentoExterno requiere negocioId, modulo y ecfTipo.');
+    }
+    const tipoNum = ecfTipoNumerico(ecfTipo);
+    if (!tipoNum) throw new Error(`Tipo e-CF '${ecfTipo}' no valido.`);
+
+    // Cargar config DGII
+    const configRow = await db.get('SELECT * FROM dgii_paso2_config WHERE negocio_id = ? LIMIT 1', [negocioId]);
+    if (!configRow) throw new Error('Configura las credenciales DGII antes de emitir e-CF.');
+    const config = await configManager.loadConfig(negocioId);
+    const negocio = await db.get('SELECT * FROM negocios WHERE id = ?', [negocioId]);
+    const rncEmisor = emisor.rnc || config.rnc_emisor || negocio?.rnc || '';
+    const emisorFinal = {
+      rnc: rncEmisor,
+      nombre: emisor.nombre || negocio?.nombre || '',
+      direccion: emisor.direccion || negocio?.direccion || null,
+      telefono: emisor.telefono || negocio?.telefono || null,
+    };
+
+    // Crear registro inicial en ecf_documentos_externos
+    const insertResult = await db.run(
+      `INSERT INTO ecf_documentos_externos
+       (negocio_id, modulo, referencia_externa, ecf_tipo, ecf_estado, cliente_documento, cliente_nombre, monto_total, ecf_intentos)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+      [
+        negocioId,
+        modulo,
+        referenciaExterna ? String(referenciaExterna) : null,
+        tipoNum,
+        'PROCESANDO',
+        comprador.documento || null,
+        comprador.nombre || null,
+        Number(totales.total || 0),
+      ]
+    );
+    const documentoId = insertResult.lastID || insertResult.insertId;
+
+    try {
+      // Generar eNCF
+      const encfData = await generarEncf(`E${tipoNum}`, negocioId, db);
+
+      // Construir payload
+      const payload = buildEcfPayloadDirecto({
+        ecfTipo: `E${tipoNum}`,
+        emisor: emisorFinal,
+        comprador,
+        items,
+        totales,
+        fechaEmision,
+        pagos,
+        encfData,
+        configDgii: config,
+        referenciaEncf,
+        referenciaFecha,
+        codigoModificacion,
+      });
+
+      // Build XML
+      const tiposConFVS = ['31', '33', '41', '43', '44', '45', '46', '47'];
+      const xmlGenerado = buildEcfXml({
+        payload,
+        rncEmisorFallback: rncEmisor,
+        fechaVencimientoSecuenciaFallback: tiposConFVS.includes(tipoNum) ? (encfData.fechaVencimiento || null) : null,
+      });
+      const firmado = signEcfXml({ xml: xmlGenerado, config });
+
+      const flujo = determineEcfFlujo(`E${tipoNum}`, totales.total || 0);
+      const endpoints = config.endpoints || DGII_DEFAULT_ENDPOINTS;
+
+      // Compute CodigoSeguridad y QR URL para Representacion Impresa
+      const sigValueExt = extractSignatureValueFromXml(firmado.xml);
+      const codigoSeguridadExt = computeCodigoSeguridadeCF(sigValueExt);
+      const ambienteExt = detectarAmbiente(endpoints.recepcion || '');
+      const fechaFirmaExt = extractFechaFirmaFromXml(firmado.xml);
+      const qrUrlExt = buildQrUrl({
+        ambiente: ambienteExt,
+        flujo,
+        rncEmisor,
+        rncComprador: payload.RNCComprador || null,
+        encf: encfData.encf,
+        fechaEmision: payload.FechaEmision,
+        montoTotal: payload.MontoTotal,
+        fechaFirma: fechaFirmaExt,
+        codigoSeguridad: codigoSeguridadExt,
+      });
+
+      await actualizarDocumentoExterno(documentoId, {
+        ecf_encf: encfData.encf,
+        ecf_xml_generado: xmlGenerado,
+        ecf_xml_firmado: firmado.xml,
+        payload_emision: JSON.stringify(payload),
+        ecf_codigo_seguridad: codigoSeguridadExt,
+        ecf_qr_url: qrUrlExt,
+      });
+
+      const token = await configManager.resolveToken({ config, configRow, negocioId });
+
+      // FC < 250k flow (E32) — reutiliza codigoSeguridadExt ya computado arriba
+      if (flujo === 'FC_MENOR_250K') {
+        const codigoSeguridad = codigoSeguridadExt;
+
+        const rfcePayload = buildResumenFcPayload({
+          pedido: { ecf_tipo: tipoNum, total: totales.total || 0, fecha_factura: fechaEmision || null },
+          cliente: comprador,
+          negocio: emisorFinal,
+          encfData,
+          configDgii: config,
+          codigoSeguridadeCF: codigoSeguridad,
+          ecfPayload: payload,
+        });
+        const rfceXml = buildResumenFcXml({ payload: rfcePayload, rncEmisorFallback: rncEmisor, codigoSeguridadeCF: codigoSeguridad });
+        const rfceFirmado = signEcfXml({ xml: rfceXml, config });
+        const envio = await sendXmlToDgii({
+          endpoint: endpoints.recepcionFc,
+          apiPath: '/api/recepcion/ecf',
+          xmlPayload: rfceFirmado.xml,
+          token,
+          fileName: buildDgiiXmlFileName({ rncEmisor, encf: encfData.encf, fallback: 'rfce.xml' }),
+        });
+        await registrarIntentoExterno({
+          documentoId,
+          tipoEnvio: 'RESUMEN_FC',
+          endpoint: envio.endpoint,
+          responseStatus: envio.status,
+          responseBody: envio.raw,
+          resultado: envio.extracted?.accepted ? 'ACEPTADO' : envio.extracted?.rejected ? 'RECHAZADO' : 'ENVIADO',
+          codigo: envio.extracted?.code,
+          mensaje: envio.extracted?.message,
+          trackId: envio.extracted?.trackId,
+        });
+
+        const estadoFinal = envio.extracted?.accepted ? 'ACEPTADO' : envio.extracted?.rejected ? 'RECHAZADO' : 'ENVIADO';
+        await actualizarDocumentoExterno(documentoId, {
+          ecf_estado: estadoFinal,
+          ecf_codigo_dgii: envio.extracted?.code || null,
+          ecf_mensaje_dgii: envio.extracted?.message || null,
+        });
+        return { ok: estadoFinal !== 'RECHAZADO', documentoId, encf: encfData.encf, estado: estadoFinal, mensaje: envio.extracted?.message };
+      }
+
+      // ECF normal flow
+      const envio = await sendXmlToDgii({
+        endpoint: endpoints.recepcion,
+        apiPath: '/api/FacturasElectronicas',
+        xmlPayload: firmado.xml,
+        token,
+        fileName: buildDgiiXmlFileName({ rncEmisor, encf: encfData.encf }),
+      });
+      await registrarIntentoExterno({
+        documentoId,
+        tipoEnvio: 'EMISION',
+        endpoint: envio.endpoint,
+        responseStatus: envio.status,
+        responseBody: envio.raw,
+        resultado: envio.extracted?.accepted ? 'ACEPTADO' : envio.extracted?.rejected ? 'RECHAZADO' : 'ENVIADO',
+        codigo: envio.extracted?.code,
+        mensaje: envio.extracted?.message,
+        trackId: envio.extracted?.trackId,
+      });
+
+      if (!envio.ok) {
+        const mensaje = envio.extracted?.message || envio.raw?.slice(0, 500) || 'Error de envio';
+        if (/secuencia.*utiliza/i.test(mensaje)) {
+          await avanzarSecuenciaTrasDuplicado(`E${tipoNum}`, negocioId, db);
+        }
+        await actualizarDocumentoExterno(documentoId, {
+          ecf_estado: 'RECHAZADO',
+          ecf_codigo_dgii: envio.extracted?.code || null,
+          ecf_mensaje_dgii: mensaje,
+        });
+        return { ok: false, documentoId, encf: encfData.encf, estado: 'RECHAZADO', mensaje };
+      }
+
+      const trackId = envio.extracted?.trackId;
+      let estadoFinal = 'ENVIADO';
+      let codigoDgii = envio.extracted?.code || null;
+      let mensajeDgii = envio.extracted?.message || null;
+
+      if (trackId) {
+        await actualizarDocumentoExterno(documentoId, { ecf_track_id: trackId });
+        const consulta = await consultDgiiResultUntilSettled(
+          { endpoint: endpoints.consultaResultado, token, trackId, encf: encfData.encf, rncEmisor },
+          { maxAttempts: 5, delayMs: 1500 }
+        );
+        await registrarIntentoExterno({
+          documentoId,
+          tipoEnvio: 'CONSULTA',
+          endpoint: consulta.endpoint,
+          responseStatus: consulta.status,
+          responseBody: consulta.raw,
+          resultado: consulta.extracted?.accepted ? 'ACEPTADO' : consulta.extracted?.rejected ? 'RECHAZADO' : 'PENDIENTE',
+          codigo: consulta.extracted?.code,
+          mensaje: consulta.extracted?.message,
+          trackId,
+        });
+        if (consulta.extracted?.accepted) estadoFinal = 'ACEPTADO';
+        else if (consulta.extracted?.rejected) estadoFinal = 'RECHAZADO';
+        codigoDgii = consulta.extracted?.code || codigoDgii;
+        mensajeDgii = consulta.extracted?.message || mensajeDgii;
+      } else if (envio.extracted?.accepted) {
+        estadoFinal = 'ACEPTADO';
+      }
+
+      await actualizarDocumentoExterno(documentoId, {
+        ecf_estado: estadoFinal,
+        ecf_codigo_dgii: codigoDgii,
+        ecf_mensaje_dgii: mensajeDgii,
+      });
+      return { ok: estadoFinal !== 'RECHAZADO', documentoId, encf: encfData.encf, estado: estadoFinal, mensaje: mensajeDgii, trackId };
+    } catch (err) {
+      await actualizarDocumentoExterno(documentoId, {
+        ecf_estado: 'ERROR',
+        ecf_mensaje_dgii: err.message || 'Error inesperado',
+      });
+      throw err;
+    }
+  };
+
   // ===========================================================================
   // Routes
   // ===========================================================================
+
+  // POST /emitir-documento — Emit e-CF for external module (compras/gastos/notas/especiales)
+  router.post('/emitir-documento', (req, res) =>
+    ensureAdmin(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const body = req.body || {};
+        if (!body.modulo || !body.ecf_tipo) {
+          return res.status(400).json({ ok: false, error: 'modulo y ecf_tipo son requeridos.' });
+        }
+        const result = await emitirEcfDocumentoExterno({
+          negocioId,
+          modulo: body.modulo,
+          referenciaExterna: body.referencia_externa || null,
+          ecfTipo: body.ecf_tipo,
+          emisor: body.emisor || {},
+          comprador: body.comprador || {},
+          items: Array.isArray(body.items) ? body.items : [],
+          totales: body.totales || {},
+          fechaEmision: body.fecha_emision || null,
+          pagos: body.pagos || {},
+          referenciaEncf: body.referencia_encf || null,
+          referenciaFecha: body.referencia_fecha || null,
+          codigoModificacion: body.codigo_modificacion || null,
+        });
+        return res.json({ ok: result.ok, ...result });
+      } catch (error) {
+        console.error('Error emitiendo e-CF documento externo:', error);
+        return res.status(500).json({ ok: false, error: error.message });
+      }
+    })
+  );
+
+  // GET /documentos-externos — List external e-CF documents
+  // Si modulo=notas, tambien incluye E33/E34 emitidas desde pedidos (flujo POS).
+  router.get('/documentos-externos', (req, res) =>
+    ensureAdmin(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const { modulo, estado, limit = 100 } = req.query || {};
+        // LIMIT se interpola como entero (mysql2 con execute() no acepta LIMIT ? como parametro).
+        const lim = Math.max(1, Math.min(1000, Number(limit) || 100));
+        const conditions = ['negocio_id = ?'];
+        const params = [negocioId];
+        if (modulo) { conditions.push('modulo = ?'); params.push(modulo); }
+        if (estado) { conditions.push('ecf_estado = ?'); params.push(estado); }
+        const docs = await db.all(
+          `SELECT id, modulo, referencia_externa, ecf_tipo, ecf_encf, ecf_estado, ecf_track_id,
+                  ecf_codigo_dgii, ecf_mensaje_dgii, ecf_codigo_seguridad, cliente_documento,
+                  cliente_nombre, monto_total, ecf_intentos, ecf_ultimo_intento_at, created_at, updated_at
+           FROM ecf_documentos_externos
+           WHERE ${conditions.join(' AND ')}
+           ORDER BY created_at DESC LIMIT ${lim}`,
+          params
+        );
+        // Para modulo=notas, anexar tambien las E33/E34 emitidas desde pedidos POS.
+        if (modulo === 'notas') {
+          const pedidoConds = ['negocio_id = ?', "ecf_tipo IN ('E33','E34')", 'ecf_encf IS NOT NULL'];
+          const pedidoParams = [negocioId];
+          if (estado) { pedidoConds.push('ecf_estado = ?'); pedidoParams.push(estado); }
+          const pedidoNotas = await db.all(
+            `SELECT id, 'notas' AS modulo,
+                    CAST(id AS CHAR) AS referencia_externa,
+                    REPLACE(ecf_tipo, 'E', '') AS ecf_tipo,
+                    ecf_encf, ecf_estado, ecf_track_id,
+                    ecf_codigo_dgii, ecf_mensaje_dgii, ecf_codigo_seguridad,
+                    cliente_documento, cliente AS cliente_nombre,
+                    total AS monto_total,
+                    ecf_intentos, ecf_ultimo_intento_at,
+                    fecha_factura AS created_at, ecf_ultimo_intento_at AS updated_at,
+                    'pedido' AS origen
+               FROM pedidos
+              WHERE ${pedidoConds.join(' AND ')}
+              ORDER BY id DESC LIMIT ${lim}`,
+            pedidoParams
+          );
+          // Marcar tambien las externas con origen para que el frontend pueda diferenciar
+          docs.forEach((d) => { d.origen = 'externo'; });
+          // Unir y ordenar por created_at desc
+          const todos = [...docs, ...pedidoNotas].sort((a, b) => {
+            const ta = new Date(a.created_at || 0).getTime();
+            const tb = new Date(b.created_at || 0).getTime();
+            return tb - ta;
+          }).slice(0, lim);
+          return res.json({ ok: true, documentos: todos });
+        }
+        return res.json({ ok: true, documentos: docs });
+      } catch (error) {
+        return res.status(500).json({ ok: false, error: error.message });
+      }
+    })
+  );
+
+  // GET /documentos-externos/:id — Get single external document detail
+  router.get('/documentos-externos/:id', (req, res) =>
+    ensureAdmin(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const docId = Number(req.params.id);
+        const doc = await db.get(
+          'SELECT * FROM ecf_documentos_externos WHERE id = ? AND negocio_id = ?',
+          [docId, negocioId]
+        );
+        if (!doc) return res.status(404).json({ ok: false, error: 'No encontrado' });
+        let intentos = [];
+        try { intentos = doc.intentos_log ? JSON.parse(doc.intentos_log) : []; } catch (_) {}
+        return res.json({ ok: true, documento: doc, intentos });
+      } catch (error) {
+        return res.status(500).json({ ok: false, error: error.message });
+      }
+    })
+  );
 
   // POST /emitir/:pedidoId — Emit e-CF for a single order
   router.post('/emitir/:pedidoId', (req, res) =>
@@ -660,6 +1080,35 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     })
   );
 
+  // GET /emitidos — Lista TODOS los pedidos con e-CF (incluye ACEPTADOS) para ver RI
+  router.get('/emitidos', (req, res) =>
+    ensureAdmin(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const estadoFiltro = (req.query.estado || '').toString().toUpperCase().trim();
+        const limit = Math.min(Number(req.query.limit) || 200, 1000);
+        let where = 'negocio_id = ? AND ecf_tipo IS NOT NULL';
+        const params = [negocioId];
+        if (estadoFiltro) {
+          where += ' AND ecf_estado = ?';
+          params.push(estadoFiltro);
+        }
+        const rows = await db.all(
+          `SELECT id, cliente, tipo_comprobante, ncf, total, ecf_tipo, ecf_encf, ecf_estado, ecf_codigo_dgii, ecf_mensaje_dgii, ecf_codigo_seguridad, ecf_qr_url, ecf_track_id, ecf_intentos, ecf_ultimo_intento_at, fecha_factura,
+            (ecf_xml_rfce_firmado IS NOT NULL) AS tiene_rfce
+           FROM pedidos
+           WHERE ${where}
+           ORDER BY id DESC
+           LIMIT ${limit}`,
+          params
+        );
+        return res.json({ ok: true, pedidos: rows || [] });
+      } catch (error) {
+        return res.status(500).json({ ok: false, error: error.message });
+      }
+    })
+  );
+
   // GET /resumen — Dashboard summary
   router.get('/resumen', (req, res) =>
     ensureAdmin(req, res, async (usuario) => {
@@ -724,6 +1173,202 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     })
   );
 
+  // GET /xml/:pedidoId — Descarga XML generado o firmado de un pedido
+  router.get('/xml/:pedidoId', (req, res) =>
+    ensureAdmin(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const pedidoId = Number(req.params.pedidoId);
+        const wantFirmado = req.query.firmado === '1' || req.query.firmado === 'true';
+        const row = await db.get(
+          'SELECT id, ecf_encf, ecf_xml_generado, ecf_xml_firmado FROM pedidos WHERE id = ? AND negocio_id = ?',
+          [pedidoId, negocioId]
+        );
+        if (!row) return res.status(404).send('Pedido no encontrado');
+        const xml = wantFirmado ? row.ecf_xml_firmado : (row.ecf_xml_firmado || row.ecf_xml_generado);
+        if (!xml) return res.status(404).send('Sin XML disponible');
+        const filename = `${row.ecf_encf || ('pedido_' + pedidoId)}${wantFirmado ? '_firmado' : ''}.xml`;
+        res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+        res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+        return res.send(xml);
+      } catch (error) {
+        return res.status(500).send(`Error: ${error.message}`);
+      }
+    })
+  );
+
+  // GET /xml-externo/:docId — Descarga XML de un documento externo
+  router.get('/xml-externo/:docId', (req, res) =>
+    ensureAdmin(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const docId = Number(req.params.docId);
+        const wantFirmado = req.query.firmado === '1' || req.query.firmado === 'true';
+        const row = await db.get(
+          'SELECT id, ecf_encf, ecf_xml_generado, ecf_xml_firmado FROM ecf_documentos_externos WHERE id = ? AND negocio_id = ?',
+          [docId, negocioId]
+        );
+        if (!row) return res.status(404).send('Documento no encontrado');
+        const xml = wantFirmado ? row.ecf_xml_firmado : (row.ecf_xml_firmado || row.ecf_xml_generado);
+        if (!xml) return res.status(404).send('Sin XML disponible');
+        const filename = `${row.ecf_encf || ('doc_' + docId)}${wantFirmado ? '_firmado' : ''}.xml`;
+        res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+        res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+        return res.send(xml);
+      } catch (error) {
+        return res.status(500).send(`Error: ${error.message}`);
+      }
+    })
+  );
+
+  // GET /lookup-encf?encf=E310000000001 — Buscar el comprobante origen por eNCF
+  // para auto-completar el formulario de Notas (E33/E34): cliente, items, totales,
+  // fecha de emision. Busca primero en `pedidos` (POS) y luego en
+  // `ecf_documentos_externos` (compras/gastos/notas/especiales).
+  router.get('/lookup-encf', (req, res) =>
+    ensureAdmin(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const encf = String(req.query.encf || '').trim().toUpperCase();
+        if (!/^E\d{12}$/.test(encf)) {
+          return res.status(400).json({ ok: false, error: 'eNCF invalido. Formato esperado: E + 12 digitos.' });
+        }
+
+        // 1) Buscar en pedidos (POS)
+        const pedido = await db.get(
+          `SELECT id, ecf_tipo, ecf_encf, ecf_estado, fecha_factura, cliente, cliente_documento,
+                  subtotal, impuesto, descuento_monto, total, tipo_comprobante
+           FROM pedidos
+           WHERE ecf_encf = ? AND negocio_id = ? LIMIT 1`,
+          [encf, negocioId]
+        );
+        if (pedido) {
+          const detalle = await db.all(
+            `SELECT dp.cantidad, dp.precio_unitario, dp.descuento_monto, p.nombre
+             FROM detalle_pedido dp
+             LEFT JOIN productos p ON p.id = dp.producto_id
+             WHERE dp.pedido_id = ? AND dp.negocio_id = ?
+             ORDER BY dp.id ASC`,
+            [pedido.id, negocioId]
+          );
+          let cliente = null;
+          if (pedido.cliente_documento) {
+            cliente = await db.get(
+              'SELECT documento, nombre, direccion, telefono, email FROM clientes WHERE documento = ? AND negocio_id = ? LIMIT 1',
+              [pedido.cliente_documento, negocioId]
+            );
+          }
+          return res.json({
+            ok: true,
+            origen: 'pedido',
+            encf,
+            ecf_tipo: pedido.ecf_tipo || null,
+            estado: pedido.ecf_estado || null,
+            fecha_emision: pedido.fecha_factura || null,
+            cliente: {
+              documento: cliente?.documento || pedido.cliente_documento || '',
+              nombre: cliente?.nombre || pedido.cliente || '',
+              direccion: cliente?.direccion || '',
+              telefono: cliente?.telefono || '',
+              correo: cliente?.email || '',
+            },
+            items: (detalle || []).map((d) => {
+              const cant = Number(d.cantidad || 0);
+              const pu = Number(d.precio_unitario || 0);
+              const desc = Number(d.descuento_monto || 0);
+              return {
+                nombre: d.nombre || 'Item',
+                cantidad: cant,
+                precio_unitario: pu,
+                monto: Math.max(0, cant * pu - desc),
+              };
+            }),
+            totales: {
+              subtotal: Number(pedido.subtotal || 0),
+              impuesto: Number(pedido.impuesto || 0),
+              descuento: Number(pedido.descuento_monto || 0),
+              total: Number(pedido.total || 0),
+            },
+          });
+        }
+
+        // 2) Buscar en documentos externos
+        const externo = await db.get(
+          `SELECT id, ecf_tipo, ecf_encf, ecf_estado, cliente_documento, cliente_nombre,
+                  monto_total, payload_emision, created_at
+           FROM ecf_documentos_externos
+           WHERE ecf_encf = ? AND negocio_id = ? LIMIT 1`,
+          [encf, negocioId]
+        );
+        if (externo) {
+          let payload = {};
+          try { payload = externo.payload_emision ? JSON.parse(externo.payload_emision) : {}; } catch (_) { payload = {}; }
+          const items = Array.isArray(payload.items) ? payload.items : [];
+          const totales = payload.totales || {};
+          const comprador = payload.comprador || {};
+          return res.json({
+            ok: true,
+            origen: 'externo',
+            encf,
+            ecf_tipo: externo.ecf_tipo ? `E${externo.ecf_tipo}` : null,
+            estado: externo.ecf_estado || null,
+            fecha_emision: payload.fecha_emision || (externo.created_at ? String(externo.created_at).slice(0, 10) : null),
+            cliente: {
+              documento: comprador.documento || externo.cliente_documento || '',
+              nombre: comprador.nombre || externo.cliente_nombre || '',
+              direccion: comprador.direccion || '',
+              telefono: comprador.telefono || '',
+              correo: comprador.correo || '',
+            },
+            items: items.map((it) => ({
+              nombre: it.nombre || 'Item',
+              cantidad: Number(it.cantidad || 0),
+              precio_unitario: Number(it.precio_unitario || 0),
+              monto: Number(it.monto || (Number(it.cantidad || 0) * Number(it.precio_unitario || 0))),
+            })),
+            totales: {
+              subtotal: Number(totales.subtotal || 0),
+              impuesto: Number(totales.impuesto || 0),
+              descuento: Number(totales.descuento || 0),
+              total: Number(totales.total || externo.monto_total || 0),
+            },
+          });
+        }
+
+        return res.status(404).json({ ok: false, error: `No se encontro ningun comprobante con eNCF ${encf}.` });
+      } catch (error) {
+        return res.status(500).json({ ok: false, error: error.message });
+      }
+    })
+  );
+
+  // GET /xml-rfce/:pedidoId — Descarga el RFCE firmado para E32<250k
+  // El RFCE (Resumen de Factura de Consumo Electronica) es obligatorio para
+  // que la DGII reconozca el flujo completo cuando se valida manualmente desde
+  // el portal de pruebas.
+  router.get('/xml-rfce/:pedidoId', (req, res) =>
+    ensureAdmin(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const pedidoId = Number(req.params.pedidoId);
+        const row = await db.get(
+          'SELECT id, ecf_encf, ecf_xml_rfce_firmado FROM pedidos WHERE id = ? AND negocio_id = ?',
+          [pedidoId, negocioId]
+        );
+        if (!row) return res.status(404).send('Pedido no encontrado');
+        if (!row.ecf_xml_rfce_firmado) {
+          return res.status(404).send('Sin RFCE disponible (solo aplica a E32 menor a 250,000)');
+        }
+        const filename = `${row.ecf_encf || ('pedido_' + pedidoId)}_RFCE.xml`;
+        res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+        res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+        return res.send(row.ecf_xml_rfce_firmado);
+      } catch (error) {
+        return res.status(500).send(`Error: ${error.message}`);
+      }
+    })
+  );
+
   // GET /secuencias — Get current sequences
   router.get('/secuencias', (req, res) =>
     ensureAdmin(req, res, async (usuario) => {
@@ -764,6 +1409,238 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     })
   );
 
+  // GET /representacion/:pedidoId — Representacion Impresa (HTML imprimible) de un pedido
+  router.get('/representacion/:pedidoId', (req, res) =>
+    requireUsuarioSesion(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const pedidoId = Number(req.params.pedidoId);
+        if (!pedidoId) return res.status(400).send('ID de pedido invalido.');
+
+        const data = await loadPedidoCompleto(pedidoId, negocioId);
+        if (!data) return res.status(404).send('Pedido no encontrado.');
+        const { pedido, detalle, cliente, negocio } = data;
+
+        if (!pedido.ecf_encf) {
+          return res.status(400).send('Este pedido no tiene e-CF emitido.');
+        }
+
+        const config = await configManager.loadConfig(negocioId);
+        const flujo = determineEcfFlujo(pedido.ecf_tipo, pedido.total);
+        const ambiente = detectarAmbiente(config?.endpoints?.recepcion || DGII_DEFAULT_ENDPOINTS.recepcion);
+
+        // Reconstruir items del detalle para el render
+        const itemsRender = (detalle || []).map((d, i) => ({
+          linea: String(i + 1),
+          nombre: d.nombre_producto || d.nombre || `Item ${i + 1}`,
+          cantidad: String(d.cantidad || 1),
+          unidadMedida: '',
+          precioUnitario: Number(d.precio_unitario || 0).toFixed(2),
+          descuento: d.descuento_monto > 0 ? Number(d.descuento_monto).toFixed(2) : null,
+          montoItem: (Number(d.cantidad || 1) * Number(d.precio_unitario || 0) - Number(d.descuento_monto || 0)).toFixed(2),
+          indicadorFact: '',
+        }));
+
+        // Reconstruir totales desde el pedido (lo que efectivamente se envio)
+        const totales = {
+          MontoGravadoI1: pedido.impuesto > 0 ? Number(pedido.subtotal || 0).toFixed(2) : null,
+          TotalITBIS1: pedido.impuesto > 0 ? Number(pedido.impuesto || 0).toFixed(2) : null,
+          TotalITBIS: Number(pedido.impuesto || 0).toFixed(2),
+          MontoExento: pedido.impuesto > 0 ? null : Number(pedido.subtotal || 0).toFixed(2),
+          MontoTotal: Number(pedido.total || 0).toFixed(2),
+        };
+
+        const fechaFirma = pedido.ecf_xml_firmado ? extractFechaFirmaFromXml(pedido.ecf_xml_firmado) : null;
+        const fechaVencimiento = await obtenerFechaVencimiento(pedido.ecf_tipo, negocioId, db).catch(() => null);
+
+        const fechaEmisionDgii = (() => {
+          const f = pedido.fecha_factura ? new Date(pedido.fecha_factura) : new Date();
+          if (Number.isNaN(f.getTime())) return '';
+          return `${String(f.getDate()).padStart(2, '0')}-${String(f.getMonth() + 1).padStart(2, '0')}-${f.getFullYear()}`;
+        })();
+
+        const { html } = await buildRepresentacionImpresa({
+          payload: {},
+          encf: pedido.ecf_encf,
+          ecfTipo: pedido.ecf_tipo,
+          emisor: {
+            rnc: config?.rnc_emisor || negocio?.rnc || '',
+            nombre: negocio?.nombre || '',
+            direccion: negocio?.direccion || '',
+            telefono: negocio?.telefono || '',
+          },
+          comprador: cliente ? {
+            documento: cliente.documento || pedido.cliente_documento || '',
+            nombre: cliente.nombre || pedido.cliente || '',
+            direccion: cliente.direccion || '',
+            email: cliente.email || '',
+          } : { nombre: pedido.cliente || '' },
+          fechaEmision: fechaEmisionDgii,
+          fechaVencimiento: fechaVencimiento || '',
+          fechaFirma: fechaFirma || '',
+          codigoSeguridad: pedido.ecf_codigo_seguridad || '',
+          totales,
+          items: itemsRender,
+          trackId: pedido.ecf_track_id || '',
+          estado: pedido.ecf_estado || '',
+          flujo,
+          ambiente,
+        });
+
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(html);
+      } catch (error) {
+        console.error('Error generando RI pedido:', error.message);
+        return res.status(500).send('Error generando Representacion Impresa: ' + error.message);
+      }
+    })
+  );
+
+  // GET /representacion-externo/:docId — Representacion Impresa de un documento externo (compras/gastos/notas/especiales)
+  router.get('/representacion-externo/:docId', (req, res) =>
+    requireUsuarioSesion(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const docId = Number(req.params.docId);
+        if (!docId) return res.status(400).send('ID de documento invalido.');
+
+        const doc = await db.get(
+          'SELECT * FROM ecf_documentos_externos WHERE id = ? AND negocio_id = ?',
+          [docId, negocioId]
+        );
+        if (!doc) return res.status(404).send('Documento no encontrado.');
+        if (!doc.ecf_encf) return res.status(400).send('Este documento no tiene e-CF emitido.');
+
+        let payload = {};
+        try { payload = doc.payload_emision ? JSON.parse(doc.payload_emision) : {}; } catch (_) { payload = {}; }
+
+        const config = await configManager.loadConfig(negocioId);
+        const flujoCalc = determineEcfFlujo(`E${doc.ecf_tipo}`, doc.monto_total || 0);
+        const ambiente = detectarAmbiente(config?.endpoints?.recepcion || DGII_DEFAULT_ENDPOINTS.recepcion);
+        const fechaFirma = doc.ecf_xml_firmado ? extractFechaFirmaFromXml(doc.ecf_xml_firmado) : null;
+        const negocio = await db.get('SELECT * FROM negocios WHERE id = ?', [negocioId]);
+
+        const { html } = await buildRepresentacionImpresa({
+          payload,
+          encf: doc.ecf_encf,
+          ecfTipo: doc.ecf_tipo,
+          emisor: {
+            rnc: payload.RNCEmisor || config?.rnc_emisor || negocio?.rnc || '',
+            nombre: payload.RazonSocialEmisor || negocio?.nombre || '',
+            direccion: payload.DireccionEmisor || negocio?.direccion || '',
+            telefono: payload['TelefonoEmisor[0]'] || negocio?.telefono || '',
+          },
+          comprador: {
+            documento: payload.RNCComprador || doc.cliente_documento || '',
+            nombre: payload.RazonSocialComprador || doc.cliente_nombre || '',
+            direccion: payload.DireccionComprador || '',
+            email: payload.CorreoComprador || '',
+          },
+          fechaEmision: payload.FechaEmision || '',
+          fechaVencimiento: payload.FechaVencimientoSecuencia || '',
+          fechaFirma: fechaFirma || '',
+          codigoSeguridad: doc.ecf_codigo_seguridad || payload.CodigoSeguridadeCF || '',
+          trackId: doc.ecf_track_id || '',
+          estado: doc.ecf_estado || '',
+          flujo: flujoCalc,
+          ambiente,
+        });
+
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(html);
+      } catch (error) {
+        console.error('Error generando RI doc externo:', error.message);
+        return res.status(500).send('Error generando Representacion Impresa: ' + error.message);
+      }
+    })
+  );
+
+  // GET /paso5-candidatos — Lista las RI requeridas por la certificacion DGII Paso 5.
+  // Devuelve, para cada slot (E31, E32 >=250k, E32 <250k, E33, E34, E41, E43, E44, E45,
+  // E46, E47), el documento ACEPTADO mas reciente disponible (entre `pedidos` y
+  // `ecf_documentos_externos`). El frontend usa el URL para abrir la RI con ?print=1
+  // y permitirle al usuario guardarla como PDF.
+  router.get('/paso5-candidatos', (req, res) =>
+    ensureAdmin(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+
+        const slots = [
+          { slot: '31',         label: 'Tipo 31 - Factura Credito Fiscal',   ecfTipo: '31' },
+          { slot: '32_GE_250K', label: 'Tipo 32 - Consumo >= RD$250k',       ecfTipo: '32', minTotal: 250000 },
+          { slot: '32_LT_250K', label: 'Tipo 32 - Consumo < RD$250k',        ecfTipo: '32', maxTotal: 249999.99 },
+          { slot: '33',         label: 'Tipo 33 - Nota de Debito',           ecfTipo: '33' },
+          { slot: '34',         label: 'Tipo 34 - Nota de Credito',          ecfTipo: '34' },
+          { slot: '41',         label: 'Tipo 41 - Compras',                  ecfTipo: '41' },
+          { slot: '43',         label: 'Tipo 43 - Gastos Menores',           ecfTipo: '43' },
+          { slot: '44',         label: 'Tipo 44 - Regimenes Especiales',     ecfTipo: '44' },
+          { slot: '45',         label: 'Tipo 45 - Gubernamental',            ecfTipo: '45' },
+          { slot: '46',         label: 'Tipo 46 - Exportaciones',            ecfTipo: '46' },
+          { slot: '47',         label: 'Tipo 47 - Pagos al Exterior',        ecfTipo: '47' },
+        ];
+
+        const out = [];
+        for (const s of slots) {
+          // Buscar en pedidos (POS) - ACEPTADO mas reciente para este tipo
+          const ecfTipoPedido = `E${s.ecfTipo}`;
+          const condsPedido = ['negocio_id = ?', 'ecf_tipo = ?', "ecf_estado = 'ACEPTADO'", 'ecf_encf IS NOT NULL'];
+          const paramsPedido = [negocioId, ecfTipoPedido];
+          if (s.minTotal != null) { condsPedido.push('total >= ?'); paramsPedido.push(s.minTotal); }
+          if (s.maxTotal != null) { condsPedido.push('total <= ?'); paramsPedido.push(s.maxTotal); }
+          const pedido = await db.get(
+            `SELECT id, ecf_encf, ecf_tipo, ecf_estado, total AS monto_total,
+                    cliente AS cliente_nombre, fecha_factura AS created_at
+               FROM pedidos
+              WHERE ${condsPedido.join(' AND ')}
+              ORDER BY id DESC LIMIT 1`,
+            paramsPedido
+          );
+
+          // Buscar en ecf_documentos_externos
+          const condsExt = ['negocio_id = ?', 'ecf_tipo = ?', "ecf_estado = 'ACEPTADO'", 'ecf_encf IS NOT NULL'];
+          const paramsExt = [negocioId, s.ecfTipo];
+          if (s.minTotal != null) { condsExt.push('monto_total >= ?'); paramsExt.push(s.minTotal); }
+          if (s.maxTotal != null) { condsExt.push('monto_total <= ?'); paramsExt.push(s.maxTotal); }
+          const externo = await db.get(
+            `SELECT id, ecf_encf, ecf_tipo, ecf_estado, monto_total,
+                    cliente_nombre, created_at
+               FROM ecf_documentos_externos
+              WHERE ${condsExt.join(' AND ')}
+              ORDER BY id DESC LIMIT 1`,
+            paramsExt
+          );
+
+          // Elegir el mas reciente (por created_at)
+          let elegido = null;
+          if (pedido && externo) {
+            const fp = new Date(pedido.created_at || 0).getTime();
+            const fe = new Date(externo.created_at || 0).getTime();
+            elegido = fp >= fe
+              ? { ...pedido, origen: 'pedido', url: `/api/dgii/ecf/representacion/${pedido.id}?print=1` }
+              : { ...externo, origen: 'externo', url: `/api/dgii/ecf/representacion-externo/${externo.id}?print=1` };
+          } else if (pedido) {
+            elegido = { ...pedido, origen: 'pedido', url: `/api/dgii/ecf/representacion/${pedido.id}?print=1` };
+          } else if (externo) {
+            elegido = { ...externo, origen: 'externo', url: `/api/dgii/ecf/representacion-externo/${externo.id}?print=1` };
+          }
+
+          out.push({
+            slot: s.slot,
+            label: s.label,
+            ecf_tipo: s.ecfTipo,
+            disponible: !!elegido,
+            documento: elegido,
+          });
+        }
+
+        return res.json({ ok: true, slots: out });
+      } catch (error) {
+        console.error('Error /paso5-candidatos:', error);
+        return res.status(500).json({ ok: false, error: error.message });
+      }
+    })
+  );
+
   // POST /test-auth — Test DGII authentication
   router.post('/test-auth', (req, res) =>
     ensureAdmin(req, res, async (usuario) => {
@@ -780,7 +1657,7 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     })
   );
 
-  return { router, emitirEcfParaPedido };
+  return { router, emitirEcfParaPedido, emitirEcfDocumentoExterno };
 };
 
 module.exports = { createDgiiEcfRouter };

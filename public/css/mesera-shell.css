@@ -1,0 +1,1677 @@
+/* =====================================================================
+   KANM Mesera Shell — Layout profesional, elegante e interactivo
+   ---------------------------------------------------------------------
+   PC (>=1100px): Topbar + Tabs + Workspace 2 columnas (productos | carrito)
+   Tablet (981-1099): Topbar + Tabs + 2 columnas mas estrechas
+   Movil (<=980px): Topbar compacto + Tabs scroll-x + 1 columna + FAB carrito
+   --------------------------------------------------------------------- */
+
+:root {
+  --mesera-topbar-h: 60px;
+  --mesera-tabs-h: 60px;
+  --mesera-footer-h: 78px;
+  --mesera-cart-w: 380px;
+  --mesera-shell-bg: #f5f6f8;
+  --mesera-card-bg: #ffffff;
+  --mesera-border: rgba(15, 23, 42, 0.08);
+  --mesera-text: #1e293b;
+  --mesera-muted: #64748b;
+  --mesera-primary: var(--color-boton-primario, #ec4899);
+  --mesera-primary-soft: color-mix(in srgb, var(--color-boton-primario, #ec4899) 14%, transparent);
+  --mesera-success: #16a34a;
+  --mesera-warning: #f59e0b;
+  --mesera-danger: #dc2626;
+  --mesera-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --mesera-shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08);
+  --mesera-shadow-lg: 0 12px 30px rgba(15, 23, 42, 0.12);
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
+body.mesera-shell-body {
+  margin: 0;
+  background: var(--mesera-shell-bg);
+  color: var(--mesera-text);
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+body.mesera-shell-body.mesera-cart-locked {
+  overflow: hidden;
+}
+
+/* Oculta el header viejo siempre */
+.mesera-shell-body .kanm-header {
+  display: none !important;
+}
+
+.mesera-shell {
+  display: grid;
+  grid-template-rows: var(--mesera-topbar-h) var(--mesera-tabs-h) 1fr auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  position: relative;
+  isolation: isolate;
+}
+
+/* ============================================================
+   TOPBAR
+   ============================================================ */
+.mesera-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 22px;
+  background: var(--mesera-card-bg);
+  border-bottom: 1px solid var(--mesera-border);
+  height: var(--mesera-topbar-h);
+}
+
+.mesera-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mesera-topbar-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--color-boton-primario, #ec4899), var(--color-boton-secundario, #7b8fb8));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: var(--mesera-shadow-sm);
+}
+
+.mesera-topbar-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mesera-topbar-logo img:not([src]),
+.mesera-topbar-logo img[src=""] {
+  display: none;
+}
+
+.mesera-logo-fallback {
+  font-size: 1rem;
+}
+
+.mesera-topbar-textwrap {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  min-width: 0;
+}
+
+.mesera-topbar-business {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--mesera-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mesera-topbar-role {
+  font-size: 0.75rem;
+  color: var(--mesera-muted);
+}
+
+.mesera-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.mesera-topbar-tag {
+  display: inline-flex;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--mesera-primary-soft);
+  color: var(--mesera-primary);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mesera-topbar-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--mesera-border);
+  background: #fff;
+  color: var(--mesera-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.mesera-topbar-action:hover {
+  background: var(--mesera-primary-soft);
+  border-color: color-mix(in srgb, var(--mesera-primary) 25%, transparent);
+  color: var(--mesera-primary);
+}
+
+.mesera-topbar-action-icon {
+  font-size: 0.95rem;
+}
+
+.chat-link .chat-unread-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+}
+
+/* ============================================================
+   TABS BAR
+   ============================================================ */
+.mesera-tabsbar {
+  position: sticky;
+  top: var(--mesera-topbar-h);
+  z-index: 25;
+  background: var(--mesera-shell-bg);
+  padding: 10px 22px;
+  border-bottom: 1px solid var(--mesera-border);
+  height: var(--mesera-tabs-h);
+  display: flex;
+  align-items: center;
+}
+
+.mesera-tabsbar .mesera-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: var(--mesera-shadow-sm);
+  border: 1px solid var(--mesera-border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  scrollbar-width: none;
+  margin: 0;
+}
+
+.mesera-tabsbar .mesera-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.mesera-tabsbar .mesera-tab-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: auto;
+  height: auto;
+  padding: 9px 16px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--mesera-muted);
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.1s ease;
+  white-space: nowrap;
+  position: relative;
+  box-shadow: none;
+}
+
+.mesera-tabsbar .mesera-tab-btn .mesera-tab-icon {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.mesera-tabsbar .mesera-tab-btn:hover {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--mesera-text);
+}
+
+.mesera-tabsbar .mesera-tab-btn.active {
+  background: linear-gradient(135deg, var(--mesera-primary), color-mix(in srgb, var(--mesera-primary) 75%, #6366f1));
+  color: #fff;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--mesera-primary) 30%, transparent);
+}
+
+.mesera-tabsbar .mesera-tab-btn.active:hover {
+  transform: translateY(-1px);
+}
+
+.mesera-tabsbar .mesera-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.72rem;
+  margin-left: 2px;
+  box-shadow: 0 4px 10px rgba(239, 68, 68, 0.4);
+  animation: meseraBadgePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes meseraBadgePulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.08); }
+}
+
+/* ============================================================
+   MAIN + WORKSPACE (2 columnas)
+   ============================================================ */
+.mesera-shell .kanm-main.mesera-main {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 18px 22px;
+  display: block;
+  gap: 0;
+}
+
+.mesera-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--mesera-cart-w);
+  gap: 18px;
+  align-items: start;
+}
+
+.mesera-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* Asegura que paneles ocultos no rompan layout */
+.mesera-shell .mesera-tab-panel {
+  display: none;
+}
+
+.mesera-shell .mesera-tab-panel.active {
+  display: block;
+}
+
+/* ============================================================
+   CARDS GENERALES (info, productos, pedidos)
+   ============================================================ */
+.mesera-shell .kanm-card.mesera-card-info,
+.mesera-shell .kanm-card.mesera-card-productos,
+.mesera-shell .kanm-card.mesera-card-pedidos,
+.mesera-shell .kanm-card.mesera-cart-card {
+  background: var(--mesera-card-bg);
+  border: 1px solid var(--mesera-border);
+  border-radius: 16px;
+  box-shadow: var(--mesera-shadow-sm);
+  padding: 18px 20px;
+}
+
+.mesera-shell .kanm-card-header h2 {
+  margin: 0 0 2px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--mesera-text);
+}
+
+.mesera-shell .kanm-card-header .kanm-subtitle {
+  margin: 0;
+  color: var(--mesera-muted);
+  font-size: 0.85rem;
+}
+
+/* ============================================================
+   FORM CARD: encabezado + grid de campos (datos mesa, delivery)
+   ============================================================ */
+.mesera-shell .kanm-card.mesera-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mesera-shell .kanm-card.mesera-card-info .kanm-card-header {
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--mesera-border);
+}
+
+/* Form grid de mesera (datos mesa, delivery) */
+.mesera-form-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0;
+}
+
+.mesera-form-grid .mesera-span-full,
+.mesera-form-grid .delivery-span-full {
+  grid-column: 1 / -1;
+}
+
+/* Cada campo es una "subcarta" suave para mejor jerarquia visual */
+.mesera-form-grid .kanm-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #fbfbfd 0%, #f6f7fa 100%);
+  border: 1px solid var(--mesera-border);
+  border-radius: 12px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.mesera-form-grid .kanm-input-group:focus-within {
+  border-color: color-mix(in srgb, var(--mesera-primary) 45%, transparent);
+  background: #fff;
+  box-shadow: 0 0 0 4px var(--mesera-primary-soft);
+}
+
+.mesera-form-grid .kanm-input {
+  border-radius: 10px;
+  border: 1px solid var(--mesera-border);
+  padding: 10px 12px;
+  background: #fff;
+  font-size: 0.92rem;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mesera-form-grid .kanm-input:focus {
+  outline: none;
+  border-color: var(--mesera-primary);
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--mesera-primary-soft);
+}
+
+.mesera-form-grid textarea.kanm-input {
+  resize: vertical;
+  min-height: 64px;
+  line-height: 1.4;
+}
+
+.mesera-form-grid .kanm-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--mesera-text);
+  margin-bottom: 0;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+/* Icono dentro del label (emoji decorativo) */
+.mesera-form-grid .kanm-label .mesera-label-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--mesera-primary-soft);
+  color: var(--mesera-primary);
+  font-size: 0.78rem;
+  flex-shrink: 0;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Marcador visual "(opcional)" suave */
+.mesera-form-grid .kanm-label .mesera-label-opt {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--mesera-muted);
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: auto;
+  font-style: italic;
+}
+
+.mesera-form-grid .kanm-helper {
+  font-size: 0.74rem;
+  color: var(--mesera-muted);
+  margin-top: 0;
+  line-height: 1.3;
+}
+
+.mesera-form-grid .kanm-helper:empty {
+  display: none;
+}
+
+/* Helper de identidad (nombre del mesero logueado) destacado */
+.mesera-form-grid #mesera-identidad:not(:empty) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mesera-success) 12%, transparent);
+  color: var(--mesera-success);
+  font-size: 0.72rem;
+  font-weight: 600;
+  align-self: flex-start;
+}
+
+.mesera-form-grid #mesera-identidad:not(:empty)::before {
+  content: "👋";
+  font-size: 0.78rem;
+}
+
+/* ============================================================
+   PRODUCTOS CARD
+   ============================================================ */
+.mesera-card-productos {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mesera-productos-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.mesera-productos-title {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.mesera-productos-search {
+  flex: 1 1 280px;
+  max-width: 420px;
+}
+
+.mesera-productos-search .buscador-input {
+  position: relative;
+}
+
+.mesera-productos-search input[type="search"] {
+  width: 100%;
+  padding: 10px 14px 10px 38px;
+  border-radius: 12px;
+  border: 1px solid var(--mesera-border);
+  background: #fafafa;
+  font-size: 0.9rem;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mesera-productos-search input[type="search"]:focus {
+  outline: none;
+  border-color: var(--mesera-primary);
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--mesera-primary-soft);
+}
+
+.mesera-productos-search .buscador-icono {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  font-size: 0.95rem;
+  color: var(--mesera-muted);
+  pointer-events: none;
+}
+
+.mesera-productos-search .search-results-info {
+  margin: 6px 2px 0;
+  font-size: 0.78rem;
+  color: var(--mesera-muted);
+}
+
+/* Lista de productos: scroll interno con grid */
+.mesera-productos-scroll {
+  max-height: calc(100vh - var(--mesera-topbar-h) - var(--mesera-tabs-h) - var(--mesera-footer-h) - 290px);
+  min-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  margin: 0 -4px;
+  padding: 4px 8px 8px 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+
+.mesera-productos-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.mesera-productos-scroll::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 4px;
+}
+
+.mesera-productos-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.mesera-productos-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+/* Tarjeta de producto: rediseno mas elegante */
+.mesera-shell .producto-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid var(--mesera-border);
+  box-shadow: var(--mesera-shadow-sm);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  cursor: default;
+  position: relative;
+  overflow: hidden;
+}
+
+.mesera-shell .producto-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--mesera-primary-soft) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.mesera-shell .producto-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--mesera-shadow-md);
+  border-color: color-mix(in srgb, var(--mesera-primary) 25%, transparent);
+}
+
+.mesera-shell .producto-card:hover::before {
+  opacity: 1;
+}
+
+.mesera-shell .producto-card h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--mesera-text);
+  line-height: 1.25;
+  position: relative;
+}
+
+.mesera-shell .producto-card .producto-meta {
+  font-size: 0.82rem;
+  color: var(--mesera-muted);
+  margin-top: 0;
+  position: relative;
+}
+
+.mesera-shell .producto-card .producto-acciones {
+  margin-top: auto;
+  padding-top: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  position: relative;
+}
+
+.mesera-shell .producto-card .producto-acciones .kanm-button {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.mesera-shell .producto-card .producto-precio-selector {
+  position: relative;
+}
+
+.mesera-shell .producto-card .producto-precio-select {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--mesera-border);
+  padding: 6px 10px;
+  background: #fafafa;
+  font-size: 0.82rem;
+}
+
+/* ============================================================
+   CARRITO (sidebar)
+   ============================================================ */
+.mesera-cart-aside {
+  position: sticky;
+  top: calc(var(--mesera-topbar-h) + var(--mesera-tabs-h) + 18px);
+  align-self: start;
+  height: calc(100vh - var(--mesera-topbar-h) - var(--mesera-tabs-h) - var(--mesera-footer-h) - 36px);
+  max-height: calc(100vh - var(--mesera-topbar-h) - var(--mesera-tabs-h) - var(--mesera-footer-h) - 36px);
+  display: flex;
+  flex-direction: column;
+}
+
+.mesera-cart-card {
+  flex: 1 1 auto;
+  display: flex !important;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mesera-cart-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mesera-cart-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.mesera-cart-title-icon {
+  font-size: 1.1rem;
+}
+
+.mesera-cart-close {
+  display: none;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--mesera-text);
+  border-radius: 10px;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mesera-cart-close:hover {
+  background: rgba(15, 23, 42, 0.1);
+}
+
+.mesera-cart-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 -4px;
+  padding: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+
+.mesera-cart-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.mesera-cart-list::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 3px;
+}
+
+/* Tarjetas del carrito */
+.mesera-shell .carrito-item {
+  display: grid !important;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fafafa;
+  border: 1px solid var(--mesera-border);
+  transition: border-color 0.15s ease;
+}
+
+.mesera-shell .carrito-item:hover {
+  border-color: color-mix(in srgb, var(--mesera-primary) 30%, transparent);
+}
+
+.mesera-shell .carrito-item .carrito-controles input[type="number"] {
+  width: 56px;
+  height: 32px;
+  text-align: center;
+  border-radius: 8px;
+  border: 1px solid var(--mesera-border);
+  background: #fff;
+  font-size: 0.88rem;
+}
+
+.mesera-shell .carrito-item .carrito-controles button {
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+
+/* Resumen del carrito */
+.mesera-cart-resumen {
+  border-top: 1px dashed var(--mesera-border);
+  padding-top: 12px;
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mesera-cart-resumen .resumen-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.88rem;
+  color: var(--mesera-muted);
+}
+
+.mesera-cart-resumen .resumen-item.total {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--mesera-border);
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--mesera-text);
+}
+
+.mesera-cart-resumen .resumen-item.total span:last-child {
+  color: var(--mesera-primary);
+}
+
+/* Empty state del carrito */
+.mesera-shell .lista-carrito .kanm-empty-message {
+  text-align: center;
+  padding: 28px 16px;
+  border-radius: 12px;
+  background: #fafafa;
+  color: var(--mesera-muted);
+  font-size: 0.88rem;
+  border: 2px dashed var(--mesera-border);
+}
+
+/* ============================================================
+   PEDIDOS (pendientes / preparando / listos)
+   ============================================================ */
+.mesera-card-pedidos {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mesera-card-pedidos .kanm-card-header {
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--mesera-border);
+  margin-bottom: 4px;
+}
+
+.mesera-pedidos-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 14px;
+  max-height: none;
+}
+
+/* ----- Cuenta card (contenedor principal de cada cuenta) ----- */
+.mesera-shell .pedido-activo-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid var(--mesera-border);
+  border-left: 4px solid var(--mesera-muted);
+  border-radius: 14px;
+  padding: 14px 16px 14px 18px;
+  box-shadow: var(--mesera-shadow-sm);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  overflow: hidden;
+}
+
+.mesera-shell .pedido-activo-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--mesera-shadow-md);
+}
+
+/* Color de borde izquierdo segun el estado de la cuenta */
+.mesera-shell .pedido-activo-card:has(.kanm-badge.estado-pendiente) {
+  border-left-color: var(--mesera-warning);
+}
+.mesera-shell .pedido-activo-card:has(.kanm-badge.estado-preparando),
+.mesera-shell .pedido-activo-card:has(.kanm-badge.estado-parcial) {
+  border-left-color: #3b82f6;
+}
+.mesera-shell .pedido-activo-card:has(.kanm-badge.estado-listo) {
+  border-left-color: var(--mesera-success);
+}
+
+/* ----- Header de la cuenta: cuenta # + servicio + badges ----- */
+.mesera-shell .pedido-activo-header {
+  display: grid !important;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "info  badge"
+    "areas areas";
+  align-items: start;
+  gap: 8px 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--mesera-border);
+}
+
+.mesera-shell .pedido-activo-header > div:first-child {
+  grid-area: info;
+  min-width: 0;
+}
+
+.mesera-shell .pedido-activo-header > .kanm-badge {
+  grid-area: badge;
+  align-self: start;
+  flex-shrink: 0;
+}
+
+.mesera-shell .pedido-activo-header .pedido-area-badges {
+  grid-area: areas;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.mesera-shell .pedido-activo-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--mesera-text);
+  letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mesera-shell .pedido-activo-header h3::before {
+  content: "🧾";
+  font-size: 0.95rem;
+}
+
+.mesera-shell .pedido-activo-header .kanm-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.84rem;
+  color: var(--mesera-text);
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.mesera-shell .pedido-activo-header .pedido-meta {
+  margin: 4px 0 0;
+  font-size: 0.74rem;
+  color: var(--mesera-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ----- Contenedor de pedidos dentro de la cuenta ----- */
+.mesera-shell .cuenta-pedidos {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ----- Subcard: cada pedido individual ----- */
+.mesera-shell .pedido-subcard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fafbfc 0%, #f4f6f9 100%);
+  border: 1px solid var(--mesera-border);
+}
+
+.mesera-shell .pedido-subcard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mesera-shell .pedido-subcard-header .kanm-badge {
+  font-size: 0.7rem;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.mesera-shell .pedido-subcard-header .kanm-badge.ghost {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--mesera-text);
+  border: 1px solid var(--mesera-border);
+}
+
+.mesera-shell .pedido-subcard .pedido-meta {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--mesera-muted);
+  line-height: 1.35;
+}
+
+.mesera-shell .pedido-subcard .pedido-note {
+  font-size: 0.78rem;
+  color: var(--mesera-text);
+  background: color-mix(in srgb, var(--mesera-warning) 12%, transparent);
+  border-left: 3px solid var(--mesera-warning);
+  border-radius: 6px;
+  padding: 6px 10px;
+  line-height: 1.35;
+}
+
+/* ----- Lista de items del pedido ----- */
+.mesera-shell .kanm-pedido-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mesera-shell .kanm-pedido-items li {
+  position: relative;
+  padding: 6px 8px 6px 26px;
+  font-size: 0.85rem;
+  color: var(--mesera-text);
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid var(--mesera-border);
+  line-height: 1.3;
+}
+
+.mesera-shell .kanm-pedido-items li::before {
+  content: "•";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--mesera-primary);
+  font-weight: 700;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+/* ----- Botones de accion dentro de subcard ----- */
+.mesera-shell .pedido-subcard .pedido-activo-acciones {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.mesera-shell .pedido-subcard .pedido-activo-acciones .kanm-button {
+  flex: 1 1 auto;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  border-radius: 8px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ----- Acciones a nivel de cuenta (Agregar nueva orden, etc) ----- */
+.mesera-shell .pedido-activo-card .cuenta-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--mesera-border);
+  margin-top: 2px;
+}
+
+.mesera-shell .pedido-activo-card .cuenta-acciones .kanm-button {
+  flex: 1 1 auto;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  border-radius: 9px;
+  font-weight: 600;
+}
+
+/* ----- Badges de area (Cocina, Bar) refinadas ----- */
+.mesera-shell .pedido-area-badges .kanm-badge {
+  font-size: 0.7rem;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid var(--mesera-border);
+  color: var(--mesera-muted);
+}
+
+.mesera-shell .pedido-area-badges .kanm-badge.estado-pendiente {
+  background: color-mix(in srgb, var(--mesera-warning) 12%, transparent);
+  color: var(--mesera-warning);
+  border-color: color-mix(in srgb, var(--mesera-warning) 30%, transparent);
+}
+
+.mesera-shell .pedido-area-badges .kanm-badge.estado-preparando {
+  background: color-mix(in srgb, #3b82f6 12%, transparent);
+  color: #1d4ed8;
+  border-color: color-mix(in srgb, #3b82f6 30%, transparent);
+}
+
+.mesera-shell .pedido-area-badges .kanm-badge.estado-listo {
+  background: color-mix(in srgb, var(--mesera-success) 12%, transparent);
+  color: var(--mesera-success);
+  border-color: color-mix(in srgb, var(--mesera-success) 30%, transparent);
+}
+
+/* ----- Badge principal de la cuenta (estado general) ----- */
+.mesera-shell .pedido-activo-header > .kanm-badge {
+  font-size: 0.72rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.mesera-shell .pedido-activo-header > .kanm-badge.estado-pendiente {
+  background: color-mix(in srgb, var(--mesera-warning) 14%, transparent);
+  color: #b45309;
+  border: 1px solid color-mix(in srgb, var(--mesera-warning) 30%, transparent);
+}
+
+.mesera-shell .pedido-activo-header > .kanm-badge.estado-preparando,
+.mesera-shell .pedido-activo-header > .kanm-badge.estado-parcial {
+  background: color-mix(in srgb, #3b82f6 14%, transparent);
+  color: #1d4ed8;
+  border: 1px solid color-mix(in srgb, #3b82f6 30%, transparent);
+}
+
+.mesera-shell .pedido-activo-header > .kanm-badge.estado-listo {
+  background: color-mix(in srgb, var(--mesera-success) 14%, transparent);
+  color: #15803d;
+  border: 1px solid color-mix(in srgb, var(--mesera-success) 30%, transparent);
+}
+
+/* Mensaje vacio (sin pedidos) */
+.mesera-shell .lista-pedidos-activos:empty + .kanm-message,
+.mesera-shell .mesera-card-pedidos .kanm-message:not(:empty) {
+  text-align: center;
+  padding: 16px;
+  background: #fafbfc;
+  border-radius: 10px;
+  border: 1px dashed var(--mesera-border);
+  color: var(--mesera-muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* ============================================================
+   FOOTER FIJO CON ACCIONES
+   ============================================================ */
+.mesera-shell .kanm-footer.mesera-footer-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 22;
+  background: var(--mesera-card-bg);
+  border-top: 1px solid var(--mesera-border);
+  padding: 12px 22px;
+  box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.04);
+  margin: 0;
+}
+
+.mesera-footer-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.mesera-footer-msg {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.mesera-footer-msg .kanm-message:empty {
+  display: none;
+}
+
+.mesera-footer-acciones {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.mesera-footer-acciones[hidden] {
+  display: none !important;
+}
+
+.mesera-shell .kanm-button.mesera-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.mesera-shell .kanm-button.mesera-btn.primary {
+  background: linear-gradient(135deg, var(--mesera-primary), color-mix(in srgb, var(--mesera-primary) 80%, #6366f1));
+  border: none;
+  color: #fff;
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--mesera-primary) 30%, transparent);
+  transition: transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.mesera-shell .kanm-button.mesera-btn.primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--mesera-primary) 40%, transparent);
+}
+
+.mesera-shell .kanm-button.mesera-btn.secondary {
+  background: #fff;
+  border: 1px solid var(--mesera-border);
+  color: var(--mesera-text);
+}
+
+.mesera-shell .kanm-button.mesera-btn.secondary:hover {
+  background: var(--mesera-primary-soft);
+  border-color: color-mix(in srgb, var(--mesera-primary) 30%, transparent);
+  color: var(--mesera-primary);
+}
+
+/* ============================================================
+   FAB CARRITO MOVIL
+   ============================================================ */
+.mesera-cart-fab {
+  display: none;
+  position: fixed;
+  right: 14px;
+  bottom: calc(var(--mesera-footer-h) + 16px);
+  z-index: 28;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(135deg, var(--mesera-primary), color-mix(in srgb, var(--mesera-primary) 70%, #6366f1));
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--mesera-primary) 45%, transparent);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mesera-cart-fab[hidden] {
+  display: none !important;
+}
+
+.mesera-cart-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 40px color-mix(in srgb, var(--mesera-primary) 55%, transparent);
+}
+
+.mesera-cart-fab-icon {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.mesera-cart-fab-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  text-align: left;
+}
+
+.mesera-cart-fab-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  opacity: 0.95;
+}
+
+.mesera-cart-fab-total {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.mesera-cart-fab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  background: #fff;
+  color: var(--mesera-primary);
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  margin-left: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.mesera-cart-fab-badge[hidden] {
+  display: none;
+}
+
+.mesera-cart-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  border: 0;
+  padding: 0;
+  z-index: 40;
+  cursor: pointer;
+}
+
+.mesera-cart-overlay.mesera-cart-overlay--visible {
+  display: block;
+}
+
+/* ============================================================
+   RESPONSIVE: TABLET (981 - 1099 px)
+   ============================================================ */
+@media (max-width: 1099px) {
+  :root {
+    --mesera-cart-w: 320px;
+  }
+
+  .mesera-shell .kanm-main.mesera-main {
+    padding: 14px 16px;
+  }
+
+  .mesera-tabsbar {
+    padding: 8px 16px;
+  }
+
+  .mesera-topbar {
+    padding: 10px 16px;
+  }
+
+  .mesera-productos-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+}
+
+/* ============================================================
+   RESPONSIVE: TABLET / MOVIL (<= 980 px)
+   ============================================================ */
+@media (max-width: 980px) {
+  :root {
+    --mesera-topbar-h: 56px;
+    --mesera-tabs-h: 56px;
+    --mesera-footer-h: 86px;
+  }
+
+  .mesera-shell {
+    grid-template-rows: var(--mesera-topbar-h) var(--mesera-tabs-h) 1fr auto;
+  }
+
+  /* Topbar compacto */
+  .mesera-topbar {
+    padding: 8px 14px;
+  }
+
+  .mesera-topbar-business {
+    font-size: 0.92rem;
+  }
+
+  .mesera-topbar-role {
+    display: none;
+  }
+
+  .mesera-topbar-tag {
+    display: none;
+  }
+
+  .mesera-topbar-action-label {
+    display: none;
+  }
+
+  .mesera-topbar-action {
+    padding: 8px;
+    border-radius: 10px;
+  }
+
+  /* Tabs scrollables */
+  .mesera-tabsbar {
+    padding: 8px 12px;
+  }
+
+  .mesera-tabsbar .mesera-tabs {
+    gap: 6px;
+  }
+
+  .mesera-tabsbar .mesera-tab-btn {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+  }
+
+  /* Workspace 1 columna - oculta carrito sidebar y muestra FAB */
+  .mesera-workspace {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .mesera-shell .kanm-main.mesera-main {
+    padding: 12px 12px calc(var(--mesera-footer-h) + 76px);
+  }
+
+  /* Carrito como drawer desde la derecha */
+  .mesera-cart-aside {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(420px, 92vw);
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    transform: translateX(100%);
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 50;
+    background: var(--mesera-card-bg);
+    box-shadow: -8px 0 32px rgba(15, 23, 42, 0.18);
+    padding: 0;
+  }
+
+  .mesera-cart-aside.mesera-cart-aside--open {
+    transform: translateX(0);
+  }
+
+  .mesera-cart-card {
+    height: 100%;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 16px 16px 100px !important;
+  }
+
+  .mesera-cart-close {
+    display: inline-flex !important;
+  }
+
+  /* FAB visible solo en tomar/delivery */
+  .mesera-cart-fab {
+    display: inline-flex;
+  }
+
+  .mesera-cart-fab[data-tab-shared][hidden] {
+    display: none !important;
+  }
+
+  /* Productos grid mas compacto */
+  .mesera-productos-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+  }
+
+  .mesera-shell .producto-card {
+    padding: 12px;
+  }
+
+  .mesera-shell .producto-card h3 {
+    font-size: 0.92rem;
+  }
+
+  .mesera-productos-scroll {
+    max-height: none;
+    min-height: 280px;
+    padding-right: 4px;
+  }
+
+  /* Form fields apilados */
+  .mesera-form-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .mesera-form-grid .kanm-input-group {
+    padding: 10px 12px;
+  }
+
+  /* Pedidos grid compacto */
+  .mesera-pedidos-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mesera-shell .pedido-activo-card {
+    padding: 12px 14px 12px 16px;
+  }
+
+  .mesera-shell .pedido-subcard {
+    padding: 9px 11px;
+  }
+
+  .mesera-shell .pedido-activo-header h3 {
+    font-size: 0.95rem;
+  }
+
+  /* Footer movil: stack columnas si hace falta */
+  .mesera-shell .kanm-footer.mesera-footer-bar {
+    padding: 10px 12px;
+  }
+
+  .mesera-footer-inner {
+    gap: 8px;
+  }
+
+  .mesera-footer-msg {
+    flex: 1 1 100%;
+    order: -1;
+  }
+
+  .mesera-footer-msg .kanm-message:empty {
+    display: none;
+  }
+
+  .mesera-footer-acciones {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+
+  .mesera-shell .kanm-button.mesera-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+    padding: 10px 12px;
+    font-size: 0.84rem;
+  }
+}
+
+/* ============================================================
+   RESPONSIVE: MOVIL PEQUENO (<= 480 px)
+   ============================================================ */
+@media (max-width: 480px) {
+  .mesera-topbar-textwrap {
+    display: none;
+  }
+
+  .mesera-topbar-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+  }
+
+  .mesera-tabsbar .mesera-tab-btn .mesera-tab-label {
+    display: none;
+  }
+
+  .mesera-tabsbar .mesera-tab-btn {
+    padding: 9px 12px;
+    min-width: 44px;
+    justify-content: center;
+  }
+
+  .mesera-tabsbar .mesera-tab-btn .mesera-tab-icon {
+    font-size: 1.2rem;
+  }
+
+  .mesera-tabsbar .mesera-tab-btn.active .mesera-tab-label {
+    display: inline;
+    font-size: 0.78rem;
+  }
+
+  .mesera-productos-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .mesera-shell .producto-card {
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  .mesera-shell .producto-card h3 {
+    font-size: 0.86rem;
+  }
+
+  .mesera-shell .producto-card .producto-meta {
+    font-size: 0.74rem;
+  }
+
+  .mesera-shell .producto-card .producto-acciones .kanm-button {
+    padding: 6px 8px;
+    font-size: 0.78rem;
+  }
+
+  .mesera-cart-fab {
+    right: 10px;
+    padding: 10px 14px;
+  }
+
+  .mesera-cart-fab-text {
+    display: none;
+  }
+
+  .mesera-cart-fab-icon {
+    font-size: 1.4rem;
+  }
+}
+
+/* ============================================================
+   ANIMACIONES SUTILES
+   ============================================================ */
+@keyframes meseraFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.mesera-shell .mesera-tab-panel.active,
+.mesera-shell [data-tab-shared] {
+  animation: meseraFadeIn 0.2s ease-out;
+}
+
+/* ============================================================
+   ACCESIBILIDAD: foco visible
+   ============================================================ */
+.mesera-shell button:focus-visible,
+.mesera-shell a:focus-visible,
+.mesera-shell input:focus-visible,
+.mesera-shell select:focus-visible,
+.mesera-shell textarea:focus-visible {
+  outline: 2px solid var(--mesera-primary);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   EDGE CASE: notch / safe-area en iOS
+   ============================================================ */
+@supports (padding: max(0px)) {
+  .mesera-topbar {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  .mesera-shell .kanm-footer.mesera-footer-bar {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .mesera-cart-fab {
+    right: max(14px, env(safe-area-inset-right));
+  }
+}
+
+/* ============================================================
+   COMPATIBILIDAD: oculta header viejo y rules conflictivos
+   ============================================================ */
+.mesera-shell-body .kanm-page-header,
+.mesera-shell-body .kanm-header,
+.mesera-shell-body .kanm-header-actions {
+  display: none !important;
+}
+
+/* Override: el .mesera-tabs viejo era full-width con sombra propia, ya lo manejamos */
+.mesera-shell-body .mesera-tabs {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+  border-radius: 0;
+}
+
+/* Solo aplica el estilo nuevo a .mesera-tabs DENTRO de .mesera-tabsbar */
+.mesera-shell-body .mesera-tabsbar .mesera-tabs {
+  background: #fff;
+  padding: 4px;
+  border-radius: 14px;
+  border: 1px solid var(--mesera-border);
+  box-shadow: var(--mesera-shadow-sm);
+}
+
+/* Toast container debe quedar arriba de todo */
+#toast-container {
+  position: fixed;
+  bottom: calc(var(--mesera-footer-h) + 90px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  pointer-events: none;
+}
+
+#toast-container .toast {
+  pointer-events: auto;
+}
+
+@media (max-width: 980px) {
+  #toast-container {
+    bottom: calc(var(--mesera-footer-h) + 100px);
+  }
+}

@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/styles.css?v=20260310a" />
+  <link rel="stylesheet" href="/css/admin-shell.css?v=20260424a" />
   <style>
     /* Modal Negocios */
     #kanm-negocios-modal {
@@ -74,60 +75,184 @@
     }
   </style>
 </head>
-<body data-role="admin,caja">
-  <header class="kanm-header">
-    <div class="kanm-header-left">
-      <div class="kanm-header-logo-container">
-        <img id="kanm-header-logo" alt="" />
-        <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
-      </div>
-      <div class="kanm-header-texts">
-        <div
-          id="kanm-header-negocio-nombre-principal"
-          class="kanm-header-title"
-          data-negocio-titulo
-        ></div>
-        <div id="kanm-header-negocio-subtitulo" class="kanm-header-subtitle">Panel de administración</div>
-      </div>
-    </div>
+<body data-role="admin,caja" class="kanm-shell-body">
+  <div class="kanm-shell" id="kanm-shell" data-shell-state="expanded">
+    <button
+      type="button"
+      class="kanm-shell-overlay"
+      id="kanm-shell-overlay"
+      aria-hidden="true"
+      tabindex="-1"
+    ></button>
 
-    <div class="kanm-header-right">
-      <div class="kanm-header-actions">
-        <span class="tag-rol">Admin</span>
-        <a class="kanm-button ghost chat-link" href="/chat.html">
-          Chat interno
-          <span id="chat-unread-badge" class="chat-unread-badge"></span>
-        </a>
-        <button type="button" class="kanm-button ghost" id="kanm-empresa-panel" hidden>Panel empresa</button>
-        <button type="button" class="kanm-button ghost" onclick="logout()">Cerrar sesión</button>
+    <aside class="kanm-sidebar" id="kanm-sidebar" aria-label="Navegación principal">
+      <div class="kanm-sidebar-brand">
+        <div class="kanm-sidebar-brand-logo">
+          <img id="kanm-header-logo" alt="" />
+          <div id="kanm-header-logo-fallback" class="kanm-logo-fallback"></div>
+        </div>
+        <div class="kanm-sidebar-brand-text">
+          <span
+            id="kanm-header-negocio-nombre-principal"
+            class="kanm-sidebar-brand-name"
+            data-negocio-titulo
+          ></span>
+          <span id="kanm-header-negocio-subtitulo" class="kanm-sidebar-brand-subtitle">Panel de administración</span>
+        </div>
+        <button
+          type="button"
+          class="kanm-sidebar-close"
+          id="kanm-sidebar-close"
+          aria-label="Cerrar menú"
+        >×</button>
       </div>
-    </div>
-  </header>
 
-  <main class="admin-container">
-    <div class="admin-tabs" id="admin-tabs">
-      <button type="button" class="kanm-tab active" data-admin-tab="productos" data-modulo="admin">Inventario</button>
-      <button type="button" class="kanm-tab" data-admin-tab="configuracion" data-modulo="admin">Configuración</button>
-      <button type="button" class="kanm-tab" data-admin-tab="usuarios" data-modulo="admin">Usuarios</button>
-      <button type="button" class="kanm-tab" data-admin-tab="categorias" data-modulo="admin">Categorías</button>
-      <button type="button" class="kanm-tab" data-admin-tab="menuPublico" data-modulo="admin">Menu QR</button>
-      <button type="button" class="kanm-tab" data-admin-tab="clientes" data-modulo="admin">Clientes</button>
-      <button type="button" class="kanm-tab" data-admin-tab="cotizaciones" data-modulo="admin" data-tab-url="/admin/cotizaciones">
-        Cotizaciones
-      </button>
-      <button type="button" class="kanm-tab" data-admin-tab="compras" data-modulo="admin">Compras &amp; 606</button>
-      <button type="button" class="kanm-tab" data-admin-tab="abastecimiento" data-modulo="admin">Abastecimiento</button>
-      <button type="button" class="kanm-tab" data-admin-tab="gastos" data-modulo="admin">Gastos</button>
-      <button type="button" class="kanm-tab" data-admin-tab="ventas" data-modulo="caja">Ventas &amp; 607</button>
-      <button type="button" class="kanm-tab" data-admin-tab="facturacionElectronica" data-modulo="admin">
-        Facturación Electrónica
-      </button>
-      <button type="button" class="kanm-tab" data-admin-tab="facturacionEcf" data-modulo="admin">e-CF</button>
-      <button type="button" class="kanm-tab" data-admin-tab="analisis" data-modulo="admin">Analisis del negocio</button>
-      <button type="button" class="kanm-tab" data-admin-tab="cuadres" data-modulo="caja">Cuadres de caja</button>
-      <button type="button" class="kanm-tab" data-admin-tab="historial" data-modulo="historialCocina">Historial de preparación</button>
-      <button type="button" class="kanm-tab super-admin-only" data-admin-tab="negocios" data-modulo="admin">Negocios</button>
-    </div>
+      <nav class="kanm-sidebar-nav admin-tabs" id="admin-tabs" aria-label="Secciones de administración">
+        <div class="kanm-sidebar-group">
+          <span class="kanm-sidebar-group-label">POS &amp; Operaciones</span>
+          <button type="button" class="kanm-tab kanm-sidebar-item active" data-admin-tab="productos" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">📦</span>
+            <span class="kanm-sidebar-label">Inventario</span>
+          </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="categorias" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">🗂️</span>
+            <span class="kanm-sidebar-label">Categorías</span>
+          </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="menuPublico" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">📱</span>
+            <span class="kanm-sidebar-label">Menú QR</span>
+          </button>
+        </div>
+
+        <div class="kanm-sidebar-group">
+          <span class="kanm-sidebar-group-label">Ventas &amp; Caja</span>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="ventas" data-modulo="caja">
+            <span class="kanm-sidebar-icon" aria-hidden="true">💰</span>
+            <span class="kanm-sidebar-label">Ventas &amp; 607</span>
+          </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="cuadres" data-modulo="caja">
+            <span class="kanm-sidebar-icon" aria-hidden="true">🧾</span>
+            <span class="kanm-sidebar-label">Cuadres de caja</span>
+          </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="historial" data-modulo="historialCocina">
+            <span class="kanm-sidebar-icon" aria-hidden="true">👨‍🍳</span>
+            <span class="kanm-sidebar-label">Historial preparación</span>
+          </button>
+        </div>
+
+        <div class="kanm-sidebar-group">
+          <span class="kanm-sidebar-group-label">CRM</span>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="clientes" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">👥</span>
+            <span class="kanm-sidebar-label">Clientes</span>
+          </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="cotizaciones" data-modulo="admin" data-tab-url="/admin/cotizaciones">
+            <span class="kanm-sidebar-icon" aria-hidden="true">📝</span>
+            <span class="kanm-sidebar-label">Cotizaciones</span>
+          </button>
+        </div>
+
+        <div class="kanm-sidebar-group">
+          <span class="kanm-sidebar-group-label">Compras &amp; Costos</span>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="compras" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">🛒</span>
+            <span class="kanm-sidebar-label">Compras &amp; 606</span>
+          </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="abastecimiento" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">🚚</span>
+            <span class="kanm-sidebar-label">Abastecimiento</span>
+          </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="gastos" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">💸</span>
+            <span class="kanm-sidebar-label">Gastos</span>
+          </button>
+        </div>
+
+        <div class="kanm-sidebar-group">
+          <span class="kanm-sidebar-group-label">DGII e-CF</span>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="facturacionEcf" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">⚡</span>
+            <span class="kanm-sidebar-label">Facturación e-CF</span>
+          </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="notasFiscales" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">📄</span>
+            <span class="kanm-sidebar-label">Notas E33/E34</span>
+          </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="documentosEspeciales" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">📑</span>
+            <span class="kanm-sidebar-label">Docs Especiales</span>
+          </button>
+        </div>
+
+        <div class="kanm-sidebar-group">
+          <span class="kanm-sidebar-group-label">Análisis</span>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="analisis" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">📊</span>
+            <span class="kanm-sidebar-label">Análisis del negocio</span>
+          </button>
+        </div>
+
+        <div class="kanm-sidebar-group">
+          <span class="kanm-sidebar-group-label">Administración</span>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="configuracion" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">⚙️</span>
+            <span class="kanm-sidebar-label">Configuración</span>
+          </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="usuarios" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">🛡️</span>
+            <span class="kanm-sidebar-label">Usuarios</span>
+          </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item super-admin-only" data-admin-tab="negocios" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">🏢</span>
+            <span class="kanm-sidebar-label">Negocios</span>
+          </button>
+        </div>
+      </nav>
+
+      <div class="kanm-sidebar-footer">
+        <button
+          type="button"
+          class="kanm-sidebar-collapse-btn"
+          id="kanm-sidebar-collapse"
+          title="Contraer menú"
+          aria-label="Contraer menú"
+        >
+          <span class="kanm-sidebar-collapse-icon" aria-hidden="true">«</span>
+          <span class="kanm-sidebar-collapse-label">Contraer</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="kanm-shell-main">
+      <header class="kanm-topbar">
+        <button
+          type="button"
+          class="kanm-topbar-burger"
+          id="kanm-shell-toggle"
+          aria-label="Abrir menú"
+          aria-controls="kanm-sidebar"
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
+        <div class="kanm-topbar-titlewrap">
+          <span class="kanm-topbar-section-label" id="kanm-topbar-section-label">Inventario</span>
+          <span class="kanm-topbar-business" data-negocio-titulo></span>
+        </div>
+        <div class="kanm-topbar-actions">
+          <span class="tag-rol">Admin</span>
+          <a class="kanm-button ghost chat-link" href="/chat.html">
+            <span class="kanm-topbar-action-text">Chat interno</span>
+            <span id="chat-unread-badge" class="chat-unread-badge"></span>
+          </a>
+          <button type="button" class="kanm-button ghost" id="kanm-empresa-panel" hidden>Panel empresa</button>
+          <button type="button" class="kanm-button ghost" onclick="logout()">
+            <span class="kanm-topbar-action-text">Cerrar sesión</span>
+            <span class="kanm-topbar-action-short" aria-hidden="true">↩</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="admin-container">
 
     <!-- Inventario -->
     <section class="admin-panel" data-admin-section="productos" id="admin-section-productos">
@@ -1329,11 +1454,15 @@
             <div class="kanm-input-group">
               <label for="compra-tipo">Tipo de comprobante</label>
               <select id="compra-tipo">
-                <option value="B01">B01</option>
-                <option value="B02">B02</option>
-                <option value="B15">B15</option>
-                <option value="B16">B16</option>
+                <option value="B01">B01 - Crédito fiscal (proveedor con RNC)</option>
+                <option value="B02">B02 - Consumidor final</option>
+                <option value="B11">B11 - Comprobante de Compras</option>
+                <option value="B15">B15 - Gubernamental</option>
+                <option value="B16">B16 - Exportaciones</option>
+                <option value="E41">E41 - Compras Electrónica (e-CF, sin RNC)</option>
+                <option value="E47">E47 - Pagos al Exterior (e-CF)</option>
               </select>
+              <p class="kanm-input-help">E41/E47 emiten un e-CF a la DGII al guardar la compra. Para E47 (Pagos al Exterior) ingrese el identificador extranjero del proveedor en el campo RNC.</p>
             </div>
           </div>
 
@@ -1697,6 +1826,14 @@
                 <input type="text" id="gasto-ncf" placeholder="B01XXXXXXXX" />
               </div>
               <div class="kanm-input-group">
+                <label for="gasto-tipo-comprobante">Comprobante e-CF</label>
+                <select id="gasto-tipo-comprobante">
+                  <option value="">Sin e-CF</option>
+                  <option value="E43">E43 - Gastos Menores Electrónica</option>
+                </select>
+                <p class="kanm-input-help">E43 emite un e-CF a la DGII al guardar el gasto.</p>
+              </div>
+              <div class="kanm-input-group">
                 <label for="gasto-referencia">Referencia</label>
                 <input type="text" id="gasto-referencia" placeholder="#transferencia o factura" />
               </div>
@@ -1959,461 +2096,6 @@
       </section>
     </section>
 
-    <!-- Facturacion electronica -->
-    <section
-      class="admin-panel hidden"
-      data-admin-section="facturacionElectronica"
-      id="admin-section-facturacion-electronica"
-    >
-      <div class="kanm-card-header fe-section-header">
-        <h2>Facturación Electrónica</h2>
-        <p class="kanm-subtitle">
-          Centraliza por negocio la configuración e-CF, los certificados, las secuencias y la cola documental.
-        </p>
-        <div class="fe-section-strip" aria-hidden="true">
-          <span class="fe-section-pill">Emisor + DGII</span>
-          <span class="fe-section-pill">Secuencias activas</span>
-          <span class="fe-section-pill">Cola documental</span>
-        </div>
-      </div>
-
-      <div class="admin-seccion-grid">
-        <section class="kanm-card admin-card admin-seccion-panel fe-config-card">
-          <header class="kanm-card-header">
-            <h3>Configuración e-CF</h3>
-            <p class="kanm-subtitle">
-              Si activas este módulo, los e-CF se administran aquí y el flujo fiscal anterior deja de ser la fuente principal.
-            </p>
-          </header>
-
-          <form id="fe-config-form" class="kanm-form fe-config-form" novalidate>
-            <div class="kanm-form-grid fe-form-grid">
-              <div class="kanm-input-group">
-                <label class="kanm-input-toggle" for="fe-habilitada">
-                  <span>Habilitar facturación electrónica</span>
-                  <input type="checkbox" id="fe-habilitada" />
-                </label>
-                <p class="kanm-input-help">Activa el uso de e-CF por negocio y la cola documental del módulo.</p>
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-ambiente">Ambiente</label>
-                <select id="fe-ambiente">
-                  <option value="certificacion">Certificación</option>
-                  <option value="produccion">Producción</option>
-                </select>
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-proveedor">Proveedor / canal</label>
-                <input type="text" id="fe-proveedor" placeholder="DGII" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-rnc-emisor">RNC emisor</label>
-                <input type="text" id="fe-rnc-emisor" placeholder="101000000" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-razon-social">Razón social</label>
-                <input type="text" id="fe-razon-social" placeholder="Nombre legal del emisor" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-nombre-comercial">Nombre comercial</label>
-                <input type="text" id="fe-nombre-comercial" placeholder="Nombre comercial" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-telefono">Teléfono</label>
-                <input type="text" id="fe-telefono" placeholder="809-000-0000" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-correo">Correo</label>
-                <input type="email" id="fe-correo" placeholder="facturacion@negocio.com" />
-              </div>
-              <div class="kanm-input-group kanm-input-group--full">
-                <label for="fe-direccion">Dirección fiscal</label>
-                <input type="text" id="fe-direccion" placeholder="Dirección del emisor" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-municipio-codigo">Municipio código DGII</label>
-                <input type="text" id="fe-municipio-codigo" placeholder="010101" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-provincia-codigo">Provincia código DGII</label>
-                <input type="text" id="fe-provincia-codigo" placeholder="010000" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-usuario-envio">Usuario de envío</label>
-                <input type="text" id="fe-usuario-envio" placeholder="Usuario DGII o integrador" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-clave-envio">Clave de envío</label>
-                <input type="password" id="fe-clave-envio" placeholder="Dejar en blanco para conservar" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-certificado-file">Certificado digital</label>
-                <input type="file" id="fe-certificado-file" accept=".p12,.pfx,application/x-pkcs12" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-certificado-password">Clave del certificado</label>
-                <input
-                  type="password"
-                  id="fe-certificado-password"
-                  placeholder="Dejar en blanco para conservar"
-                />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-firma-alias">Firma / alias</label>
-                <input type="text" id="fe-firma-alias" placeholder="Alias interno de firma" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-website">Website</label>
-                <input type="text" id="fe-website" placeholder="www.negocio.com" />
-              </div>
-              <div class="kanm-input-group kanm-input-group--full">
-                <label for="fe-observaciones">Observaciones</label>
-                <textarea id="fe-observaciones" rows="2" placeholder="Notas internas del proceso e-CF"></textarea>
-              </div>
-            </div>
-
-            <div class="factura-rangos">
-              <div class="kanm-card kanm-card--subsection">
-                <div class="kanm-card-header">
-                  <h4>Secuencia E31</h4>
-                  <p class="kanm-subtitle">Crédito fiscal electrónico generado desde caja.</p>
-                </div>
-                <div class="factura-rango-grid">
-                  <label class="kanm-input-toggle" for="fe-e31-activa">
-                    <span>Activa</span>
-                    <input type="checkbox" id="fe-e31-activa" checked />
-                  </label>
-                  <div class="kanm-input-group">
-                    <label for="fe-e31-prefijo">Prefijo</label>
-                    <input type="text" id="fe-e31-prefijo" placeholder="E31" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e31-correlativo">Siguiente correlativo</label>
-                    <input type="number" id="fe-e31-correlativo" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e31-inicio">Inicio</label>
-                    <input type="number" id="fe-e31-inicio" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e31-fin">Fin</label>
-                    <input type="number" id="fe-e31-fin" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e31-vencimiento">Vencimiento secuencia</label>
-                    <input type="date" id="fe-e31-vencimiento" />
-                  </div>
-                </div>
-              </div>
-
-              <div class="kanm-card kanm-card--subsection">
-                <div class="kanm-card-header">
-                  <h4>Secuencia E32</h4>
-                  <p class="kanm-subtitle">Consumidor final electrónico para cobros operativos.</p>
-                </div>
-                <div class="factura-rango-grid">
-                  <label class="kanm-input-toggle" for="fe-e32-activa">
-                    <span>Activa</span>
-                    <input type="checkbox" id="fe-e32-activa" checked />
-                  </label>
-                  <div class="kanm-input-group">
-                    <label for="fe-e32-prefijo">Prefijo</label>
-                    <input type="text" id="fe-e32-prefijo" placeholder="E32" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e32-correlativo">Siguiente correlativo</label>
-                    <input type="number" id="fe-e32-correlativo" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e32-inicio">Inicio</label>
-                    <input type="number" id="fe-e32-inicio" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e32-fin">Fin</label>
-                    <input type="number" id="fe-e32-fin" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e32-vencimiento">Vencimiento secuencia</label>
-                    <input type="date" id="fe-e32-vencimiento" />
-                  </div>
-                </div>
-              </div>
-
-              <div class="kanm-card kanm-card--subsection">
-                <div class="kanm-card-header">
-                  <h4>Secuencia E43</h4>
-                  <p class="kanm-subtitle">Gastos menores electrónicos.</p>
-                </div>
-                <div class="factura-rango-grid">
-                  <label class="kanm-input-toggle" for="fe-e43-activa">
-                    <span>Activa</span>
-                    <input type="checkbox" id="fe-e43-activa" checked />
-                  </label>
-                  <div class="kanm-input-group">
-                    <label for="fe-e43-prefijo">Prefijo</label>
-                    <input type="text" id="fe-e43-prefijo" placeholder="E43" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e43-correlativo">Siguiente correlativo</label>
-                    <input type="number" id="fe-e43-correlativo" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e43-inicio">Inicio</label>
-                    <input type="number" id="fe-e43-inicio" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e43-fin">Fin</label>
-                    <input type="number" id="fe-e43-fin" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e43-vencimiento">Vencimiento secuencia</label>
-                    <input type="date" id="fe-e43-vencimiento" />
-                  </div>
-                </div>
-              </div>
-
-              <div class="kanm-card kanm-card--subsection">
-                <div class="kanm-card-header">
-                  <h4>Secuencia E44</h4>
-                  <p class="kanm-subtitle">Regímenes especiales electrónicos.</p>
-                </div>
-                <div class="factura-rango-grid">
-                  <label class="kanm-input-toggle" for="fe-e44-activa">
-                    <span>Activa</span>
-                    <input type="checkbox" id="fe-e44-activa" checked />
-                  </label>
-                  <div class="kanm-input-group">
-                    <label for="fe-e44-prefijo">Prefijo</label>
-                    <input type="text" id="fe-e44-prefijo" placeholder="E44" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e44-correlativo">Siguiente correlativo</label>
-                    <input type="number" id="fe-e44-correlativo" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e44-inicio">Inicio</label>
-                    <input type="number" id="fe-e44-inicio" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e44-fin">Fin</label>
-                    <input type="number" id="fe-e44-fin" min="1" />
-                  </div>
-                  <div class="kanm-input-group">
-                    <label for="fe-e44-vencimiento">Vencimiento secuencia</label>
-                    <input type="date" id="fe-e44-vencimiento" />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="kanm-card kanm-card--subsection fe-auth-card">
-              <div class="kanm-card-header">
-                <h4>Autenticación DGII manual</h4>
-                <p class="kanm-subtitle">
-                  Si DGII rechaza la firma automática de la semilla, descarga la semilla aquí, fírmala en la app oficial
-                  y valida el XML firmado. FE reutiliza ese token cacheado al enviar.
-                </p>
-              </div>
-              <div class="fe-auth-actions">
-                <button type="button" class="kanm-button ghost" id="fe-dgii-semilla-descargar">Descargar semilla</button>
-                <div class="kanm-input-group">
-                  <label for="fe-dgii-semilla-firmada-file">XML de semilla firmada</label>
-                  <input type="file" id="fe-dgii-semilla-firmada-file" accept=".xml,text/xml,application/xml" />
-                </div>
-                <button type="button" class="kanm-button" id="fe-dgii-semilla-validar">Validar semilla firmada</button>
-              </div>
-              <p class="kanm-input-help">
-                El token se guarda en la configuración DGII Paso 2 y luego el botón <strong>Enviar DGII</strong> de este
-                módulo lo aprovecha automáticamente.
-              </p>
-              <div id="fe-dgii-auth-mensaje" class="kanm-message"></div>
-            </div>
-
-            <div class="admin-form-actions">
-              <button type="button" class="kanm-button" id="fe-config-guardar">Guardar facturación electrónica</button>
-            </div>
-            <div id="fe-config-estado" class="kanm-subtitle fe-config-status"></div>
-            <div id="fe-config-mensaje" class="kanm-message fe-config-message"></div>
-          </form>
-        </section>
-
-        <section class="kanm-card admin-card admin-seccion-panel fe-documentos-card">
-          <header class="kanm-card-header">
-            <h3>Documentos e-CF</h3>
-            <p class="kanm-subtitle">
-              Revisa la cola generada por caja. Aquí quedarán los payloads listos para transformar a XML y enviar.
-            </p>
-          </header>
-
-          <div class="admin-report-controls fe-doc-controls">
-            <div class="kanm-input-group">
-              <label for="fe-doc-estado">Estado</label>
-              <select id="fe-doc-estado">
-                <option value="">Todos</option>
-                <option value="config_pendiente">Config pendiente</option>
-                <option value="pendiente_xml">Pendiente XML</option>
-                <option value="xml_generado">XML generado</option>
-                <option value="firmado">Firmado</option>
-                <option value="enviado">Enviado</option>
-                <option value="aceptado">Aceptado</option>
-                <option value="rechazado">Rechazado</option>
-                <option value="error">Error</option>
-              </select>
-            </div>
-            <div class="admin-report-actions">
-              <button type="button" class="kanm-button ghost" id="fe-doc-refrescar">Refrescar</button>
-            </div>
-          </div>
-
-          <div class="admin-resumen-grid fe-kpi-grid">
-            <div class="resumen-metric">
-              <span class="resumen-label">Documentos</span>
-              <span class="resumen-value" id="fe-doc-total">0</span>
-            </div>
-            <div class="resumen-metric">
-              <span class="resumen-label">Pendientes XML</span>
-              <span class="resumen-value" id="fe-doc-pendiente">0</span>
-            </div>
-            <div class="resumen-metric">
-              <span class="resumen-label">Config pendiente</span>
-              <span class="resumen-value" id="fe-doc-config-pendiente">0</span>
-            </div>
-            <div class="resumen-metric">
-              <span class="resumen-label">Monto total</span>
-              <span class="resumen-value" id="fe-doc-total-monto">DOP&nbsp;0.00</span>
-            </div>
-          </div>
-
-          <div id="fe-documentos-mensaje" class="kanm-message"></div>
-          <div class="kanm-table-wrapper fe-table-wrap fe-documentos-table-wrap">
-            <table class="kanm-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th>e-CF</th>
-                  <th>Tipo</th>
-                  <th>Cliente</th>
-                  <th>Mesa</th>
-                  <th>Total</th>
-                  <th>Estado</th>
-                  <th>Track</th>
-                  <th>XML</th>
-                </tr>
-              </thead>
-              <tbody id="fe-documentos-tabla">
-                <tr>
-                  <td colspan="9">Sin documentos cargados.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="kanm-card admin-card admin-seccion-panel fe-manual-card">
-          <header class="kanm-card-header">
-            <h3>Cobertura y registro manual</h3>
-            <p class="kanm-subtitle">
-              Aquí ves qué tipo e-CF nace desde un módulo operativo y cuáles casos especiales puedes registrar desde FE.
-            </p>
-          </header>
-
-          <form id="fe-manual-form" class="kanm-form fe-manual-form" novalidate>
-            <div class="kanm-form-grid fe-form-grid fe-form-grid--manual">
-              <div class="kanm-input-group">
-                <label for="fe-manual-tipo">Tipo e-CF</label>
-                <select id="fe-manual-tipo">
-                  <option value="E33">E33 - Nota de débito</option>
-                  <option value="E41">E41 - Compras</option>
-                  <option value="E43">E43 - Gastos menores</option>
-                  <option value="E44">E44 - Regímenes especiales</option>
-                  <option value="E45">E45 - Gubernamental</option>
-                  <option value="E46">E46 - Exportaciones</option>
-                  <option value="E47">E47 - Pagos al exterior</option>
-                </select>
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-manual-fecha">Fecha emisión</label>
-                <input type="date" id="fe-manual-fecha" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-manual-rol">Rol contraparte</label>
-                <select id="fe-manual-rol">
-                  <option value="cliente">Cliente</option>
-                  <option value="proveedor">Proveedor</option>
-                  <option value="beneficiario">Beneficiario</option>
-                  <option value="entidad">Entidad</option>
-                </select>
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-manual-nombre">Nombre contraparte</label>
-                <input type="text" id="fe-manual-nombre" placeholder="Nombre del receptor o proveedor" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-manual-documento">Documento contraparte</label>
-                <input type="text" id="fe-manual-documento" placeholder="RNC, cédula o identificación" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-manual-referencia-tipo">Tipo doc. referencia</label>
-                <input type="text" id="fe-manual-referencia-tipo" placeholder="E31, E32, contrato, orden..." />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-manual-referencia-encf">e-CF / ref. relacionada</label>
-                <input type="text" id="fe-manual-referencia-encf" placeholder="Documento de referencia" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-manual-motivo">Motivo / referencia</label>
-                <input type="text" id="fe-manual-motivo" placeholder="Motivo comercial o fiscal" />
-              </div>
-              <div class="kanm-input-group kanm-input-group--full">
-                <label for="fe-manual-descripcion">Descripción</label>
-                <input type="text" id="fe-manual-descripcion" placeholder="Concepto principal del documento" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-manual-subtotal">Subtotal</label>
-                <input type="number" id="fe-manual-subtotal" min="0" step="0.01" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-manual-impuesto">Impuesto</label>
-                <input type="number" id="fe-manual-impuesto" min="0" step="0.01" value="0" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="fe-manual-total">Total</label>
-                <input type="number" id="fe-manual-total" min="0" step="0.01" />
-              </div>
-              <div class="kanm-input-group kanm-input-group--full">
-                <label for="fe-manual-notas">Notas</label>
-                <textarea id="fe-manual-notas" rows="2" placeholder="Notas internas del documento"></textarea>
-              </div>
-            </div>
-            <div class="admin-form-actions">
-              <button type="button" class="kanm-button" id="fe-manual-guardar">Registrar documento FE</button>
-            </div>
-            <div id="fe-manual-mensaje" class="kanm-message"></div>
-          </form>
-
-          <div class="kanm-table-wrapper fe-table-wrap fe-origenes-table-wrap">
-            <table class="kanm-table">
-              <thead>
-                <tr>
-                  <th>Tipo</th>
-                  <th>Origen</th>
-                  <th>Modo</th>
-                  <th>Secuencia</th>
-                  <th>Descripción</th>
-                </tr>
-              </thead>
-              <tbody id="fe-origenes-tabla">
-                <tr>
-                  <td colspan="5">Sin cobertura cargada.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div id="fe-origenes-mensaje" class="kanm-message"></div>
-        </section>
-      </div>
-    </section>
-
     <!-- Emision e-CF -->
     <section class="admin-panel hidden" data-admin-section="facturacionEcf" id="admin-section-ecf">
       <div class="kanm-card-header fe-section-header">
@@ -2515,6 +2197,332 @@
             </thead>
             <tbody id="ecf-pendientes-tabla">
               <tr><td colspan="9">Cargando&hellip;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- e-CF Emitidos (todos, incluye aceptados) -->
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div>
+            <h3>e-CF emitidos (incluye ACEPTADOS)</h3>
+            <p class="kanm-subtitle">Todos los pedidos con e-CF emitido desde el POS. Click en "Ver RI" para imprimir la representaci&oacute;n.</p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <label style="font-size:13px;">Filtro estado:</label>
+            <select id="ecf-emitidos-filtro" class="kanm-input kanm-input--sm">
+              <option value="">Todos</option>
+              <option value="ACEPTADO">Aceptados</option>
+              <option value="RECHAZADO">Rechazados</option>
+              <option value="ENVIADO">Enviados</option>
+              <option value="PENDIENTE">Pendientes</option>
+              <option value="ACEPTADO_CONDICIONAL">Aceptado condicional</option>
+              <option value="ERROR">Error</option>
+            </select>
+            <button class="kanm-button kanm-button--outline kanm-button--sm" id="ecf-btn-refresh-emitidos">Refrescar</button>
+          </div>
+        </header>
+        <div class="fe-table-wrap ecf-table-wrap">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Cliente</th>
+                <th>Tipo</th>
+                <th>eNCF</th>
+                <th>Total</th>
+                <th>Estado</th>
+                <th>Mensaje DGII</th>
+                <th>C&oacute;digo Seg.</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="ecf-emitidos-tabla">
+              <tr><td colspan="9">Cargando&hellip;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Documentos e-CF auto-emitidos (Compras / Gastos / Notas / Especiales)</h3>
+          <p class="kanm-subtitle">Todos los e-CF generados desde otros m&oacute;dulos. Click en "Ver RI" para ver la representaci&oacute;n impresa.</p>
+        </header>
+        <div class="fe-table-wrap ecf-table-wrap">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>M&oacute;dulo</th>
+                <th>Ref.</th>
+                <th>Tipo</th>
+                <th>eNCF</th>
+                <th>Cliente</th>
+                <th>Monto</th>
+                <th>Estado</th>
+                <th>Mensaje</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="ecf-externos-todos-tabla">
+              <tr><td colspan="10">Cargando&hellip;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Paso 5 - Representaciones Impresas (Certificacion DGII) -->
+      <section class="kanm-card admin-card admin-seccion-panel" id="paso5-card">
+        <header class="kanm-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div>
+            <h3>Paso 5: Representaciones Impresas (Certificaci&oacute;n DGII)</h3>
+            <p class="kanm-subtitle">
+              Genera el PDF de cada tipo requerido para la prueba del Paso 5. Click en
+              <strong>&quot;Abrir RI &amp; PDF&quot;</strong> abre la representaci&oacute;n y dispara
+              el di&aacute;logo de impresi&oacute;n &mdash; elige <strong>&quot;Guardar como PDF&quot;</strong>
+              para subirlo al portal DGII. L&iacute;mite total: 10MB.
+            </p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="kanm-button kanm-button--outline kanm-button--sm" id="paso5-btn-refresh">
+              <span style="margin-right:4px;">&#x21BB;</span> Actualizar
+            </button>
+            <button class="kanm-button kanm-button--primary kanm-button--sm" id="paso5-btn-abrir-todas">
+              <span style="margin-right:4px;">&#x1F4C2;</span> Abrir todas (11 pesta&ntilde;as)
+            </button>
+          </div>
+        </header>
+        <div id="paso5-mensaje" class="ecf-msg" hidden></div>
+        <div class="fe-table-wrap ecf-table-wrap">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Tipo requerido</th>
+                <th>eNCF disponible</th>
+                <th>Cliente</th>
+                <th>Monto total</th>
+                <th>Estado</th>
+                <th>Origen</th>
+                <th>Acci&oacute;n</th>
+              </tr>
+            </thead>
+            <tbody id="paso5-tabla">
+              <tr><td colspan="7">Cargando&hellip;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- Notas Fiscales E33/E34 -->
+    <section class="admin-panel hidden" data-admin-section="notasFiscales" id="admin-section-notas-fiscales">
+      <div class="kanm-card-header">
+        <h2>Notas Fiscales E33 / E34</h2>
+        <p class="kanm-subtitle">Emite Notas de Débito (E33) o Notas de Crédito (E34) vinculadas a un e-CF previo.</p>
+      </div>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Emitir nota</h3>
+          <p class="kanm-subtitle">La nota referencia el e-CF original (E31/E32).</p>
+        </header>
+        <form id="nota-fiscal-form" class="kanm-form" novalidate>
+          <div class="kanm-form-grid">
+            <div class="kanm-input-group">
+              <label for="nota-tipo">Tipo de nota</label>
+              <select id="nota-tipo">
+                <option value="E34">E34 - Nota de Crédito</option>
+                <option value="E33">E33 - Nota de Débito</option>
+              </select>
+            </div>
+            <div class="kanm-input-group">
+              <label for="nota-fecha">Fecha emisión</label>
+              <input type="date" id="nota-fecha" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="nota-referencia-encf">eNCF referenciado</label>
+              <input type="text" id="nota-referencia-encf" placeholder="E310000000001" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="nota-referencia-fecha">Fecha del eNCF original</label>
+              <input type="date" id="nota-referencia-fecha" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="nota-codigo-modificacion">Motivo</label>
+              <select id="nota-codigo-modificacion">
+                <option value="1">1 - Anula la referencia</option>
+                <option value="2">2 - Corrige texto</option>
+                <option value="3">3 - Corrige monto</option>
+                <option value="4">4 - Reemplaza</option>
+                <option value="5">5 - Referencia electrónica</option>
+              </select>
+            </div>
+          </div>
+
+          <h4 class="admin-form-section-title">Cliente</h4>
+          <div class="kanm-form-grid">
+            <div class="kanm-input-group">
+              <label for="nota-cliente-rnc">RNC / Cédula</label>
+              <input type="text" id="nota-cliente-rnc" placeholder="00000000000" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="nota-cliente-nombre">Razón social</label>
+              <input type="text" id="nota-cliente-nombre" placeholder="Nombre del cliente" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="nota-cliente-direccion">Dirección</label>
+              <input type="text" id="nota-cliente-direccion" placeholder="Dirección" />
+            </div>
+          </div>
+
+          <h4 class="admin-form-section-title">Conceptos</h4>
+          <div id="nota-items-container" class="admin-detalle-lista"></div>
+          <button type="button" class="kanm-button ghost" id="nota-add-item">+ Agregar concepto</button>
+
+          <h4 class="admin-form-section-title">Totales</h4>
+          <div class="kanm-form-grid">
+            <div class="kanm-input-group">
+              <label for="nota-subtotal">Subtotal gravado</label>
+              <input type="text" id="nota-subtotal" inputmode="decimal" placeholder="0.00" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="nota-impuesto">ITBIS</label>
+              <input type="text" id="nota-impuesto" inputmode="decimal" placeholder="0.00" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="nota-total">Total</label>
+              <input type="text" id="nota-total" inputmode="decimal" placeholder="0.00" />
+            </div>
+          </div>
+
+          <div class="admin-form-actions">
+            <button type="submit" class="kanm-button kanm-button--primary">Emitir nota</button>
+          </div>
+          <div id="nota-fiscal-mensaje" class="kanm-message"></div>
+        </form>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Notas emitidas</h3>
+          <p class="kanm-subtitle">Historial de E33/E34 emitidas a la DGII.</p>
+        </header>
+        <div class="fe-table-wrap">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Tipo</th>
+                <th>eNCF</th>
+                <th>Cliente</th>
+                <th>Total</th>
+                <th>Estado</th>
+                <th>Mensaje DGII</th>
+                <th>Fecha</th>
+              </tr>
+            </thead>
+            <tbody id="notas-fiscales-tabla">
+              <tr><td colspan="8">Sin notas emitidas.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- Documentos Especiales E44/E45/E46 -->
+    <section class="admin-panel hidden" data-admin-section="documentosEspeciales" id="admin-section-documentos-especiales">
+      <div class="kanm-card-header">
+        <h2>Documentos Especiales e-CF</h2>
+        <p class="kanm-subtitle">Emite E44 (Regímenes Especiales), E45 (Gubernamental) y E46 (Exportaciones).</p>
+      </div>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Emitir documento</h3>
+          <p class="kanm-subtitle">Selecciona el tipo según el cliente / operación.</p>
+        </header>
+        <form id="doc-especial-form" class="kanm-form" novalidate>
+          <div class="kanm-form-grid">
+            <div class="kanm-input-group">
+              <label for="doc-esp-tipo">Tipo de e-CF</label>
+              <select id="doc-esp-tipo">
+                <option value="E44">E44 - Regímenes Especiales (zona franca, hospitales, escuelas)</option>
+                <option value="E45">E45 - Gubernamental</option>
+                <option value="E46">E46 - Exportaciones</option>
+              </select>
+            </div>
+            <div class="kanm-input-group">
+              <label for="doc-esp-fecha">Fecha emisión</label>
+              <input type="date" id="doc-esp-fecha" />
+            </div>
+          </div>
+
+          <h4 class="admin-form-section-title">Cliente / Comprador</h4>
+          <div class="kanm-form-grid">
+            <div class="kanm-input-group">
+              <label for="doc-esp-cliente-rnc">RNC / Identificador</label>
+              <input type="text" id="doc-esp-cliente-rnc" placeholder="00000000000" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="doc-esp-cliente-nombre">Razón social</label>
+              <input type="text" id="doc-esp-cliente-nombre" placeholder="Nombre del cliente" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="doc-esp-cliente-direccion">Dirección / País</label>
+              <input type="text" id="doc-esp-cliente-direccion" placeholder="Dirección o país (E46)" />
+            </div>
+          </div>
+
+          <h4 class="admin-form-section-title">Conceptos</h4>
+          <div id="doc-esp-items-container" class="admin-detalle-lista"></div>
+          <button type="button" class="kanm-button ghost" id="doc-esp-add-item">+ Agregar concepto</button>
+
+          <h4 class="admin-form-section-title">Totales</h4>
+          <div class="kanm-form-grid">
+            <div class="kanm-input-group">
+              <label for="doc-esp-subtotal">Subtotal</label>
+              <input type="text" id="doc-esp-subtotal" inputmode="decimal" placeholder="0.00" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="doc-esp-impuesto">ITBIS</label>
+              <input type="text" id="doc-esp-impuesto" inputmode="decimal" placeholder="0.00" />
+            </div>
+            <div class="kanm-input-group">
+              <label for="doc-esp-total">Total</label>
+              <input type="text" id="doc-esp-total" inputmode="decimal" placeholder="0.00" />
+            </div>
+          </div>
+
+          <div class="admin-form-actions">
+            <button type="submit" class="kanm-button kanm-button--primary">Emitir e-CF</button>
+          </div>
+          <div id="doc-especial-mensaje" class="kanm-message"></div>
+        </form>
+      </section>
+
+      <section class="kanm-card admin-card">
+        <header class="kanm-card-header">
+          <h3>Documentos especiales emitidos</h3>
+          <p class="kanm-subtitle">Historial de E44/E45/E46 emitidas a la DGII.</p>
+        </header>
+        <div class="fe-table-wrap">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Tipo</th>
+                <th>eNCF</th>
+                <th>Cliente</th>
+                <th>Total</th>
+                <th>Estado</th>
+                <th>Mensaje DGII</th>
+                <th>Fecha</th>
+              </tr>
+            </thead>
+            <tbody id="documentos-especiales-tabla">
+              <tr><td colspan="8">Sin documentos emitidos.</td></tr>
             </tbody>
           </table>
         </div>
@@ -3134,7 +3142,9 @@
         </div>
       </div>
     </section>
-  </main>
+      </main>
+    </div>
+  </div>
 
   <!-- Modal Ventas de productos -->
   <div class="kanm-modal-overlay" id="modal-ventas-productos" hidden>
@@ -4108,6 +4118,138 @@
 
   <script src="/js/password-toggle.js"></script>
   <script src="/js/auth.js"></script>
+  <script>
+    // ===== Admin Shell: sidebar toggle + topbar section title =====
+    (function () {
+      const shell = document.getElementById('kanm-shell');
+      const sidebar = document.getElementById('kanm-sidebar');
+      const overlay = document.getElementById('kanm-shell-overlay');
+      const burger = document.getElementById('kanm-shell-toggle');
+      const closeBtn = document.getElementById('kanm-sidebar-close');
+      const collapseBtn = document.getElementById('kanm-sidebar-collapse');
+      const sectionLabel = document.getElementById('kanm-topbar-section-label');
+      if (!shell) return;
+
+      const TAB_LABELS = {
+        productos: 'Inventario',
+        configuracion: 'Configuración',
+        usuarios: 'Usuarios',
+        categorias: 'Categorías',
+        menuPublico: 'Menú QR',
+        clientes: 'Clientes',
+        cotizaciones: 'Cotizaciones',
+        compras: 'Compras & 606',
+        abastecimiento: 'Abastecimiento',
+        gastos: 'Gastos',
+        ventas: 'Ventas & 607',
+        facturacionEcf: 'Facturación e-CF',
+        notasFiscales: 'Notas E33/E34',
+        documentosEspeciales: 'Documentos Especiales e-CF',
+        analisis: 'Análisis del negocio',
+        cuadres: 'Cuadres de caja',
+        historial: 'Historial preparación',
+        negocios: 'Negocios',
+      };
+
+      const isMobile = () => window.matchMedia('(max-width: 820px)').matches;
+
+      function openMobile() {
+        shell.setAttribute('data-shell-state', 'open');
+      }
+
+      function closeMobile() {
+        shell.setAttribute('data-shell-state', 'expanded');
+      }
+
+      function toggleCollapseDesktop() {
+        const current = shell.getAttribute('data-shell-state');
+        const next = current === 'collapsed' ? 'expanded' : 'collapsed';
+        shell.setAttribute('data-shell-state', next);
+        try {
+          localStorage.setItem('kanm:sidebar-state', next);
+        } catch (_) {}
+      }
+
+      // Restore desktop collapse preference
+      try {
+        const stored = localStorage.getItem('kanm:sidebar-state');
+        if (stored === 'collapsed' && !isMobile()) {
+          shell.setAttribute('data-shell-state', 'collapsed');
+        }
+      } catch (_) {}
+
+      burger?.addEventListener('click', () => {
+        if (isMobile()) {
+          openMobile();
+        } else {
+          toggleCollapseDesktop();
+        }
+      });
+
+      collapseBtn?.addEventListener('click', () => {
+        toggleCollapseDesktop();
+      });
+
+      closeBtn?.addEventListener('click', closeMobile);
+      overlay?.addEventListener('click', closeMobile);
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && isMobile() && shell.getAttribute('data-shell-state') === 'open') {
+          closeMobile();
+        }
+      });
+
+      // Update topbar section label + auto-close drawer on tab click
+      const updateTopbarLabel = (tabKey) => {
+        if (sectionLabel && tabKey && TAB_LABELS[tabKey]) {
+          sectionLabel.textContent = TAB_LABELS[tabKey];
+        }
+      };
+
+      const tabButtons = sidebar?.querySelectorAll('[data-admin-tab]') || [];
+      tabButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const tab = btn.dataset.adminTab;
+          updateTopbarLabel(tab);
+          if (isMobile()) {
+            // close drawer after selection on mobile
+            setTimeout(closeMobile, 80);
+          }
+        });
+      });
+
+      // Set initial label from currently active tab
+      const activeBtn = sidebar?.querySelector('[data-admin-tab].active');
+      if (activeBtn) {
+        updateTopbarLabel(activeBtn.dataset.adminTab);
+      }
+
+      // Observe tab activations performed by admin.js (mostrarTabAdmin) to keep title synced
+      const observer = new MutationObserver(() => {
+        const active = sidebar?.querySelector('[data-admin-tab].active');
+        if (active) {
+          updateTopbarLabel(active.dataset.adminTab);
+        }
+      });
+      tabButtons.forEach((btn) => {
+        observer.observe(btn, { attributes: true, attributeFilter: ['class'] });
+      });
+
+      // Reset shell state when crossing the mobile breakpoint
+      const mq = window.matchMedia('(max-width: 820px)');
+      const handleBreakpoint = () => {
+        const state = shell.getAttribute('data-shell-state');
+        if (mq.matches && state === 'collapsed') {
+          shell.setAttribute('data-shell-state', 'expanded');
+        }
+      };
+      if (typeof mq.addEventListener === 'function') {
+        mq.addEventListener('change', handleBreakpoint);
+      } else if (typeof mq.addListener === 'function') {
+        mq.addListener(handleBreakpoint);
+      }
+    })();
+  </script>
   <script src="/js/admin.js?v=20260310a"></script>
   <script src="/js/admin-facturacion-posium.js"></script>
   <script src="/js/admin-cotizaciones.js"></script>

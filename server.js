@@ -38,6 +38,10 @@ const {
   sendXmlToDgii,
   consultDgiiResult,
 } = require('./facturacion-electronica.dgii');
+
+// signXmlForDgii aplica el custom digest (ordena atributos de namespace) que DGII
+// exige para validar la firma de un e-CF. Ver comentario en dgii-core.js/DgiiDigest.
+const { signXmlForDgii } = require('./dgii-core');
 console.log('server.js carga correctamente');
 
 const ENABLE_DGII_PASO2 = /^(1|true|yes|on)$/i.test(String(process.env.ENABLE_DGII_PASO2 || ''));
@@ -5422,6 +5426,7 @@ const agruparPedidosEnCuentas = (pedidos = [], itemsMap = new Map()) => {
       cuentasMap.set(clave, {
         id: pedido.cuenta_id || pedido.id,
         cuenta_id: pedido.cuenta_id || pedido.id,
+        numero_cuenta_negocio: Number(pedido.numero_cuenta_negocio) || null,
         mesa: pedido.mesa,
         cliente: pedido.cliente,
         modo_servicio: pedido.modo_servicio,
@@ -5435,6 +5440,9 @@ const agruparPedidosEnCuentas = (pedidos = [], itemsMap = new Map()) => {
     }
 
     const cuenta = cuentasMap.get(clave);
+    if (!cuenta.numero_cuenta_negocio && pedido.numero_cuenta_negocio) {
+      cuenta.numero_cuenta_negocio = Number(pedido.numero_cuenta_negocio) || null;
+    }
     const detalle = itemsMap.get(pedido.id) || [];
     const estadoCuenta = combinarEstadoCuenta(pedido);
     cuenta.pedidos.push({
@@ -5699,7 +5707,7 @@ const obtenerCuentasPorEstados = async (estados, negocioId, opciones = {}) => {
   }
   const pedidos = await db.all(
     `
-      SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
+      SELECT id, cuenta_id, numero_cuenta_negocio, mesa, cliente, modo_servicio, estado, nota, subtotal,
              impuesto, total, fecha_creacion, fecha_listo, fecha_cierre,
              cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, negocio_id,
              cliente_documento, ncf, tipo_comprobante, comentarios,
@@ -5777,7 +5785,7 @@ const obtenerCuentasPorEstados = async (estados, negocioId, opciones = {}) => {
 const obtenerPedidoConDetalle = async (pedidoId, negocioId) => {
   const pedido = await db.get(
     `
-        SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
+        SELECT id, cuenta_id, numero_cuenta_negocio, mesa, cliente, modo_servicio, estado, nota, subtotal,
                impuesto, total, fecha_creacion, fecha_listo, fecha_cierre,
                cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, cliente_documento, ncf, tipo_comprobante, propina_monto,
                descuento_monto, delivery_estado, delivery_usuario_id, delivery_usuario_nombre, delivery_fecha_asignacion,
@@ -6952,15 +6960,46 @@ const generarXmlDocumentoFacturacionElectronica = async ({
       flujo: 'ECF_NORMAL',
       rncEmisorFallback: config?.rnc_emisor || documento?.payload?.emisor?.rnc_emisor || '',
     });
+
+    // Intentamos firmar tambien el XML aqui mismo para que el boton "Descargar"
+    // entregue el XML firmado y el usuario pueda subirlo manualmente al portal
+    // DGII sin recibir "Firma del certificado invalida". Si falta el cert no
+    // bloqueamos la generacion: dejamos xml_firmado en null y registramos warn.
+    let xmlFirmado = null;
+    try {
+      const { combinedConfig } = await cargarConfiguracionAutenticacionFacturacionElectronica(negocioId);
+      if (combinedConfig?.p12_base64 && combinedConfig?.p12_password != null) {
+        const cert = extractPemFromP12({
+          p12Base64: combinedConfig.p12_base64,
+          p12Password: combinedConfig.p12_password || '',
+        });
+        const rootMatchEcf = xmlBorrador.match(/<(\w+)[\s>]/);
+        const rootTagEcf = rootMatchEcf ? rootMatchEcf[1] : 'ECF';
+        const firmado = signXmlForDgii({
+          xml: xmlBorrador,
+          privateKeyPem: cert.privateKeyPem,
+          certPem: cert.certPem,
+          rootTag: rootTagEcf,
+        });
+        xmlFirmado = firmado?.xml || null;
+      }
+    } catch (signError) {
+      console.warn(
+        'FE: no se pudo firmar XML al generar (descarga entregara borrador sin firma):',
+        signError?.message || signError
+      );
+    }
+
     await db.run(
       `UPDATE facturacion_electronica_documentos
-          SET xml_borrador = ?, estado_local = ?, mensaje_respuesta = NULL, updated_at = CURRENT_TIMESTAMP
+          SET xml_borrador = ?, xml_firmado = ?, estado_local = ?, mensaje_respuesta = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND negocio_id = ?`,
-      [xmlBorrador, FACTURACION_ELECTRONICA_ESTADOS.XML_GENERADO, documento.id, negocioId]
+      [xmlBorrador, xmlFirmado, FACTURACION_ELECTRONICA_ESTADOS.XML_GENERADO, documento.id, negocioId]
     );
     return {
       ...(await obtenerDocumentoFacturacionElectronicaPorId(documento.id, negocioId)),
       xml_borrador: xmlBorrador,
+      xml_firmado: xmlFirmado,
       nombre_archivo: construirNombreArchivoXmlFacturacionElectronica(documento, config),
     };
   } catch (error) {
@@ -7105,10 +7144,16 @@ const enviarDocumentoFacturacionElectronica = async ({ documentoId, negocioId } 
       p12Base64: combinedConfig.p12_base64,
       p12Password: combinedConfig.p12_password || '',
     });
-    const firmado = signXmlDocument({
-      xml: documentoConXml.xml_borrador,
+    // Detectar root tag del XML (ECF, RFCE, ARECF, etc.) para que signXmlForDgii
+    // aplique correctamente la referencia y el custom digest sobre el elemento raiz.
+    const xmlBorrador = documentoConXml.xml_borrador;
+    const rootMatchEcf = xmlBorrador.match(/<(\w+)[\s>]/);
+    const rootTagEcf = rootMatchEcf ? rootMatchEcf[1] : 'ECF';
+    const firmado = signXmlForDgii({
+      xml: xmlBorrador,
       privateKeyPem: cert.privateKeyPem,
       certPem: cert.certPem,
+      rootTag: rootTagEcf,
     });
     const token = await resolverTokenDgiiFacturacionElectronica({
       negocioId,
@@ -7817,7 +7862,7 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
   const cuentaId = pedido.cuenta_id || pedido.id;
   const pedidosRelacionados = await db.all(
     `
-      SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
+      SELECT id, cuenta_id, numero_cuenta_negocio, mesa, cliente, modo_servicio, estado, nota, subtotal,
              impuesto, total, descuento_monto, propina_monto, tipo_comprobante, ncf,
              pago_efectivo, pago_tarjeta, pago_transferencia,
              cliente_documento, fecha_creacion, fecha_cierre, fecha_factura
@@ -8818,7 +8863,7 @@ const obtenerPedidosCuentaParaCobro = async (cuentaId, negocioId, { incluirEnCur
   const placeholders = estados.map(() => '?').join(', ');
   return db.all(
     `
-      SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
+      SELECT id, cuenta_id, numero_cuenta_negocio, mesa, cliente, modo_servicio, estado, nota, subtotal,
              impuesto, total, fecha_creacion, fecha_listo, fecha_cierre, cocinero_id,
              cocinero_nombre, bartender_id, bartender_nombre, cliente_documento, ncf,
              tipo_comprobante, COALESCE(propina_porcentaje, 0) AS propina_porcentaje,
@@ -8895,6 +8940,7 @@ const obtenerPedidosPendientesDeCierre = (fecha, negocioId, opcionesOrCallback, 
     SELECT
       COALESCE(cuenta_id, id) AS id,
       MAX(cuenta_id) AS cuenta_id,
+      MAX(numero_cuenta_negocio) AS numero_cuenta_negocio,
       MAX(mesa) AS mesa,
       MAX(cliente) AS cliente,
       MIN(${FECHA_BASE_PEDIDOS_SQL}) AS fecha_cierre,
@@ -9517,15 +9563,20 @@ if (ENABLE_DGII_PASO2) {
 }
 
 const { createDgiiEcfRouter } = require('./dgii-ecf.routes');
-const { router: __dgiiEcfRouter, emitirEcfParaPedido: __emitirEcfParaPedido } = createDgiiEcfRouter({
+const {
+  router: __dgiiEcfRouter,
+  emitirEcfParaPedido: __emitirEcfParaPedido,
+  emitirEcfDocumentoExterno: __emitirEcfDocumentoExterno,
+} = createDgiiEcfRouter({
   db,
   requireUsuarioSesion,
   tienePermisoAdmin: esSuperAdmin,
   obtenerNegocioIdUsuario,
 });
 app.use('/api/dgii/ecf', __dgiiEcfRouter);
-// Expose emitirEcfParaPedido globally for auto-emission on cierre
+// Expose emisores e-CF globalmente para auto-emision desde otros modulos
 global.__emitirEcfParaPedido = __emitirEcfParaPedido;
+global.__emitirEcfDocumentoExterno = __emitirEcfDocumentoExterno;
 
 app.post('/api/caja/cierres', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
@@ -9600,6 +9651,7 @@ const obtenerPedidosDetalleCierre = (cierreId, negocioId, origen, callback) => {
       ${identificadorCuentaSql} AS id,
       MIN(id) AS factura_pedido_id,
       MAX(cuenta_id) AS cuenta_id,
+      MAX(numero_cuenta_negocio) AS numero_cuenta_negocio,
       MAX(mesa) AS mesa,
       MAX(cliente) AS cliente,
       SUM(subtotal) AS subtotal,
@@ -11391,180 +11443,12 @@ app.post('/api/facturacion-electronica/autenticacion/validar-semilla-firmada', (
   });
 });
 
-app.get('/api/facturacion-electronica/documentos', (req, res) => {
-  requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!tienePermisoAdmin(usuarioSesion)) {
-      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
-    }
-    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
-    try {
-      const documentos = await listarDocumentosFacturacionElectronica(negocioId, {
-        estado: req.query?.estado,
-        limit: req.query?.limit ?? req.query?.limite,
-      });
-      res.json({
-        ok: true,
-        documentos,
-        resumen: resumirDocumentosFacturacionElectronica(documentos),
-      });
-    } catch (error) {
-      console.error('Error al listar documentos de facturacion electronica:', error?.message || error);
-      res.status(500).json({ ok: false, error: 'No se pudieron obtener los documentos de facturacion electronica' });
-    }
-  });
-});
+// Endpoints HTTP del panel viejo 'Facturacion Electronica' eliminados.
+// La emision e-CF expone su API en dgii-ecf.routes.js (ruta /api/dgii/ecf/*).
+// Los helpers backend (listarDocumentosFacturacionElectronica, generarXml..., enviar...,
+// registrarDocumentoFacturacionElectronicaManual, obtenerCoberturaFacturacionElectronica)
+// se mantienen porque el flujo automatico de insercion de ventas los usa para tracking.
 
-app.post('/api/facturacion-electronica/documentos/:id/generar-xml', (req, res) => {
-  requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!tienePermisoAdmin(usuarioSesion)) {
-      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
-    }
-    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
-    const documentoId = Number(req.params?.id);
-    if (!Number.isFinite(documentoId) || documentoId <= 0) {
-      return res.status(400).json({ ok: false, error: 'Documento FE inválido.' });
-    }
-    try {
-      const documento = await generarXmlDocumentoFacturacionElectronica({
-        documentoId,
-        negocioId,
-        persistirError: true,
-      });
-      res.json({
-        ok: true,
-        documento,
-        xml_borrador: documento?.xml_borrador || '',
-        nombre_archivo: documento?.nombre_archivo || `${documento?.encf || 'ecf'}.xml`,
-      });
-    } catch (error) {
-      const status = error?.status || 500;
-      console.error('Error generando XML FE:', error?.message || error);
-      res.status(status).json({
-        ok: false,
-        error: error?.message || 'No se pudo generar el XML del documento FE.',
-      });
-    }
-  });
-});
-
-app.post('/api/facturacion-electronica/documentos/:id/enviar', (req, res) => {
-  requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!tienePermisoAdmin(usuarioSesion)) {
-      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
-    }
-    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
-    const documentoId = Number(req.params?.id);
-    if (!Number.isFinite(documentoId) || documentoId <= 0) {
-      return res.status(400).json({ ok: false, error: 'Documento FE inválido.' });
-    }
-    try {
-      const documento = await enviarDocumentoFacturacionElectronica({
-        documentoId,
-        negocioId,
-      });
-      res.json({
-        ok: true,
-        documento,
-        envio: documento?.respuesta_envio || null,
-        consulta: documento?.respuesta_consulta || null,
-      });
-    } catch (error) {
-      const status = error?.status || 500;
-      console.error('Error enviando documento FE:', error?.message || error);
-      res.status(status).json({
-        ok: false,
-        error: error?.message || 'No se pudo enviar el documento FE a DGII.',
-      });
-    }
-  });
-});
-
-app.get('/api/facturacion-electronica/origenes', (req, res) => {
-  requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!tienePermisoAdmin(usuarioSesion)) {
-      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
-    }
-    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
-    try {
-      const origenes = await obtenerCoberturaFacturacionElectronica(negocioId);
-      res.json({ ok: true, origenes });
-    } catch (error) {
-      console.error('Error al obtener cobertura de facturacion electronica:', error?.message || error);
-      res.status(500).json({ ok: false, error: 'No se pudo obtener la cobertura de facturacion electronica' });
-    }
-  });
-});
-
-app.post('/api/facturacion-electronica/documentos/manual', (req, res) => {
-  requireUsuarioSesion(req, res, async (usuarioSesion) => {
-    if (!tienePermisoAdmin(usuarioSesion)) {
-      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
-    }
-    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
-    const payload = req.body || {};
-    try {
-      const tipoDocumento = await validarTipoComprobanteVentaNegocio(
-        payload.tipo_documento ?? payload.tipoDocumento,
-        negocioId
-      );
-      if (!esTipoComprobanteElectronico(tipoDocumento)) {
-        return res.status(400).json({ ok: false, error: 'Debes indicar un tipo e-CF valido.' });
-      }
-
-      const descripcion = normalizarCampoTexto(payload.descripcion, null);
-      const subtotal = redondearMontoPago(payload.subtotal);
-      const impuesto = redondearMontoPago(payload.impuesto);
-      const totalCalculado = redondearMontoPago(
-        payload.total !== undefined && payload.total !== null ? payload.total : subtotal + impuesto
-      );
-      if (totalCalculado <= 0) {
-        return res.status(400).json({ ok: false, error: 'El total del documento manual debe ser mayor que cero.' });
-      }
-      const itemsEntrada = Array.isArray(payload.items)
-        ? payload.items
-        : descripcion
-        ? [{ descripcion, cantidad: 1, precio_unitario: totalCalculado, total_linea: totalCalculado }]
-        : [];
-      if (!itemsEntrada.length) {
-        return res.status(400).json({ ok: false, error: 'Debes incluir una descripcion o al menos un item.' });
-      }
-
-      const documento = await registrarDocumentoFacturacionElectronicaManual({
-        negocioId,
-        tipoDocumento,
-        encf: payload.encf ?? payload.ncf,
-        fechaEmision: payload.fecha_emision ?? payload.fechaEmision ?? payload.fecha,
-        contraparte: {
-          rol: payload.rol_contraparte ?? payload.rolContraparte ?? 'cliente',
-          nombre: payload.contraparte_nombre ?? payload.contraparteNombre ?? payload.nombre,
-          documento: payload.contraparte_documento ?? payload.contraparteDocumento ?? payload.documento,
-          telefono: payload.contraparte_telefono ?? payload.contraparteTelefono,
-          email: payload.contraparte_email ?? payload.contraparteEmail,
-          direccion: payload.contraparte_direccion ?? payload.contraparteDireccion,
-        },
-        referencia: {
-          tipo_documento: payload.referencia_tipo_documento ?? payload.referenciaTipoDocumento,
-          encf: payload.referencia_encf ?? payload.referenciaEncf ?? payload.ncf_referencia,
-          motivo: payload.referencia_motivo ?? payload.referenciaMotivo ?? payload.motivo,
-          origen_id: payload.referencia_origen_id ?? payload.referenciaOrigenId,
-        },
-        descripcion,
-        notas: payload.notas ?? payload.comentarios,
-        subtotal,
-        impuesto,
-        total: totalCalculado,
-        items: itemsEntrada,
-        flujo: payload.flujo ?? 'manual',
-        usuarioId: usuarioSesion?.id || null,
-      });
-      res.status(201).json({ ok: true, documento });
-    } catch (error) {
-      const status = error?.status || 500;
-      console.error('Error al registrar documento FE manual:', error?.message || error);
-      res.status(status).json({ ok: false, error: error?.message || 'No se pudo registrar el documento manual' });
-    }
-  });
-});
 
 app.get('/api/productos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
@@ -12035,7 +11919,7 @@ app.get('/api/caja/cuadre/:id/detalle', (req, res) => {
     try {
       const pedidos = await db.all(
         `
-          SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado, nota, subtotal,
+          SELECT id, cuenta_id, numero_cuenta_negocio, mesa, cliente, modo_servicio, estado, nota, subtotal,
                  impuesto, total, fecha_creacion, fecha_listo, fecha_cierre, cliente_documento,
                  ncf, tipo_comprobante, propina_monto, descuento_monto, comentarios
           FROM pedidos
@@ -12059,6 +11943,7 @@ app.get('/api/caja/cuadre/:id/detalle', (req, res) => {
       const itemsAgrupados = agruparItemsCuenta(detalle);
       const cuenta = {
         cuenta_id: pedidos[0].cuenta_id || pedidos[0].id,
+        numero_cuenta_negocio: Number(pedidos[0].numero_cuenta_negocio) || null,
         mesa: pedidos[0].mesa,
         cliente: pedidos[0].cliente,
         modo_servicio: pedidos[0].modo_servicio,
@@ -13068,6 +12953,7 @@ app.get('/api/cuentas/:id/detalle', (req, res) => {
       const puedeCobrar = (pedidos || []).every((pedido) => pedido.estado === 'listo');
       const cuenta = {
         cuenta_id: pedidos[0].cuenta_id || pedidos[0].id,
+        numero_cuenta_negocio: Number(pedidos[0].numero_cuenta_negocio) || null,
         mesa: pedidos[0].mesa,
         cliente: pedidos[0].cliente,
         modo_servicio: pedidos[0].modo_servicio,
@@ -13660,6 +13546,20 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
       }
 
       let cuentaNuevaId = null;
+      // Numero local de cuenta para el negocio. Como esta cuenta es nueva (creada
+      // al separar items de otra), incrementamos el contador del negocio para que
+      // arranque con su propia secuencia (1,2,3...) y no con el id global de pedidos.
+      await db.run(
+        `INSERT INTO secuencias_cuenta (negocio_id, correlativo)
+         VALUES (?, 1)
+         ON DUPLICATE KEY UPDATE correlativo = correlativo + 1`,
+        [negocioId]
+      );
+      const filaSecSplit = await db.get(
+        'SELECT correlativo FROM secuencias_cuenta WHERE negocio_id = ?',
+        [negocioId]
+      );
+      const numeroCuentaNuevaNegocio = Number(filaSecSplit?.correlativo) || null;
       const pedidoNuevoPorOrigen = new Map();
       const tasaPorPedidoNuevo = new Map();
       const toleranciaCantidadSplit = 0.0001;
@@ -13702,8 +13602,9 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
               bartender_nombre,
               origen_caja,
               creado_por,
-              negocio_id
-            ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+              negocio_id,
+              numero_cuenta_negocio
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             cuentaNuevaId,
@@ -13720,6 +13621,7 @@ app.post('/api/cuentas/:id/separar', (req, res) => {
             base.origen_caja,
             base.creado_por || usuarioSesion.id,
             negocioId,
+            numeroCuentaNuevaNegocio,
           ]
         );
 
@@ -14063,14 +13965,30 @@ app.post('/api/cuentas/juntar', (req, res) => {
           .json({ ok: false, error: 'No se pueden juntar cuentas de mesas diferentes.' });
       }
 
+      // Tomamos el numero local de la cuenta destino para unificar la junta:
+      // todas las cuentas combinadas pasan a mostrar el mismo numero por negocio.
+      const filaDestino = await db.get(
+        `SELECT numero_cuenta_negocio
+           FROM pedidos
+          WHERE negocio_id = ?
+            AND (cuenta_id = ? OR id = ?)
+            AND numero_cuenta_negocio IS NOT NULL
+          ORDER BY id ASC
+          LIMIT 1`,
+        [negocioId, cuentaDestino, cuentaDestino]
+      );
+      const numeroDestino = Number(filaDestino?.numero_cuenta_negocio) || null;
+
       await db.run(
         `
           UPDATE pedidos
-             SET cuenta_id = ?
+             SET cuenta_id = ?${numeroDestino ? ', numero_cuenta_negocio = ?' : ''}
            WHERE negocio_id = ?
              AND (cuenta_id IN (${placeholders}) OR id IN (${placeholders}))
         `,
-        [cuentaDestino, negocioId, ...cuentaIds, ...cuentaIds]
+        numeroDestino
+          ? [cuentaDestino, numeroDestino, negocioId, ...cuentaIds, ...cuentaIds]
+          : [cuentaDestino, negocioId, ...cuentaIds, ...cuentaIds]
       );
 
       const pedidoIds = Array.from(new Set((pedidos || []).map((pedido) => Number(pedido.id)).filter(Boolean)));
@@ -14415,13 +14333,47 @@ app.post('/api/pedidos', (req, res) => {
 
       const consumoRegistros = [];
 
+      // Resolver el numero de cuenta por negocio. Si la cuenta ya existe (cuentaReferencia),
+      // copiamos su numero local. Si es una cuenta nueva, incrementamos atomicamente el
+      // contador en `secuencias_cuenta` para que cada negocio lleve su propia secuencia
+      // (1,2,3...) y no comparta el AUTO_INCREMENT global de pedidos.id.
+      let numeroCuentaNegocio = null;
+      if (cuentaReferencia) {
+        const filaPrev = await db.get(
+          `SELECT numero_cuenta_negocio
+             FROM pedidos
+            WHERE negocio_id = ?
+              AND (cuenta_id = ? OR id = ?)
+              AND numero_cuenta_negocio IS NOT NULL
+            ORDER BY id ASC
+            LIMIT 1`,
+          [negocioId, cuentaReferencia, cuentaReferencia]
+        );
+        numeroCuentaNegocio = Number(filaPrev?.numero_cuenta_negocio) || null;
+      }
+
+      if (!numeroCuentaNegocio) {
+        await db.run(
+          `INSERT INTO secuencias_cuenta (negocio_id, correlativo)
+           VALUES (?, 1)
+           ON DUPLICATE KEY UPDATE correlativo = correlativo + 1`,
+          [negocioId]
+        );
+        const filaSec = await db.get(
+          'SELECT correlativo FROM secuencias_cuenta WHERE negocio_id = ?',
+          [negocioId]
+        );
+        numeroCuentaNegocio = Number(filaSec?.correlativo) || null;
+      }
+
       const insertResult = await db.run(
         `
             INSERT INTO pedidos (
               cuenta_id, mesa, cliente, modo_servicio, nota, estado,
               subtotal, impuesto, total, fecha_listo, origen_caja, creado_por, negocio_id,
-              delivery_estado, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              delivery_estado, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas,
+              numero_cuenta_negocio
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             cuentaReferencia,
@@ -14442,6 +14394,7 @@ app.post('/api/pedidos', (req, res) => {
             deliveryDireccion,
             deliveryReferencia,
             deliveryNotas,
+            numeroCuentaNegocio,
           ]
         );
 
@@ -17222,7 +17175,7 @@ app.get('/api/delivery/pedidos', (req, res) => {
     try {
       const pedidos = await db.all(
         `
-          SELECT p.id, p.cuenta_id, p.mesa, p.cliente, p.modo_servicio, p.estado, p.nota,
+          SELECT p.id, p.cuenta_id, p.numero_cuenta_negocio, p.mesa, p.cliente, p.modo_servicio, p.estado, p.nota,
                  p.subtotal, p.impuesto, p.total, p.fecha_creacion, p.fecha_listo, p.fecha_cierre,
                  p.delivery_estado, p.delivery_usuario_id, p.delivery_usuario_nombre,
                  p.delivery_fecha_asignacion, p.delivery_fecha_entrega,
@@ -25717,6 +25670,45 @@ app.post('/api/compras', (req, res) => {
             return finalizarConError('Error al confirmar la compra', commitErr);
           }
 
+          const tipoComprobanteUpper = String(tipo_comprobante || '').toUpperCase();
+          const debeEmitirEcf = ['E41', 'E47'].includes(tipoComprobanteUpper);
+
+          // Auto-emision e-CF para compras (E41/E47) — fire-and-forget
+          if (debeEmitirEcf && typeof global.__emitirEcfDocumentoExterno === 'function') {
+            setImmediate(async () => {
+              try {
+                await global.__emitirEcfDocumentoExterno({
+                  negocioId,
+                  modulo: 'compras',
+                  referenciaExterna: String(compraId),
+                  ecfTipo: tipoComprobanteUpper,
+                  comprador: {
+                    documento: normalizarCampoTexto(rnc, null),
+                    tipo_documento: 'RNC',
+                    nombre: proveedor.trim(),
+                  },
+                  items: detallesLimpios.map((d) => ({
+                    nombre: d.descripcion,
+                    cantidad: d.cantidad || 1,
+                    precio_unitario: d.precio_unitario || (d.total || 0),
+                    descuento_monto: 0,
+                    tipo: 'PRODUCTO',
+                  })),
+                  totales: {
+                    subtotal: montoGravadoValor,
+                    impuesto: impuestoValor,
+                    total: totalValor,
+                    descuento: 0,
+                  },
+                  fechaEmision: fecha,
+                  pagos: { efectivo: totalValor },
+                });
+              } catch (err) {
+                console.error(`Error emitiendo e-CF ${tipoComprobanteUpper} para compra ${compraId}:`, err.message);
+              }
+            });
+          }
+
           res.status(201).json({
             id: compraId,
             proveedor: proveedor.trim(),
@@ -25728,6 +25720,7 @@ app.post('/api/compras', (req, res) => {
             impuesto: impuestoValor,
             total: totalValor,
             monto_exento: montoExentoValor,
+            ecf_emision: debeEmitirEcf ? 'EN_PROCESO' : null,
           });
         });
       };
@@ -26501,6 +26494,41 @@ app.post('/api/admin/gastos', (req, res) => {
 
       const result = await db.run(sql, params);
       limpiarCacheAnalitica(negocioId);
+
+      // Auto-emision e-CF (E43) si se indico tipo_comprobante
+      const tipoComprobanteUpper = String(payload.tipo_comprobante || payload.tipoComprobante || '').toUpperCase();
+      const debeEmitirEcf = tipoComprobanteUpper === 'E43';
+      if (debeEmitirEcf && typeof global.__emitirEcfDocumentoExterno === 'function') {
+        const gastoId = result.lastID;
+        setImmediate(async () => {
+          try {
+            await global.__emitirEcfDocumentoExterno({
+              negocioId,
+              modulo: 'gastos',
+              referenciaExterna: String(gastoId),
+              ecfTipo: 'E43',
+              comprador: {},
+              items: [{
+                nombre: descripcion || categoria || 'Gasto menor',
+                cantidad: 1,
+                precio_unitario: montoValor,
+                tipo: 'PRODUCTO',
+              }],
+              totales: {
+                subtotal: 0,
+                impuesto: 0,
+                total: montoValor,
+                descuento: 0,
+              },
+              fechaEmision: fecha,
+              pagos: { efectivo: montoValor },
+            });
+          } catch (err) {
+            console.error(`Error emitiendo e-CF E43 para gasto ${gastoId}:`, err.message);
+          }
+        });
+      }
+
       res.status(201).json({
         ok: true,
         gasto: {
@@ -26522,6 +26550,7 @@ app.post('/api/admin/gastos', (req, res) => {
           estado: pagoGasto.estado,
           fecha_pago: pagoGasto.fecha_pago,
           monto_pagado: pagoGasto.monto_pagado,
+          ecf_emision: debeEmitirEcf ? 'EN_PROCESO' : null,
         },
       });
     } catch (error) {
@@ -28601,22 +28630,25 @@ const tablaExiste = async (nombreTabla) => {
 };
 
 const construirHistorialQuery = ({ table, area, idCol, nombreCol, negocioId, fecha, preparadorId }) => {
-  const where = ['negocio_id = ?', 'DATE(created_at) = ?'];
+  const where = [`${table}.negocio_id = ?`, `DATE(${table}.created_at) = ?`];
   const params = [negocioId, fecha];
 
   if (Number.isFinite(preparadorId)) {
-    where.push(`${idCol} = ?`);
+    where.push(`${table}.${idCol} = ?`);
     params.push(preparadorId);
   }
 
   const whereSql = where.join(' AND ');
   const selectSql = `
-    SELECT id, cuenta_id, pedido_id, item_nombre, cantidad,
-           ${idCol} AS preparador_id,
-           ${nombreCol} AS preparador_nombre,
-           created_at, completed_at,
+    SELECT ${table}.id, ${table}.cuenta_id,
+           pedidos.numero_cuenta_negocio AS numero_cuenta_negocio,
+           ${table}.pedido_id, ${table}.item_nombre, ${table}.cantidad,
+           ${table}.${idCol} AS preparador_id,
+           ${table}.${nombreCol} AS preparador_nombre,
+           ${table}.created_at, ${table}.completed_at,
            '${area}' AS area
     FROM ${table}
+    LEFT JOIN pedidos ON pedidos.id = ${table}.cuenta_id
     WHERE ${whereSql}
   `;
   const countSql = `SELECT COUNT(1) AS total FROM ${table} WHERE ${whereSql}`;
@@ -28690,43 +28722,40 @@ app.get('/api/preparacion/historial', (req, res) => {
           })
         : null;
 
+      const wrapWithOrder = (innerSql) => `
+        SELECT * FROM (${innerSql}) AS historial
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${limitSafe} OFFSET ${offsetSafe}
+      `;
+
       if (area === 'cocina') {
         if (!cocinaQuery) {
           return res.json({ ok: true, items: [], total: 0, page, pageSize: limit });
         }
         const countRow = await db.get(cocinaQuery.countSql, cocinaQuery.params);
         total = Number(countRow?.total) || 0;
-        const dataSql = `${cocinaQuery.selectSql} ORDER BY created_at DESC, id DESC LIMIT ${limitSafe} OFFSET ${offsetSafe}`;
-        items = await db.all(dataSql, cocinaQuery.params);
+        items = await db.all(wrapWithOrder(cocinaQuery.selectSql), cocinaQuery.params);
       } else if (area === 'bar') {
         if (!barQuery) {
           return res.json({ ok: true, items: [], total: 0, page, pageSize: limit });
         }
         const countRow = await db.get(barQuery.countSql, barQuery.params);
         total = Number(countRow?.total) || 0;
-        const dataSql = `${barQuery.selectSql} ORDER BY created_at DESC, id DESC LIMIT ${limitSafe} OFFSET ${offsetSafe}`;
-        items = await db.all(dataSql, barQuery.params);
+        items = await db.all(wrapWithOrder(barQuery.selectSql), barQuery.params);
       } else if (cocinaQuery && barQuery) {
         const countCocina = await db.get(cocinaQuery.countSql, cocinaQuery.params);
         const countBar = await db.get(barQuery.countSql, barQuery.params);
         total = (Number(countCocina?.total) || 0) + (Number(countBar?.total) || 0);
-        const dataSql = `
-          SELECT *
-          FROM (${cocinaQuery.selectSql} UNION ALL ${barQuery.selectSql}) AS historial
-          ORDER BY created_at DESC, id DESC
-          LIMIT ${limitSafe} OFFSET ${offsetSafe}
-        `;
+        const dataSql = wrapWithOrder(`${cocinaQuery.selectSql} UNION ALL ${barQuery.selectSql}`);
         items = await db.all(dataSql, [...cocinaQuery.params, ...barQuery.params]);
       } else if (cocinaQuery) {
         const countRow = await db.get(cocinaQuery.countSql, cocinaQuery.params);
         total = Number(countRow?.total) || 0;
-        const dataSql = `${cocinaQuery.selectSql} ORDER BY created_at DESC, id DESC LIMIT ${limitSafe} OFFSET ${offsetSafe}`;
-        items = await db.all(dataSql, cocinaQuery.params);
+        items = await db.all(wrapWithOrder(cocinaQuery.selectSql), cocinaQuery.params);
       } else if (barQuery) {
         const countRow = await db.get(barQuery.countSql, barQuery.params);
         total = Number(countRow?.total) || 0;
-        const dataSql = `${barQuery.selectSql} ORDER BY created_at DESC, id DESC LIMIT ${limitSafe} OFFSET ${offsetSafe}`;
-        items = await db.all(dataSql, barQuery.params);
+        items = await db.all(wrapWithOrder(barQuery.selectSql), barQuery.params);
       }
 
       const normalizados = (items || []).map((item) => ({
@@ -29280,29 +29309,26 @@ app.get('/api/preparacion/historial/export', (req, res) => {
           })
         : null;
 
+      const wrapWithOrderExp = (innerSql) => `
+        SELECT * FROM (${innerSql}) AS historial
+        ORDER BY created_at DESC, id DESC
+      `;
+
       if (area === 'cocina') {
         if (cocinaQuery) {
-          const dataSql = `${cocinaQuery.selectSql} ORDER BY created_at DESC, id DESC`;
-          rows = await db.all(dataSql, cocinaQuery.params);
+          rows = await db.all(wrapWithOrderExp(cocinaQuery.selectSql), cocinaQuery.params);
         }
       } else if (area === 'bar') {
         if (barQuery) {
-          const dataSql = `${barQuery.selectSql} ORDER BY created_at DESC, id DESC`;
-          rows = await db.all(dataSql, barQuery.params);
+          rows = await db.all(wrapWithOrderExp(barQuery.selectSql), barQuery.params);
         }
       } else if (cocinaQuery && barQuery) {
-        const dataSql = `
-          SELECT *
-          FROM (${cocinaQuery.selectSql} UNION ALL ${barQuery.selectSql}) AS historial
-          ORDER BY created_at DESC, id DESC
-        `;
+        const dataSql = wrapWithOrderExp(`${cocinaQuery.selectSql} UNION ALL ${barQuery.selectSql}`);
         rows = await db.all(dataSql, [...cocinaQuery.params, ...barQuery.params]);
       } else if (cocinaQuery) {
-        const dataSql = `${cocinaQuery.selectSql} ORDER BY created_at DESC, id DESC`;
-        rows = await db.all(dataSql, cocinaQuery.params);
+        rows = await db.all(wrapWithOrderExp(cocinaQuery.selectSql), cocinaQuery.params);
       } else if (barQuery) {
-        const dataSql = `${barQuery.selectSql} ORDER BY created_at DESC, id DESC`;
-        rows = await db.all(dataSql, barQuery.params);
+        rows = await db.all(wrapWithOrderExp(barQuery.selectSql), barQuery.params);
       }
 
       const headers = [
@@ -29316,7 +29342,7 @@ app.get('/api/preparacion/historial/export', (req, res) => {
         'finalizado',
       ];
       const datos = (rows || []).map((r) => ({
-        cuenta: r.cuenta_id || '',
+        cuenta: r.numero_cuenta_negocio || r.cuenta_id || '',
         pedido: r.pedido_id || '',
         item: r.item_nombre || '',
         cantidad: r.cantidad || 0,
@@ -29413,25 +29439,28 @@ app.get('/api/historial-cocina', (req, res) => {
     }
 
     try {
-      const where = ['negocio_id = ?', 'DATE(created_at) = ?'];
+      const where = ['hc.negocio_id = ?', 'DATE(hc.created_at) = ?'];
       const params = [negocioId, fecha];
 
       if (Number.isFinite(cocineroId)) {
-        where.push('cocinero_id = ?');
+        where.push('hc.cocinero_id = ?');
         params.push(cocineroId);
       }
 
       const whereSql = where.join(' AND ');
 
-      const countSql = `SELECT COUNT(1) AS total FROM historial_cocina WHERE ${whereSql}`;
+      const countSql = `SELECT COUNT(1) AS total FROM historial_cocina hc WHERE ${whereSql}`;
       const [countRow] = await db.all(countSql, params);
       const total = Number(countRow?.total) || 0;
 
       const dataSql = `
-        SELECT id, cuenta_id, pedido_id, item_nombre, cantidad, cocinero_id, cocinero_nombre, created_at, completed_at
-        FROM historial_cocina
+        SELECT hc.id, hc.cuenta_id, p.numero_cuenta_negocio AS numero_cuenta_negocio,
+               hc.pedido_id, hc.item_nombre, hc.cantidad, hc.cocinero_id, hc.cocinero_nombre,
+               hc.created_at, hc.completed_at
+        FROM historial_cocina hc
+        LEFT JOIN pedidos p ON p.id = hc.cuenta_id
         WHERE ${whereSql}
-        ORDER BY created_at DESC, id DESC
+        ORDER BY hc.created_at DESC, hc.id DESC
         LIMIT ${limit} OFFSET ${offset}
       `;
       const items = await db.all(dataSql, params);
@@ -29461,24 +29490,27 @@ app.get('/api/historial-cocina/export', (req, res) => {
     }
 
     try {
-      const where = ['negocio_id = ?', 'DATE(created_at) = ?'];
+      const where = ['hc.negocio_id = ?', 'DATE(hc.created_at) = ?'];
       const params = [negocioId, fecha];
       if (Number.isFinite(cocineroId)) {
-        where.push('cocinero_id = ?');
+        where.push('hc.cocinero_id = ?');
         params.push(cocineroId);
       }
       const whereSql = where.join(' AND ');
 
       const dataSql = `
-        SELECT cuenta_id, pedido_id, item_nombre, cantidad, cocinero_nombre, created_at, completed_at
-        FROM historial_cocina
+        SELECT hc.cuenta_id, p.numero_cuenta_negocio AS numero_cuenta_negocio,
+               hc.pedido_id, hc.item_nombre, hc.cantidad, hc.cocinero_nombre,
+               hc.created_at, hc.completed_at
+        FROM historial_cocina hc
+        LEFT JOIN pedidos p ON p.id = hc.cuenta_id
         WHERE ${whereSql}
-        ORDER BY created_at DESC, id DESC
+        ORDER BY hc.created_at DESC, hc.id DESC
       `;
       const rows = await db.all(dataSql, params);
       const headers = ['cuenta', 'pedido', 'item', 'cantidad', 'cocinero', 'entrada', 'finalizado'];
       const datos = (rows || []).map((r) => ({
-        cuenta: r.cuenta_id || '',
+        cuenta: r.numero_cuenta_negocio || r.cuenta_id || '',
         pedido: r.pedido_id || '',
         item: r.item_nombre || '',
         cantidad: r.cantidad || 0,
