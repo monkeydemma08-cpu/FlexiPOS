@@ -6774,10 +6774,718 @@ const cargarAnalisis = async () => {
     if (basicoOk && avanzadoOk) {
       setMessage(analisisMensaje, '', 'info');
     }
+
+    // F2: cargar endpoints extendidos en paralelo. Cada bloque captura su propio
+    // error para que un fallo aislado no rompa la carga del resto.
+    const periodoQs = params.toString();
+    cargarAnalisisExtendido(periodoQs);
   } catch (error) {
     console.error('Error al cargar analisis:', error);
     setMessage(analisisMensaje, error.message || 'Error al cargar el analisis.', 'error');
   }
+};
+
+// ---------------------------------------------------------------------------
+// F2 — Render functions para los 8 endpoints de analisis-extension.
+// ---------------------------------------------------------------------------
+const setText = (id, value) => {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+};
+
+const setHtml = (id, value) => {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = value;
+};
+
+const formatPct = (value, decimals = 2) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '0%';
+  return `${num.toFixed(decimals)}%`;
+};
+
+const renderRankingById = (id, items, formatter) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!items || items.length === 0) {
+    el.innerHTML = '<div class="analisis-ranking-empty">Sin datos en el periodo.</div>';
+    return;
+  }
+  el.innerHTML = items.map(formatter).join('');
+};
+
+const renderDiagnosticos = (id, diagnosticos) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!diagnosticos || diagnosticos.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = diagnosticos
+    .map((d) => {
+      const tipo = d.nivel === 'critico' ? 'error' : d.nivel === 'aviso' ? 'warning' : 'info';
+      return `<div class="kanm-message" data-type="${tipo}"><strong>${d.kpi || ''}:</strong> ${d.mensaje || ''}</div>`;
+    })
+    .join('');
+};
+
+// ---------------------------------------------------------------------------
+// F3 — Chart.js helpers para el modulo analisis-extension
+// ---------------------------------------------------------------------------
+const __analisisChartInstances = new Map();
+const ANALISIS_CHART_PALETTE = [
+  '#d56a8f', '#f5a25d', '#3aa1d8', '#7cc06a', '#9b6ad6',
+  '#e36767', '#f3c84a', '#5dc6c0', '#b56e8a', '#7d96b8',
+];
+
+const renderChart = (canvasId, type, data, options = {}) => {
+  if (typeof Chart === 'undefined') {
+    console.warn('[analisis-extension] Chart.js no esta cargado');
+    return null;
+  }
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+
+  // Destruir instancia previa si existia
+  const prev = __analisisChartInstances.get(canvasId);
+  if (prev && typeof prev.destroy === 'function') {
+    prev.destroy();
+  }
+
+  const baseOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12, font: { size: 11 } } },
+      tooltip: { mode: 'index', intersect: false },
+    },
+    interaction: { mode: 'index', intersect: false },
+  };
+  const merged = { ...baseOptions, ...options };
+  if (options.plugins) {
+    merged.plugins = { ...baseOptions.plugins, ...options.plugins };
+  }
+
+  const chart = new Chart(canvas.getContext('2d'), {
+    type,
+    data,
+    options: merged,
+  });
+  __analisisChartInstances.set(canvasId, chart);
+  return chart;
+};
+
+const destroyAnalisisCharts = () => {
+  __analisisChartInstances.forEach((chart) => {
+    if (chart && typeof chart.destroy === 'function') {
+      try { chart.destroy(); } catch (e) { /* noop */ }
+    }
+  });
+  __analisisChartInstances.clear();
+};
+
+const renderHeatmapGrid = (containerId, heatmapRows = []) => {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!heatmapRows || heatmapRows.length === 0) {
+    el.innerHTML = '<div class="analisis-ranking-empty">Sin datos del heatmap.</div>';
+    return;
+  }
+  // Indexar por dia/hora
+  const byKey = new Map();
+  let maxIngresos = 0;
+  heatmapRows.forEach((row) => {
+    const key = `${row.dia_semana}_${row.hora}`;
+    byKey.set(key, row);
+    if (row.ingresos > maxIngresos) maxIngresos = row.ingresos;
+  });
+  if (maxIngresos <= 0) maxIngresos = 1;
+
+  const html = [];
+  // Cabecera: hora 0..23
+  html.push('<div class="analisis-heatmap-axis"></div>');
+  for (let h = 0; h < 24; h++) {
+    html.push(`<div class="analisis-heatmap-axis">${String(h).padStart(2, '0')}</div>`);
+  }
+  // Filas: dom..sab
+  for (let d = 1; d <= 7; d++) {
+    html.push(`<div class="analisis-heatmap-axis analisis-heatmap-axis--row">${DIAS_SEMANA[d - 1]}</div>`);
+    for (let h = 0; h < 24; h++) {
+      const row = byKey.get(`${d}_${h}`);
+      const ingresos = row?.ingresos || 0;
+      const pedidos = row?.pedidos || 0;
+      const intensity = Math.min(1, ingresos / maxIngresos);
+      const alpha = (0.05 + intensity * 0.85).toFixed(2);
+      const bg = `rgba(213, 106, 143, ${alpha})`;
+      const tooltip = `${DIAS_SEMANA[d - 1]} ${String(h).padStart(2, '0')}:00 — ${formatCurrency(ingresos)} (${pedidos} pedidos)`;
+      html.push(
+        `<div class="analisis-heatmap-cell" style="background:${bg};" title="${tooltip}"></div>`
+      );
+    }
+  }
+  el.innerHTML = html.join('');
+};
+
+const renderRestaurante = (data) => {
+  const k = data?.kpis || {};
+  setText('rest-kpi-food-cost', formatPct(k.food_cost_pct));
+  setText('rest-kpi-labor-cost', formatPct(k.labor_cost_pct));
+  setText('rest-kpi-prime-cost', formatPct(k.prime_cost_pct));
+  setText('rest-kpi-items-ticket', formatNumber(k.items_por_ticket));
+  setText('rest-kpi-margen-contribucion', formatCurrency(k.margen_contribucion));
+  setText('rest-kpi-rotacion-mesas', formatNumber(k.rotacion_mesas));
+  setText('rest-kpi-venta-diaria', formatCurrency(k.venta_promedio_diaria));
+  setText('rest-kpi-propinas', formatCurrency(k.propinas));
+  renderDiagnosticos('rest-diagnosticos', data?.diagnosticos);
+
+  // Chart: doughnut con composicion del costo (food, labor, otros, utilidad)
+  const ingresos = Number(k.ingresos_sin_itbis) || Number(k.ingresos) || 0;
+  const cogs = Number(k.cogs) || 0;
+  const personal = Number(k.personal) || 0;
+  const otros = Math.max(0, ingresos - cogs - personal - (Number(k.margen_contribucion) || 0));
+  const utilidad = Math.max(0, Number(k.margen_contribucion) || 0);
+  if (ingresos > 0) {
+    renderChart(
+      'rest-chart-breakdown',
+      'doughnut',
+      {
+        labels: ['Food Cost (COGS)', 'Labor Cost', 'Otros costos', 'Margen contribucion'],
+        datasets: [{
+          data: [cogs, personal, otros, utilidad],
+          backgroundColor: ['#e36767', '#f5a25d', '#7d96b8', '#7cc06a'],
+          borderWidth: 2,
+          borderColor: '#fff',
+        }],
+      },
+      {
+        cutout: '55%',
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const val = ctx.parsed || 0;
+                const pct = ingresos > 0 ? ((val / ingresos) * 100).toFixed(1) : '0';
+                return `${ctx.label}: ${formatCurrency(val)} (${pct}%)`;
+              },
+            },
+          },
+        },
+      }
+    );
+  }
+};
+
+const renderProductosRentabilidad = (data) => {
+  const fmt = (p) => `
+    <div class="analisis-ranking-item">
+      <div class="analisis-ranking-name">${(p.nombre || '').replace(/[<>]/g, '')}</div>
+      <div class="analisis-ranking-meta">
+        ${formatNumber(p.unidades)} und · ${formatCurrency(p.ingresos)} · margen ${formatPct(p.margen_pct)} (${formatCurrency(p.margen)})
+      </div>
+    </div>`;
+  renderRankingById('prod-margen-negativo', data?.margen_negativo, fmt);
+  renderRankingById('prod-margen-bajo', data?.margen_bajo, fmt);
+  // Top por margen absoluto (de la lista completa)
+  const topMargen = (data?.productos || [])
+    .filter((p) => p.margen > 0)
+    .sort((a, b) => b.margen - a.margen)
+    .slice(0, 10);
+  renderRankingById('prod-top-margen', topMargen, fmt);
+
+  // Chart: barra horizontal con top 10 productos por margen absoluto
+  if (topMargen.length > 0) {
+    renderChart(
+      'prod-chart-margen',
+      'bar',
+      {
+        labels: topMargen.map((p) => (p.nombre || '').slice(0, 28)),
+        datasets: [
+          {
+            label: 'Margen (DOP)',
+            data: topMargen.map((p) => Number(p.margen) || 0),
+            backgroundColor: '#7cc06a',
+            borderRadius: 6,
+          },
+          {
+            label: 'Ingresos (DOP)',
+            data: topMargen.map((p) => Number(p.ingresos) || 0),
+            backgroundColor: 'rgba(213, 106, 143, 0.35)',
+            borderRadius: 6,
+          },
+        ],
+      },
+      {
+        indexAxis: 'y',
+        scales: {
+          x: { ticks: { callback: (v) => formatCurrency(v) } },
+        },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ${formatCurrency(ctx.parsed.x)}`,
+            },
+          },
+        },
+      }
+    );
+  }
+};
+
+const renderInventario = (data) => {
+  const inv = data?.inventario || {};
+  const mov = data?.movimientos || {};
+  setText('inv-kpi-valor', formatCurrency(inv.valor_actual));
+  setText('inv-kpi-rotacion', formatNumber(inv.rotacion_anual));
+  setText('inv-kpi-dias', formatNumber(inv.dias_inventario));
+  setText('inv-kpi-compras', formatCurrency(mov.compras));
+  setText('inv-kpi-mermas', formatCurrency(mov.mermas));
+  setText('inv-kpi-stock-bajo-count', String(inv.stock_bajo_count || 0));
+  renderRankingById('inv-stock-bajo-list', data?.stock_bajo, (r) => `
+    <div class="analisis-ranking-item">
+      <div class="analisis-ranking-name">${(r.nombre || '').replace(/[<>]/g, '')}</div>
+      <div class="analisis-ranking-meta">Stock ${formatNumber(r.stock)} / min ${formatNumber(r.stock_minimo)} · falta ${formatNumber(r.faltante)}</div>
+    </div>`);
+  renderRankingById('inv-sin-movimiento-list', data?.sin_movimiento, (r) => `
+    <div class="analisis-ranking-item">
+      <div class="analisis-ranking-name">${(r.nombre || '').replace(/[<>]/g, '')}</div>
+      <div class="analisis-ranking-meta">Stock ${formatNumber(r.stock)} · valor ${formatCurrency(r.valor_estimado)}</div>
+    </div>`);
+};
+
+const renderPersonal = (data) => {
+  const t = data?.totales || {};
+  setText('pers-kpi-ventas', formatCurrency(t.total_ventas));
+  setText('pers-kpi-costo', formatCurrency(t.total_costo_personal));
+  setText('pers-kpi-ratio', formatPct(t.ratio_personal_ventas));
+  renderRankingById('pers-ventas-usuario', data?.ventas_por_usuario, (u) => `
+    <div class="analisis-ranking-item">
+      <div class="analisis-ranking-name">${(u.nombre || '').replace(/[<>]/g, '')}</div>
+      <div class="analisis-ranking-meta">${u.tickets} tickets · ${formatCurrency(u.ingresos)} · prom ${formatCurrency(u.ticket_promedio)}</div>
+    </div>`);
+  renderRankingById('pers-empleados', data?.empleados, (e) => `
+    <div class="analisis-ranking-item">
+      <div class="analisis-ranking-name">${(e.nombre || '').replace(/[<>]/g, '')} <span class="analisis-ranking-tag">${e.cargo || ''}</span></div>
+      <div class="analisis-ranking-meta">${e.tipo_pago} · ${formatNumber(e.horas_trabajadas)}h · costo periodo ${formatCurrency(e.costo_estimado_periodo)}</div>
+    </div>`);
+};
+
+const renderClientes = (data) => {
+  const r = data?.recurrencia || {};
+  const a = data?.aging_cuentas_por_cobrar || {};
+  setText('cli-kpi-unicos', String(r.clientes_unicos || 0));
+  setText('cli-kpi-recurrentes', String(r.clientes_recurrentes || 0));
+  setText('cli-kpi-tasa-recurrencia', formatPct(r.tasa_recurrencia_pct));
+  setText('cli-kpi-cxc-total', formatCurrency(a.total));
+  setText('cli-aging-0-30', formatCurrency(a.bucket_0_30));
+  setText('cli-aging-31-60', formatCurrency(a.bucket_31_60));
+  setText('cli-aging-61-90', formatCurrency(a.bucket_61_90));
+  setText('cli-aging-90-plus', formatCurrency(a.bucket_90_plus));
+  const tbody = document.getElementById('cli-top-clientes-body');
+  if (tbody) {
+    if (!data?.top_clientes?.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="kanm-table-empty">Sin clientes en el periodo.</td></tr>';
+    } else {
+      tbody.innerHTML = data.top_clientes
+        .map(
+          (c) => `<tr>
+            <td>${(c.nombre || '').replace(/[<>]/g, '')}</td>
+            <td>${c.facturas}</td>
+            <td>${formatCurrency(c.total_comprado)}</td>
+            <td>${formatCurrency(c.total_abonado)}</td>
+            <td>${formatCurrency(c.saldo)}</td>
+            <td>${formatCurrency(c.ticket_promedio)}</td>
+          </tr>`
+        )
+        .join('');
+    }
+  }
+};
+
+const renderFiscal = (data) => {
+  const i = data?.itbis || {};
+  setText('fis-kpi-itbis-recaudado', formatCurrency(i.recaudado));
+  setText('fis-kpi-itbis-pagado', formatCurrency(i.pagado));
+  setText('fis-kpi-itbis-neto', formatCurrency(i.neto));
+  setText('fis-kpi-total-facturado', formatCurrency(i.total_facturado));
+  renderRankingById('fis-tipos-comprobante', data?.tipos_comprobante, (t) => `
+    <div class="analisis-ranking-item">
+      <div class="analisis-ranking-name">${(t.tipo || '').replace(/[<>]/g, '')}</div>
+      <div class="analisis-ranking-meta">${t.cantidad} doc · ${formatCurrency(t.total)}</div>
+    </div>`);
+  renderRankingById('fis-ecf-estado', data?.ecf_estado, (e) => `
+    <div class="analisis-ranking-item">
+      <div class="analisis-ranking-name">${(e.estado || '').replace(/[<>]/g, '')}</div>
+      <div class="analisis-ranking-meta">${e.cantidad} doc · ${formatCurrency(e.total)}</div>
+    </div>`);
+
+  // Chart: doughnut tipos comprobante
+  const tiposArr = data?.tipos_comprobante || [];
+  if (tiposArr.length > 0) {
+    renderChart(
+      'fis-chart-comprobantes',
+      'doughnut',
+      {
+        labels: tiposArr.map((t) => t.tipo || 'N/A'),
+        datasets: [{
+          data: tiposArr.map((t) => Number(t.total) || 0),
+          backgroundColor: ANALISIS_CHART_PALETTE,
+          borderWidth: 2,
+          borderColor: '#fff',
+        }],
+      },
+      {
+        cutout: '50%',
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.label}: ${formatCurrency(ctx.parsed)}`,
+            },
+          },
+        },
+      }
+    );
+  }
+
+  // Chart: doughnut estado e-CF
+  const ecfArr = data?.ecf_estado || [];
+  if (ecfArr.length > 0) {
+    renderChart(
+      'fis-chart-ecf',
+      'doughnut',
+      {
+        labels: ecfArr.map((e) => e.estado || 'N/A'),
+        datasets: [{
+          data: ecfArr.map((e) => Number(e.cantidad) || 0),
+          backgroundColor: ecfArr.map((e) => {
+            const est = String(e.estado || '').toLowerCase();
+            if (est.includes('aceptad')) return '#7cc06a';
+            if (est.includes('rechaza')) return '#e36767';
+            if (est.includes('pendien')) return '#f3c84a';
+            return '#7d96b8';
+          }),
+          borderWidth: 2,
+          borderColor: '#fff',
+        }],
+      },
+      {
+        cutout: '50%',
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.label}: ${ctx.parsed} doc`,
+            },
+          },
+        },
+      }
+    );
+  }
+};
+
+const renderGastosAvanzado = (data) => {
+  renderRankingById('gas-top-proveedores', data?.proveedores, (p) => `
+    <div class="analisis-ranking-item">
+      <div class="analisis-ranking-name">${(p.proveedor || '').replace(/[<>]/g, '')}</div>
+      <div class="analisis-ranking-meta">${p.facturas} fact · ${formatCurrency(p.total)} · prom ${formatCurrency(p.promedio)}</div>
+    </div>`);
+  renderRankingById('gas-top-categorias', data?.categorias, (c) => `
+    <div class="analisis-ranking-item">
+      <div class="analisis-ranking-name">${(c.categoria || '').replace(/[<>]/g, '')}</div>
+      <div class="analisis-ranking-meta">${c.cantidad} gastos · ${formatCurrency(c.total)}</div>
+    </div>`);
+  renderRankingById('gas-presupuestos', data?.presupuestos, (p) => {
+    const estadoTag =
+      p.estado === 'sobre_presupuesto' ? '🔴' : p.estado === 'cerca_limite' ? '🟡' : '🟢';
+    return `
+      <div class="analisis-ranking-item">
+        <div class="analisis-ranking-name">${estadoTag} ${(p.categoria || '').replace(/[<>]/g, '')}</div>
+        <div class="analisis-ranking-meta">${formatCurrency(p.ejecutado)} / ${formatCurrency(p.presupuestado)} · desv ${formatPct(p.desviacion_pct)}</div>
+      </div>`;
+  });
+  const tbody = document.getElementById('gas-duplicados-body');
+  if (tbody) {
+    if (!data?.posibles_duplicados?.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="kanm-table-empty">Sin duplicados detectados.</td></tr>';
+    } else {
+      tbody.innerHTML = data.posibles_duplicados
+        .map(
+          (d) => `<tr>
+            <td>${d.fecha}</td>
+            <td>${formatCurrency(d.monto)}</td>
+            <td>${(d.proveedor || '').replace(/[<>]/g, '')}</td>
+            <td>${(d.descripcion || '').replace(/[<>]/g, '')}</td>
+            <td>${d.dias_diferencia}d</td>
+          </tr>`
+        )
+        .join('');
+    }
+  }
+};
+
+const DIAS_SEMANA = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+
+// ---------------------------------------------------------------------------
+// F4 — Alertas accionables (inbox priorizado)
+// ---------------------------------------------------------------------------
+const renderAlertasAccionables = (data) => {
+  setText('alertas-acc-criticas', String(data?.totales?.criticas || 0));
+  setText('alertas-acc-avisos', String(data?.totales?.avisos || 0));
+  setText('alertas-acc-informativas', String(data?.totales?.informativas || 0));
+  setText('alertas-acc-total', String(data?.totales?.total || 0));
+
+  const lista = document.getElementById('alertas-acc-list');
+  if (!lista) return;
+
+  const alertas = Array.isArray(data?.alertas) ? data.alertas : [];
+  if (alertas.length === 0) {
+    lista.innerHTML =
+      '<div class="alerta-acc-empty">✓ Sin alertas accionables. Todo bajo control.</div>';
+    return;
+  }
+
+  const escape = (str) => String(str || '').replace(/[<>&"]/g, (c) => ({
+    '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;',
+  })[c]);
+
+  lista.innerHTML = alertas
+    .map((a) => {
+      const nivelClass = `alerta-acc-item--${a.nivel || 'info'}`;
+      const tagClass = `alerta-acc-tag--${a.nivel || 'info'}`;
+      const linkBtn = a.link
+        ? `<a class="alerta-acc-link" href="${escape(a.link)}">Ir →</a>`
+        : '';
+      return `
+        <div class="alerta-acc-item ${nivelClass}">
+          <div class="alerta-acc-bar"></div>
+          <div class="alerta-acc-content">
+            <div class="alerta-acc-titulo">
+              ${escape(a.titulo)}
+              <span class="alerta-acc-tag ${tagClass}">${escape(a.nivel || 'info')}</span>
+              <span class="alerta-acc-tag">${escape(a.categoria || 'general')}</span>
+            </div>
+            <div class="alerta-acc-mensaje">${escape(a.mensaje)}</div>
+            ${a.accion_sugerida ? `<div class="alerta-acc-accion">→ ${escape(a.accion_sugerida)}</div>` : ''}
+          </div>
+          <div class="alerta-acc-actions">${linkBtn}</div>
+        </div>`;
+    })
+    .join('');
+};
+
+const renderTendencias = (data) => {
+  const c = data?.comparativos || {};
+  const f = data?.forecast || {};
+  setText('tend-kpi-ytd', formatCurrency(c.ingresos_ytd));
+  setText('tend-kpi-yoy', formatCurrency(c.ingresos_mismo_periodo_anio_pasado));
+  setText('tend-kpi-yoy-var', c.variacion_yoy_pct === null ? 's/d' : formatPct(c.variacion_yoy_pct));
+  setText('tend-kpi-mom', formatCurrency(c.ingresos_mismo_periodo_mes_anterior));
+  setText('tend-kpi-mom-var', c.variacion_mom_pct === null ? 's/d' : formatPct(c.variacion_mom_pct));
+  setText('tend-kpi-promedio', formatCurrency(f.promedio_diario_ponderado || f.promedio_diario));
+  setText('tend-kpi-proy-30', formatCurrency(f.proyeccion_30_dias));
+  setText('tend-kpi-banda-sup', formatCurrency(f.banda_superior_30d));
+  setText('tend-kpi-banda-inf', formatCurrency(f.banda_inferior_30d));
+  setText('tend-kpi-proy-anio', formatCurrency(f.proyeccion_anio));
+  const aviso = document.getElementById('tend-forecast-aviso');
+  if (aviso) {
+    if (f.advertencia) {
+      aviso.textContent = f.advertencia;
+      aviso.hidden = false;
+    } else {
+      aviso.textContent = '';
+      aviso.hidden = true;
+    }
+  }
+  // Heatmap top 10 franjas (lista) + grid completo
+  const heatmapAll = data?.heatmap || [];
+  const heatmap = heatmapAll
+    .slice()
+    .sort((a, b) => b.ingresos - a.ingresos)
+    .slice(0, 10);
+  renderRankingById('tend-heatmap-list', heatmap, (h) => {
+    const dia = DIAS_SEMANA[(h.dia_semana || 1) - 1] || '?';
+    const hora = String(h.hora || 0).padStart(2, '0');
+    return `
+      <div class="analisis-ranking-item">
+        <div class="analisis-ranking-name">${dia} · ${hora}:00</div>
+        <div class="analisis-ranking-meta">${formatCurrency(h.ingresos)} · ${h.pedidos} pedidos</div>
+      </div>`;
+  });
+  renderHeatmapGrid('tend-heatmap-grid', heatmapAll);
+
+  // Chart: serie diaria + proyeccion + bandas de confianza
+  const serie = data?.serie_diaria || [];
+  if (serie.length > 0) {
+    const promedioPond = Number(f.promedio_diario_ponderado) || Number(f.promedio_diario) || 0;
+    const factores = f.factores_estacionales || {};
+    const dowKeys = ['dom', 'lun', 'mar', 'mie', 'jue', 'vie', 'sab'];
+
+    // Calcular proyeccion 30 dias futuros con estacionalidad
+    const ultimaFecha = serie.length > 0 ? new Date(serie[serie.length - 1].dia) : new Date();
+    const labelsFuturos = [];
+    const valoresFuturos = [];
+    const valoresSuperior = [];
+    const valoresInferior = [];
+    const stdDev = Number(f.std_dev_diario) || 0;
+    for (let i = 1; i <= 30; i++) {
+      const fut = new Date(ultimaFecha);
+      fut.setDate(fut.getDate() + i);
+      const dow = fut.getDay();
+      const factor = factores[dowKeys[dow]] || 1;
+      const proyeccion = promedioPond * factor;
+      labelsFuturos.push(fut.toISOString().slice(0, 10));
+      valoresFuturos.push(proyeccion);
+      valoresSuperior.push(proyeccion + stdDev);
+      valoresInferior.push(Math.max(0, proyeccion - stdDev));
+    }
+
+    // Datasets: histórico + proyeccion + banda
+    const labelsAll = [...serie.map((r) => r.dia), ...labelsFuturos];
+    const histLen = serie.length;
+    const histData = serie.map((r) => Number(r.ingresos) || 0);
+    const proyData = [
+      ...new Array(histLen).fill(null),
+      ...valoresFuturos,
+    ];
+    const bandaSupData = [
+      ...new Array(histLen).fill(null),
+      ...valoresSuperior,
+    ];
+    const bandaInfData = [
+      ...new Array(histLen).fill(null),
+      ...valoresInferior,
+    ];
+
+    renderChart(
+      'tend-chart-serie',
+      'line',
+      {
+        labels: labelsAll,
+        datasets: [
+          {
+            label: 'Ingresos historicos',
+            data: [...histData, ...new Array(30).fill(null)],
+            borderColor: '#d56a8f',
+            backgroundColor: 'rgba(213, 106, 143, 0.15)',
+            tension: 0.25,
+            fill: true,
+            pointRadius: 2,
+            spanGaps: false,
+          },
+          {
+            label: 'Proyeccion 30d (ponderada+estac)',
+            data: proyData,
+            borderColor: '#7cc06a',
+            backgroundColor: 'rgba(124, 192, 106, 0.0)',
+            borderDash: [6, 4],
+            tension: 0.2,
+            pointRadius: 1,
+            fill: false,
+            spanGaps: false,
+          },
+          {
+            label: 'Banda optimista',
+            data: bandaSupData,
+            borderColor: 'rgba(124, 192, 106, 0.4)',
+            borderDash: [3, 3],
+            tension: 0.2,
+            pointRadius: 0,
+            fill: '+1',
+            backgroundColor: 'rgba(124, 192, 106, 0.10)',
+            spanGaps: false,
+          },
+          {
+            label: 'Banda pesimista',
+            data: bandaInfData,
+            borderColor: 'rgba(199, 62, 62, 0.4)',
+            borderDash: [3, 3],
+            tension: 0.2,
+            pointRadius: 0,
+            fill: false,
+            spanGaps: false,
+          },
+          {
+            label: `Promedio ponderado (${formatCurrency(promedioPond)})`,
+            data: labelsAll.map(() => promedioPond),
+            borderColor: '#7d96b8',
+            borderDash: [2, 2],
+            pointRadius: 0,
+            fill: false,
+          },
+        ],
+      },
+      {
+        scales: {
+          y: { ticks: { callback: (v) => formatCurrency(v) } },
+          x: { ticks: { maxRotation: 60, autoSkip: true, maxTicksLimit: 16 } },
+        },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: (ctx) =>
+                ctx.parsed.y === null
+                  ? null
+                  : `${ctx.dataset.label}: ${formatCurrency(ctx.parsed.y)}`,
+            },
+          },
+        },
+      }
+    );
+  }
+
+  // Chart: comparativo Periodo vs MoM vs YoY vs YTD
+  renderChart(
+    'tend-chart-comparativo',
+    'bar',
+    {
+      labels: ['Periodo actual', 'Mes anterior', 'Anio pasado', 'Acumulado YTD'],
+      datasets: [{
+        label: 'Ingresos (DOP)',
+        data: [
+          Number(c.ingresos_periodo) || 0,
+          Number(c.ingresos_mismo_periodo_mes_anterior) || 0,
+          Number(c.ingresos_mismo_periodo_anio_pasado) || 0,
+          Number(c.ingresos_ytd) || 0,
+        ],
+        backgroundColor: ['#d56a8f', '#f5a25d', '#9b6ad6', '#3aa1d8'],
+        borderRadius: 6,
+      }],
+    },
+    {
+      scales: { y: { ticks: { callback: (v) => formatCurrency(v) } } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: (ctx) => formatCurrency(ctx.parsed.y) },
+        },
+      },
+    }
+  );
+};
+
+const cargarAnalisisExtendido = async (qs) => {
+  const endpoints = [
+    { url: `/api/admin/analytics/restaurante?${qs}`, render: renderRestaurante, key: 'restaurante' },
+    { url: `/api/admin/analytics/productos?${qs}`, render: renderProductosRentabilidad, key: 'productos' },
+    { url: `/api/admin/analytics/inventario?${qs}`, render: renderInventario, key: 'inventario' },
+    { url: `/api/admin/analytics/personal?${qs}`, render: renderPersonal, key: 'personal' },
+    { url: `/api/admin/analytics/clientes?${qs}`, render: renderClientes, key: 'clientes' },
+    { url: `/api/admin/analytics/fiscal?${qs}`, render: renderFiscal, key: 'fiscal' },
+    { url: `/api/admin/analytics/gastos-avanzado?${qs}`, render: renderGastosAvanzado, key: 'gastos-avanzado' },
+    { url: `/api/admin/analytics/tendencias?${qs}`, render: renderTendencias, key: 'tendencias' },
+    { url: `/api/admin/analytics/alertas-accionables?${qs}`, render: renderAlertasAccionables, key: 'alertas-accionables' },
+  ];
+  await Promise.all(
+    endpoints.map(async ({ url, render, key }) => {
+      try {
+        const respuesta = await fetchConAutorizacion(url);
+        if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status}`);
+        const data = await respuesta.json();
+        if (!data || data.ok === false) throw new Error(data?.error || 'Sin datos');
+        render(data);
+      } catch (error) {
+        console.warn(`[analisis-extension] ${key}:`, error?.message || error);
+      }
+    })
+  );
 };
 
 const csvEscape = (value) => {

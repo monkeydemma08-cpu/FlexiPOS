@@ -4644,6 +4644,174 @@ body[data-role='mesera'] .kanm-main {
   color: #c73e3e;
 }
 
+/* ============= Analisis F3: chart wraps + heatmap ============= */
+.analisis-chart-wrap {
+  background: var(--surface-soft);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.analisis-ranking-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--kanm-gray-700);
+  background: var(--surface-soft);
+  border-radius: 12px;
+}
+
+.analisis-heatmap-wrap {
+  display: grid;
+  grid-template-columns: 90px repeat(24, minmax(20px, 1fr));
+  gap: 2px;
+  margin-top: 12px;
+  font-size: 0.7rem;
+  overflow-x: auto;
+}
+
+.analisis-heatmap-axis {
+  color: var(--kanm-gray-700);
+  text-align: center;
+  padding: 2px;
+  font-weight: 600;
+}
+
+.analisis-heatmap-axis--row {
+  text-align: right;
+  padding-right: 8px;
+}
+
+.analisis-heatmap-cell {
+  height: 24px;
+  border-radius: 4px;
+  background: rgba(213, 106, 143, 0.08);
+  position: relative;
+  cursor: default;
+}
+
+.analisis-heatmap-cell[title]:hover::after {
+  content: attr(title);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.85);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  z-index: 10;
+}
+
+/* ============= F4: Inbox de alertas accionables ============= */
+.analisis-alertas-acc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.alerta-acc-item {
+  display: grid;
+  grid-template-columns: 6px 1fr auto;
+  gap: 14px;
+  background: var(--surface-soft);
+  border-radius: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.15s ease;
+}
+
+.alerta-acc-item:hover {
+  box-shadow: 0 6px 14px rgba(213, 106, 143, 0.08);
+}
+
+.alerta-acc-bar {
+  border-radius: 4px;
+  background: var(--kanm-gray-300, #cbd5dc);
+}
+
+.alerta-acc-item--critico .alerta-acc-bar { background: #c73e3e; }
+.alerta-acc-item--aviso   .alerta-acc-bar { background: #f5a25d; }
+.alerta-acc-item--info    .alerta-acc-bar { background: #3aa1d8; }
+
+.alerta-acc-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.alerta-acc-titulo {
+  font-weight: 700;
+  color: var(--kanm-gray-900);
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.alerta-acc-tag {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(213, 106, 143, 0.15);
+  color: var(--kanm-gray-700);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.alerta-acc-tag--critico { background: rgba(199, 62, 62, 0.15); color: #c73e3e; }
+.alerta-acc-tag--aviso   { background: rgba(245, 162, 93, 0.15); color: #8a5a11; }
+.alerta-acc-tag--info    { background: rgba(58, 161, 216, 0.15); color: #365b9a; }
+
+.alerta-acc-mensaje {
+  font-size: 0.85rem;
+  color: var(--kanm-gray-700);
+}
+
+.alerta-acc-accion {
+  font-size: 0.85rem;
+  color: var(--kanm-gray-900);
+  font-style: italic;
+  margin-top: 4px;
+}
+
+.alerta-acc-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.alerta-acc-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: #fff;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--kanm-pink, #d56a8f);
+  text-decoration: none;
+  border: 1px solid rgba(213, 106, 143, 0.3);
+  transition: background 0.15s ease;
+}
+
+.alerta-acc-link:hover {
+  background: rgba(213, 106, 143, 0.08);
+}
+
+.alerta-acc-empty {
+  padding: 24px;
+  text-align: center;
+  background: rgba(124, 192, 106, 0.08);
+  border-radius: 12px;
+  color: #0f8a5f;
+  font-weight: 600;
+}
+
 .admin-resumen-grid .resumen-metric {
   min-width: 160px;
 }

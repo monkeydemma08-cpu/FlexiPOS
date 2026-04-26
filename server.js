@@ -198,6 +198,9 @@ const limpiarCacheAnalitica = (negocioId) => {
   if (!negocioId) {
     analyticsCache.clear();
     analyticsAdvancedCache.clear();
+    if (typeof global.__limpiarCacheAnalisisExtension === 'function') {
+      try { global.__limpiarCacheAnalisisExtension(); } catch (_e) {}
+    }
     return;
   }
   for (const key of analyticsCache.keys()) {
@@ -209,6 +212,9 @@ const limpiarCacheAnalitica = (negocioId) => {
     if (key.startsWith(`${negocioId}:`)) {
       analyticsAdvancedCache.delete(key);
     }
+  }
+  if (typeof global.__limpiarCacheAnalisisExtension === 'function') {
+    try { global.__limpiarCacheAnalisisExtension(negocioId); } catch (_e) {}
   }
 };
 
@@ -9578,6 +9584,24 @@ app.use('/api/dgii/ecf', __dgiiEcfRouter);
 global.__emitirEcfParaPedido = __emitirEcfParaPedido;
 global.__emitirEcfDocumentoExterno = __emitirEcfDocumentoExterno;
 
+// Analisis extendido: KPIs avanzados (restaurante, productos, inventario, personal,
+// clientes, fiscal, gastos avanzados, tendencias).
+const { createAnalisisExtensionRouter } = require('./analisis-extension');
+const {
+  router: __analisisExtensionRouter,
+  limpiarCache: __limpiarCacheAnalisisExtension,
+} = createAnalisisExtensionRouter({
+  db,
+  requireUsuarioSesion,
+  tienePermisoAdmin,
+  obtenerNegocioIdUsuario,
+  normalizarRangoAnalisis,
+  obtenerRangoAnterior,
+  NEGOCIO_ID_DEFAULT,
+});
+app.use('/api/admin/analytics', __analisisExtensionRouter);
+global.__limpiarCacheAnalisisExtension = __limpiarCacheAnalisisExtension;
+
 app.post('/api/caja/cierres', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     try {
@@ -14046,6 +14070,8 @@ app.put('/api/cuentas/:id/cerrar', (req, res) => {
           return res.status(status).json({ ok: false, error: err.message || 'No se pudo cerrar la cuenta.' });
         }
 
+        limpiarCacheAnalitica(negocioId);
+
         (async () => {
           const mesasCuenta = Array.from(
             new Set(
@@ -14113,6 +14139,8 @@ app.put('/api/cuentas/:id/cobro-adelantado', (req, res) => {
             .status(status)
             .json({ ok: false, error: err.message || 'No se pudo registrar el cobro adelantado.' });
         }
+
+        limpiarCacheAnalitica(negocioId);
 
         res.json({
           ok: true,
@@ -22191,12 +22219,18 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
         const precioUnitarioEmpresa = Number.isFinite(item.precio_unitario)
           ? Number(item.precio_unitario)
           : Number(productoEmpresa.precio_sugerido || productoSucursal?.precio || 0);
+        const costoSnapshotEmpresa = Number(
+          productoEmpresa.costo_promedio_actual || productoEmpresa.costo_base || 0
+        );
         itemsProcesados.push({
           producto_id: Number(productoSucursal.id),
           empresa_producto_id: Number(productoEmpresa.id),
           nombre: productoSucursal.nombre || nombreEmpresa,
           cantidad: Number(item.cantidad),
           precio_unitario: Number(precioUnitarioEmpresa) || 0,
+          costo_unitario_snapshot: Number.isFinite(costoSnapshotEmpresa) && costoSnapshotEmpresa > 0
+            ? costoSnapshotEmpresa
+            : 0,
         });
       }
 
@@ -22268,8 +22302,8 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
             const totalLinea = Number((item.cantidad * item.precio_unitario).toFixed(2));
             await db.run(
               `INSERT INTO clientes_deudas_detalle
-                (deuda_id, producto_id, nombre_producto, cantidad, precio_unitario, total_linea, negocio_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                (deuda_id, producto_id, nombre_producto, cantidad, precio_unitario, total_linea, negocio_id, costo_unitario_snapshot)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 deudaId,
                 item.producto_id,
@@ -22278,6 +22312,7 @@ app.post('/api/empresa/clientes/:id/deudas', (req, res) => {
                 item.precio_unitario,
                 totalLinea,
                 negocioId,
+                Number(item.costo_unitario_snapshot) || 0,
               ]
             );
           }
@@ -22492,6 +22527,7 @@ app.post('/api/empresa/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
         [deudaId, clienteId, deuda.negocio_id, fecha, monto, metodo, notas]
       );
       await db.run('UPDATE clientes_deudas SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [deudaId]);
+      limpiarCacheAnalitica(deuda.negocio_id);
       res.status(201).json({ ok: true });
     } catch (error) {
       console.error('Error al registrar abono de cliente:', error?.message || error);
@@ -23050,7 +23086,8 @@ const prepararItemsDeuda = async (
   const placeholders = ids.map(() => '?').join(', ');
   const productos = await db.all(
     `SELECT id, nombre, precio, precios, stock, stock_indefinido, tipo_producto, insumo_vendible,
-            contenido_por_unidad, unidad_base
+            contenido_por_unidad, unidad_base,
+            costo_unitario_real, costo_promedio_actual, costo_base_sin_itbis, ultimo_costo_sin_itbis
        FROM productos
       WHERE negocio_id = ? AND id IN (${placeholders})`,
     [negocioId, ...ids]
@@ -23118,6 +23155,14 @@ const prepararItemsDeuda = async (
       precioUnitario = Number(precioSolicitado.toFixed(2));
     }
 
+    const costoSnapshot = Number(
+      producto.costo_unitario_real ||
+        producto.costo_promedio_actual ||
+        producto.costo_base_sin_itbis ||
+        producto.ultimo_costo_sin_itbis ||
+        0
+    );
+
     itemsProcesados.push({
       producto_id: productoId,
       nombre: producto.nombre,
@@ -23126,6 +23171,7 @@ const prepararItemsDeuda = async (
       stock_indefinido: stockIndefinido ? 1 : 0,
       tipo_producto: tipoProducto,
       insumo_vendible: insumoVendible ? 1 : 0,
+      costo_unitario_snapshot: Number.isFinite(costoSnapshot) && costoSnapshot > 0 ? costoSnapshot : 0,
     });
   }
 
@@ -24004,8 +24050,8 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
           );
           await db.run(
             `INSERT INTO clientes_deudas_detalle
-              (deuda_id, producto_id, nombre_producto, cantidad, precio_unitario, total_linea, negocio_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              (deuda_id, producto_id, nombre_producto, cantidad, precio_unitario, total_linea, negocio_id, costo_unitario_snapshot)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               deudaId,
               item.producto_id,
@@ -24014,6 +24060,7 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
               item.precio_unitario,
               totalLinea,
               negocioId,
+              Number(item.costo_unitario_snapshot) || 0,
             ]
           );
 
@@ -24591,6 +24638,8 @@ app.post('/api/clientes/:id/deudas/:deudaId/abonos', (req, res) => {
         'UPDATE clientes_deudas SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND negocio_id = ?',
         [deudaId, negocioId]
       );
+
+      limpiarCacheAnalitica(negocioId);
 
       res.status(201).json({
         ok: true,
@@ -27462,16 +27511,23 @@ app.get('/api/admin/analytics/overview', (req, res) => {
     const paramsBase = [negocioId, rango.desde, rango.hasta];
 
     try {
+      // FIX BUG-4: separar propina del ingreso del negocio (la propina es para empleados)
+      // FIX BUG-3: excluir pedidos que tengan deuda asociada para evitar doble conteo
       const ventasPedidosResumen = await db.get(
         `
           SELECT COUNT(DISTINCT COALESCE(cuenta_id, id)) AS total_ventas,
-                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
+                 SUM(subtotal + impuesto - descuento_monto) AS total,
+                 SUM(propina_monto) AS propinas
           FROM pedidos
           WHERE estado = 'pagado'
             AND negocio_id = ?
             AND ${fechaBase} BETWEEN ? AND ?
+            AND id NOT IN (
+              SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
+              WHERE negocio_id = ? AND pedido_id IS NOT NULL
+            )
         `,
-        paramsBase
+        [negocioId, rango.desde, rango.hasta, negocioId]
       );
       const ventasDeudasResumen = await db.get(
         `
@@ -27483,21 +27539,28 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         `,
         paramsBase
       );
+      // FIX BUG-4: ventas_sin_itbis ya no incluye propina
       const metricasPedidosResumen = await db.get(
         `
           SELECT SUM(impuesto) AS itbis_recaudado,
-                 SUM(subtotal - descuento_monto + propina_monto) AS total_sin_itbis
+                 SUM(subtotal - descuento_monto) AS total_sin_itbis
           FROM pedidos
           WHERE estado = 'pagado'
             AND negocio_id = ?
             AND ${fechaBase} BETWEEN ? AND ?
+            AND id NOT IN (
+              SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
+              WHERE negocio_id = ? AND pedido_id IS NOT NULL
+            )
         `,
-        paramsBase
+        [negocioId, rango.desde, rango.hasta, negocioId]
       );
+      // FIX BUG-11: prefiere itbis_total persistido si existe; si no, infiere
       const metricasDeudasResumen = await db.get(
         `
           SELECT SUM(
                    CASE
+                     WHEN d.itbis_total IS NOT NULL THEN d.itbis_total
                      WHEN COALESCE(det.subtotal_lineas, 0) > 0
                       AND d.monto_total >= COALESCE(det.subtotal_lineas, 0)
                      THEN d.monto_total - COALESCE(det.subtotal_lineas, 0)
@@ -27506,6 +27569,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
                  ) AS itbis_recaudado,
                  SUM(
                    CASE
+                     WHEN d.subtotal_total IS NOT NULL THEN d.subtotal_total
                      WHEN COALESCE(det.subtotal_lineas, 0) > 0
                       AND d.monto_total >= COALESCE(det.subtotal_lineas, 0)
                      THEN COALESCE(det.subtotal_lineas, 0)
@@ -27525,8 +27589,11 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         [negocioId, negocioId, rango.desde, rango.hasta]
       );
 
-      const ingresosTotal =
-        (Number(ventasPedidosResumen?.total) || 0) + (Number(ventasDeudasResumen?.total) || 0);
+      // FIX BUG-4: ingresosTotal NO incluye propinas (no son ingreso del negocio)
+      const propinasRecaudadas = Number((Number(ventasPedidosResumen?.propinas) || 0).toFixed(2));
+      const ventasContado = Number(ventasPedidosResumen?.total) || 0;
+      const ventasCredito = Number(ventasDeudasResumen?.total) || 0;
+      const ingresosTotal = ventasContado + ventasCredito;
       const itbisRecaudado = Number(
         (
           (Number(metricasPedidosResumen?.itbis_recaudado) || 0) +
@@ -27543,6 +27610,48 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         (Number(ventasPedidosResumen?.total_ventas) || 0) +
         (Number(ventasDeudasResumen?.total_ventas) || 0);
       const ticketPromedio = ventasCount > 0 ? Number((ingresosTotal / ventasCount).toFixed(2)) : 0;
+
+      // FIX BUG-5 + BUG-6: cobros reales (cruzando clientes_abonos)
+      const abonosResumen = await db.get(
+        `
+          SELECT SUM(monto) AS total,
+                 SUM(CASE WHEN UPPER(COALESCE(metodo_pago,'EFECTIVO')) = 'EFECTIVO' THEN monto ELSE 0 END) AS efectivo,
+                 SUM(CASE WHEN UPPER(COALESCE(metodo_pago,'')) IN ('TARJETA','TARJETA_CREDITO','TARJETA_DEBITO','POS') THEN monto ELSE 0 END) AS tarjeta,
+                 SUM(CASE WHEN UPPER(COALESCE(metodo_pago,'')) IN ('TRANSFERENCIA','TRANSFER','BANCO','DEPOSITO') THEN monto ELSE 0 END) AS transferencia
+          FROM clientes_abonos
+          WHERE negocio_id = ?
+            AND DATE(fecha) BETWEEN ? AND ?
+        `,
+        paramsBase
+      );
+      const abonosTotalPeriodo = Number(abonosResumen?.total) || 0;
+      const abonosEfectivo = Number(abonosResumen?.efectivo) || 0;
+      const abonosTarjeta = Number(abonosResumen?.tarjeta) || 0;
+      const abonosTransferencia = Number(abonosResumen?.transferencia) || 0;
+
+      // Cuentas por cobrar (saldo pendiente actual)
+      const cxcResumen = await db.get(
+        `
+          SELECT SUM(d.monto_total - COALESCE(ab.total_abonos, 0)) AS saldo_pendiente,
+                 COUNT(DISTINCT d.cliente_id) AS clientes_con_saldo,
+                 SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), d.fecha) > 30
+                          THEN d.monto_total - COALESCE(ab.total_abonos, 0) ELSE 0 END) AS saldo_30_60,
+                 SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), d.fecha) > 60
+                          THEN d.monto_total - COALESCE(ab.total_abonos, 0) ELSE 0 END) AS saldo_mayor_60,
+                 SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), d.fecha) > 90
+                          THEN d.monto_total - COALESCE(ab.total_abonos, 0) ELSE 0 END) AS saldo_mayor_90
+          FROM clientes_deudas d
+          LEFT JOIN (
+            SELECT deuda_id, SUM(monto) AS total_abonos
+            FROM clientes_abonos
+            WHERE negocio_id = ?
+            GROUP BY deuda_id
+          ) ab ON ab.deuda_id = d.id
+          WHERE d.negocio_id = ?
+            AND (d.monto_total - COALESCE(ab.total_abonos, 0)) > 0.01
+        `,
+        [negocioId, negocioId]
+      );
       const ventasSeriePedidos = await db.all(
         `
           SELECT ${fechaBase} AS fecha,
@@ -27697,6 +27806,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         `,
         [negocioId, negocioId, negocioId, negocioId, rango.desde, rango.hasta]
       );
+      // FIX BUG-10: solo productos activos en el catalogo (no incluir descontinuados como "sin ventas")
       const catalogoProductos = await db.all(
         `
           SELECT p.id,
@@ -27705,6 +27815,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM productos p
           LEFT JOIN categorias c ON c.id = p.categoria_id AND c.negocio_id = p.negocio_id
           WHERE p.negocio_id = ?
+            AND COALESCE(p.activo, 1) = 1
         `,
         [negocioId]
       );
@@ -27941,6 +28052,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         `
           SELECT SUM(
                    COALESCE(dd.cantidad, 0) * COALESCE(
+                     NULLIF(dd.costo_unitario_snapshot, 0),
                      NULLIF(p.costo_unitario_real, 0),
                      NULLIF(p.costo_promedio_actual, 0),
                      NULLIF(p.costo_base_sin_itbis, 0),
@@ -27975,23 +28087,34 @@ app.get('/api/admin/analytics/overview', (req, res) => {
       );
       const costosConfigurados = Number(costosConfiguradosRow?.total) > 0;
 
-      const gananciaNeta = Number((ingresosTotal - gastosTotal).toFixed(2));
-      const margenNeto = ingresosTotal > 0 ? Number((gananciaNeta / ingresosTotal).toFixed(4)) : 0;
+      // FIX BUG-1 + BUG-2: ganancia neta = ventas - COGS - gastos OPERATIVOS
+      // (NUNCA restar compras de inventario porque ya estan en COGS al venderse)
       const utilidadBruta = Number((ingresosTotal - cogsTotal).toFixed(2));
       const utilidadReal = Number((utilidadBruta - gastosOperativosTotal).toFixed(2));
+      // gananciaNeta ahora coincide con utilidadReal (KPI principal correcto)
+      const gananciaNeta = utilidadReal;
+      const margenNeto = ingresosTotal > 0 ? Number((gananciaNeta / ingresosTotal).toFixed(4)) : 0;
+      const margenBruto = ingresosTotal > 0 ? Number((utilidadBruta / ingresosTotal).toFixed(4)) : 0;
+      // Food cost ratio (KPI estandar de restaurantes)
+      const foodCostRatio = ingresosTotal > 0 ? Number((cogsTotal / ingresosTotal).toFixed(4)) : 0;
 
       const rangoAnterior = obtenerRangoAnterior(rango.desde, rango.dias);
       const paramsAnterior = [negocioId, rangoAnterior.desde, rangoAnterior.hasta];
+      // FIX BUG-4: comparativo sin propinas
       const ventasAnteriorPedidos = await db.get(
         `
           SELECT COUNT(DISTINCT COALESCE(cuenta_id, id)) AS total_ventas,
-                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
+                 SUM(subtotal + impuesto - descuento_monto) AS total
           FROM pedidos
           WHERE estado = 'pagado'
             AND negocio_id = ?
             AND ${fechaBase} BETWEEN ? AND ?
+            AND id NOT IN (
+              SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
+              WHERE negocio_id = ? AND pedido_id IS NOT NULL
+            )
         `,
-        paramsAnterior
+        [...paramsAnterior, negocioId]
       );
       const ventasAnteriorDeudas = await db.get(
         `
@@ -28101,6 +28224,27 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         }
       }
 
+      // Nuevas alertas accionables (Fase 1.5)
+      const cxcMayor60 = Number(cxcResumen?.saldo_mayor_60) || 0;
+      if (cxcMayor60 > 0) {
+        alertas.push({
+          nivel: 'warning',
+          mensaje: `Tienes RD$${cxcMayor60.toFixed(2)} en cuentas por cobrar con mas de 60 dias de antiguedad. Revisa cobranza.`,
+        });
+      }
+      if (foodCostRatio > 0.35 && cogsTotal > 0) {
+        alertas.push({
+          nivel: 'warning',
+          mensaje: `Food cost en ${(foodCostRatio * 100).toFixed(1)}% (objetivo 28-32%). Revisa precios o costos de insumos.`,
+        });
+      }
+      if (utilidadBruta < 0) {
+        alertas.push({
+          nivel: 'critical',
+          mensaje: 'Tu utilidad bruta es NEGATIVA: estas vendiendo por debajo del costo. Revisa precios y costos urgentemente.',
+        });
+      }
+
       const totalProductosConVentas = (ventasProductosLista || []).filter((item) => {
         const cantidad = Number(item?.cantidad) || 0;
         const ingresos = Number(item?.ingresos) || 0;
@@ -28138,6 +28282,8 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         rango,
         ingresos: {
           total: ingresosTotal,
+          contado: Number(ventasContado.toFixed(2)),
+          credito: Number(ventasCredito.toFixed(2)),
           count: ventasCount,
           ticket_promedio: ticketPromedio,
           serie_diaria: (ventasSerie || []).map((row) => ({
@@ -28147,6 +28293,34 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           })),
           por_dia_semana: ventasDiaSemanaFormateadas,
           por_hora: ventasHoraFormateadas,
+        },
+        propinas: {
+          recaudadas: propinasRecaudadas,
+          nota: 'Las propinas no se incluyen en ventas porque se entregan al personal.',
+        },
+        cobros: {
+          // Cobros directos en pedidos (efectivo/tarjeta/transferencia inmediato)
+          total_directos:
+            (Number(metodosPago?.efectivo) || 0) +
+            (Number(metodosPago?.tarjeta) || 0) +
+            (Number(metodosPago?.transferencia) || 0),
+          // Abonos a deudas (cobranza de credito)
+          total_abonos: Number(abonosTotalPeriodo.toFixed(2)),
+          total: Number(
+            ((Number(metodosPago?.efectivo) || 0) +
+              (Number(metodosPago?.tarjeta) || 0) +
+              (Number(metodosPago?.transferencia) || 0) +
+              abonosTotalPeriodo).toFixed(2)
+          ),
+        },
+        cuentas_por_cobrar: {
+          saldo_pendiente: Number((Number(cxcResumen?.saldo_pendiente) || 0).toFixed(2)),
+          clientes_con_saldo: Number(cxcResumen?.clientes_con_saldo) || 0,
+          aging: {
+            vencido_30_60: Number((Number(cxcResumen?.saldo_30_60) || 0).toFixed(2)),
+            vencido_mayor_60: Number((Number(cxcResumen?.saldo_mayor_60) || 0).toFixed(2)),
+            vencido_mayor_90: Number((Number(cxcResumen?.saldo_mayor_90) || 0).toFixed(2)),
+          },
         },
         gastos: {
           total: gastosTotal,
@@ -28165,11 +28339,14 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           })),
         },
         ganancias: {
-          neta: gananciaNeta,
+          neta: gananciaNeta,                // FIX: ahora = ventas - COGS - operativos (correcto)
           margen: margenNeto,
+          margen_bruto: margenBruto,
           cogs_total: cogsTotal,
+          food_cost_ratio: foodCostRatio,    // KPI estandar de restaurante (objetivo 28-32%)
           utilidad_bruta: utilidadBruta,
           utilidad_real: utilidadReal,
+          formula: 'Ganancia neta = Ventas - COGS - Gastos operativos (excluye compras de inventario para evitar doble conteo)',
         },
         costos_configurados: costosConfigurados,
         rankings: {
@@ -28186,10 +28363,24 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           })),
         },
         comparacion,
+        // FIX BUG-5: metodos_pago combina cobros directos + abonos a deudas
         metodos_pago: {
-          efectivo: Number(metodosPago?.efectivo) || 0,
-          tarjeta: Number(metodosPago?.tarjeta) || 0,
-          transferencia: Number(metodosPago?.transferencia) || 0,
+          efectivo: Number(((Number(metodosPago?.efectivo) || 0) + abonosEfectivo).toFixed(2)),
+          tarjeta: Number(((Number(metodosPago?.tarjeta) || 0) + abonosTarjeta).toFixed(2)),
+          transferencia: Number(((Number(metodosPago?.transferencia) || 0) + abonosTransferencia).toFixed(2)),
+          // Desglose para distinguir cobros directos vs abonos a credito
+          desglose: {
+            directos: {
+              efectivo: Number(metodosPago?.efectivo) || 0,
+              tarjeta: Number(metodosPago?.tarjeta) || 0,
+              transferencia: Number(metodosPago?.transferencia) || 0,
+            },
+            abonos: {
+              efectivo: abonosEfectivo,
+              tarjeta: abonosTarjeta,
+              transferencia: abonosTransferencia,
+            },
+          },
         },
         itbis_recaudado: itbisRecaudado,
         ventas_sin_itbis: ventasSinItbis,
@@ -28279,6 +28470,7 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
         `
           SELECT SUM(
                    COALESCE(dd.cantidad, 0) * COALESCE(
+                     NULLIF(dd.costo_unitario_snapshot, 0),
                      NULLIF(p.costo_unitario_real, 0),
                      NULLIF(p.costo_promedio_actual, 0),
                      NULLIF(p.costo_base_sin_itbis, 0),
@@ -28402,15 +28594,16 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
 
       const inventarioStockTotal = Number(inventarioStockResumen?.total) || 0;
       const inventarioStockCount = Number(inventarioStockResumen?.cantidad) || 0;
-      const inventarioFinalEstimado = Number(
-        (inventarioStockCount > 0
-          ? inventarioStockTotal
-          : capitalInicial.inventario_inicial + gastosInventarioTotal - cogsTotal).toFixed(2)
-      );
+      // FIX BUG-7: clampea a no-negativo y agrega advertencia si el calculo da inconsistente
+      const inventarioFinalCrudo = inventarioStockCount > 0
+        ? inventarioStockTotal
+        : capitalInicial.inventario_inicial + gastosInventarioTotal - cogsTotal;
+      const inventarioFinalEstimado = Number(Math.max(0, inventarioFinalCrudo).toFixed(2));
+      const inventarioFinalNegativo = inventarioFinalCrudo < 0;
       const inventarioInicialEstimado =
         inventarioStockCount > 0
-          ? Number((inventarioFinalEstimado - gastosInventarioTotal + cogsTotal).toFixed(2))
-          : capitalInicial.inventario_inicial;
+          ? Number(Math.max(0, inventarioFinalEstimado - gastosInventarioTotal + cogsTotal).toFixed(2))
+          : Math.max(0, Number(capitalInicial.inventario_inicial) || 0);
 
       const entradasCaja =
         (Number(metodosPago?.efectivo) || 0) +

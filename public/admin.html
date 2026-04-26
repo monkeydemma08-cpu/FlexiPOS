@@ -2919,6 +2919,406 @@
         </header>
         <div id="analisis-alertas" class="analisis-alertas"></div>
       </section>
+
+      <!-- ============================================================== -->
+      <!-- F4: Inbox de alertas accionables (priorizadas)                  -->
+      <!-- ============================================================== -->
+      <section class="kanm-card admin-card" id="analisis-alertas-acc-card">
+        <header class="kanm-card-header">
+          <h3>Inbox de alertas accionables</h3>
+          <p class="kanm-subtitle">Senales priorizadas con accion sugerida.</p>
+        </header>
+        <div class="admin-resumen-grid analisis-kpi-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">Criticas</span>
+            <span class="resumen-value" id="alertas-acc-criticas" style="color:#c73e3e">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Avisos</span>
+            <span class="resumen-value" id="alertas-acc-avisos" style="color:#8a5a11">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Informativas</span>
+            <span class="resumen-value" id="alertas-acc-informativas" style="color:#365b9a">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Total</span>
+            <span class="resumen-value" id="alertas-acc-total">0</span>
+          </div>
+        </div>
+        <div id="alertas-acc-list" class="analisis-alertas-acc-list"></div>
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- KPIs avanzados de restaurante (F2 — analisis-extension)         -->
+      <!-- ============================================================== -->
+      <section class="kanm-card admin-card" id="analisis-restaurante-card">
+        <header class="kanm-card-header">
+          <h3>KPIs de restaurante</h3>
+          <p class="kanm-subtitle">Food Cost, Labor Cost, Prime Cost e items por ticket.</p>
+        </header>
+        <div class="admin-resumen-grid analisis-kpi-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">Food Cost %</span>
+            <span class="resumen-value" id="rest-kpi-food-cost">0%</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Labor Cost %</span>
+            <span class="resumen-value" id="rest-kpi-labor-cost">0%</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Prime Cost %</span>
+            <span class="resumen-value" id="rest-kpi-prime-cost">0%</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Items por ticket</span>
+            <span class="resumen-value" id="rest-kpi-items-ticket">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Margen contribucion</span>
+            <span class="resumen-value" id="rest-kpi-margen-contribucion">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Rotacion mesas</span>
+            <span class="resumen-value" id="rest-kpi-rotacion-mesas">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Venta promedio diaria</span>
+            <span class="resumen-value" id="rest-kpi-venta-diaria">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Propinas recaudadas</span>
+            <span class="resumen-value" id="rest-kpi-propinas">DOP&nbsp;0.00</span>
+          </div>
+        </div>
+        <div id="rest-diagnosticos" class="analisis-alertas"></div>
+        <h4>Composicion del Prime Cost</h4>
+        <div class="analisis-chart-wrap" style="position:relative;height:260px;margin-top:12px;">
+          <canvas id="rest-chart-breakdown"></canvas>
+        </div>
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- Rentabilidad por producto                                       -->
+      <!-- ============================================================== -->
+      <section class="kanm-card admin-card" id="analisis-productos-rent-card">
+        <header class="kanm-card-header">
+          <h3>Rentabilidad por producto</h3>
+          <p class="kanm-subtitle">Margenes calculados con costo persistido al momento de venta.</p>
+        </header>
+        <div class="analisis-rankings-grid">
+          <div>
+            <h4>Margen negativo (urgente)</h4>
+            <div class="analisis-ranking-list" id="prod-margen-negativo"></div>
+          </div>
+          <div>
+            <h4>Margen bajo (&lt; 20%)</h4>
+            <div class="analisis-ranking-list" id="prod-margen-bajo"></div>
+          </div>
+          <div>
+            <h4>Top 10 por margen</h4>
+            <div class="analisis-ranking-list" id="prod-top-margen"></div>
+          </div>
+        </div>
+        <h4>Top productos por margen absoluto</h4>
+        <div class="analisis-chart-wrap" style="position:relative;height:300px;margin-top:12px;">
+          <canvas id="prod-chart-margen"></canvas>
+        </div>
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- Inventario avanzado                                             -->
+      <!-- ============================================================== -->
+      <section class="kanm-card admin-card" id="analisis-inventario-card">
+        <header class="kanm-card-header">
+          <h3>Inventario y rotacion</h3>
+          <p class="kanm-subtitle">Valor, dias de cobertura, mermas y stock bajo.</p>
+        </header>
+        <div class="admin-resumen-grid analisis-kpi-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">Valor inventario</span>
+            <span class="resumen-value" id="inv-kpi-valor">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Rotacion anual</span>
+            <span class="resumen-value" id="inv-kpi-rotacion">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Dias inventario</span>
+            <span class="resumen-value" id="inv-kpi-dias">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Compras periodo</span>
+            <span class="resumen-value" id="inv-kpi-compras">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Mermas estimadas</span>
+            <span class="resumen-value" id="inv-kpi-mermas">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Productos stock bajo</span>
+            <span class="resumen-value" id="inv-kpi-stock-bajo-count">0</span>
+          </div>
+        </div>
+        <div class="analisis-rankings-grid">
+          <div>
+            <h4>Stock bajo (reabastecer)</h4>
+            <div class="analisis-ranking-list" id="inv-stock-bajo-list"></div>
+          </div>
+          <div>
+            <h4>Sin movimiento en periodo</h4>
+            <div class="analisis-ranking-list" id="inv-sin-movimiento-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- Personal y productividad                                        -->
+      <!-- ============================================================== -->
+      <section class="kanm-card admin-card" id="analisis-personal-card">
+        <header class="kanm-card-header">
+          <h3>Personal y productividad</h3>
+          <p class="kanm-subtitle">Ventas por usuario y costo estimado de personal.</p>
+        </header>
+        <div class="admin-resumen-grid analisis-kpi-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">Total ventas</span>
+            <span class="resumen-value" id="pers-kpi-ventas">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Costo personal estimado</span>
+            <span class="resumen-value" id="pers-kpi-costo">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Ratio personal/ventas</span>
+            <span class="resumen-value" id="pers-kpi-ratio">0%</span>
+          </div>
+        </div>
+        <div class="analisis-rankings-grid">
+          <div>
+            <h4>Ventas por usuario</h4>
+            <div class="analisis-ranking-list" id="pers-ventas-usuario"></div>
+          </div>
+          <div>
+            <h4>Empleados (costo estimado)</h4>
+            <div class="analisis-ranking-list" id="pers-empleados"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- Clientes (top, recurrencia, aging CxC)                          -->
+      <!-- ============================================================== -->
+      <section class="kanm-card admin-card" id="analisis-clientes-card">
+        <header class="kanm-card-header">
+          <h3>Clientes</h3>
+          <p class="kanm-subtitle">Top, recurrencia y antiguedad de cuentas por cobrar.</p>
+        </header>
+        <div class="admin-resumen-grid analisis-kpi-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">Clientes unicos</span>
+            <span class="resumen-value" id="cli-kpi-unicos">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Recurrentes</span>
+            <span class="resumen-value" id="cli-kpi-recurrentes">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Tasa recurrencia</span>
+            <span class="resumen-value" id="cli-kpi-tasa-recurrencia">0%</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">CxC pendientes</span>
+            <span class="resumen-value" id="cli-kpi-cxc-total">DOP&nbsp;0.00</span>
+          </div>
+        </div>
+        <div class="admin-resumen-grid analisis-kpi-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">0-30 dias</span>
+            <span class="resumen-value" id="cli-aging-0-30">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">31-60 dias</span>
+            <span class="resumen-value" id="cli-aging-31-60">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">61-90 dias</span>
+            <span class="resumen-value" id="cli-aging-61-90">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">+90 dias (riesgo)</span>
+            <span class="resumen-value" id="cli-aging-90-plus">DOP&nbsp;0.00</span>
+          </div>
+        </div>
+        <h4>Top 20 clientes</h4>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>Facturas</th>
+                <th>Comprado</th>
+                <th>Abonado</th>
+                <th>Saldo</th>
+                <th>Ticket prom.</th>
+              </tr>
+            </thead>
+            <tbody id="cli-top-clientes-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- Fiscal: ITBIS, tipos comprobante, eCF                           -->
+      <!-- ============================================================== -->
+      <section class="kanm-card admin-card" id="analisis-fiscal-card">
+        <header class="kanm-card-header">
+          <h3>Fiscal y tributario</h3>
+          <p class="kanm-subtitle">ITBIS recaudado/pagado, tipos de comprobante y estado e-CF.</p>
+        </header>
+        <div class="admin-resumen-grid analisis-kpi-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">ITBIS recaudado</span>
+            <span class="resumen-value" id="fis-kpi-itbis-recaudado">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">ITBIS pagado (gastos)</span>
+            <span class="resumen-value" id="fis-kpi-itbis-pagado">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">ITBIS neto a pagar</span>
+            <span class="resumen-value" id="fis-kpi-itbis-neto">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Total facturado</span>
+            <span class="resumen-value" id="fis-kpi-total-facturado">DOP&nbsp;0.00</span>
+          </div>
+        </div>
+        <div class="analisis-rankings-grid">
+          <div>
+            <h4>Distribucion por tipo comprobante</h4>
+            <div class="analisis-ranking-list" id="fis-tipos-comprobante"></div>
+            <div class="analisis-chart-wrap" style="position:relative;height:240px;margin-top:8px;">
+              <canvas id="fis-chart-comprobantes"></canvas>
+            </div>
+          </div>
+          <div>
+            <h4>Estado e-CF</h4>
+            <div class="analisis-ranking-list" id="fis-ecf-estado"></div>
+            <div class="analisis-chart-wrap" style="position:relative;height:240px;margin-top:8px;">
+              <canvas id="fis-chart-ecf"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- Gastos avanzado                                                 -->
+      <!-- ============================================================== -->
+      <section class="kanm-card admin-card" id="analisis-gastos-card">
+        <header class="kanm-card-header">
+          <h3>Gastos avanzado</h3>
+          <p class="kanm-subtitle">Proveedores, presupuestos y posibles duplicados.</p>
+        </header>
+        <div class="analisis-rankings-grid">
+          <div>
+            <h4>Top proveedores</h4>
+            <div class="analisis-ranking-list" id="gas-top-proveedores"></div>
+          </div>
+          <div>
+            <h4>Categorias del periodo</h4>
+            <div class="analisis-ranking-list" id="gas-top-categorias"></div>
+          </div>
+          <div>
+            <h4>Presupuestos del mes</h4>
+            <div class="analisis-ranking-list" id="gas-presupuestos"></div>
+          </div>
+        </div>
+        <h4>Posibles duplicados (mismo monto y proveedor en 7 dias)</h4>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Monto</th>
+                <th>Proveedor</th>
+                <th>Descripcion</th>
+                <th>Diferencia</th>
+              </tr>
+            </thead>
+            <tbody id="gas-duplicados-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- Tendencias: MoM, YoY, YTD, forecast, heatmap                    -->
+      <!-- ============================================================== -->
+      <section class="kanm-card admin-card" id="analisis-tendencias-card">
+        <header class="kanm-card-header">
+          <h3>Tendencias y proyecciones</h3>
+          <p class="kanm-subtitle">Comparativos MoM, YoY, YTD y forecast del periodo.</p>
+        </header>
+        <div class="admin-resumen-grid analisis-kpi-grid">
+          <div class="resumen-metric">
+            <span class="resumen-label">YTD (anio en curso)</span>
+            <span class="resumen-value" id="tend-kpi-ytd">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">YoY (mismo periodo)</span>
+            <span class="resumen-value" id="tend-kpi-yoy">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Variacion YoY</span>
+            <span class="resumen-value" id="tend-kpi-yoy-var">0%</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">MoM (mes anterior)</span>
+            <span class="resumen-value" id="tend-kpi-mom">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Variacion MoM</span>
+            <span class="resumen-value" id="tend-kpi-mom-var">0%</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Promedio diario</span>
+            <span class="resumen-value" id="tend-kpi-promedio">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Proyeccion 30 dias</span>
+            <span class="resumen-value" id="tend-kpi-proy-30">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Proyeccion anual</span>
+            <span class="resumen-value" id="tend-kpi-proy-anio">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Banda optimista (30d)</span>
+            <span class="resumen-value" id="tend-kpi-banda-sup" style="color:#0f8a5f">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">Banda pesimista (30d)</span>
+            <span class="resumen-value" id="tend-kpi-banda-inf" style="color:#c73e3e">DOP&nbsp;0.00</span>
+          </div>
+        </div>
+        <div id="tend-forecast-aviso" class="kanm-message" data-type="warning" hidden></div>
+
+        <h4>Serie diaria + proyeccion</h4>
+        <div class="analisis-chart-wrap" style="position:relative;height:320px;margin-top:12px;">
+          <canvas id="tend-chart-serie"></canvas>
+        </div>
+
+        <h4>Comparativo MoM / YoY</h4>
+        <div class="analisis-chart-wrap" style="position:relative;height:240px;margin-top:12px;">
+          <canvas id="tend-chart-comparativo"></canvas>
+        </div>
+
+        <h4>Heatmap dia/hora (top 10 franjas)</h4>
+        <div class="analisis-ranking-list" id="tend-heatmap-list"></div>
+
+        <h4>Heatmap semanal completo</h4>
+        <div class="analisis-heatmap-wrap" id="tend-heatmap-grid"></div>
+      </section>
     </section>
 
     <!-- Cuadres -->
@@ -4118,6 +4518,8 @@
 
   <script src="/js/password-toggle.js"></script>
   <script src="/js/auth.js"></script>
+  <!-- Chart.js para graficos analisis-extension (F3) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script>
     // ===== Admin Shell: sidebar toggle + topbar section title =====
     (function () {

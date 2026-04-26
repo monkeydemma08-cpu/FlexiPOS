@@ -2226,6 +2226,9 @@ async function runMigrations() {
   await ensureEcfDocumentosExternosColumns();
   await ensureTableSecuenciasCuenta();
   await ensurePedidosNumeroCuentaNegocio();
+  await ensureAnalisisExtensionColumns();
+  await ensureTableAnalisisAlertas();
+  await ensureTablePresupuestosCategoriaGasto();
 }
 
 async function ensureTableSecuenciasCuenta() {
@@ -2345,6 +2348,111 @@ async function ensurePedidosNumeroCuentaNegocio() {
       }
     }
   }
+}
+
+// =====================================================================
+// Mejoras del modulo de Analisis del negocio (Fase 1 + 2)
+// =====================================================================
+
+async function ensureAnalisisExtensionColumns() {
+  // pedidos: usuario que cerro la venta (para ranking de cajeros/meseros)
+  await ensureColumn('pedidos', 'usuario_id_cierre INT NULL');
+  await ensureIndexByName(
+    'pedidos',
+    'idx_pedidos_negocio_usuario_cierre',
+    '(negocio_id, usuario_id_cierre)'
+  );
+
+  // clientes_deudas: vinculo opcional al pedido y desglose ITBIS persistido
+  await ensureColumn('clientes_deudas', 'pedido_id INT NULL');
+  await ensureColumn('clientes_deudas', 'itbis_total DECIMAL(12,2) NULL');
+  await ensureColumn('clientes_deudas', 'subtotal_total DECIMAL(12,2) NULL');
+  await ensureIndexByName(
+    'clientes_deudas',
+    'idx_clientes_deudas_pedido',
+    '(pedido_id)'
+  );
+
+  // clientes_deudas_detalle: snapshot de costo para COGS historico estable
+  await ensureColumn(
+    'clientes_deudas_detalle',
+    'costo_unitario_snapshot DECIMAL(12,2) NULL'
+  );
+
+  // clientes_abonos: usuario que registro el abono (auditoria)
+  await ensureColumn('clientes_abonos', 'usuario_id INT NULL');
+
+  // productos: stock minimo y maximo para alertas inteligentes
+  await ensureColumn('productos', 'stock_minimo DECIMAL(10,3) NULL');
+  await ensureColumn('productos', 'stock_maximo DECIMAL(10,3) NULL');
+
+  // gastos: flag de gasto fijo (vs variable) y presupuesto opcional referencia
+  await ensureColumn('gastos', 'es_fijo TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('gastos', 'presupuesto_id INT NULL');
+  await ensureIndexByName(
+    'gastos',
+    'idx_gastos_negocio_es_fijo',
+    '(negocio_id, es_fijo)'
+  );
+
+  // Indices de performance para analytics
+  await ensureIndexByName(
+    'pedidos',
+    'idx_pedidos_neg_estado_fecha',
+    '(negocio_id, estado, fecha_factura)'
+  );
+  await ensureIndexByName(
+    'gastos',
+    'idx_gastos_negocio_fecha_tipo',
+    '(negocio_id, fecha, tipo_gasto)'
+  );
+  await ensureIndexByName(
+    'clientes_deudas',
+    'idx_clientes_deudas_negocio_fecha',
+    '(negocio_id, fecha)'
+  );
+  await ensureIndexByName(
+    'clientes_abonos',
+    'idx_clientes_abonos_negocio_fecha',
+    '(negocio_id, fecha)'
+  );
+}
+
+async function ensureTableAnalisisAlertas() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS analisis_alertas (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      tipo VARCHAR(40) NOT NULL,
+      nivel VARCHAR(20) NOT NULL DEFAULT 'info',
+      titulo VARCHAR(200) NOT NULL,
+      mensaje TEXT NULL,
+      datos JSON NULL,
+      estado VARCHAR(20) NOT NULL DEFAULT 'NUEVA',
+      atendida_por INT NULL,
+      atendida_en DATETIME NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_analisis_alertas_negocio_estado (negocio_id, estado),
+      KEY idx_analisis_alertas_negocio_tipo (negocio_id, tipo),
+      KEY idx_analisis_alertas_negocio_created (negocio_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureTablePresupuestosCategoriaGasto() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS presupuestos_categoria_gasto (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      categoria VARCHAR(120) NOT NULL,
+      monto_mensual DECIMAL(12,2) NOT NULL DEFAULT 0,
+      activo TINYINT(1) NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_presupuesto_negocio_categoria (negocio_id, categoria)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 }
 
 module.exports = runMigrations;

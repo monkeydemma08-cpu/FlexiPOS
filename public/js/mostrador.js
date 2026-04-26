@@ -283,7 +283,11 @@ const obtenerAuthHeaders = () => {
 const fetchAutorizado = async (url, options = {}) => {
   const headers = { ...obtenerAuthHeaders(), ...(options.headers || {}) };
   const respuesta = await fetch(url, { ...options, headers });
-  if (respuesta.status === 401 || respuesta.status === 403) {
+  // 401 = sesion invalida (token ausente/expirado) -> cerrar sesion.
+  // 403 = autenticado pero no autorizado (p.ej. password admin incorrecto,
+  // permisos faltantes). NO cerrar sesion: el caller mostrara el mensaje
+  // de error devuelto por el backend.
+  if (respuesta.status === 401) {
     authApi?.handleUnauthorized?.();
     throw new Error('Sesion expirada. Inicia sesion nuevamente.');
   }
