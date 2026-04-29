@@ -4660,6 +4660,48 @@ body[data-role='mesera'] .kanm-main {
   border-radius: 12px;
 }
 
+/* Override del grid original cuando el item usa la estructura nueva
+   (.analisis-ranking-name + .analisis-ranking-meta). El grid de 3 columnas
+   (28px / 1fr / auto) hace que el primer hijo caiga en una columna de 28px
+   y el contenido se desborde solapando con el resto. Con flex y space-between
+   el nombre queda a la izquierda y las metricas alineadas a la derecha. */
+.analisis-ranking-item:has(.analisis-ranking-name),
+.analisis-ranking-item:has(.analisis-ranking-meta) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.analisis-ranking-name {
+  font-weight: 600;
+  color: var(--kanm-gray-900);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.analisis-ranking-meta {
+  font-size: 0.88rem;
+  color: var(--kanm-gray-700);
+  text-align: right;
+  flex: 0 1 auto;
+  white-space: normal;
+}
+
+.analisis-ranking-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--kanm-gray-700);
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
 .analisis-heatmap-wrap {
   display: grid;
   grid-template-columns: 90px repeat(24, minmax(20px, 1fr));
@@ -8326,5 +8368,242 @@ body[data-role='mesera'] .kanm-main {
   }
   .lista-carrito {
     max-height: 35vh;
+  }
+}
+
+/* ============================================================
+   Super admin: Negocios - metricas, dropdown, resumen
+   ============================================================ */
+
+/* Tarjetas de metricas en la cabecera del modulo de negocios */
+.kanm-negocios-metricas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 12px 0 18px;
+}
+
+.kanm-metric-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: var(--kanm-surface, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--color-boton-primario, #255bc7) 12%, #e1e6ee);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+}
+
+.kanm-metric-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--kanm-gray-400, #94a3b8);
+}
+
+.kanm-metric-total::before { background: #255bc7; }
+.kanm-metric-activos::before { background: #16a34a; }
+.kanm-metric-inactivos::before { background: #6b7280; }
+.kanm-metric-suspendidos::before { background: #f59e0b; }
+
+.kanm-metric-label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--kanm-gray-600, #475569);
+  font-weight: 600;
+}
+
+.kanm-metric-value {
+  font-size: 1.85rem;
+  font-weight: 700;
+  color: var(--kanm-gray-900, #0f172a);
+  line-height: 1;
+}
+
+/* Acciones por fila: ahora horizontal en lugar de grid 2D */
+.negocio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 12px;
+  background: transparent;
+  border: 0;
+}
+
+.negocio-actions .kanm-button {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  line-height: 1.1;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+/* Dropdown menu para acciones secundarias */
+.kanm-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.kanm-dropdown-toggle {
+  min-width: 36px;
+  padding: 6px 10px !important;
+  font-size: 1rem !important;
+}
+
+.kanm-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+  padding: 6px;
+  background: #ffffff;
+  border: 1px solid #e1e6ee;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.kanm-dropdown-menu[hidden] {
+  display: none;
+}
+
+.kanm-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--kanm-gray-900, #0f172a);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.kanm-menu-item:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.kanm-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kanm-menu-item--danger {
+  color: var(--kanm-error, #d93050);
+}
+
+.kanm-menu-item--danger:hover:not(:disabled) {
+  background: rgba(217, 48, 80, 0.1);
+}
+
+.kanm-menu-separator {
+  height: 1px;
+  background: #e1e6ee;
+  margin: 6px 4px;
+}
+
+/* Modal de resumen y suspender */
+.kanm-resumen-info {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 18px;
+  padding: 12px 0 16px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e1e6ee;
+  font-size: 0.88rem;
+  color: var(--kanm-gray-700, #334155);
+}
+
+.kanm-resumen-info strong {
+  color: var(--kanm-gray-900, #0f172a);
+  margin-right: 4px;
+}
+
+.kanm-resumen-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.kanm-resumen-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e1e6ee;
+}
+
+.kanm-resumen-card.kanm-resumen-money {
+  background: linear-gradient(135deg, rgba(22, 163, 74, 0.08), rgba(22, 163, 74, 0.02));
+  border-color: rgba(22, 163, 74, 0.25);
+}
+
+.kanm-resumen-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--kanm-gray-600, #475569);
+  font-weight: 600;
+}
+
+.kanm-resumen-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--kanm-gray-900, #0f172a);
+}
+
+/* Modal footer (botones cancelar/confirmar) */
+.kanm-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid #e1e6ee;
+  background: #f8fafc;
+  border-radius: 0 0 12px 12px;
+}
+
+/* Mono y subtitle helpers */
+.kanm-mono {
+  font-family: 'Roboto Mono', 'Courier New', monospace;
+  font-size: 0.85em;
+  color: var(--kanm-gray-700, #334155);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 720px) {
+  .kanm-negocios-metricas {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .kanm-metric-value {
+    font-size: 1.5rem;
+  }
+  .kanm-dropdown-menu {
+    right: auto;
+    left: 0;
   }
 }

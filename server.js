@@ -1635,6 +1635,179 @@ function mapNegocioWithDefaults(row = {}) {
   };
 }
 
+// =============================================================================
+// SEED INICIAL DE NEGOCIO
+// Inicializa todo lo que un negocio recien creado necesita para operar:
+//   - Secuencias NCF basicas (B01, B02, B14, B15) con correlativo en 1
+//   - Configuracion fiscal por defecto (RNC, telefono, direccion, ITBIS, moneda,
+//     pie de factura, etc.) usando los datos del negocio si vienen
+//   - Categoria base "General" para que la pantalla de productos funcione
+//   - Modos contables y opciones operativas con valores razonables
+// Es idempotente: usa INSERT IGNORE / ON DUPLICATE KEY UPDATE para que se pueda
+// llamar tanto al crear el negocio como manualmente desde el modulo super admin.
+// =============================================================================
+const SEED_NCF_SECUENCIAS_DEFAULT = [
+  { tipo: 'B01', prefijo: 'B01', digitos: 8, correlativo: 1 }, // Credito Fiscal
+  { tipo: 'B02', prefijo: 'B02', digitos: 8, correlativo: 1 }, // Consumo
+  { tipo: 'B14', prefijo: 'B14', digitos: 8, correlativo: 1 }, // Regimenes especiales
+  { tipo: 'B15', prefijo: 'B15', digitos: 8, correlativo: 1 }, // Gubernamental
+];
+
+const SEED_CONFIG_DEFAULTS = (negocio = {}) => ({
+  // === Datos fiscales (van impresos en la factura) ===
+  // Usan los prefijos FACTURACION_CLAVES para que obtenerConfiguracionFacturacion los lea.
+  facturacion_rnc: negocio.rnc || '',
+  facturacion_telefono: negocio.telefono || '',
+  facturacion_telefonos: negocio.telefono || '',
+  facturacion_direccion: negocio.direccion || '',
+  facturacion_logo: negocio.logo_url || '',
+  facturacion_pie: 'Gracias por su compra',
+  // === Rango de NCF B01/B02 (sin tope para no bloquear pruebas) ===
+  ncf_b01_inicio: '1',
+  ncf_b01_fin: '',
+  ncf_b02_inicio: '1',
+  ncf_b02_fin: '',
+  // === Impuesto / ITBIS ===
+  // CLAVE REAL que obtenerConfiguracionImpuestoNegocio() lee.
+  impuesto_porcentaje: '18',
+  productos_con_impuesto: '0', // 0 = ITBIS se suma, 1 = el precio ya lo incluye
+  impuesto_incluido_porcentaje: '18',
+  // === Operativo (todos validados contra los CONFIG_KEY del propio server.js) ===
+  itbis_acredita: '1',                    // ITBIS_ACREDITA_CONFIG_KEY
+  cogs_costo_estimado: '0',               // COGS_CONFIG_KEY
+  modo_inventario_costos: 'PREPARACION',  // INVENTARIO_MODO_CONFIG_KEY
+  insumos_bloquear_sin_stock: '0',        // INSUMOS_BLOQUEO_CONFIG_KEY
+  cocina_multipedidos: '1',               // COCINA_MULTIPEDIDOS_CONFIG_KEY
+  // === Moneda (la usa el frontend para format) ===
+  moneda_codigo: 'DOP',
+  moneda_simbolo: 'RD$',
+  // === Branding ===
+  titulo_sistema: negocio.titulo_sistema || negocio.nombre || '',
+  slogan: '',
+});
+
+const SEED_CATEGORIAS_DEFAULT = [
+  { nombre: 'General', area: 'ninguna' },
+];
+
+async function seedNegocioInicial(negocioId, opciones = {}) {
+  if (!Number.isFinite(Number(negocioId)) || Number(negocioId) <= 0) {
+    return { ok: false, error: 'negocio_id invalido' };
+  }
+
+  const id = Number(negocioId);
+  const resumen = {
+    secuencias_creadas: 0,
+    config_inicializada: 0,
+    categorias_creadas: 0,
+  };
+
+  // 1) Datos del negocio para llenar configuracion (rnc, telefono, etc.)
+  let negocioRow = null;
+  try {
+    negocioRow = await db.get(
+      'SELECT id, nombre, slug, rnc, telefono, direccion, titulo_sistema, logo_url FROM negocios WHERE id = ? LIMIT 1',
+      [id]
+    );
+  } catch (error) {
+    console.warn('seedNegocioInicial: no se pudo leer negocio', id, error?.message || error);
+  }
+
+  if (!negocioRow) {
+    return { ok: false, error: 'Negocio no encontrado' };
+  }
+
+  // 2) Secuencias NCF. Solo se insertan si no existen para no pisar correlativos.
+  for (const seq of SEED_NCF_SECUENCIAS_DEFAULT) {
+    try {
+      const result = await db.run(
+        `INSERT INTO secuencias_ncf (tipo, prefijo, digitos, correlativo, negocio_id)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE tipo = tipo`,
+        [seq.tipo, seq.prefijo, seq.digitos, seq.correlativo, id]
+      );
+      if (result?.affectedRows === 1 || result?.changes === 1) {
+        resumen.secuencias_creadas += 1;
+      }
+    } catch (error) {
+      console.warn(
+        `seedNegocioInicial: no se pudo insertar secuencia ${seq.tipo} para negocio ${id}:`,
+        error?.message || error
+      );
+    }
+  }
+
+  // 3) Claves de configuracion. Solo se insertan si no existen (no se sobreescribe
+  //    si el negocio ya configuro algo). Para forzar reset usar opciones.forzarConfig=true.
+  const configValores = {
+    ...SEED_CONFIG_DEFAULTS(negocioRow),
+    ...(opciones?.overridesConfig && typeof opciones.overridesConfig === 'object'
+      ? opciones.overridesConfig
+      : {}),
+  };
+  const forzarConfig = opciones?.forzarConfig === true;
+  for (const [clave, valor] of Object.entries(configValores)) {
+    try {
+      if (forzarConfig) {
+        await db.run(
+          `INSERT INTO configuracion (clave, valor, negocio_id) VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [clave, valor == null ? '' : String(valor), id]
+        );
+        resumen.config_inicializada += 1;
+      } else {
+        const existente = await db.get(
+          'SELECT 1 FROM configuracion WHERE clave = ? AND negocio_id = ? LIMIT 1',
+          [clave, id]
+        );
+        if (!existente) {
+          await db.run(
+            `INSERT INTO configuracion (clave, valor, negocio_id) VALUES (?, ?, ?)`,
+            [clave, valor == null ? '' : String(valor), id]
+          );
+          resumen.config_inicializada += 1;
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `seedNegocioInicial: no se pudo insertar config ${clave} para negocio ${id}:`,
+        error?.message || error
+      );
+    }
+  }
+
+  // 4) Categorias por defecto (solo si no hay ninguna)
+  if (opciones?.crearCategoriasBase !== false) {
+    try {
+      const tieneCategoria = await db.get(
+        'SELECT id FROM categorias WHERE negocio_id = ? LIMIT 1',
+        [id]
+      );
+      if (!tieneCategoria) {
+        for (const cat of SEED_CATEGORIAS_DEFAULT) {
+          try {
+            await db.run(
+              `INSERT INTO categorias (nombre, activo, area_preparacion, negocio_id)
+               VALUES (?, 1, ?, ?)`,
+              [cat.nombre, cat.area, id]
+            );
+            resumen.categorias_creadas += 1;
+          } catch (error) {
+            console.warn(
+              `seedNegocioInicial: no se pudo crear categoria ${cat.nombre}:`,
+              error?.message || error
+            );
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('seedNegocioInicial: error revisando categorias:', error?.message || error);
+    }
+  }
+
+  return { ok: true, resumen };
+}
+
 const registrarAccionAdmin = async ({ adminId, negocioId, accion }) => {
   if (!adminId || !negocioId || !accion) {
     return;
@@ -15613,6 +15786,48 @@ app.post('/api/negocios', (req, res) => {
           console.warn('No se pudo procesar admin principal del negocio:', admErr?.message || admErr);
         }
 
+        // Inicializacion automatica: secuencias NCF, configuracion fiscal y
+        // categorias base. Es idempotente: si el seed falla en una pieza, las
+        // demas siguen y el negocio queda creado igualmente.
+        try {
+          const skipSeed =
+            payload.skipSeed === true ||
+            payload.skip_seed === true ||
+            payload.crearDatosIniciales === false ||
+            payload.crear_datos_iniciales === false;
+          if (!skipSeed) {
+            const overridesConfig = {};
+            if (payload.itbis_porcentaje !== undefined && payload.itbis_porcentaje !== null) {
+              const itbis = Number(payload.itbis_porcentaje);
+              if (Number.isFinite(itbis) && itbis >= 0 && itbis <= 100) {
+                // La clave REAL que el sistema lee es 'impuesto_porcentaje'.
+                // Mantenemos itbis_porcentaje como alias por compatibilidad pero no se usa.
+                overridesConfig.impuesto_porcentaje = String(itbis);
+                overridesConfig.impuesto_incluido_porcentaje = String(itbis);
+              }
+            }
+            if (payload.moneda_codigo) {
+              overridesConfig.moneda_codigo = String(payload.moneda_codigo);
+            }
+            if (payload.moneda_simbolo) {
+              overridesConfig.moneda_simbolo = String(payload.moneda_simbolo);
+            }
+            const seedResult = await seedNegocioInicial(negocioCreado.id, {
+              crearCategoriasBase: payload.crearCategoriasBase !== false,
+              overridesConfig,
+            });
+            if (seedResult?.resumen) {
+              responsePayload.seed = seedResult.resumen;
+            }
+          }
+        } catch (seedErr) {
+          console.warn(
+            'No se pudo inicializar datos por defecto del negocio',
+            negocioCreado.id,
+            seedErr?.message || seedErr
+          );
+        }
+
         res.status(201).json(responsePayload);
     });
   });
@@ -15987,11 +16202,217 @@ app.put('/api/admin/negocios/:id/desactivar', (req, res) => {
 });
 
 app.put('/api/admin/negocios/:id/suspender', (req, res) => {
-  res.status(404).json({ ok: false, error: 'Operacion no disponible' });
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+    const motivo = normalizarCampoTexto(req.body?.motivo, null);
+
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      if (negocio.deleted_at) {
+        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
+      }
+
+      await db.run(
+        `UPDATE negocios
+            SET suspendido = 1,
+                motivo_suspension = ?,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+        [motivo, id]
+      );
+      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'suspender' });
+      res.json({ ok: true, suspendido: 1, motivo_suspension: motivo });
+    } catch (error) {
+      console.error('Error suspendiendo negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo suspender el negocio' });
+    }
+  });
 });
 
 app.put('/api/admin/negocios/:id/reactivar', (req, res) => {
-  res.status(404).json({ ok: false, error: 'Operacion no disponible' });
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      if (negocio.deleted_at) {
+        return res.status(400).json({ ok: false, error: 'El negocio esta eliminado' });
+      }
+
+      await db.run(
+        `UPDATE negocios
+            SET suspendido = 0,
+                motivo_suspension = NULL,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+        [id]
+      );
+      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'reactivar' });
+      res.json({ ok: true, suspendido: 0 });
+    } catch (error) {
+      console.error('Error reactivando negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo reactivar el negocio' });
+    }
+  });
+});
+
+// Reinicializa secuencias NCF, configuracion base y categorias para un negocio
+// ya existente (operacion manual desde el panel super admin).
+app.post('/api/admin/negocios/:id/inicializar', (req, res) => {
+  requireSuperAdmin(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    try {
+      const negocio = await obtenerNegocioAdmin(id);
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+      const opciones = {
+        forzarConfig: req.body?.forzarConfig === true || req.body?.forzar_config === true,
+        crearCategoriasBase: req.body?.crearCategoriasBase !== false,
+      };
+      const resultado = await seedNegocioInicial(id, opciones);
+      if (!resultado?.ok) {
+        return res
+          .status(400)
+          .json({ ok: false, error: resultado?.error || 'No se pudo inicializar el negocio' });
+      }
+      await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'inicializar' });
+      res.json({ ok: true, resumen: resultado.resumen });
+    } catch (error) {
+      console.error('Error inicializando negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo inicializar el negocio' });
+    }
+  });
+});
+
+// Devuelve metricas resumen de un negocio (cantidad de usuarios, productos,
+// pedidos, clientes y secuencias) para la vista detalle del super admin.
+app.get('/api/admin/negocios/:id/resumen', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+
+    const safeCount = async (sql, params = []) => {
+      try {
+        const row = await db.get(sql, params);
+        const valor = row ? Object.values(row)[0] : 0;
+        return Number(valor) || 0;
+      } catch (error) {
+        return 0;
+      }
+    };
+
+    try {
+      const negocio = await db.get(
+        `SELECT n.id, n.nombre, n.slug, n.rnc, n.telefono, n.direccion, n.activo, n.suspendido,
+                n.motivo_suspension, n.deleted_at, n.creado_en, n.updated_at,
+                e.nombre AS empresa_nombre,
+                u.usuario AS admin_principal_usuario
+           FROM negocios n
+           LEFT JOIN empresas e ON e.id = n.empresa_id
+           LEFT JOIN usuarios u ON u.id = n.admin_principal_usuario_id
+          WHERE n.id = ? LIMIT 1`,
+        [id]
+      );
+      if (!negocio) {
+        return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      }
+
+      const usuarios = await safeCount(
+        'SELECT COUNT(*) AS total FROM usuarios WHERE negocio_id = ? AND (activo IS NULL OR activo = 1)',
+        [id]
+      );
+      const productos = await safeCount(
+        'SELECT COUNT(*) AS total FROM productos WHERE negocio_id = ?',
+        [id]
+      );
+      const categorias = await safeCount(
+        'SELECT COUNT(*) AS total FROM categorias WHERE negocio_id = ?',
+        [id]
+      );
+      const clientes = await safeCount(
+        'SELECT COUNT(*) AS total FROM clientes WHERE negocio_id = ?',
+        [id]
+      );
+      const pedidosTotal = await safeCount(
+        'SELECT COUNT(*) AS total FROM pedidos WHERE negocio_id = ?',
+        [id]
+      );
+      const pedidosUltimos30 = await safeCount(
+        `SELECT COUNT(*) AS total FROM pedidos
+          WHERE negocio_id = ?
+            AND COALESCE(fecha_factura, fecha_cierre, fecha_creacion) >= (CURRENT_DATE - INTERVAL 30 DAY)`,
+        [id]
+      );
+      const ventas30dias = await safeCount(
+        `SELECT COALESCE(SUM(total), 0) AS total FROM pedidos
+          WHERE negocio_id = ?
+            AND COALESCE(fecha_factura, fecha_cierre, fecha_creacion) >= (CURRENT_DATE - INTERVAL 30 DAY)`,
+        [id]
+      );
+
+      let secuencias = [];
+      try {
+        secuencias = await db.all(
+          `SELECT tipo, prefijo, digitos, correlativo
+             FROM secuencias_ncf
+            WHERE negocio_id = ?
+            ORDER BY tipo ASC`,
+          [id]
+        );
+      } catch (error) {
+        secuencias = [];
+      }
+
+      let configClaves = 0;
+      try {
+        const row = await db.get(
+          'SELECT COUNT(*) AS total FROM configuracion WHERE negocio_id = ?',
+          [id]
+        );
+        configClaves = Number(row?.total) || 0;
+      } catch (error) {
+        configClaves = 0;
+      }
+
+      res.json({
+        ok: true,
+        negocio,
+        metricas: {
+          usuarios,
+          productos,
+          categorias,
+          clientes,
+          pedidos_total: pedidosTotal,
+          pedidos_ultimos_30: pedidosUltimos30,
+          ventas_ultimos_30: Number(ventas30dias) || 0,
+          config_claves: configClaves,
+        },
+        secuencias,
+      });
+    } catch (error) {
+      console.error('Error obteniendo resumen de negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el resumen' });
+    }
+  });
 });
 
 app.get('/api/admin/negocios/:id/facturacion-config', (req, res) => {

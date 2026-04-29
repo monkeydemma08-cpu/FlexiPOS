@@ -10,67 +10,292 @@
   <link rel="stylesheet" href="/css/styles.css?v=20260425c" />
   <link rel="stylesheet" href="/css/admin-shell.css?v=20260424a" />
   <style>
-    /* Modal Negocios */
+    /* ================================================================
+       Modal Negocios - usa el patron estandar de overlay del admin:
+       overlay full-screen + panel centrado max-width 960px.
+       ================================================================ */
+    /* Reset agresivo del .kanm-modal base que mide 420px y rompe el overlay */
     #kanm-negocios-modal {
-      position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.5);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      z-index: 9999;
+      position: fixed !important;
+      top: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: none !important;
+      max-height: none !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      margin: 0 !important;
+      padding: clamp(12px, 3vw, 32px) !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      background: rgba(15, 23, 42, 0.55) !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      z-index: 9999 !important;
+      overflow-y: auto !important;
     }
     #kanm-negocios-modal.oculto {
-      display: none;
-    }
-    #kanm-negocios-modal {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      z-index: 9999;
-    }
-    #kanm-negocios-modal.oculto {
-      display: none;
+      display: none !important;
     }
     #kanm-negocios-modal .kanm-modal-backdrop {
-      position: absolute;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.4);
+      display: none; /* el overlay ya hace de backdrop */
     }
     #kanm-negocios-modal .kanm-modal-panel {
       position: relative;
-      background: #fff;
-      border-radius: 16px;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
-      max-width: 560px;
-      width: 90%;
-      max-height: 90vh;
+      background: #ffffff;
+      border-radius: 20px;
+      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.32);
+      width: 100%;
+      max-width: 960px;
+      max-height: calc(100vh - 64px);
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      z-index: 1;
+      margin: auto;
     }
     #kanm-negocios-modal .kanm-modal-header {
-      padding: 16px 20px;
-      border-bottom: 1px solid #f0f0f0;
+      padding: 18px 26px;
+      background: linear-gradient(135deg, #255bc7, #3b82f6);
+      color: #ffffff;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      flex-shrink: 0;
+    }
+    #kanm-negocios-modal .kanm-modal-header h3 {
+      margin: 0;
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #ffffff;
+    }
+    #kanm-negocios-modal .kanm-modal-header .kanm-button.ghost {
+      background: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+    #kanm-negocios-modal .kanm-modal-header .kanm-button.ghost:hover {
+      background: rgba(255, 255, 255, 0.25);
     }
     #kanm-negocios-modal .kanm-modal-body {
-      padding: 16px 20px;
+      padding: 22px 26px;
       overflow-y: auto;
+      background: #f8fafc;
+      flex: 1;
+      min-height: 0;
+    }
+    #kanm-negocios-modal #kanm-negocios-form {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
     }
 
-    @media (max-width: 768px) {
+    /* Secciones tipo card con acento de color */
+    #kanm-negocios-modal .kanm-modal-section {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 18px 20px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+      gap: 14px;
+    }
+    #kanm-negocios-modal .kanm-modal-section h4 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 4px 0;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #0f172a;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    #kanm-negocios-modal .kanm-modal-section h4::before {
+      content: '';
+      display: inline-block;
+      width: 4px;
+      height: 18px;
+      border-radius: 2px;
+      background: #255bc7;
+    }
+    #kanm-negocios-modal .kanm-modal-section[data-tone="fiscal"] h4::before { background: #16a34a; }
+    #kanm-negocios-modal .kanm-modal-section[data-tone="config"] h4::before { background: #f59e0b; }
+    #kanm-negocios-modal .kanm-modal-section[data-tone="tema"] h4::before { background: #ec4899; }
+    #kanm-negocios-modal .kanm-modal-section[data-tone="modulos"] h4::before { background: #8b5cf6; }
+    #kanm-negocios-modal .kanm-modal-section[data-tone="admin"] h4::before { background: #0ea5e9; }
+    #kanm-negocios-modal .kanm-modal-section .kanm-section-desc {
+      margin: -4px 0 6px;
+      font-size: 0.85rem;
+      color: #64748b;
+      line-height: 1.4;
+    }
+
+    /* Inputs */
+    #kanm-negocios-modal input[type="text"],
+    #kanm-negocios-modal input[type="email"],
+    #kanm-negocios-modal input[type="tel"],
+    #kanm-negocios-modal input[type="number"],
+    #kanm-negocios-modal input[type="password"],
+    #kanm-negocios-modal select {
+      padding: 9px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      background: #ffffff;
+      color: #0f172a;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    #kanm-negocios-modal input:focus,
+    #kanm-negocios-modal select:focus {
+      outline: 0;
+      border-color: #255bc7;
+      box-shadow: 0 0 0 3px rgba(37, 91, 199, 0.15);
+    }
+    #kanm-negocios-modal input:disabled,
+    #kanm-negocios-modal select:disabled {
+      background: #f1f5f9;
+      color: #94a3b8;
+      cursor: not-allowed;
+    }
+    #kanm-negocios-modal input[type="color"] {
+      width: 100%;
+      height: 42px;
+      padding: 4px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #ffffff;
+      cursor: pointer;
+    }
+    #kanm-negocios-modal label {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #334155;
+    }
+    #kanm-negocios-modal .kanm-input-help {
+      font-size: 0.78rem;
+      color: #64748b;
+      margin-top: 2px;
+      line-height: 1.35;
+    }
+
+    /* Grids con auto-collapse: si no caben quedan en 1 columna */
+    #kanm-negocios-modal .kanm-grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }
+    #kanm-negocios-modal .kanm-grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+    }
+    #kanm-negocios-modal .kanm-grid-4 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+    }
+
+    /* Modulos como cards seleccionables */
+    #kanm-negocios-modal .kanm-modulos-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+    }
+    #kanm-negocios-modal .kanm-modulo-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      background: #ffffff;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+      font-weight: 500;
+      font-size: 0.88rem;
+      color: #334155;
+    }
+    #kanm-negocios-modal .kanm-modulo-card:hover {
+      border-color: #94a3b8;
+    }
+    #kanm-negocios-modal .kanm-modulo-card input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #255bc7;
+      cursor: pointer;
+    }
+    #kanm-negocios-modal .kanm-modulo-card:has(input:checked) {
+      border-color: #255bc7;
+      background: rgba(37, 91, 199, 0.06);
+      color: #1e3a8a;
+    }
+
+    #kanm-negocios-modal .kanm-checkbox {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+      color: #334155;
+      cursor: pointer;
+      font-size: 0.88rem;
+    }
+    #kanm-negocios-modal .kanm-checkbox input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #255bc7;
+      cursor: pointer;
+    }
+
+    #kanm-negocios-modal .kanm-color-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    /* Footer fijo */
+    #kanm-negocios-modal .kanm-modal-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 26px;
+      background: #ffffff;
+      border-top: 1px solid #e2e8f0;
+      flex-shrink: 0;
+    }
+    #kanm-negocios-modal .kanm-modal-footer #kanm-negocios-form-mensaje {
+      flex: 1;
+      font-size: 0.85rem;
+      margin: 0;
+    }
+    #kanm-negocios-modal .kanm-modal-footer .kanm-button.primary {
+      padding: 10px 24px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      border-radius: 10px;
+    }
+
+    /* Responsive: ocupa toda la pantalla en mobile */
+    @media (max-width: 720px) {
+      #kanm-negocios-modal {
+        padding: 0;
+        align-items: stretch;
+      }
       #kanm-negocios-modal .kanm-modal-panel {
-        max-width: 100%;
-        width: 100%;
+        max-height: 100vh;
         border-radius: 0;
+        max-width: 100%;
+      }
+      #kanm-negocios-modal .kanm-modal-body {
+        padding: 16px 18px;
+      }
+      #kanm-negocios-modal .kanm-modal-section {
+        padding: 14px 16px;
       }
     }
   </style>
@@ -3464,7 +3689,34 @@
               placeholder="Buscar negocio por nombre..."
             />
           </div>
+          <div class="kanm-input-group">
+            <select id="kanm-negocios-filtro-estado" class="kanm-input">
+              <option value="">Todos los estados</option>
+              <option value="activo">Activos</option>
+              <option value="inactivo">Inactivos</option>
+              <option value="suspendido">Suspendidos</option>
+              <option value="eliminado">Eliminados</option>
+            </select>
+          </div>
           <button type="button" class="kanm-button primary" id="kanm-negocios-btn-nuevo">Nuevo negocio</button>
+        </div>
+      </div>
+      <div class="kanm-negocios-metricas" id="kanm-negocios-metricas">
+        <div class="kanm-metric-card kanm-metric-total">
+          <div class="kanm-metric-label">Total</div>
+          <div class="kanm-metric-value" id="kanm-negocios-metric-total">0</div>
+        </div>
+        <div class="kanm-metric-card kanm-metric-activos">
+          <div class="kanm-metric-label">Activos</div>
+          <div class="kanm-metric-value" id="kanm-negocios-metric-activos">0</div>
+        </div>
+        <div class="kanm-metric-card kanm-metric-inactivos">
+          <div class="kanm-metric-label">Inactivos</div>
+          <div class="kanm-metric-value" id="kanm-negocios-metric-inactivos">0</div>
+        </div>
+        <div class="kanm-metric-card kanm-metric-suspendidos">
+          <div class="kanm-metric-label">Suspendidos</div>
+          <div class="kanm-metric-value" id="kanm-negocios-metric-suspendidos">0</div>
         </div>
       </div>
       <div id="kanm-negocios-mensaje" class="kanm-subtitle"></div>
@@ -3475,9 +3727,9 @@
                 <th>Nombre</th>
                 <th>Slug</th>
                 <th>Empresa</th>
+                <th>RNC</th>
                 <th>Estado</th>
-                <th>Colores</th>
-                <th>Logo</th>
+                <th>Tema</th>
                 <th>Acciones</th>
               </tr>
             </thead>
@@ -3487,6 +3739,46 @@
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- Modal: Resumen de negocio (super admin) -->
+      <div class="kanm-modal oculto" id="kanm-negocios-resumen-modal">
+        <div class="kanm-modal-backdrop"></div>
+        <div class="kanm-modal-panel">
+          <div class="kanm-modal-header">
+            <h3 id="kanm-negocios-resumen-titulo">Resumen del negocio</h3>
+            <button type="button" class="kanm-button ghost" id="kanm-negocios-resumen-cerrar">Cerrar</button>
+          </div>
+          <div class="kanm-modal-body" id="kanm-negocios-resumen-body">
+            <p class="kanm-subtitle">Cargando resumen...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Suspender negocio (motivo opcional) -->
+      <div class="kanm-modal oculto" id="kanm-negocios-suspender-modal">
+        <div class="kanm-modal-backdrop"></div>
+        <div class="kanm-modal-panel">
+          <div class="kanm-modal-header">
+            <h3>Suspender negocio</h3>
+            <button type="button" class="kanm-button ghost" id="kanm-negocios-suspender-cerrar">Cerrar</button>
+          </div>
+          <div class="kanm-modal-body">
+            <p class="kanm-subtitle">El negocio quedara bloqueado para todos sus usuarios. Puedes reactivarlo en cualquier momento.</p>
+            <div class="kanm-input-group">
+              <label for="kanm-negocios-suspender-motivo">Motivo (se mostrara al admin del negocio)</label>
+              <textarea
+                id="kanm-negocios-suspender-motivo"
+                rows="3"
+                placeholder="Ej. Pago de mensualidad pendiente"
+              ></textarea>
+            </div>
+          </div>
+          <div class="kanm-modal-footer">
+            <button type="button" class="kanm-button ghost" id="kanm-negocios-suspender-cancelar">Cancelar</button>
+            <button type="button" class="kanm-button danger" id="kanm-negocios-suspender-confirmar">Suspender</button>
+          </div>
         </div>
       </div>
 
@@ -3666,145 +3958,228 @@
       <div class="kanm-modal-body">
         <form id="kanm-negocios-form" class="kanm-form" novalidate>
           <input type="hidden" id="kanm-negocios-id" />
-          <section class="kanm-modal-section">
-            <h4>Datos básicos</h4>
-            <div class="kanm-input-group">
-              <label for="kanm-negocios-nombre">Título / Nombre público</label>
-              <input type="text" id="kanm-negocios-nombre" placeholder="Ej. Mi Cafetería" required />
+
+          <!-- Datos basicos -->
+          <section class="kanm-modal-section" data-tone="basicos">
+            <h4>Datos basicos</h4>
+            <p class="kanm-section-desc">Identifica el negocio dentro de la plataforma. El slug se usa en URLs y no se puede cambiar luego.</p>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-nombre">Titulo / Nombre publico *</label>
+                <input type="text" id="kanm-negocios-nombre" placeholder="Ej. Mi Cafeteria" required />
+              </div>
+              <div class="kanm-input-group" id="kanm-negocios-slug-group">
+                <label for="kanm-negocios-slug">Slug *</label>
+                <input type="text" id="kanm-negocios-slug" placeholder="mi-cafeteria" required />
+                <span class="kanm-input-help">Solo letras, numeros y guiones. Se bloquea al editar.</span>
+              </div>
             </div>
-            <div class="kanm-input-group" id="kanm-negocios-slug-group">
-              <label for="kanm-negocios-slug">Slug</label>
-              <input type="text" id="kanm-negocios-slug" placeholder="mi-cafeteria" required />
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-empresa-nombre">Empresa</label>
+                <input type="text" id="kanm-negocios-empresa-nombre" placeholder="Grupo empresarial" />
+                <span class="kanm-input-help">Usa el mismo nombre para agrupar sucursales.</span>
+              </div>
+              <div class="kanm-input-group" id="kanm-negocios-empresa-select-group">
+                <label for="kanm-negocios-empresa-select">Empresa existente</label>
+                <select id="kanm-negocios-empresa-select">
+                  <option value="">Selecciona un grupo...</option>
+                </select>
+                <span class="kanm-input-help">Al elegir un grupo se copia el tema visual y el logo.</span>
+              </div>
             </div>
-            <div class="kanm-input-group">
-              <label for="kanm-negocios-empresa-nombre">Empresa</label>
-              <input type="text" id="kanm-negocios-empresa-nombre" placeholder="Grupo empresarial" />
-              <span class="kanm-input-help">Usa el mismo nombre para agrupar sucursales.</span>
-            </div>
-            <div class="kanm-input-group" id="kanm-negocios-empresa-select-group">
-              <label for="kanm-negocios-empresa-select">Empresa existente</label>
-              <select id="kanm-negocios-empresa-select">
-                <option value="">Selecciona un grupo...</option>
-              </select>
-              <span class="kanm-input-help">
-                Al elegir un grupo se copiará el tema visual y el logo de esa empresa.
-              </span>
-            </div>
-            <div class="kanm-input-group">
-              <label class="kanm-checkbox" for="kanm-negocios-tiene-sucursales">
-                <input type="checkbox" id="kanm-negocios-tiene-sucursales" />
-                <span>Este negocio tiene sucursales</span>
-              </label>
-              <span class="kanm-input-help">
-                Si activas, se crea o se reutiliza el usuario empresa. Si ya existe, puedes dejar el usuario vacio.
-              </span>
-            </div>
-            <div class="kanm-input-group">
-              <label for="kanm-negocios-logo-url">Logo URL</label>
-              <input type="text" id="kanm-negocios-logo-url" placeholder="https://..." />
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-logo-url">Logo URL</label>
+                <input type="text" id="kanm-negocios-logo-url" placeholder="https://..." />
+              </div>
+              <div class="kanm-input-group" style="justify-content: flex-end;">
+                <label class="kanm-checkbox" for="kanm-negocios-tiene-sucursales" style="padding-top: 22px;">
+                  <input type="checkbox" id="kanm-negocios-tiene-sucursales" />
+                  <span>Este negocio tiene sucursales</span>
+                </label>
+                <span class="kanm-input-help">Crea o reutiliza un usuario empresa para gestionar las sucursales.</span>
+              </div>
             </div>
           </section>
 
-          <section class="kanm-modal-section">
-            <h4>Tema visual</h4>
+          <!-- Datos fiscales -->
+          <section class="kanm-modal-section" data-tone="fiscal">
+            <h4>Datos fiscales y de contacto</h4>
+            <p class="kanm-section-desc">Estos datos se imprimen en la factura y se usan para la facturacion electronica DGII.</p>
             <div class="kanm-grid-2">
               <div class="kanm-input-group">
-                <label for="kanm-negocios-color-primario">Color primario</label>
-                <input type="color" id="kanm-negocios-color-primario" value="#255bc7" />
+                <label for="kanm-negocios-rnc">RNC / Cedula</label>
+                <input
+                  type="text"
+                  id="kanm-negocios-rnc"
+                  placeholder="000-00000-0"
+                  maxlength="20"
+                  inputmode="numeric"
+                />
+                <span class="kanm-input-help">Requerido para emitir comprobantes fiscales (NCF / e-CF).</span>
               </div>
               <div class="kanm-input-group">
-                <label for="kanm-negocios-color-secundario">Color secundario</label>
-                <input type="color" id="kanm-negocios-color-secundario" value="#7b8fb8" />
+                <label for="kanm-negocios-telefono">Telefono</label>
+                <input type="tel" id="kanm-negocios-telefono" placeholder="809-000-0000" maxlength="30" />
               </div>
             </div>
-            <div class="kanm-grid-2">
+            <div class="kanm-input-group">
+              <label for="kanm-negocios-direccion">Direccion</label>
+              <input
+                type="text"
+                id="kanm-negocios-direccion"
+                placeholder="Calle 1 No. 23, Sector, Ciudad"
+                maxlength="255"
+              />
+            </div>
+          </section>
+
+          <!-- Configuracion fiscal y operativa -->
+          <section class="kanm-modal-section" data-tone="config">
+            <h4>Configuracion fiscal y operativa</h4>
+            <p class="kanm-section-desc">Valores por defecto al crear el negocio. Solo aplican en creacion. Pueden ajustarse luego desde la pestana Configuracion del propio negocio.</p>
+            <div class="kanm-grid-3">
               <div class="kanm-input-group">
-                <label for="kanm-negocios-color-texto">Color texto</label>
-                <input type="color" id="kanm-negocios-color-texto" value="#24344a" />
+                <label for="kanm-negocios-itbis">ITBIS (%)</label>
+                <input
+                  type="number"
+                  id="kanm-negocios-itbis"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value="18"
+                />
               </div>
               <div class="kanm-input-group">
-                <label for="kanm-negocios-color-header">Color header</label>
+                <label for="kanm-negocios-moneda-codigo">Moneda</label>
+                <select id="kanm-negocios-moneda-codigo">
+                  <option value="DOP" selected>DOP - Peso dominicano</option>
+                  <option value="USD">USD - Dolar</option>
+                  <option value="EUR">EUR - Euro</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-moneda-simbolo">Simbolo</label>
+                <input type="text" id="kanm-negocios-moneda-simbolo" maxlength="6" value="RD$" />
+              </div>
+            </div>
+            <div class="kanm-input-group">
+              <label class="kanm-checkbox" for="kanm-negocios-crear-datos">
+                <input type="checkbox" id="kanm-negocios-crear-datos" checked />
+                <span>Inicializar datos por defecto al crear</span>
+              </label>
+              <span class="kanm-input-help">
+                Crea automaticamente las secuencias NCF (B01, B02, B14, B15), los valores de configuracion inicial (RNC, telefono, direccion, ITBIS, moneda, comportamiento de cocina e inventario) y una categoria "General".
+              </span>
+            </div>
+          </section>
+
+          <!-- Modulos habilitados -->
+          <section class="kanm-modal-section" data-tone="modulos">
+            <h4>Modulos habilitados</h4>
+            <p class="kanm-section-desc">Activa solo los modulos que el negocio va a utilizar. Los desactivados no apareceran en el menu lateral.</p>
+            <div class="kanm-modulos-grid">
+              <label class="kanm-modulo-card">
+                <input type="checkbox" id="kanm-modulo-admin" checked />
+                <span>Admin</span>
+              </label>
+              <label class="kanm-modulo-card">
+                <input type="checkbox" id="kanm-modulo-mesera" checked />
+                <span>Mesera</span>
+              </label>
+              <label class="kanm-modulo-card">
+                <input type="checkbox" id="kanm-modulo-cocina" checked />
+                <span>Cocina</span>
+              </label>
+              <label class="kanm-modulo-card">
+                <input type="checkbox" id="kanm-modulo-bar" />
+                <span>Bar</span>
+              </label>
+              <label class="kanm-modulo-card">
+                <input type="checkbox" id="kanm-modulo-caja" checked />
+                <span>Caja</span>
+              </label>
+              <label class="kanm-modulo-card">
+                <input type="checkbox" id="kanm-modulo-mostrador" checked />
+                <span>Mostrador</span>
+              </label>
+              <label class="kanm-modulo-card">
+                <input type="checkbox" id="kanm-modulo-delivery" checked />
+                <span>Delivery</span>
+              </label>
+              <label class="kanm-modulo-card">
+                <input type="checkbox" id="kanm-modulo-historial" checked />
+                <span>Historial cocina</span>
+              </label>
+            </div>
+          </section>
+
+          <!-- Tema visual -->
+          <section class="kanm-modal-section" data-tone="tema">
+            <h4>Tema visual</h4>
+            <p class="kanm-section-desc">Personaliza los colores que veran los usuarios del negocio. Si elegiste una empresa existente, estos valores ya vienen pre-cargados.</p>
+            <div class="kanm-grid-4">
+              <div class="kanm-input-group kanm-color-field">
+                <label for="kanm-negocios-color-primario">Primario</label>
+                <input type="color" id="kanm-negocios-color-primario" value="#255bc7" />
+              </div>
+              <div class="kanm-input-group kanm-color-field">
+                <label for="kanm-negocios-color-secundario">Secundario</label>
+                <input type="color" id="kanm-negocios-color-secundario" value="#7b8fb8" />
+              </div>
+              <div class="kanm-input-group kanm-color-field">
+                <label for="kanm-negocios-color-texto">Texto</label>
+                <input type="color" id="kanm-negocios-color-texto" value="#24344a" />
+              </div>
+              <div class="kanm-input-group kanm-color-field">
+                <label for="kanm-negocios-color-header">Header</label>
                 <input type="color" id="kanm-negocios-color-header" value="#255bc7" />
               </div>
             </div>
             <div class="kanm-grid-3">
-              <div class="kanm-input-group">
-                <label for="kanm-negocios-color-boton-primario">Color botón primario</label>
+              <div class="kanm-input-group kanm-color-field">
+                <label for="kanm-negocios-color-boton-primario">Boton primario</label>
                 <input type="color" id="kanm-negocios-color-boton-primario" value="#255bc7" />
               </div>
-              <div class="kanm-input-group">
-                <label for="kanm-negocios-color-boton-secundario">Color botón secundario</label>
+              <div class="kanm-input-group kanm-color-field">
+                <label for="kanm-negocios-color-boton-secundario">Boton secundario</label>
                 <input type="color" id="kanm-negocios-color-boton-secundario" value="#7b8fb8" />
               </div>
-              <div class="kanm-input-group">
-                <label for="kanm-negocios-color-boton-peligro">Color botón peligro</label>
+              <div class="kanm-input-group kanm-color-field">
+                <label for="kanm-negocios-color-boton-peligro">Boton peligro</label>
                 <input type="color" id="kanm-negocios-color-boton-peligro" value="#ff4b4b" />
               </div>
             </div>
           </section>
 
-          <section class="kanm-modal-section">
-            <h4>Módulos habilitados</h4>
-            <div class="kanm-grid-3">
-              <label class="kanm-checkbox">
-                <input type="checkbox" id="kanm-modulo-admin" checked />
-                <span>Admin</span>
-              </label>
-              <label class="kanm-checkbox">
-                <input type="checkbox" id="kanm-modulo-mesera" checked />
-                <span>Mesera</span>
-              </label>
-              <label class="kanm-checkbox">
-                <input type="checkbox" id="kanm-modulo-cocina" checked />
-                <span>Cocina</span>
-              </label>
-              <label class="kanm-checkbox">
-                <input type="checkbox" id="kanm-modulo-bar" />
-                <span>Bar</span>
-              </label>
-              <label class="kanm-checkbox">
-                <input type="checkbox" id="kanm-modulo-caja" checked />
-                <span>Caja</span>
-              </label>
-              <label class="kanm-checkbox">
-                <input type="checkbox" id="kanm-modulo-mostrador" checked />
-                <span>Mostrador</span>
-              </label>
-              <label class="kanm-checkbox">
-                <input type="checkbox" id="kanm-modulo-delivery" checked />
-                <span>Delivery</span>
-              </label>
-              <label class="kanm-checkbox">
-                <input type="checkbox" id="kanm-modulo-historial" checked />
-                <span>Historial de preparación</span>
-              </label>
-            </div>
-          </section>
-
-          <section class="kanm-modal-section">
+          <!-- Admin principal -->
+          <section class="kanm-modal-section" data-tone="admin">
             <h4 id="kanm-negocios-admin-titulo">Admin principal</h4>
-          <div class="kanm-input-group">
-            <label for="kanm-negocios-admin-correo" id="kanm-negocios-admin-correo-label">Correo del admin principal</label>
-            <input type="email" id="kanm-negocios-admin-correo" placeholder="admin@negocio.com" />
-          </div>
-          <div class="kanm-grid-2">
+            <p class="kanm-section-desc">Sera el primer usuario del negocio con permisos completos. Si no defines password, se generara una temporal.</p>
             <div class="kanm-input-group">
-              <label for="kanm-negocios-admin-usuario" id="kanm-negocios-admin-usuario-label">Usuario admin (opcional)</label>
-              <input type="text" id="kanm-negocios-admin-usuario" placeholder="admin.negocio" />
-              <span class="kanm-input-help" id="kanm-negocios-admin-usuario-help">
-                Este usuario sera el admin principal del negocio.
-              </span>
+              <label for="kanm-negocios-admin-correo" id="kanm-negocios-admin-correo-label">Correo del admin principal</label>
+              <input type="email" id="kanm-negocios-admin-correo" placeholder="admin@negocio.com" />
             </div>
-            <div class="kanm-input-group kanm-input-group--inline kanm-input-toggle">
-              <label class="kanm-checkbox" for="kanm-negocios-cambiar-password">
-                <input type="checkbox" id="kanm-negocios-cambiar-password" />
-                <span>Actualizar contrase?a</span>
-              </label>
-              <span class="kanm-input-help">Activa para definir una nueva contrase?a.</span>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-admin-usuario" id="kanm-negocios-admin-usuario-label">Usuario admin (opcional)</label>
+                <input type="text" id="kanm-negocios-admin-usuario" placeholder="admin.negocio" />
+                <span class="kanm-input-help" id="kanm-negocios-admin-usuario-help">
+                  Este usuario sera el admin principal del negocio.
+                </span>
+              </div>
+              <div class="kanm-input-group">
+                <label class="kanm-checkbox" for="kanm-negocios-cambiar-password">
+                  <input type="checkbox" id="kanm-negocios-cambiar-password" />
+                  <span>Actualizar contrasena</span>
+                </label>
+                <span class="kanm-input-help">Activa para definir una nueva contrasena.</span>
+              </div>
             </div>
             <div class="kanm-input-group">
               <label for="kanm-negocios-admin-password" id="kanm-negocios-admin-password-label">
-                Contrase?a admin (opcional)
+                Contrasena admin (opcional)
               </label>
               <div class="password-field">
                 <input
@@ -3823,17 +4198,15 @@
                 </button>
               </div>
               <span class="kanm-input-help" id="kanm-negocios-admin-password-help">
-                Solo se aplica si activas "Actualizar contrase?a".
+                Solo se aplica si activas "Actualizar contrasena".
               </span>
             </div>
-          </div>
-        </section>
-
-          <div class="kanm-modal-footer">
-            <div id="kanm-negocios-form-mensaje" class="kanm-subtitle"></div>
-            <button type="submit" class="kanm-button primary" id="kanm-negocios-btn-guardar">Guardar</button>
-          </div>
+          </section>
         </form>
+      </div>
+      <div class="kanm-modal-footer">
+        <div id="kanm-negocios-form-mensaje" class="kanm-subtitle"></div>
+        <button type="submit" class="kanm-button primary" id="kanm-negocios-btn-guardar" form="kanm-negocios-form">Guardar negocio</button>
       </div>
     </div>
   </div>
@@ -4652,7 +5025,7 @@
       }
     })();
   </script>
-  <script src="/js/admin.js?v=20260310a"></script>
+  <script src="/js/admin.js?v=20260428a"></script>
   <script src="/js/admin-facturacion-posium.js"></script>
   <script src="/js/admin-cotizaciones.js"></script>
   <script src="/js/admin-clientes.js"></script>

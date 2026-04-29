@@ -322,8 +322,8 @@ const createAnalisisExtensionRouter = ({
             GROUP BY dp.producto_id, COALESCE(pr.nombre, 'Sin nombre'),
                      COALESCE(pr.activo, 1), c.nombre
             ORDER BY ingresos DESC
-            LIMIT ?`,
-          [negocioId, negocioId, rango.desde, rango.hasta, limit]
+            LIMIT ${Number(limit)}`,
+          [negocioId, negocioId, rango.desde, rango.hasta]
         );
 
         const productos = (rows || []).map((row) => {
@@ -457,18 +457,24 @@ const createAnalisisExtensionRouter = ({
           [negocioId, negocioId, negocioId, rango.desde, rango.hasta]
         );
 
-        // Movimientos de inventario (compras vs salidas) para mermas
-        const movimientosRow = await db.get(
-          `SELECT
-                  SUM(CASE WHEN tipo = 'ENTRADA' THEN COALESCE(cantidad, 0) * COALESCE(costo_unitario, 0) ELSE 0 END) AS compras,
-                  SUM(CASE WHEN tipo = 'SALIDA'  THEN COALESCE(cantidad, 0) * COALESCE(costo_unitario, 0) ELSE 0 END) AS salidas,
-                  SUM(CASE WHEN tipo = 'AJUSTE' AND COALESCE(cantidad, 0) < 0
-                           THEN ABS(cantidad) * COALESCE(costo_unitario, 0) ELSE 0 END) AS mermas
-             FROM inventario_movimientos
-            WHERE negocio_id = ?
-              AND DATE(fecha) BETWEEN ? AND ?`,
-          [negocioId, rango.desde, rango.hasta]
-        );
+        // Movimientos de inventario (compras vs salidas) para mermas.
+        // La tabla empresa_inventario_movimientos usa empresa_id, no negocio_id.
+        // Como no siempre hay mapeo directo, usamos compras_inventario para entradas
+        // y un try/catch defensivo para que el endpoint no caiga.
+        let movimientosRow = { compras: 0, salidas: 0, mermas: 0 };
+        try {
+          const compras = await db.get(
+            `SELECT COALESCE(SUM(total), 0) AS total
+               FROM compras_inventario
+              WHERE negocio_id = ?
+                AND DATE(fecha) BETWEEN ? AND ?
+                AND COALESCE(estado, 'CONFIRMADA') <> 'ANULADA'`,
+            [negocioId, rango.desde, rango.hasta]
+          );
+          movimientosRow.compras = compras?.total || 0;
+        } catch (errMov) {
+          console.warn('[analytics/inventario] sin compras_inventario:', errMov.message);
+        }
 
         const valorInventario = roundDecimal(valorInventarioRow?.valor);
         const cogs = roundDecimal(cogsRow?.cogs);
@@ -1344,8 +1350,8 @@ const createAnalisisExtensionRouter = ({
         const margenNeg = await db.all(
           `SELECT pr.id, pr.nombre,
                   SUM(dp.cantidad) AS unidades,
-                  SUM(dp.cantidad * dp.precio - COALESCE(dp.descuento, 0)) AS ingresos,
-                  SUM(dp.cantidad * COALESCE(dp.costo_unitario_snapshot, pr.costo_promedio_actual, pr.costo_base, 0)) AS costo_total
+                  SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos,
+                  SUM(dp.cantidad * COALESCE(dp.costo_unitario_snapshot, pr.costo_promedio_actual, pr.costo_base_sin_itbis, 0)) AS costo_total
              FROM detalle_pedido dp
              JOIN pedidos p ON p.id = dp.pedido_id
              JOIN productos pr ON pr.id = dp.producto_id
@@ -1353,10 +1359,10 @@ const createAnalisisExtensionRouter = ({
               AND ${fechaBaseFor('p')} BETWEEN ? AND ?
               AND pr.activo = 1
             GROUP BY pr.id, pr.nombre
-           HAVING SUM(dp.cantidad * dp.precio - COALESCE(dp.descuento, 0)) -
-                  SUM(dp.cantidad * COALESCE(dp.costo_unitario_snapshot, pr.costo_promedio_actual, pr.costo_base, 0)) < 0
-            ORDER BY (SUM(dp.cantidad * dp.precio - COALESCE(dp.descuento, 0)) -
-                      SUM(dp.cantidad * COALESCE(dp.costo_unitario_snapshot, pr.costo_promedio_actual, pr.costo_base, 0))) ASC
+           HAVING SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) -
+                  SUM(dp.cantidad * COALESCE(dp.costo_unitario_snapshot, pr.costo_promedio_actual, pr.costo_base_sin_itbis, 0)) < 0
+            ORDER BY (SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) -
+                      SUM(dp.cantidad * COALESCE(dp.costo_unitario_snapshot, pr.costo_promedio_actual, pr.costo_base_sin_itbis, 0))) ASC
             LIMIT 30`,
           [negocioId, negocioId, rango.desde, rango.hasta]
         );
@@ -1383,16 +1389,30 @@ const createAnalisisExtensionRouter = ({
         }
 
         // ---------- 3) Cuentas por cobrar > 90 dias ----------
+        // clientes_deudas usa columna `fecha`. El saldo se calcula como
+        // monto_total - SUM(abonos) por deuda; un solo saldo agregado por cliente
+        // se obtiene de una subquery con LEFT JOIN a clientes_abonos.
         const aging = await db.get(
           `SELECT
-              SUM(CASE WHEN DATEDIFF(CURDATE(), fecha_creacion) > 90 THEN saldo ELSE 0 END) AS bucket_90_plus,
-              SUM(CASE WHEN DATEDIFF(CURDATE(), fecha_creacion) BETWEEN 61 AND 90 THEN saldo ELSE 0 END) AS bucket_61_90,
-              COUNT(CASE WHEN DATEDIFF(CURDATE(), fecha_creacion) > 90 THEN 1 ELSE NULL END) AS cuentas_90_plus,
-              COUNT(CASE WHEN DATEDIFF(CURDATE(), fecha_creacion) > 60 THEN 1 ELSE NULL END) AS cuentas_60_plus,
-              SUM(saldo) AS total_saldo
-            FROM clientes_deudas
-           WHERE negocio_id = ? AND saldo > 0`,
-          [negocioId]
+              SUM(CASE WHEN DATEDIFF(CURDATE(), d.fecha) > 90 THEN saldo_pendiente ELSE 0 END) AS bucket_90_plus,
+              SUM(CASE WHEN DATEDIFF(CURDATE(), d.fecha) BETWEEN 61 AND 90 THEN saldo_pendiente ELSE 0 END) AS bucket_61_90,
+              COUNT(CASE WHEN DATEDIFF(CURDATE(), d.fecha) > 90 THEN 1 ELSE NULL END) AS cuentas_90_plus,
+              COUNT(CASE WHEN DATEDIFF(CURDATE(), d.fecha) > 60 THEN 1 ELSE NULL END) AS cuentas_60_plus,
+              SUM(saldo_pendiente) AS total_saldo
+            FROM (
+              SELECT d.id, d.fecha,
+                     GREATEST(d.monto_total - COALESCE(a.total_abonos, 0), 0) AS saldo_pendiente
+                FROM clientes_deudas d
+                LEFT JOIN (
+                  SELECT deuda_id, SUM(monto) AS total_abonos
+                    FROM clientes_abonos
+                   WHERE negocio_id = ?
+                   GROUP BY deuda_id
+                ) a ON a.deuda_id = d.id
+               WHERE d.negocio_id = ?
+            ) d
+           WHERE saldo_pendiente > 0`,
+          [negocioId, negocioId]
         );
         if (aging && safeNumber(aging.bucket_90_plus) > 0) {
           alertas.push({
@@ -1466,9 +1486,9 @@ const createAnalisisExtensionRouter = ({
               AND g1.id < g2.id
               AND ROUND(g1.monto, 2) = ROUND(g2.monto, 2)
               AND COALESCE(g1.proveedor, '') = COALESCE(g2.proveedor, '')
-              AND ABS(DATEDIFF(g1.fecha_gasto, g2.fecha_gasto)) <= 7
+              AND ABS(DATEDIFF(g1.fecha, g2.fecha)) <= 7
             WHERE g1.negocio_id = ?
-              AND g1.fecha_gasto BETWEEN ? AND ?`,
+              AND g1.fecha BETWEEN ? AND ?`,
           [negocioId, rango.desde, rango.hasta]
         );
         if (dupRow && safeNumber(dupRow.cantidad) > 0) {
@@ -1604,12 +1624,25 @@ const createAnalisisExtensionRouter = ({
         }
 
         // ---------- 9) Pedidos pendientes de cobro hace mas de 30 dias ----------
+        // Usa fecha real y calcula saldo dinamico.
         const pendientes = await db.get(
-          `SELECT COUNT(*) AS cantidad, SUM(saldo) AS total
-             FROM clientes_deudas
-            WHERE negocio_id = ? AND saldo > 0
-              AND DATEDIFF(CURDATE(), fecha_creacion) BETWEEN 31 AND 90`,
-          [negocioId]
+          `SELECT COUNT(*) AS cantidad, SUM(saldo_pendiente) AS total
+             FROM (
+               SELECT d.id,
+                      GREATEST(d.monto_total - COALESCE(a.total_abonos, 0), 0) AS saldo_pendiente,
+                      d.fecha
+                 FROM clientes_deudas d
+                 LEFT JOIN (
+                   SELECT deuda_id, SUM(monto) AS total_abonos
+                     FROM clientes_abonos
+                    WHERE negocio_id = ?
+                    GROUP BY deuda_id
+                 ) a ON a.deuda_id = d.id
+                WHERE d.negocio_id = ?
+             ) d
+            WHERE saldo_pendiente > 0
+              AND DATEDIFF(CURDATE(), d.fecha) BETWEEN 31 AND 90`,
+          [negocioId, negocioId]
         );
         if (pendientes && safeNumber(pendientes.cantidad) > 0) {
           alertas.push({
