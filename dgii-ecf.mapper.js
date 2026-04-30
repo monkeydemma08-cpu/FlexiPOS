@@ -2,7 +2,25 @@
 // dgii-ecf.mapper.js — Maps POS pedido data to e-CF XML payload
 // ---------------------------------------------------------------------------
 
-const { normalizeDateDgii, formatMoney } = require('./dgii-core');
+const {
+  normalizeDateDgii,
+  formatMoney,
+  normalizeRncDgii,
+  normalizeRazonSocial,
+} = require('./dgii-core');
+
+// Best-effort syncrono: arma identidad emisor SIN tocar DB. La ruta debe
+// pasar `emisorIdentidad` ya resuelto por `resolveEmisorIdentidad()` cuando
+// quiere garantizar que el RazonSocial coincida con lo registrado en DGII.
+const resolveEmisorIdentidadSync = ({ negocio = {}, configDgii = {} } = {}) => ({
+  rnc: normalizeRncDgii(configDgii?.rnc_emisor || negocio?.rnc || ''),
+  razonSocial: normalizeRazonSocial(
+    configDgii?.razon_social || negocio?.razon_social || negocio?.nombre || ''
+  ),
+  nombreComercial: normalizeRazonSocial(
+    configDgii?.nombre_comercial || negocio?.nombre_comercial || ''
+  ),
+});
 
 // ---------------------------------------------------------------------------
 // Tipo comprobante mapping
@@ -125,19 +143,34 @@ const deriveTipoPago = (pedido) => {
 // ---------------------------------------------------------------------------
 
 const deriveIndicadorMontoGravado = (pedido) => {
-  // 0 = montos no incluyen ITBIS (precios netos), 1 = montos incluyen ITBIS
-  // En este sistema: subtotal NO incluye ITBIS, impuesto se suma aparte
-  // (subtotal + impuesto = total). Por lo tanto los precios son NETOS -> '0'
-  return '0';
+  // 0 = montos NO incluyen ITBIS (precios netos)
+  // 1 = montos SI incluyen ITBIS (precios brutos)
+  //
+  // En este POS los precios mostrados al cliente y guardados en
+  // detalle_pedido.precio_unitario YA INCLUYEN ITBIS. El total que el
+  // cliente paga = sum(item.precio_unitario * cantidad) - descuentos
+  // (sin sumar 18% encima). El campo pedido.subtotal es la base sin
+  // ITBIS calculada como total/1.18, e impuesto es la diferencia.
+  //
+  // Por eso debe ir IndicadorMontoGravado='1' y los totales del header
+  // se decomponen del bruto: MontoGravadoI1 = sumBruto / 1.18,
+  // TotalITBIS1 = sumBruto - MontoGravadoI1, MontoTotal = sumBruto.
+  return '1';
 };
+
+// Tasa ITBIS estandar (18%). Se usa para decomponer precios con ITBIS
+// incluido en base + impuesto cuando IndicadorMontoGravado='1'.
+const ITBIS_RATE = 0.18;
+const ITBIS_DIVISOR = 1 + ITBIS_RATE; // 1.18
 
 // ---------------------------------------------------------------------------
 // Main mapper: pedido → e-CF payload (flat key-value)
 // ---------------------------------------------------------------------------
 
-const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData, configDgii }) => {
+const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData, configDgii, emisorIdentidad = null }) => {
   const tipoEcf = ecfTipoNumerico(pedido.ecf_tipo || determineTipoEcf(pedido.tipo_comprobante));
   const fechaEmision = normalizeDateDgii(pedido.fecha_factura || pedido.fecha_cierre || pedido.fecha_creacion, { fallbackToday: true });
+  const ident = emisorIdentidad || resolveEmisorIdentidadSync({ negocio, configDgii });
 
   const payload = {};
 
@@ -179,10 +212,13 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
     }
   }
 
-  // Emisor
-  const rncEmisor = configDgii?.rnc_emisor || negocio.rnc || '';
-  payload.RNCEmisor = rncEmisor;
-  payload.RazonSocialEmisor = negocio.nombre || '';
+  // Emisor — usa el resolver para garantizar coherencia RNC <-> RazonSocial
+  // (la DGII rechaza si no coinciden con su registro oficial)
+  payload.RNCEmisor = ident.rnc;
+  payload.RazonSocialEmisor = ident.razonSocial;
+  if (ident.nombreComercial && ident.nombreComercial !== ident.razonSocial) {
+    payload.NombreComercial = ident.nombreComercial;
+  }
   if (negocio.direccion) payload.DireccionEmisor = negocio.direccion;
   if (negocio.telefono) payload['TelefonoEmisor[0]'] = negocio.telefono;
   payload.FechaEmision = fechaEmision;
@@ -277,11 +313,19 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
   // Descuentos globales (DoR) — afectan MontoTotal pero no la base gravada del header
   const descuentoMonto = Number(pedido.descuento_monto || 0);
 
-  // Totales — DERIVADOS de las sumas reales de los items (NO de pedido.subtotal/impuesto)
-  // para garantizar que el XSD de DGII valide:
-  //   MontoGravadoI1 == sum(MontoItem WHERE IndicadorFacturacion='1')
-  //   TotalITBIS1   == round(MontoGravadoI1 * 0.18, 2)
-  //   MontoTotal    == sum(items por categoria) + ITBIS - descuentos globales
+  // ----------------------------------------------------------------
+  // Totales — Los precios del POS YA INCLUYEN ITBIS (IndicadorMontoGravado='1').
+  // Se decomponen los items gravados al 18% en base imponible + ITBIS:
+  //   MontoGravadoI1 = round(sumGravado18Bruto / 1.18, 2)
+  //   TotalITBIS1   = sumGravado18Bruto - MontoGravadoI1
+  //   MontoTotal    = sum(MontoItem) - descuentos globales
+  //
+  // Items exentos / tasa cero NO se decomponen — su precio ya es el final.
+  //
+  // El XSD de DGII valida:
+  //   sum(MontoItem WHERE IndicadorFacturacion='1') = MontoGravadoI1 + TotalITBIS1
+  //   MontoTotal = (MontoGravadoI1 + TotalITBIS1) + (resto items) - descuentos
+  // ----------------------------------------------------------------
   const tiposSoloExento = ['43', '44', '47'];
   let totalItbis1 = 0;
 
@@ -300,10 +344,11 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
     payload.TotalITBIS = '0.00';
     payload.TotalITBIS3 = '0.00';
   } else if (sumGravado18 > 0) {
-    // ITBIS calculado sobre la suma real de items gravados (no usar pedido.impuesto)
-    totalItbis1 = formatMoney(sumGravado18 * 0.18);
-    payload.MontoGravadoTotal = sumGravado18.toFixed(2);
-    payload.MontoGravadoI1 = sumGravado18.toFixed(2);
+    // Decomponer el bruto en base imponible + ITBIS (precios incluyen ITBIS).
+    const baseGravadoI1 = formatMoney(sumGravado18 / ITBIS_DIVISOR);
+    totalItbis1 = formatMoney(sumGravado18 - baseGravadoI1);
+    payload.MontoGravadoTotal = baseGravadoI1.toFixed(2);
+    payload.MontoGravadoI1 = baseGravadoI1.toFixed(2);
     payload.ITBIS1 = '18';
     payload.TotalITBIS = totalItbis1.toFixed(2);
     payload.TotalITBIS1 = totalItbis1.toFixed(2);
@@ -320,14 +365,15 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
     payload.MontoExento = formatMoney(sumExento + sumNoFacturable).toFixed(2);
   }
 
-  // MontoTotal — derivado de las sumas de items + ITBIS calculado - descuentos globales
-  // Esto garantiza coherencia con todas las lineas del detalle.
+  // MontoTotal — sum(MontoItem) - descuentos. Los MontoItem YA incluyen ITBIS,
+  // por lo tanto NO se vuelve a sumar totalItbis1.
   let montoTotalCalc;
   if (tipoEcf === '46') {
     montoTotalCalc = formatMoney(sumExento + sumTasaCero + sumNoFacturable - descuentoMonto);
   } else {
+    // sumGravado18 ya contiene el ITBIS (precios brutos), no se suma totalItbis1 aparte.
     montoTotalCalc = formatMoney(
-      sumGravado18 + sumTasaCero + sumExento + sumNoFacturable + totalItbis1 - descuentoMonto
+      sumGravado18 + sumTasaCero + sumExento + sumNoFacturable - descuentoMonto
     );
   }
   payload.MontoTotal = montoTotalCalc.toFixed(2);
@@ -347,9 +393,10 @@ const buildEcfPayloadFromPedido = ({ pedido, detalle, cliente, negocio, encfData
 // Resumen FC mapper (for E32 < 250k)
 // ---------------------------------------------------------------------------
 
-const buildResumenFcPayload = ({ pedido, cliente, negocio, encfData, configDgii, codigoSeguridadeCF, ecfPayload = null }) => {
+const buildResumenFcPayload = ({ pedido, cliente, negocio, encfData, configDgii, codigoSeguridadeCF, ecfPayload = null, emisorIdentidad = null }) => {
   const tipoEcf = ecfTipoNumerico(pedido.ecf_tipo || 'E32');
   const fechaEmision = normalizeDateDgii(pedido.fecha_factura || pedido.fecha_cierre || pedido.fecha_creacion, { fallbackToday: true });
+  const ident = emisorIdentidad || resolveEmisorIdentidadSync({ negocio, configDgii });
 
   const payload = {};
 
@@ -359,9 +406,8 @@ const buildResumenFcPayload = ({ pedido, cliente, negocio, encfData, configDgii,
   payload.TipoPago = deriveTipoPago(pedido);
   Object.assign(payload, buildFormasPago(pedido));
 
-  const rncEmisor = configDgii?.rnc_emisor || negocio.rnc || '';
-  payload.RNCEmisor = rncEmisor;
-  payload.RazonSocialEmisor = negocio.nombre || '';
+  payload.RNCEmisor = ident.rnc;
+  payload.RazonSocialEmisor = ident.razonSocial;
   payload.FechaEmision = fechaEmision;
 
   if (cliente?.documento) {
@@ -411,8 +457,8 @@ const buildResumenFcPayload = ({ pedido, cliente, negocio, encfData, configDgii,
 // Nota de credito / debito mapper
 // ---------------------------------------------------------------------------
 
-const buildNotaEcfPayload = ({ pedido, detalle, cliente, negocio, encfData, configDgii, referenciaEncf, referenciaFecha, codigoModificacion }) => {
-  const payload = buildEcfPayloadFromPedido({ pedido, detalle, cliente, negocio, encfData, configDgii });
+const buildNotaEcfPayload = ({ pedido, detalle, cliente, negocio, encfData, configDgii, referenciaEncf, referenciaFecha, codigoModificacion, emisorIdentidad = null }) => {
+  const payload = buildEcfPayloadFromPedido({ pedido, detalle, cliente, negocio, encfData, configDgii, emisorIdentidad });
 
   if (referenciaEncf) payload.NCFModificado = referenciaEncf;
   // FechaNCFModificado es requerido cuando hay NCFModificado
@@ -491,10 +537,13 @@ const buildEcfPayloadDirecto = ({
     direccion: comprador.direccion || null,
   };
 
-  // Pseudo-negocio (datos del emisor)
+  // Pseudo-negocio (datos del emisor) — incluir razon_social oficial DGII
+  // para que el resolver del mapper la use como RazonSocialEmisor
   const pseudoNegocio = {
     rnc: emisor.rnc || configDgii?.rnc_emisor || '',
     nombre: emisor.nombre || '',
+    razon_social: emisor.razon_social || configDgii?.razon_social || emisor.nombre || '',
+    nombre_comercial: emisor.nombre_comercial || configDgii?.nombre_comercial || null,
     direccion: emisor.direccion || null,
     telefono: emisor.telefono || null,
   };

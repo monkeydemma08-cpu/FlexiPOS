@@ -318,6 +318,9 @@ const histCocinaCocineroSelect = document.getElementById('hist-cocina-cocinero')
 const dgiiConfigUsuarioInput = document.getElementById('dgii-config-usuario');
 const dgiiConfigClaveInput = document.getElementById('dgii-config-clave');
 const dgiiConfigRncInput = document.getElementById('dgii-config-rnc');
+const dgiiConfigRazonSocialInput = document.getElementById('dgii-config-razon-social');
+const dgiiConfigNombreComercialInput = document.getElementById('dgii-config-nombre-comercial');
+const dgiiConfigBuscarRazonBtn = document.getElementById('dgii-config-buscar-razon');
 const dgiiConfigModoInput = document.getElementById('dgii-config-modo');
 const dgiiConfigP12Input = document.getElementById('dgii-config-p12');
 const dgiiConfigP12PasswordInput = document.getElementById('dgii-config-p12-password');
@@ -736,6 +739,8 @@ const cargarConfigDgii = async () => {
     dgiiConfigUsuarioInput.value = config.usuario_certificacion || '';
     if (dgiiConfigClaveInput) dgiiConfigClaveInput.value = '';
     if (dgiiConfigRncInput) dgiiConfigRncInput.value = config.rnc_emisor || '';
+    if (dgiiConfigRazonSocialInput) dgiiConfigRazonSocialInput.value = config.razon_social || '';
+    if (dgiiConfigNombreComercialInput) dgiiConfigNombreComercialInput.value = config.nombre_comercial || '';
     if (dgiiConfigModoInput) dgiiConfigModoInput.value = config.modo_autenticacion || 'AUTO';
     if (dgiiConfigP12PasswordInput) dgiiConfigP12PasswordInput.value = '';
 
@@ -745,6 +750,7 @@ const cargarConfigDgii = async () => {
       parts.push(`Certificado guardado${config.p12_nombre_archivo ? `: ${config.p12_nombre_archivo}` : ''}`);
     }
     if (config.token_expira_en) parts.push(`Token cache hasta ${formatDateTime(config.token_expira_en)}`);
+    if (!config.razon_social) parts.push('Falta Razon Social oficial DGII');
     setMessage(dgiiConfigMensaje, parts.join(' | '), 'info');
   } catch (error) {
     console.error('Error cargando configuracion DGII:', error);
@@ -763,6 +769,8 @@ const guardarConfigDgii = async () => {
       usuario_certificacion: dgiiConfigUsuarioInput?.value?.trim() || '',
       clave_certificacion: dgiiConfigClaveInput?.value || undefined,
       rnc_emisor: dgiiConfigRncInput?.value?.trim() || '',
+      razon_social: dgiiConfigRazonSocialInput?.value?.trim() || '',
+      nombre_comercial: dgiiConfigNombreComercialInput?.value?.trim() || '',
       modo_autenticacion: dgiiConfigModoInput?.value || 'AUTO',
       p12_password: dgiiConfigP12PasswordInput?.value || undefined,
       p12_nombre_archivo: p12File ? p12File.name : undefined,
@@ -787,6 +795,46 @@ const guardarConfigDgii = async () => {
     setMessage(dgiiConfigMensaje, error.message || 'No se pudo guardar configuracion DGII.', 'error');
   } finally {
     if (dgiiConfigGuardarBtn) dgiiConfigGuardarBtn.disabled = false;
+  }
+};
+
+const buscarRazonSocialDgiiPorRnc = async () => {
+  if (!dgiiConfigBuscarRazonBtn) return;
+  const rnc = (dgiiConfigRncInput?.value || '').replace(/[^0-9]/g, '').trim();
+  if (!rnc) {
+    setMessage(dgiiConfigMensaje, 'Ingrese un RNC primero (solo digitos).', 'error');
+    return;
+  }
+  try {
+    dgiiConfigBuscarRazonBtn.disabled = true;
+    setMessage(dgiiConfigMensaje, `Buscando RNC ${rnc} en cache DGII...`, 'info');
+    const resp = await fetchConAutorizacion(`/api/dgii/paso2/lookup-rnc/${encodeURIComponent(rnc)}`);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se encontro el RNC en el cache DGII.');
+    }
+    const found = data?.resultado || {};
+    const razon = String(found.razon_social || '').trim();
+    const comercial = String(found.nombre_comercial || '').trim();
+    if (!razon) {
+      setMessage(dgiiConfigMensaje, `RNC ${rnc} no esta en el cache DGII (use el actualizador de RNCs primero).`, 'error');
+      return;
+    }
+    if (dgiiConfigRazonSocialInput) {
+      dgiiConfigRazonSocialInput.value = razon;
+    }
+    if (comercial && dgiiConfigNombreComercialInput && !dgiiConfigNombreComercialInput.value) {
+      dgiiConfigNombreComercialInput.value = comercial;
+    }
+    const partes = [`Razon Social DGII: ${razon}`];
+    if (comercial) partes.push(`Nombre Comercial: ${comercial}`);
+    partes.push('Recuerda guardar la configuracion para aplicar los cambios.');
+    setMessage(dgiiConfigMensaje, partes.join(' | '), 'info');
+  } catch (error) {
+    console.error('Error buscando razon social en cache DGII:', error);
+    setMessage(dgiiConfigMensaje, error.message || 'No se pudo buscar el RNC en cache DGII.', 'error');
+  } finally {
+    if (dgiiConfigBuscarRazonBtn) dgiiConfigBuscarRazonBtn.disabled = false;
   }
 };
 
@@ -6247,6 +6295,16 @@ const renderRankingList = (container, items, formatter) => {
     const row = document.createElement('div');
     row.className = 'analisis-ranking-item';
 
+    // Si el formatter incluye `metodo`, marcamos el row como interactivo para
+    // que el listener delegado en el contenedor abra el modal.
+    if (data.metodo) {
+      row.dataset.metodo = data.metodo;
+      row.style.cursor = 'pointer';
+      row.title = 'Click para ver el detalle';
+      row.setAttribute('role', 'button');
+      row.setAttribute('tabindex', '0');
+    }
+
     const pos = document.createElement('span');
     pos.className = 'ranking-pos';
     pos.textContent = String(index + 1);
@@ -6352,6 +6410,141 @@ if (modalVentasProductos) {
 }
 if (ventasProductosBuscar) ventasProductosBuscar.addEventListener('input', renderVentasProductosTabla);
 if (ventasProductosOrden) ventasProductosOrden.addEventListener('change', renderVentasProductosTabla);
+
+// ---------------------------------------------------------------------------
+// Modal: Ventas por metodo de pago (efectivo / tarjeta / transferencia)
+// ---------------------------------------------------------------------------
+const modalVentasMetodo = document.getElementById('modal-ventas-metodo');
+const modalVentasMetodoTitulo = document.getElementById('modal-ventas-metodo-titulo');
+const modalVentasMetodoCerrar = document.getElementById('modal-ventas-metodo-cerrar');
+const modalVentasMetodoCargando = document.getElementById('modal-ventas-metodo-cargando');
+const modalVentasMetodoContenido = document.getElementById('modal-ventas-metodo-contenido');
+const modalVentasMetodoResumen = document.getElementById('modal-ventas-metodo-resumen');
+const modalVentasMetodoPedidosTbody = document.getElementById('modal-ventas-metodo-pedidos-tbody');
+const modalVentasMetodoAbonosTbody = document.getElementById('modal-ventas-metodo-abonos-tbody');
+
+const escapeHtmlSimple = (str) => {
+  const s = String(str == null ? '' : str);
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+};
+
+const formatFechaCorta = (valor) => {
+  if (!valor) return '';
+  const d = new Date(valor);
+  if (Number.isNaN(d.getTime())) return String(valor);
+  return d.toLocaleString('es-DO', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+};
+
+const cerrarModalVentasMetodo = () => {
+  if (!modalVentasMetodo) return;
+  modalVentasMetodo.classList.remove('is-visible');
+  modalVentasMetodo.hidden = true;
+};
+
+const abrirModalVentasMetodo = async (metodo) => {
+  if (!modalVentasMetodo) return;
+  const metodoNombre = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia' }[metodo] || metodo;
+  if (modalVentasMetodoTitulo) modalVentasMetodoTitulo.textContent = `Ventas por ${metodoNombre}`;
+  if (modalVentasMetodoResumen) modalVentasMetodoResumen.innerHTML = '';
+  if (modalVentasMetodoPedidosTbody) modalVentasMetodoPedidosTbody.innerHTML = '';
+  if (modalVentasMetodoAbonosTbody) modalVentasMetodoAbonosTbody.innerHTML = '';
+  if (modalVentasMetodoCargando) modalVentasMetodoCargando.hidden = false;
+  if (modalVentasMetodoContenido) modalVentasMetodoContenido.hidden = true;
+
+  modalVentasMetodo.hidden = false;
+  requestAnimationFrame(() => modalVentasMetodo.classList.add('is-visible'));
+
+  try {
+    const params = new URLSearchParams();
+    params.set('metodo', metodo);
+    if (analisisDesdeInput?.value) params.set('from', analisisDesdeInput.value);
+    if (analisisHastaInput?.value) params.set('to', analisisHastaInput.value);
+    const resp = await fetchConAutorizacion(`/api/admin/analytics/ventas-por-metodo-pago?${params.toString()}`);
+    if (!resp.ok) throw new Error('No se pudo cargar el detalle');
+    const data = await resp.json();
+
+    if (modalVentasMetodoResumen) {
+      const r = data.resumen || {};
+      modalVentasMetodoResumen.innerHTML = `
+        <div style="background:var(--surface-soft);padding:8px 12px;border-radius:8px">
+          <strong>Total:</strong> ${formatCurrency(r.total || 0)}
+        </div>
+        <div style="background:var(--surface-soft);padding:8px 12px;border-radius:8px">
+          <strong>Ventas directas:</strong> ${formatCurrency(r.total_ventas_directas || 0)} (${r.cantidad_pedidos || 0})
+        </div>
+        <div style="background:var(--surface-soft);padding:8px 12px;border-radius:8px">
+          <strong>Abonos:</strong> ${formatCurrency(r.total_abonos || 0)} (${r.cantidad_abonos || 0})
+        </div>
+      `;
+    }
+
+    if (modalVentasMetodoPedidosTbody) {
+      if (!data.pedidos?.length) {
+        modalVentasMetodoPedidosTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;padding:16px">Sin ventas directas en este periodo</td></tr>';
+      } else {
+        modalVentasMetodoPedidosTbody.innerHTML = data.pedidos.map((p) => `
+          <tr>
+            <td>${escapeHtmlSimple(formatFechaCorta(p.fecha))}</td>
+            <td>${p.cuenta_id || p.id || ''}</td>
+            <td>${escapeHtmlSimple(p.cliente || p.mesa || '-')}</td>
+            <td>${escapeHtmlSimple(p.ncf || '-')}</td>
+            <td style="text-align:right">${formatCurrency(p.monto_metodo)}</td>
+            <td style="text-align:right">${formatCurrency(p.total)}</td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    if (modalVentasMetodoAbonosTbody) {
+      if (!data.abonos?.length) {
+        modalVentasMetodoAbonosTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;padding:16px">Sin abonos en este periodo</td></tr>';
+      } else {
+        modalVentasMetodoAbonosTbody.innerHTML = data.abonos.map((a) => `
+          <tr>
+            <td>${escapeHtmlSimple(formatFechaCorta(a.fecha))}</td>
+            <td>${escapeHtmlSimple(a.cliente_nombre || '-')}</td>
+            <td>${escapeHtmlSimple(a.cliente_documento || '-')}</td>
+            <td>${a.pedido_id || '-'}</td>
+            <td>${escapeHtmlSimple(a.notas || '-')}</td>
+            <td style="text-align:right">${formatCurrency(a.monto)}</td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    if (modalVentasMetodoContenido) modalVentasMetodoContenido.hidden = false;
+  } catch (err) {
+    if (modalVentasMetodoResumen) {
+      modalVentasMetodoResumen.innerHTML = `<div style="color:#c00">${escapeHtmlSimple(err.message || 'Error al cargar el detalle')}</div>`;
+    }
+  } finally {
+    if (modalVentasMetodoCargando) modalVentasMetodoCargando.hidden = true;
+  }
+};
+
+if (modalVentasMetodoCerrar) modalVentasMetodoCerrar.addEventListener('click', cerrarModalVentasMetodo);
+if (modalVentasMetodo) {
+  modalVentasMetodo.addEventListener('click', (e) => {
+    if (e.target === modalVentasMetodo) cerrarModalVentasMetodo();
+  });
+}
+// Click delegado: cualquier item con data-metodo dentro de #analisis-metodos-pago abre el modal
+if (analisisMetodosPago) {
+  analisisMetodosPago.addEventListener('click', (e) => {
+    const item = e.target.closest('[data-metodo]');
+    if (!item) return;
+    const metodo = item.dataset.metodo;
+    if (metodo) abrirModalVentasMetodo(metodo);
+  });
+}
 
 const renderAlertasAnalisis = (alertas, container = analisisAlertas) => {
   if (!container) return;
@@ -6568,10 +6761,10 @@ const renderAnalisis = (data) => {
   }));
 
   renderRankingList(analisisMetodosPago, [
-    { label: 'Efectivo', value: formatCurrency(data.metodos_pago?.efectivo || 0) },
-    { label: 'Tarjeta', value: formatCurrency(data.metodos_pago?.tarjeta || 0) },
-    { label: 'Transferencia', value: formatCurrency(data.metodos_pago?.transferencia || 0) },
-  ], (item) => ({ label: item.label, value: item.value }));
+    { label: 'Efectivo',      value: formatCurrency(data.metodos_pago?.efectivo || 0),      metodo: 'efectivo' },
+    { label: 'Tarjeta',       value: formatCurrency(data.metodos_pago?.tarjeta || 0),       metodo: 'tarjeta' },
+    { label: 'Transferencia', value: formatCurrency(data.metodos_pago?.transferencia || 0), metodo: 'transferencia' },
+  ], (item) => ({ label: item.label, value: item.value, metodo: item.metodo }));
 
   renderRankingList(analisisTopCategorias, gastosData.top_categorias || [], (item) => ({
     label: item.categoria || 'Sin categoria',
@@ -11330,6 +11523,11 @@ feConfigGuardarBtn?.addEventListener('click', (event) => {
 dgiiConfigGuardarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   guardarConfigDgii();
+});
+
+dgiiConfigBuscarRazonBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  buscarRazonSocialDgiiPorRnc();
 });
 
 dgiiSemillaDescargarBtn?.addEventListener('click', (event) => {

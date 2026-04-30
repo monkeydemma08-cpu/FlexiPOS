@@ -301,6 +301,140 @@ const computeCodigoSeguridadeCF = (signatureValue = '') => {
 };
 
 // ---------------------------------------------------------------------------
+// Normalizadores DGII (RNC, eNCF, monto, fecha) — usados en XML, payload y QR
+// ---------------------------------------------------------------------------
+
+// RNC: la DGII espera SOLO digitos. 9 = empresa, 11 = persona fisica.
+// Strips espacios, guiones y cualquier caracter no numerico.
+const normalizeRncDgii = (value = '') => String(value || '').replace(/[^0-9]/g, '');
+
+// eNCF: la DGII espera el formato 'E' + 2 digitos tipo + 10 digitos secuencia (13 chars).
+// Forzamos uppercase y eliminamos espacios.
+const normalizeENCF = (value = '') => String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+
+// Razon Social: trim, colapsar espacios multiples y limitar a 150 chars (el XSD permite 150).
+// NUNCA truncar arbitrariamente — solo si excede.
+const normalizeRazonSocial = (value = '') => {
+  const raw = String(value || '').trim().replace(/\s+/g, ' ');
+  return raw.length > 150 ? raw.slice(0, 150) : raw;
+};
+
+// Monto para QR: la DGII espera el monto sin separadores de miles, con punto decimal.
+// Acepta strings con coma decimal o thousand separators y los normaliza.
+const normalizeMontoTotalQr = (value = 0) => {
+  if (value == null || value === '') return '0.00';
+  let str = String(value).trim();
+  // Detectar formato espanol con coma decimal: "1.234,56" -> "1234.56"
+  if (/,\d{1,2}$/.test(str) && str.includes('.')) {
+    str = str.replace(/\./g, '').replace(',', '.');
+  } else {
+    // Quitar comas que sean separadores de miles
+    str = str.replace(/,/g, '');
+  }
+  const num = Number(str);
+  if (!Number.isFinite(num)) return '0.00';
+  return num.toFixed(2);
+};
+
+// ---------------------------------------------------------------------------
+// Resolver de identidad del emisor
+//
+// La DGII rechaza si "RNCEmisor no guarda relacion con nombre o razon social"
+// (es decir, si la razon social que enviamos NO coincide con la que la DGII
+// tiene registrada para ese RNC). Por eso buscamos el nombre oficial en este
+// orden de prioridad:
+//
+//   1) configDgii.razon_social        — Razon social oficial DGII configurada por admin
+//   2) negocio.razon_social           — Razon social legal del negocio
+//   3) dgii_rnc_cache.nombre_o_razon_social   — Cache oficial DGII (autoritativo)
+//   4) negocio.nombre                 — Fallback: nombre comercial
+// ---------------------------------------------------------------------------
+const resolveEmisorIdentidad = async ({ negocio = {}, configDgii = {}, db = null } = {}) => {
+  const rnc = normalizeRncDgii(configDgii?.rnc_emisor || negocio?.rnc || '');
+
+  let razonSocial = normalizeRazonSocial(
+    configDgii?.razon_social || negocio?.razon_social || ''
+  );
+  let nombreComercial = normalizeRazonSocial(
+    configDgii?.nombre_comercial || negocio?.nombre_comercial || ''
+  );
+  let fuente = razonSocial ? 'config_o_negocio' : null;
+
+  // Si todavia no tenemos razon social oficial, consultar el cache DGII
+  if (!razonSocial && rnc && db && typeof db.get === 'function') {
+    try {
+      const cacheRow = await db.get(
+        'SELECT nombre_o_razon_social, nombre_comercial FROM dgii_rnc_cache WHERE documento = ? LIMIT 1',
+        [rnc]
+      );
+      if (cacheRow?.nombre_o_razon_social) {
+        razonSocial = normalizeRazonSocial(cacheRow.nombre_o_razon_social);
+        fuente = 'dgii_rnc_cache';
+        if (!nombreComercial && cacheRow.nombre_comercial) {
+          nombreComercial = normalizeRazonSocial(cacheRow.nombre_comercial);
+        }
+      }
+    } catch (err) {
+      // tabla puede no existir o estar vacia; degradamos al fallback
+    }
+  }
+
+  // Ultimo fallback: nombre comercial del negocio
+  if (!razonSocial) {
+    razonSocial = normalizeRazonSocial(negocio?.nombre || '');
+    fuente = 'negocio_nombre';
+  }
+
+  return {
+    rnc,
+    razonSocial,
+    nombreComercial,
+    fuente,
+  };
+};
+
+// Construye la URL del QR con valores ya normalizados, garantizando que el
+// formato sea exactamente el que DGII espera (sin lo cual el portal de
+// validacion responde "No fue encontrada la Factura").
+const DGII_QR_HOST_OFICIAL = 'https://ecf.dgii.gov.do';
+const buildQrUrlNormalizado = ({
+  ambiente = 'CerteCF',
+  flujo = 'ECF_NORMAL',
+  rncEmisor,
+  rncComprador = null,
+  encf,
+  fechaEmision,
+  montoTotal,
+  fechaFirma = null,
+  codigoSeguridad,
+  hostOverride = null,
+} = {}) => {
+  const host = hostOverride || DGII_QR_HOST_OFICIAL;
+  const rncE = normalizeRncDgii(rncEmisor);
+  const encfNorm = normalizeENCF(encf);
+  const monto = normalizeMontoTotalQr(montoTotal);
+  const codSeg = String(codigoSeguridad || '').trim();
+  const params = new URLSearchParams();
+  params.set('RncEmisor', rncE);
+
+  if (flujo === 'FC_MENOR_250K') {
+    params.set('ENCF', encfNorm);
+    params.set('MontoTotal', monto);
+    params.set('CodigoSeguridad', codSeg);
+    return `${host}/${ambiente}/ConsultaTimbreFC?${params.toString()}`;
+  }
+
+  const rncC = normalizeRncDgii(rncComprador);
+  if (rncC) params.set('RncComprador', rncC);
+  params.set('ENCF', encfNorm);
+  params.set('FechaEmision', String(fechaEmision || ''));
+  params.set('MontoTotal', monto);
+  if (fechaFirma) params.set('FechaFirma', String(fechaFirma));
+  params.set('CodigoSeguridad', codSeg);
+  return `${host}/${ambiente}/ConsultaTimbre?${params.toString()}`;
+};
+
+// ---------------------------------------------------------------------------
 // Network
 // ---------------------------------------------------------------------------
 
@@ -939,6 +1073,14 @@ module.exports = {
   signXmlForDgii,
   extractSignatureValueFromXml,
   computeCodigoSeguridadeCF,
+
+  // Normalizadores DGII (RNC, encf, monto QR, razon social)
+  normalizeRncDgii,
+  normalizeENCF,
+  normalizeMontoTotalQr,
+  normalizeRazonSocial,
+  resolveEmisorIdentidad,
+  buildQrUrlNormalizado,
 
   // Network
   fetchWithTimeout,

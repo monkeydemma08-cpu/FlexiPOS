@@ -28821,6 +28821,125 @@ app.get('/api/admin/analytics/overview', (req, res) => {
   });
 });
 
+// Detalle de ventas por metodo de pago (efectivo / tarjeta / transferencia)
+// Devuelve pedidos con monto > 0 en el metodo solicitado, mas abonos a deudas
+// que usaron ese mismo metodo. Filtra por el rango from/to igual que /overview.
+app.get('/api/admin/analytics/ventas-por-metodo-pago', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const metodoRaw = String(req.query?.metodo || '').trim().toLowerCase();
+    const metodosValidos = { efectivo: 'pago_efectivo', tarjeta: 'pago_tarjeta', transferencia: 'pago_transferencia' };
+    if (!metodosValidos[metodoRaw]) {
+      return res.status(400).json({ error: 'metodo invalido. Usa: efectivo, tarjeta o transferencia.' });
+    }
+    const columnaPedido = metodosValidos[metodoRaw];
+
+    // Mapeo metodo -> valores reconocidos en clientes_abonos.metodo_pago
+    const metodosAbonos = {
+      efectivo: ['EFECTIVO'],
+      tarjeta: ['TARJETA', 'TARJETA_CREDITO', 'TARJETA_DEBITO', 'POS'],
+      transferencia: ['TRANSFERENCIA', 'TRANSFER', 'BANCO', 'DEPOSITO'],
+    };
+
+    const rango = normalizarRangoAnalisis(req.query?.from ?? req.query?.desde, req.query?.to ?? req.query?.hasta);
+    const fechaBase = `DATE(COALESCE(fecha_factura, fecha_cierre, fecha_creacion))`;
+
+    try {
+      // Pedidos con cobro directo en el metodo seleccionado
+      const pedidos = await db.all(
+        `
+          SELECT id, cuenta_id, mesa, cliente, cliente_documento, tipo_comprobante, ncf,
+                 ${columnaPedido} AS monto_metodo,
+                 pago_efectivo, pago_tarjeta, pago_transferencia,
+                 total, subtotal, impuesto, descuento_monto, propina_monto,
+                 estado, modo_servicio, origen_caja,
+                 COALESCE(fecha_factura, fecha_cierre, fecha_creacion) AS fecha
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND negocio_id = ?
+            AND ${fechaBase} BETWEEN ? AND ?
+            AND ${columnaPedido} > 0
+          ORDER BY fecha DESC, id DESC
+          LIMIT 1000
+        `,
+        [negocioId, rango.desde, rango.hasta]
+      );
+
+      // Abonos a deudas con el mismo metodo
+      const placeholders = metodosAbonos[metodoRaw].map(() => '?').join(',');
+      const abonos = await db.all(
+        `
+          SELECT a.id, a.deuda_id, a.cliente_id, a.monto, a.metodo_pago, a.fecha,
+                 a.notas,
+                 c.nombre AS cliente_nombre, c.documento AS cliente_documento,
+                 d.pedido_id
+          FROM clientes_abonos a
+          LEFT JOIN clientes c ON c.id = a.cliente_id
+          LEFT JOIN clientes_deudas d ON d.id = a.deuda_id
+          WHERE a.negocio_id = ?
+            AND DATE(a.fecha) BETWEEN ? AND ?
+            AND UPPER(COALESCE(a.metodo_pago, 'EFECTIVO')) IN (${placeholders})
+          ORDER BY a.fecha DESC, a.id DESC
+          LIMIT 1000
+        `,
+        [negocioId, rango.desde, rango.hasta, ...metodosAbonos[metodoRaw]]
+      );
+
+      const totalPedidos = pedidos.reduce((sum, p) => sum + (Number(p.monto_metodo) || 0), 0);
+      const totalAbonos = abonos.reduce((sum, a) => sum + (Number(a.monto) || 0), 0);
+
+      res.json({
+        metodo: metodoRaw,
+        rango,
+        resumen: {
+          total: Number((totalPedidos + totalAbonos).toFixed(2)),
+          total_ventas_directas: Number(totalPedidos.toFixed(2)),
+          total_abonos: Number(totalAbonos.toFixed(2)),
+          cantidad_pedidos: pedidos.length,
+          cantidad_abonos: abonos.length,
+        },
+        pedidos: pedidos.map((p) => ({
+          id: p.id,
+          cuenta_id: p.cuenta_id,
+          fecha: p.fecha,
+          mesa: p.mesa,
+          cliente: p.cliente,
+          cliente_documento: p.cliente_documento,
+          tipo_comprobante: p.tipo_comprobante,
+          ncf: p.ncf,
+          modo_servicio: p.modo_servicio,
+          origen_caja: p.origen_caja,
+          monto_metodo: Number(p.monto_metodo) || 0,
+          total: Number(p.total) || 0,
+          subtotal: Number(p.subtotal) || 0,
+          impuesto: Number(p.impuesto) || 0,
+          descuento_monto: Number(p.descuento_monto) || 0,
+          propina_monto: Number(p.propina_monto) || 0,
+        })),
+        abonos: abonos.map((a) => ({
+          id: a.id,
+          deuda_id: a.deuda_id,
+          pedido_id: a.pedido_id,
+          cliente_id: a.cliente_id,
+          cliente_nombre: a.cliente_nombre,
+          cliente_documento: a.cliente_documento,
+          monto: Number(a.monto) || 0,
+          metodo_pago: a.metodo_pago,
+          fecha: a.fecha,
+          notas: a.notas,
+        })),
+      });
+    } catch (error) {
+      console.error('Error al obtener ventas por metodo de pago:', error?.message || error);
+      res.status(500).json({ error: 'Error al obtener el detalle de ventas por metodo de pago.' });
+    }
+  });
+});
+
 app.get('/api/admin/analytics/advanced', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     if (!tienePermisoAdmin(usuarioSesion)) {

@@ -773,6 +773,8 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
     p12Base64,
     p12Password,
     rncEmisor,
+    razonSocial,
+    nombreComercial,
     modoAutenticacion,
     endpoints,
     preserveSecrets = true,
@@ -808,12 +810,22 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
       ...(endpoints && typeof endpoints === 'object' ? endpoints : {}),
     });
 
+    // Persistir razon_social y nombre_comercial: si vienen en el payload usarlos,
+    // sino conservar lo que ya estaba (preserveSecrets=true por compatibilidad).
+    const razonSocialToStore = razonSocial !== undefined
+      ? (razonSocial || null)
+      : preserveSecrets ? existing?.razon_social || null : null;
+    const nombreComercialToStore = nombreComercial !== undefined
+      ? (nombreComercial || null)
+      : preserveSecrets ? existing?.nombre_comercial || null : null;
+
     await db.run(
       `INSERT INTO dgii_paso2_config (
          negocio_id, usuario_certificacion, clave_certificacion_enc,
          p12_nombre_archivo, p12_base64, p12_password_enc, rnc_emisor,
+         razon_social, nombre_comercial,
          modo_autenticacion, endpoints_json, token_cache, token_expira_en, updated_by_usuario_id
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
        ON DUPLICATE KEY UPDATE
          usuario_certificacion = VALUES(usuario_certificacion),
          clave_certificacion_enc = VALUES(clave_certificacion_enc),
@@ -821,6 +833,8 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
          p12_base64 = VALUES(p12_base64),
          p12_password_enc = VALUES(p12_password_enc),
          rnc_emisor = VALUES(rnc_emisor),
+         razon_social = VALUES(razon_social),
+         nombre_comercial = VALUES(nombre_comercial),
          modo_autenticacion = VALUES(modo_autenticacion),
          endpoints_json = VALUES(endpoints_json),
          token_cache = NULL,
@@ -834,6 +848,8 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
         p12Base64ToStore,
         p12PasswordToStore,
         rncEmisor || null,
+        razonSocialToStore,
+        nombreComercialToStore,
         modoAutenticacion || 'AUTO',
         endpointsJson,
         usuarioId || null,
@@ -1814,6 +1830,8 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
               negocio_id: negocioId,
               usuario_certificacion: '',
               rnc_emisor: '',
+              razon_social: '',
+              nombre_comercial: '',
               modo_autenticacion: 'AUTO',
               endpoints: DGII_DEFAULT_ENDPOINTS,
               tiene_clave: false,
@@ -1827,6 +1845,8 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
             negocio_id: Number(row.negocio_id),
             usuario_certificacion: row.usuario_certificacion || '',
             rnc_emisor: row.rnc_emisor || '',
+            razon_social: row.razon_social || '',
+            nombre_comercial: row.nombre_comercial || '',
             modo_autenticacion: row.modo_autenticacion || 'AUTO',
             endpoints: resolveEndpoints(row),
             tiene_clave: Boolean(row.clave_certificacion_enc),
@@ -1856,6 +1876,8 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
           p12Base64: body.p12_base64 ?? body.p12Base64,
           p12Password: body.p12_password ?? body.p12Password,
           rncEmisor: body.rnc_emisor ?? body.rncEmisor,
+          razonSocial: body.razon_social ?? body.razonSocial,
+          nombreComercial: body.nombre_comercial ?? body.nombreComercial,
           modoAutenticacion: body.modo_autenticacion ?? body.modoAutenticacion,
           endpoints: body.endpoints,
           preserveSecrets: true,
@@ -1867,6 +1889,46 @@ const createDgiiPaso2Router = ({ db, requireUsuarioSesion, tienePermisoAdmin, ob
       }
     });
   });
+
+  router.get('/lookup-rnc/:rnc', (req, res) => {
+    ensureCanAdmin(req, res, async () => {
+      try {
+        const rncRaw = String(req.params?.rnc || '').replace(/[^0-9]/g, '').trim();
+        if (!rncRaw) {
+          return res.status(400).json({ ok: false, error: 'RNC invalido. Solo digitos.' });
+        }
+        if (rncRaw.length < 9 || rncRaw.length > 11) {
+          return res.status(400).json({ ok: false, error: 'RNC debe tener 9 (empresa) u 11 (persona fisica) digitos.' });
+        }
+        const row = await db.get(
+          'SELECT documento, nombre_o_razon_social, nombre_comercial, estado, tipo_documento FROM dgii_rnc_cache WHERE documento = ? LIMIT 1',
+          [rncRaw]
+        );
+        if (!row) {
+          return res.status(404).json({
+            ok: false,
+            error: `RNC ${rncRaw} no esta en el cache DGII. Importa el padron de RNCs primero.`,
+            rnc: rncRaw,
+          });
+        }
+        return res.json({
+          ok: true,
+          rnc: rncRaw,
+          resultado: {
+            documento: row.documento || rncRaw,
+            razon_social: row.nombre_o_razon_social || '',
+            nombre_comercial: row.nombre_comercial || '',
+            estado: row.estado || '',
+            tipo_documento: row.tipo_documento || '',
+          },
+        });
+      } catch (error) {
+        console.error('DGII Paso2: error en lookup-rnc:', error?.message || error);
+        return res.status(500).json({ ok: false, error: 'No se pudo buscar el RNC en cache DGII.' });
+      }
+    });
+  });
+
   router.post('/importar-set', (req, res) => {
     ensureCanAdmin(req, res, async (usuarioSesion) => {
       try {

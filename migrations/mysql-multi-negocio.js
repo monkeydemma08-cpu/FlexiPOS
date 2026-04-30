@@ -122,6 +122,8 @@ async function ensureTableNegocios() {
       nombre VARCHAR(150) NOT NULL,
       slug VARCHAR(120) NOT NULL UNIQUE,
       rnc VARCHAR(20) NULL,
+      razon_social VARCHAR(255) NULL,
+      nombre_comercial VARCHAR(255) NULL,
       telefono VARCHAR(30) NULL,
       direccion VARCHAR(255) NULL,
       color_primario VARCHAR(20) NULL,
@@ -144,6 +146,9 @@ async function ensureTableNegocios() {
       creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  // Idempotente: agregar columnas si la tabla ya existia
+  await ensureColumn('negocios', 'razon_social VARCHAR(255) NULL');
+  await ensureColumn('negocios', 'nombre_comercial VARCHAR(255) NULL');
 }
 
 async function ensureTableEmpresas() {
@@ -550,6 +555,8 @@ async function ensureTableDgiiPaso2Config() {
       p12_base64 LONGTEXT NULL,
       p12_password_enc LONGTEXT NULL,
       rnc_emisor VARCHAR(20) NULL,
+      razon_social VARCHAR(255) NULL,
+      nombre_comercial VARCHAR(255) NULL,
       modo_autenticacion VARCHAR(30) NOT NULL DEFAULT 'CREDENCIALES',
       endpoints_json LONGTEXT NULL,
       token_cache LONGTEXT NULL,
@@ -561,6 +568,9 @@ async function ensureTableDgiiPaso2Config() {
       CONSTRAINT fk_dgii_paso2_config_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  // Idempotente: agregar columnas oficiales DGII si la tabla ya existia
+  await ensureColumn('dgii_paso2_config', 'razon_social VARCHAR(255) NULL');
+  await ensureColumn('dgii_paso2_config', 'nombre_comercial VARCHAR(255) NULL');
 }
 
 async function ensureTableDgiiPaso2Sets() {

@@ -18,6 +18,8 @@ const {
   createDgiiConfigManager,
   resolveEmissionPhase,
   dgiiCoreMissingDeps,
+  resolveEmisorIdentidad,
+  buildQrUrlNormalizado,
 } = require('./dgii-core');
 const {
   generarEncf,
@@ -41,6 +43,9 @@ const {
   buildRepresentacionImpresa,
   detectarAmbiente,
   extractFechaFirmaFromXml,
+  extractFechaEmisionFromXml,
+  extractTotalesFromXml,
+  extractItemsFromXml,
 } = require('./dgii-ri');
 
 const MAX_INTENTOS = 5;
@@ -157,7 +162,16 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     const configRow = await db.get('SELECT * FROM dgii_paso2_config WHERE negocio_id = ? LIMIT 1', [negocioId]);
     if (!configRow) throw new Error('Configura las credenciales DGII antes de emitir e-CF.');
     const config = await configManager.loadConfig(negocioId);
-    const rncEmisor = config.rnc_emisor || negocio.rnc || '';
+    // Inyectar razon_social/nombre_comercial del row (configManager solo decifra credenciales)
+    if (configRow.razon_social && !config.razon_social) config.razon_social = configRow.razon_social;
+    if (configRow.nombre_comercial && !config.nombre_comercial) config.nombre_comercial = configRow.nombre_comercial;
+
+    // Resolver identidad emisor — garantiza que RazonSocial coincida con lo que
+    // DGII tiene registrado para el RNC (consulta dgii_rnc_cache si hace falta).
+    const emisorIdentidad = await resolveEmisorIdentidad({ negocio, configDgii: config, db });
+    const rncEmisor = emisorIdentidad.rnc;
+    if (!rncEmisor) throw new Error('No hay RNC del emisor configurado (negocios.rnc o dgii_paso2_config.rnc_emisor).');
+    if (!emisorIdentidad.razonSocial) throw new Error('No hay Razon Social del emisor configurada (negocios.razon_social o dgii_paso2_config.razon_social).');
 
     // Generate eNCF if not already assigned
     let encfData;
@@ -187,6 +201,7 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
         negocio,
         encfData,
         configDgii: config,
+        emisorIdentidad,
         referenciaEncf: refPedido?.ecf_encf || '',
         referenciaFecha: refPedido?.fecha_factura || '',
         codigoModificacion: pedido.codigo_modificacion || (tipoNumerico === '33' ? '3' : '1'),
@@ -199,6 +214,7 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
         negocio,
         encfData,
         configDgii: config,
+        emisorIdentidad,
       });
     }
 
@@ -227,7 +243,7 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     const codigoSeguridad = computeCodigoSeguridadeCF(sigValue);
     const ambiente = detectarAmbiente(config.endpoints?.recepcion || DGII_DEFAULT_ENDPOINTS.recepcion);
     const fechaFirma = extractFechaFirmaFromXml(firmado.xml);
-    const qrUrl = buildQrUrl({
+    const qrUrl = buildQrUrlNormalizado({
       ambiente,
       flujo,
       rncEmisor,
@@ -587,7 +603,7 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
       const codigoSeguridadExt = computeCodigoSeguridadeCF(sigValueExt);
       const ambienteExt = detectarAmbiente(endpoints.recepcion || '');
       const fechaFirmaExt = extractFechaFirmaFromXml(firmado.xml);
-      const qrUrlExt = buildQrUrl({
+      const qrUrlExt = buildQrUrlNormalizado({
         ambiente: ambienteExt,
         flujo,
         rncEmisor,
@@ -1425,12 +1441,41 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
           return res.status(400).send('Este pedido no tiene e-CF emitido.');
         }
 
+        // Bloquear RI si el e-CF no fue ACEPTADO por DGII (a menos que se pase ?force=1).
+        // Si se imprime sin aceptacion, el QR apunta a una factura que la DGII NO podra
+        // encontrar en su sistema, devolviendo "No fue encontrada la Factura (e-CF)".
+        const force = String(req.query?.force || '') === '1';
+        const estado = String(pedido.ecf_estado || '').toUpperCase();
+        if (estado !== 'ACEPTADO' && !force) {
+          return res.status(409).send(
+            `<h2>e-CF no aceptado por DGII</h2>` +
+            `<p>Estado actual: <strong>${estado || 'DESCONOCIDO'}</strong></p>` +
+            `<p>El portal DGII solo encuentra el e-CF cuando esta aceptado. ` +
+            `Reintenta la emision o consulta el resultado antes de imprimir la RI.</p>` +
+            `<p>Si necesitas la RI igual (debug), agrega <code>?force=1</code> a la URL.</p>`
+          );
+        }
+
         const config = await configManager.loadConfig(negocioId);
+        // Inyectar razon_social del row para que el resolver la use
+        const configRow = await db.get('SELECT razon_social, nombre_comercial FROM dgii_paso2_config WHERE negocio_id = ? LIMIT 1', [negocioId]);
+        if (configRow?.razon_social && !config.razon_social) config.razon_social = configRow.razon_social;
+        if (configRow?.nombre_comercial && !config.nombre_comercial) config.nombre_comercial = configRow.nombre_comercial;
+        const emisorIdentidadRI = await resolveEmisorIdentidad({ negocio, configDgii: config, db });
         const flujo = determineEcfFlujo(pedido.ecf_tipo, pedido.total);
         const ambiente = detectarAmbiente(config?.endpoints?.recepcion || DGII_DEFAULT_ENDPOINTS.recepcion);
 
-        // Reconstruir items del detalle para el render
-        const itemsRender = (detalle || []).map((d, i) => ({
+        // CRITICO: Para que el QR resuelva en el portal DGII, los totales y la
+        // URL del QR DEBEN coincidir EXACTAMENTE con lo que se envio originalmente
+        // a DGII. Si el pedido fue editado despues de emitir, los datos actuales
+        // ya no concuerdan. Por eso preferimos extraer del XML firmado guardado
+        // y usar el ecf_qr_url tal cual quedo al emitir.
+        const xmlFirmado = pedido.ecf_xml_firmado || '';
+        const totalesXml = xmlFirmado ? extractTotalesFromXml(xmlFirmado) : null;
+        const itemsXml = xmlFirmado ? extractItemsFromXml(xmlFirmado) : [];
+
+        // Items: preferir los del XML firmado; fallback al detalle actual.
+        const itemsRender = itemsXml.length ? itemsXml : (detalle || []).map((d, i) => ({
           linea: String(i + 1),
           nombre: d.nombre_producto || d.nombre || `Item ${i + 1}`,
           cantidad: String(d.cantidad || 1),
@@ -1441,8 +1486,8 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
           indicadorFact: '',
         }));
 
-        // Reconstruir totales desde el pedido (lo que efectivamente se envio)
-        const totales = {
+        // Totales: preferir los del XML firmado; fallback al pedido actual.
+        const totales = totalesXml && totalesXml.MontoTotal ? totalesXml : {
           MontoGravadoI1: pedido.impuesto > 0 ? Number(pedido.subtotal || 0).toFixed(2) : null,
           TotalITBIS1: pedido.impuesto > 0 ? Number(pedido.impuesto || 0).toFixed(2) : null,
           TotalITBIS: Number(pedido.impuesto || 0).toFixed(2),
@@ -1450,10 +1495,11 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
           MontoTotal: Number(pedido.total || 0).toFixed(2),
         };
 
-        const fechaFirma = pedido.ecf_xml_firmado ? extractFechaFirmaFromXml(pedido.ecf_xml_firmado) : null;
+        const fechaFirma = xmlFirmado ? extractFechaFirmaFromXml(xmlFirmado) : null;
         const fechaVencimiento = await obtenerFechaVencimiento(pedido.ecf_tipo, negocioId, db).catch(() => null);
 
-        const fechaEmisionDgii = (() => {
+        // FechaEmision: preferir la del XML firmado (la que DGII tiene).
+        const fechaEmisionDgii = (xmlFirmado ? extractFechaEmisionFromXml(xmlFirmado) : null) || (() => {
           const f = pedido.fecha_factura ? new Date(pedido.fecha_factura) : new Date();
           if (Number.isNaN(f.getTime())) return '';
           return `${String(f.getDate()).padStart(2, '0')}-${String(f.getMonth() + 1).padStart(2, '0')}-${f.getFullYear()}`;
@@ -1464,8 +1510,9 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
           encf: pedido.ecf_encf,
           ecfTipo: pedido.ecf_tipo,
           emisor: {
-            rnc: config?.rnc_emisor || negocio?.rnc || '',
-            nombre: negocio?.nombre || '',
+            rnc: emisorIdentidadRI.rnc || config?.rnc_emisor || negocio?.rnc || '',
+            nombre: emisorIdentidadRI.razonSocial || negocio?.nombre || '',
+            nombreComercial: emisorIdentidadRI.nombreComercial || '',
             direccion: negocio?.direccion || '',
             telefono: negocio?.telefono || '',
           },
@@ -1485,6 +1532,10 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
           estado: pedido.ecf_estado || '',
           flujo,
           ambiente,
+          // CRITICO: pasar la URL exacta que se guardo al emitir, para que el
+          // QR apunte al timbre que DGII tiene registrado (mismo MontoTotal,
+          // misma fecha, mismo CodigoSeguridad).
+          qrUrlOverride: pedido.ecf_qr_url || null,
         });
 
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1511,22 +1562,46 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
         if (!doc) return res.status(404).send('Documento no encontrado.');
         if (!doc.ecf_encf) return res.status(400).send('Este documento no tiene e-CF emitido.');
 
+        // Bloquear RI si el e-CF no fue ACEPTADO por DGII (ver explicacion en /representacion).
+        const force = String(req.query?.force || '') === '1';
+        const estado = String(doc.ecf_estado || '').toUpperCase();
+        if (estado !== 'ACEPTADO' && !force) {
+          return res.status(409).send(
+            `<h2>e-CF no aceptado por DGII</h2>` +
+            `<p>Estado actual: <strong>${estado || 'DESCONOCIDO'}</strong></p>` +
+            `<p>El portal DGII no encuentra el e-CF hasta que esta aceptado. ` +
+            `Reintenta la emision antes de imprimir la RI. Para forzar agrega <code>?force=1</code>.</p>`
+          );
+        }
+
         let payload = {};
         try { payload = doc.payload_emision ? JSON.parse(doc.payload_emision) : {}; } catch (_) { payload = {}; }
 
         const config = await configManager.loadConfig(negocioId);
+        const configRow = await db.get('SELECT razon_social, nombre_comercial FROM dgii_paso2_config WHERE negocio_id = ? LIMIT 1', [negocioId]);
+        if (configRow?.razon_social && !config.razon_social) config.razon_social = configRow.razon_social;
+        if (configRow?.nombre_comercial && !config.nombre_comercial) config.nombre_comercial = configRow.nombre_comercial;
         const flujoCalc = determineEcfFlujo(`E${doc.ecf_tipo}`, doc.monto_total || 0);
         const ambiente = detectarAmbiente(config?.endpoints?.recepcion || DGII_DEFAULT_ENDPOINTS.recepcion);
-        const fechaFirma = doc.ecf_xml_firmado ? extractFechaFirmaFromXml(doc.ecf_xml_firmado) : null;
+        const xmlFirmadoExt = doc.ecf_xml_firmado || '';
+        const fechaFirma = xmlFirmadoExt ? extractFechaFirmaFromXml(xmlFirmadoExt) : null;
         const negocio = await db.get('SELECT * FROM negocios WHERE id = ?', [negocioId]);
+        const emisorIdentidadExt = await resolveEmisorIdentidad({ negocio, configDgii: config, db });
+
+        // Preferir totales/items/fecha del XML firmado (lo que DGII tiene),
+        // ya que es la fuente de verdad y debe coincidir con el QR.
+        const totalesXmlExt = xmlFirmadoExt ? extractTotalesFromXml(xmlFirmadoExt) : null;
+        const itemsXmlExt = xmlFirmadoExt ? extractItemsFromXml(xmlFirmadoExt) : [];
+        const fechaEmisionXmlExt = xmlFirmadoExt ? extractFechaEmisionFromXml(xmlFirmadoExt) : null;
 
         const { html } = await buildRepresentacionImpresa({
           payload,
           encf: doc.ecf_encf,
           ecfTipo: doc.ecf_tipo,
           emisor: {
-            rnc: payload.RNCEmisor || config?.rnc_emisor || negocio?.rnc || '',
-            nombre: payload.RazonSocialEmisor || negocio?.nombre || '',
+            rnc: emisorIdentidadExt.rnc || payload.RNCEmisor || config?.rnc_emisor || negocio?.rnc || '',
+            nombre: emisorIdentidadExt.razonSocial || payload.RazonSocialEmisor || negocio?.nombre || '',
+            nombreComercial: emisorIdentidadExt.nombreComercial || '',
             direccion: payload.DireccionEmisor || negocio?.direccion || '',
             telefono: payload['TelefonoEmisor[0]'] || negocio?.telefono || '',
           },
@@ -1536,14 +1611,18 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
             direccion: payload.DireccionComprador || '',
             email: payload.CorreoComprador || '',
           },
-          fechaEmision: payload.FechaEmision || '',
+          fechaEmision: fechaEmisionXmlExt || payload.FechaEmision || '',
           fechaVencimiento: payload.FechaVencimientoSecuencia || '',
           fechaFirma: fechaFirma || '',
           codigoSeguridad: doc.ecf_codigo_seguridad || payload.CodigoSeguridadeCF || '',
+          totales: (totalesXmlExt && totalesXmlExt.MontoTotal) ? totalesXmlExt : undefined,
+          items: itemsXmlExt.length ? itemsXmlExt : undefined,
           trackId: doc.ecf_track_id || '',
           estado: doc.ecf_estado || '',
           flujo: flujoCalc,
           ambiente,
+          // CRITICO: pasar la URL exacta guardada al emitir (la que DGII reconoce).
+          qrUrlOverride: doc.ecf_qr_url || null,
         });
 
         res.setHeader('Content-Type', 'text/html; charset=utf-8');

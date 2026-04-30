@@ -15,6 +15,13 @@ try {
 
 const DGII_QR_HOST = 'https://ecf.dgii.gov.do';
 
+const {
+  normalizeRncDgii,
+  normalizeENCF,
+  normalizeMontoTotalQr,
+  buildQrUrlNormalizado,
+} = require('./dgii-core');
+
 const TIPO_ECF_NOMBRE = {
   '31': 'FACTURA DE CREDITO FISCAL ELECTRONICA',
   '32': 'FACTURA DE CONSUMO ELECTRONICA',
@@ -37,35 +44,10 @@ const detectarAmbiente = (endpoint = '') => {
   return 'CerteCF';
 };
 
-const buildQrUrl = ({
-  ambiente = 'CerteCF',
-  flujo = 'ECF_NORMAL',
-  rncEmisor,
-  rncComprador = null,
-  encf,
-  fechaEmision,
-  montoTotal,
-  fechaFirma = null,
-  codigoSeguridad,
-}) => {
-  const params = new URLSearchParams();
-  params.set('RncEmisor', String(rncEmisor || ''));
-
-  if (flujo === 'FC_MENOR_250K') {
-    params.set('ENCF', String(encf || ''));
-    params.set('MontoTotal', String(montoTotal || ''));
-    params.set('CodigoSeguridad', String(codigoSeguridad || ''));
-    return `${DGII_QR_HOST}/${ambiente}/ConsultaTimbreFC?${params.toString()}`;
-  }
-
-  if (rncComprador) params.set('RncComprador', String(rncComprador));
-  params.set('ENCF', String(encf || ''));
-  params.set('FechaEmision', String(fechaEmision || ''));
-  params.set('MontoTotal', String(montoTotal || ''));
-  if (fechaFirma) params.set('FechaFirma', String(fechaFirma));
-  params.set('CodigoSeguridad', String(codigoSeguridad || ''));
-  return `${DGII_QR_HOST}/${ambiente}/ConsultaTimbre?${params.toString()}`;
-};
+// Wrapper: delega a dgii-core.buildQrUrlNormalizado para garantizar que el
+// formato sea el exacto que la DGII reconoce en su portal de validacion.
+// Mantenemos la firma original para no romper callers existentes.
+const buildQrUrl = (args = {}) => buildQrUrlNormalizado({ ...args, hostOverride: DGII_QR_HOST });
 
 const generateQrDataUrl = async (qrUrl) => {
   if (!qrUrl || !QRCodeLib) return null;
@@ -81,17 +63,22 @@ const generateQrDataUrl = async (qrUrl) => {
   }
 };
 
-// Extrae FechaFirma (DD-MM-YYYY) del XML firmado. La firma DGII suele incluir
-// un campo FechaHoraFirma; si no existe, retornamos null y el caller decide.
+// Extrae FechaFirma del XML firmado para usar en el QR de DGII.
+//
+// IMPORTANTE: la DGII espera la FechaFirma COMPLETA con hora,
+// formato 'DD-MM-YYYY HH:MM:SS', tal cual aparece en <FechaHoraFirma>.
+// Si solo se manda 'DD-MM-YYYY' el portal de validacion responde
+// "No fue encontrada la factura (e-CF) con los valores suministrados".
+//
+// La firma DGII incluye <FechaHoraFirma>; si no existe, intentamos
+// fallback a <SigningTime> de xmldsig (solo fecha).
 const extractFechaFirmaFromXml = (xml = '') => {
   if (!xml) return null;
   const match = xml.match(/<FechaHoraFirma[^>]*>([\s\S]*?)<\/FechaHoraFirma>/i);
   if (match) {
-    const raw = String(match[1]).trim();
-    // Formato esperado DGII: DD-MM-YYYY HH:MM:SS o DD-MM-YYYY
-    return raw.slice(0, 10);
+    return String(match[1]).trim();
   }
-  // Fallback: revisar SigningTime de xmldsig si existe
+  // Fallback: revisar SigningTime de xmldsig si existe (solo fecha)
   const sig = xml.match(/<SigningTime[^>]*>([\s\S]*?)<\/SigningTime>/i);
   if (sig) {
     const iso = String(sig[1]).trim();
@@ -99,10 +86,75 @@ const extractFechaFirmaFromXml = (xml = '') => {
     if (!Number.isNaN(date.getTime())) {
       const dd = String(date.getDate()).padStart(2, '0');
       const mm = String(date.getMonth() + 1).padStart(2, '0');
-      return `${dd}-${mm}-${date.getFullYear()}`;
+      const hh = String(date.getHours()).padStart(2, '0');
+      const mi = String(date.getMinutes()).padStart(2, '0');
+      const ss = String(date.getSeconds()).padStart(2, '0');
+      return `${dd}-${mm}-${date.getFullYear()} ${hh}:${mi}:${ss}`;
     }
   }
   return null;
+};
+
+// Extrae los totales fiscales del XML firmado. Estos son los valores EXACTOS
+// que se enviaron a DGII; no deben recalcularse desde el pedido (que pudo
+// haberse modificado despues de emitir).
+const _xmlGetTag = (xml, tagName) => {
+  if (!xml) return null;
+  const re = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i');
+  const m = xml.match(re);
+  return m ? String(m[1]).trim() : null;
+};
+
+const extractTotalesFromXml = (xml = '') => {
+  if (!xml) return null;
+  const t = (name) => _xmlGetTag(xml, name);
+  return {
+    MontoGravadoTotal: t('MontoGravadoTotal'),
+    MontoGravadoI1: t('MontoGravadoI1'),
+    MontoGravadoI2: t('MontoGravadoI2'),
+    MontoGravadoI3: t('MontoGravadoI3'),
+    MontoExento: t('MontoExento'),
+    TotalITBIS: t('TotalITBIS'),
+    TotalITBIS1: t('TotalITBIS1'),
+    TotalITBIS2: t('TotalITBIS2'),
+    TotalITBIS3: t('TotalITBIS3'),
+    TotalITBISRetenido: t('TotalITBISRetenido'),
+    TotalISRRetencion: t('TotalISRRetencion'),
+    MontoTotal: t('MontoTotal'),
+  };
+};
+
+// Extrae los items (lineas) del XML firmado. Cada item del XML tiene
+// NumeroLinea, NombreItem, CantidadItem, PrecioUnitarioItem, MontoItem, etc.
+const extractItemsFromXml = (xml = '') => {
+  if (!xml) return [];
+  const items = [];
+  // Cada <Item>...</Item> puede aparecer multiples veces dentro de <DetallesItems>
+  const itemRegex = /<Item>([\s\S]*?)<\/Item>/gi;
+  let match;
+  while ((match = itemRegex.exec(xml)) !== null) {
+    const block = match[1];
+    const get = (name) => {
+      const m = block.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`, 'i'));
+      return m ? String(m[1]).trim() : '';
+    };
+    items.push({
+      linea: get('NumeroLinea') || String(items.length + 1),
+      nombre: get('NombreItem') || `Item ${items.length + 1}`,
+      cantidad: get('CantidadItem') || '1',
+      unidadMedida: get('UnidadMedida') || '',
+      precioUnitario: get('PrecioUnitarioItem') || '0.00',
+      descuento: get('DescuentoMonto') || null,
+      montoItem: get('MontoItem') || '0.00',
+      indicadorFact: get('IndicadorFacturacion') || '',
+    });
+  }
+  return items;
+};
+
+// Extrae fecha de emision (DD-MM-YYYY) del XML firmado.
+const extractFechaEmisionFromXml = (xml = '') => {
+  return _xmlGetTag(xml, 'FechaEmision');
 };
 
 const fechaHoyDgii = () => {
@@ -536,6 +588,7 @@ const buildRepresentacionImpresa = async ({
   ncfModificado = '',
   fechaNcfModificado = '',
   codigoModificacion = '',
+  qrUrlOverride = null,
 }) => {
   const itemsFinal = items && items.length ? items : itemsFromPayload(payload);
   const totalesFinal = totales || {
@@ -552,7 +605,10 @@ const buildRepresentacionImpresa = async ({
     MontoTotal: payload.MontoTotal,
   };
 
-  const qrUrl = buildQrUrl({
+  // Si se pasa qrUrlOverride (la URL guardada al emitir, fuente de verdad),
+  // se usa tal cual. De lo contrario se reconstruye, pero eso puede llevar a
+  // discrepancias si los datos del pedido se modificaron despues de emitir.
+  const qrUrl = qrUrlOverride || buildQrUrl({
     ambiente,
     flujo,
     rncEmisor: emisor?.rnc || payload.RNCEmisor || '',
@@ -605,6 +661,9 @@ module.exports = {
   buildQrUrl,
   generateQrDataUrl,
   extractFechaFirmaFromXml,
+  extractFechaEmisionFromXml,
+  extractTotalesFromXml,
+  extractItemsFromXml,
   detectarAmbiente,
   itemsFromPayload,
   renderRepresentacionImpresaHtml,

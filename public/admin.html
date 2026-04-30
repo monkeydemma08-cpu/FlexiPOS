@@ -2778,7 +2778,23 @@
           <div class="kanm-input-group">
             <label for="dgii-config-rnc">RNC emisor</label>
             <input type="text" id="dgii-config-rnc" placeholder="101000000" />
+            <span class="kanm-input-help">Solo digitos. 9 = empresa, 11 = persona fisica.</span>
           </div>
+        </div>
+        <div class="kanm-grid-2">
+          <div class="kanm-input-group">
+            <label for="dgii-config-razon-social">Razon Social oficial DGII *</label>
+            <input type="text" id="dgii-config-razon-social" placeholder="Ej. POSIUM SRL" />
+            <span class="kanm-input-help">DEBE coincidir EXACTAMENTE con el nombre registrado en DGII para este RNC. Si no coincide la DGII rechaza con "RNC no guarda relacion con razon social".</span>
+          </div>
+          <div class="kanm-input-group">
+            <label for="dgii-config-nombre-comercial">Nombre comercial</label>
+            <input type="text" id="dgii-config-nombre-comercial" placeholder="Ej. POSIUM" />
+            <span class="kanm-input-help">Opcional. Si difiere de la razon social, se incluye en el e-CF.</span>
+          </div>
+        </div>
+        <div class="admin-report-actions" style="margin-bottom:8px">
+          <button type="button" class="kanm-button ghost" id="dgii-config-buscar-razon">Buscar razon social en cache DGII por RNC</button>
         </div>
         <div class="kanm-grid-3">
           <div class="kanm-input-group">
@@ -3871,6 +3887,54 @@
           </table>
         </div>
         <div id="ventas-productos-resumen" style="margin-top:12px;font-weight:600;text-align:right"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Ventas por metodo de pago -->
+  <div class="kanm-modal-overlay" id="modal-ventas-metodo" hidden>
+    <div class="kanm-modal kanm-modal--wide" role="dialog" aria-modal="true" aria-labelledby="modal-ventas-metodo-titulo">
+      <div class="kanm-modal-header">
+        <h3 id="modal-ventas-metodo-titulo">Ventas por metodo de pago</h3>
+        <button type="button" class="kanm-button ghost" id="modal-ventas-metodo-cerrar">Cerrar</button>
+      </div>
+      <div class="kanm-modal-body">
+        <div id="modal-ventas-metodo-resumen" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;font-size:13px"></div>
+        <div id="modal-ventas-metodo-cargando" style="text-align:center;padding:24px;color:#666">Cargando...</div>
+        <div id="modal-ventas-metodo-contenido" hidden>
+          <h4 style="margin:8px 0;font-size:14px">Ventas directas</h4>
+          <div style="max-height:340px;overflow-y:auto;margin-bottom:16px">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Pedido #</th>
+                  <th>Cliente</th>
+                  <th>NCF</th>
+                  <th style="text-align:right">Monto del metodo</th>
+                  <th style="text-align:right">Total pedido</th>
+                </tr>
+              </thead>
+              <tbody id="modal-ventas-metodo-pedidos-tbody"></tbody>
+            </table>
+          </div>
+          <h4 style="margin:8px 0;font-size:14px">Abonos a deudas</h4>
+          <div style="max-height:300px;overflow-y:auto">
+            <table class="kanm-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Cliente</th>
+                  <th>Documento</th>
+                  <th>Pedido</th>
+                  <th>Notas</th>
+                  <th style="text-align:right">Monto</th>
+                </tr>
+              </thead>
+              <tbody id="modal-ventas-metodo-abonos-tbody"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -5025,7 +5089,7 @@
       }
     })();
   </script>
-  <script src="/js/admin.js?v=20260428a"></script>
+  <script src="/js/admin.js?v=20260430b"></script>
   <script src="/js/admin-facturacion-posium.js"></script>
   <script src="/js/admin-cotizaciones.js"></script>
   <script src="/js/admin-clientes.js"></script>
