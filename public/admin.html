@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/styles.css?v=20260425c" />
+  <link rel="stylesheet" href="/css/styles.css?v=20260430d" />
   <link rel="stylesheet" href="/css/admin-shell.css?v=20260424a" />
   <style>
     /* ================================================================
@@ -343,7 +343,7 @@
             <span class="kanm-sidebar-icon" aria-hidden="true">🗂️</span>
             <span class="kanm-sidebar-label">Categorías</span>
           </button>
-          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="menuPublico" data-modulo="admin">
+          <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="menuPublico" data-modulo="menuQr">
             <span class="kanm-sidebar-icon" aria-hidden="true">📱</span>
             <span class="kanm-sidebar-label">Menú QR</span>
           </button>
@@ -1032,8 +1032,9 @@
             </div>
             <div class="admin-menu-publico-actions">
               <button type="button" class="kanm-button ghost" id="menu-publico-refrescar">Refrescar</button>
+              <button type="button" class="kanm-button primary" id="menu-publico-nuevo">+ Nueva mesa</button>
               <a
-                class="kanm-button primary"
+                class="kanm-button ghost"
                 id="menu-publico-abrir-panel"
                 href="/admin/menu-publico/qr"
                 target="_blank"
@@ -1064,7 +1065,7 @@
               <thead>
                 <tr>
                   <th>Nombre</th>
-                  <th>Tipo</th>
+                  <th>Mesa</th>
                   <th>Ruta</th>
                   <th>Estado</th>
                   <th>Acciones</th>
@@ -1103,68 +1104,61 @@
 
     <!-- Clientes -->
     <section class="admin-panel hidden" data-admin-section="clientes" id="admin-section-clientes">
+      <!-- Hero compacto con titulo + stats inline -->
       <section class="kanm-card admin-clientes-hero">
         <div class="admin-clientes-hero-row">
-          <div>
+          <div class="admin-clientes-hero-title">
             <h2>Clientes &amp; facturacion</h2>
-            <p class="kanm-subtitle">Gestiona clientes, facturas y cuentas por cobrar en un mismo flujo.</p>
+            <p class="kanm-subtitle">Gestiona clientes, facturas y cuentas por cobrar.</p>
+          </div>
+          <div class="admin-clientes-hero-stats">
+            <div class="admin-clientes-stat">
+              <span class="admin-clientes-stat-label">Total</span>
+              <strong class="admin-clientes-stat-value" id="admin-clientes-total">0</strong>
+            </div>
+            <div class="admin-clientes-stat">
+              <span class="admin-clientes-stat-label">Activos</span>
+              <strong class="admin-clientes-stat-value" id="admin-clientes-activos">0</strong>
+            </div>
+            <div class="admin-clientes-stat admin-clientes-stat--accent">
+              <span class="admin-clientes-stat-label">Saldo por cobrar</span>
+              <strong class="admin-clientes-stat-value" id="admin-clientes-saldo-total">RD$0.00</strong>
+            </div>
           </div>
           <div class="admin-clientes-hero-actions">
-            <button type="button" class="kanm-button ghost" id="cliente-nuevo">Nuevo cliente</button>
+            <button type="button" class="kanm-button primary" id="cliente-nuevo">+ Nuevo cliente</button>
           </div>
         </div>
-        <div class="admin-clientes-hero-stats">
-          <div class="empresa-mini-stat">
-            <span>Total clientes</span>
-            <strong id="admin-clientes-total">0</strong>
+      </section>
+
+      <!-- Toolbar de filtros compacta horizontal -->
+      <section class="kanm-card admin-clientes-toolbar">
+        <div class="admin-clientes-toolbar-row">
+          <div class="admin-clientes-toolbar-search">
+            <input type="text" id="clientes-buscar" placeholder="Buscar por nombre, documento o telefono..." />
           </div>
-          <div class="empresa-mini-stat">
-            <span>Clientes activos</span>
-            <strong id="admin-clientes-activos">0</strong>
+          <div class="admin-clientes-toolbar-filters">
+            <select id="clientes-estado" class="admin-clientes-select">
+              <option value="">Todos los estados</option>
+              <option value="activos">Activos</option>
+              <option value="inactivos">Inactivos</option>
+            </select>
+            <select id="clientes-saldo" class="admin-clientes-select">
+              <option value="">Todos los saldos</option>
+              <option value="pendiente">Con saldo</option>
+              <option value="cero">En cero</option>
+            </select>
+            <button type="button" class="kanm-button" id="clientes-filtrar">Buscar</button>
+            <button type="button" class="kanm-button ghost" id="clientes-limpiar">Limpiar</button>
           </div>
-          <div class="empresa-mini-stat">
-            <span>Saldo total</span>
-            <strong id="admin-clientes-saldo-total">RD$0.00</strong>
-          </div>
+        </div>
+        <div class="admin-clientes-toolbar-msg">
+          <span id="clientes-lista-mensaje" class="kanm-subtitle"></span>
         </div>
       </section>
 
       <div class="admin-clientes-layout">
         <div class="admin-clientes-col admin-clientes-col--list">
-          <aside class="kanm-card admin-clientes-filtros">
-            <header class="kanm-card-header">
-              <h3>Filtros</h3>
-              <p class="kanm-subtitle">Encuentra clientes por estado o documento.</p>
-            </header>
-            <div class="admin-clientes-filtros-scroll">
-              <div class="kanm-input-group">
-                <label for="clientes-buscar">Buscar</label>
-                <input type="text" id="clientes-buscar" placeholder="Nombre, documento o telefono" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="clientes-estado">Estado</label>
-                <select id="clientes-estado">
-                  <option value="">Todos</option>
-                  <option value="activos">Activos</option>
-                  <option value="inactivos">Inactivos</option>
-                </select>
-              </div>
-              <div class="kanm-input-group">
-                <label for="clientes-saldo">Saldo</label>
-                <select id="clientes-saldo">
-                  <option value="">Todos</option>
-                  <option value="pendiente">Con saldo</option>
-                  <option value="cero">En cero</option>
-                </select>
-              </div>
-            </div>
-            <div class="admin-clientes-filtros-actions">
-              <button type="button" class="kanm-button" id="clientes-filtrar">Buscar</button>
-              <button type="button" class="kanm-button ghost" id="clientes-limpiar">Limpiar</button>
-              <span id="clientes-lista-mensaje" class="kanm-subtitle"></span>
-            </div>
-          </aside>
-
           <section class="kanm-card admin-clientes-lista">
             <header class="kanm-card-header admin-clientes-lista-header">
               <div>
@@ -1180,7 +1174,7 @@
                     <th>Documento</th>
                     <th>Telefono</th>
                     <th>Email</th>
-                    <th>Saldo pendiente</th>
+                    <th class="text-right">Saldo</th>
                     <th>Estado</th>
                     <th></th>
                   </tr>
@@ -1195,13 +1189,14 @@
           <section class="kanm-card admin-clientes-perfil">
             <header class="kanm-card-header admin-clientes-perfil-header">
               <div>
-                <h3>Perfil del cliente</h3>
-                <p class="kanm-subtitle">Datos esenciales y contacto.</p>
+                <h3 id="admin-cliente-perfil-titulo">Perfil del cliente</h3>
+                <p class="kanm-subtitle" id="admin-cliente-perfil-sub">Selecciona un cliente o crea uno nuevo.</p>
               </div>
-              <span class="admin-clientes-badge" id="admin-cliente-estado-badge">Sin selecci?n</span>
+              <span class="admin-clientes-badge" id="admin-cliente-estado-badge" data-status="none">Sin seleccion</span>
             </header>
 
-            <div class="admin-clientes-resumen">
+            <!-- Resumen oculto por defecto, solo se muestra al seleccionar -->
+            <div class="admin-clientes-resumen" id="admin-cliente-resumen-bloque" hidden>
               <div class="admin-clientes-resumen-item">
                 <span>Cliente</span>
                 <strong id="admin-cliente-resumen-nombre">--</strong>
@@ -4176,7 +4171,14 @@
                 <input type="checkbox" id="kanm-modulo-historial" checked />
                 <span>Historial cocina</span>
               </label>
+              <label class="kanm-modulo-card">
+                <input type="checkbox" id="kanm-modulo-menu-qr" />
+                <span>Menú QR</span>
+              </label>
             </div>
+            <p class="kanm-section-desc" style="margin-top:0.75rem;font-size:12px;">
+              Activa <strong>Menú QR</strong> para habilitar la pestaña de accesos por mesa, generación de QR y pedidos del menú público para este negocio.
+            </p>
           </section>
 
           <!-- Tema visual -->
@@ -4275,6 +4277,47 @@
     </div>
   </div>
 
+  <div class="kanm-modal-overlay" id="menu-publico-mesa-modal" hidden>
+    <div
+      class="kanm-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="menu-publico-mesa-modal-titulo"
+      style="max-width:480px;"
+    >
+      <header class="kanm-card-header" style="margin-bottom:1rem;">
+        <h3 id="menu-publico-mesa-modal-titulo">Nueva mesa</h3>
+        <p class="kanm-subtitle">Cada mesa tendrá su propio QR único.</p>
+      </header>
+      <form id="menu-publico-mesa-form" class="kanm-form" novalidate>
+        <input type="hidden" id="menu-publico-mesa-id" />
+        <div class="kanm-input-group">
+          <label for="menu-publico-mesa-nombre">Nombre / Etiqueta</label>
+          <input
+            type="text"
+            id="menu-publico-mesa-nombre"
+            placeholder="Ej. Mesa 1, Terraza 2, Barra 3"
+            maxlength="120"
+            required
+          />
+          <span class="kanm-input-help">Este es el nombre que verá el cliente y el que aparece en la hoja imprimible.</span>
+        </div>
+        <div class="kanm-input-group">
+          <label class="kanm-input-toggle" for="menu-publico-mesa-activo">
+            <span>Mesa activa</span>
+            <input type="checkbox" id="menu-publico-mesa-activo" checked />
+          </label>
+          <span class="kanm-input-help">Si la desactivas, el QR deja de funcionar pero no se borra.</span>
+        </div>
+        <div id="menu-publico-mesa-mensaje" class="kanm-message"></div>
+        <div class="admin-form-actions" style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem;">
+          <button type="button" class="kanm-button ghost" id="menu-publico-mesa-cancelar">Cancelar</button>
+          <button type="submit" class="kanm-button primary" id="menu-publico-mesa-guardar">Guardar mesa</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div class="kanm-modal-overlay" id="admin-inventario-modal" hidden>
     <div
       class="kanm-modal kanm-modal--wide empresa-inventario-modal"
@@ -4312,6 +4355,15 @@
                 <div class="kanm-input-group producto-activo-group product-form-span">
                   <label for="prod-activo">Activo</label>
                   <input type="checkbox" id="prod-activo" checked />
+                </div>
+                <div class="kanm-input-group product-form-span">
+                  <label class="kanm-input-toggle" for="prod-visible-menu-qr">
+                    <span>Mostrar en menú QR</span>
+                    <input type="checkbox" id="prod-visible-menu-qr" checked />
+                  </label>
+                  <p class="kanm-input-help">
+                    Si está desactivado, el producto no aparecerá en el menú público que ven los clientes desde el QR.
+                  </p>
                 </div>
               </div>
             </section>
@@ -5092,7 +5144,7 @@
   <script src="/js/admin.js?v=20260430b"></script>
   <script src="/js/admin-facturacion-posium.js"></script>
   <script src="/js/admin-cotizaciones.js"></script>
-  <script src="/js/admin-clientes.js"></script>
+  <script src="/js/admin-clientes.js?v=20260430c"></script>
   <script src="/js/admin-categorias.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/notifications.js" defer></script>

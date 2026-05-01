@@ -10,6 +10,7 @@ const DEFAULT_CONFIG_MODULOS = {
   caja: true,
   mostrador: true,
   historialCocina: true,
+  menuQr: false,
 };
 const DEFAULT_COLOR_TEXTO = '#24344a';
 const DEFAULT_COLOR_PELIGRO = '#ff4b4b';
@@ -1891,12 +1892,16 @@ async function initializeNegocioThemeAndModulesDefaults() {
                 WHEN JSON_VALID(config_modulos) = 0 THEN ?
                 ELSE JSON_SET(
                   JSON_SET(
-                    config_modulos,
-                    '$.bar',
-                    IFNULL(JSON_EXTRACT(config_modulos, '$.bar'), JSON_EXTRACT(?, '$.bar'))
+                    JSON_SET(
+                      config_modulos,
+                      '$.bar',
+                      IFNULL(JSON_EXTRACT(config_modulos, '$.bar'), JSON_EXTRACT(?, '$.bar'))
+                    ),
+                    '$.mostrador',
+                    IFNULL(JSON_EXTRACT(config_modulos, '$.mostrador'), JSON_EXTRACT(?, '$.mostrador'))
                   ),
-                  '$.mostrador',
-                  IFNULL(JSON_EXTRACT(config_modulos, '$.mostrador'), JSON_EXTRACT(?, '$.mostrador'))
+                  '$.menuQr',
+                  IFNULL(JSON_EXTRACT(config_modulos, '$.menuQr'), JSON_EXTRACT(?, '$.menuQr'))
                 )
               END,
               color_boton_primario = COALESCE(color_boton_primario, color_primario),
@@ -1904,10 +1909,37 @@ async function initializeNegocioThemeAndModulesDefaults() {
               color_boton_peligro = COALESCE(color_boton_peligro, ?),
               color_header = COALESCE(color_header, color_primario, color_secundario),
               color_texto = COALESCE(color_texto, ?)` ,
-      [defaultConfig, defaultConfig, defaultConfig, defaultConfig, DEFAULT_COLOR_PELIGRO, DEFAULT_COLOR_TEXTO]
+      [defaultConfig, defaultConfig, defaultConfig, defaultConfig, defaultConfig, DEFAULT_COLOR_PELIGRO, DEFAULT_COLOR_TEXTO]
     );
   } catch (error) {
     console.warn('No se pudo inicializar temas y modulos de negocios:', error?.message || error);
+  }
+}
+
+async function activarMenuQrEnNegociosConAccesos() {
+  if (!(await tableExists('negocios')) || !(await tableExists('menu_publico_accesos'))) {
+    return;
+  }
+  try {
+    await query(
+      `UPDATE negocios n
+         JOIN (
+           SELECT DISTINCT negocio_id
+             FROM menu_publico_accesos
+         ) AS a ON a.negocio_id = n.id
+          SET n.config_modulos = JSON_SET(
+                COALESCE(n.config_modulos, JSON_OBJECT()),
+                '$.menuQr',
+                CAST(true AS JSON)
+              )
+        WHERE JSON_VALID(n.config_modulos) = 1
+          AND (
+            JSON_EXTRACT(n.config_modulos, '$.menuQr') IS NULL
+            OR JSON_EXTRACT(n.config_modulos, '$.menuQr') = CAST(false AS JSON)
+          )`
+    );
+  } catch (error) {
+    console.warn('No se pudo activar menuQr en negocios con accesos existentes:', error?.message || error);
   }
 }
 
@@ -2149,6 +2181,7 @@ async function runMigrations() {
   await modifyColumn('receta_detalle', "unidad ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND'");
   await modifyColumn('consumo_insumos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND'");
   await ensureColumn('productos', 'contenido_por_unidad DECIMAL(12,4) NOT NULL DEFAULT 1');
+  await ensureColumn('productos', 'visible_menu_qr TINYINT(1) NOT NULL DEFAULT 1');
   await modifyColumn('productos', 'stock DECIMAL(12,4) NULL DEFAULT 0');
   await ensureColumn('pedidos', 'bartender_id INT NULL');
   await ensureColumn('pedidos', 'bartender_nombre VARCHAR(255) NULL');
@@ -2208,6 +2241,7 @@ async function runMigrations() {
   await ensureNegocioStatusColumns();
   await ensureDefaultNegocio();
   await initializeNegocioThemeAndModulesDefaults();
+  await activarMenuQrEnNegociosConAccesos();
   await addNegocioIdToTables();
   await removeInsumosModule();
   try {

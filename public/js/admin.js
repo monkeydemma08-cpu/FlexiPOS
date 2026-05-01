@@ -27,6 +27,7 @@ const inputProdCostoBase = document.getElementById('prod-costo-base');
 const inputProdCostoPromedio = document.getElementById('prod-costo-promedio');
 const inputProdUltimoCosto = document.getElementById('prod-ultimo-costo');
 const inputProdActualizaCostoCompras = document.getElementById('prod-actualiza-costo');
+const inputProdVisibleMenuQr = document.getElementById('prod-visible-menu-qr');
 const inputProdCostoReal = document.getElementById('prod-costo-real');
 const inputProdCostoRealIncluyeItbis = document.getElementById('prod-costo-real-incluye-itbis');
 const inputProdEsInsumo = document.getElementById('prod-es-insumo');
@@ -401,11 +402,21 @@ const feE44VencimientoInput = document.getElementById('fe-e44-vencimiento');
 const adminTabs = Array.from(document.querySelectorAll('[data-admin-tab]'));
 const adminSections = Array.from(document.querySelectorAll('[data-admin-section]'));
 const menuPublicoRefrescarBtn = document.getElementById('menu-publico-refrescar');
+const menuPublicoNuevoBtn = document.getElementById('menu-publico-nuevo');
 const menuPublicoMensaje = document.getElementById('menu-publico-mensaje');
 const menuPublicoAccesosBody = document.getElementById('menu-publico-accesos-body');
 const menuPublicoLinks = document.getElementById('menu-publico-links');
 const menuPublicoTotalEl = document.getElementById('menu-publico-total');
 const menuPublicoMesasEl = document.getElementById('menu-publico-mesas');
+const menuPublicoMesaModal = document.getElementById('menu-publico-mesa-modal');
+const menuPublicoMesaForm = document.getElementById('menu-publico-mesa-form');
+const menuPublicoMesaIdInput = document.getElementById('menu-publico-mesa-id');
+const menuPublicoMesaNombreInput = document.getElementById('menu-publico-mesa-nombre');
+const menuPublicoMesaActivoInput = document.getElementById('menu-publico-mesa-activo');
+const menuPublicoMesaTitulo = document.getElementById('menu-publico-mesa-modal-titulo');
+const menuPublicoMesaMensaje = document.getElementById('menu-publico-mesa-mensaje');
+const menuPublicoMesaCancelarBtn = document.getElementById('menu-publico-mesa-cancelar');
+const menuPublicoMesaGuardarBtn = document.getElementById('menu-publico-mesa-guardar');
 
 let paginaHistorialCocina = 1;
 const HIST_COCINA_PAGE_SIZE = 50;
@@ -1870,14 +1881,16 @@ const getLocalDateISO = (value = new Date()) => {
 };
 
 const mostrarTabAdmin = (tab = 'productos') => {
+  const tabDisponible = (btn) =>
+    !btn.classList.contains('hidden') && (btn.style?.display !== 'none');
   const existeTab = adminTabs.some(
-    (btn) => btn.dataset.adminTab === tab && !btn.classList.contains('hidden')
+    (btn) => btn.dataset.adminTab === tab && tabDisponible(btn)
   );
   let tabDestino = tab;
 
   if (!existeTab) {
     const cotizaDisponible = adminTabs.find(
-      (btn) => btn.dataset.adminTab === 'cotizaciones' && !btn.classList.contains('hidden')
+      (btn) => btn.dataset.adminTab === 'cotizaciones' && tabDisponible(btn)
     );
     tabDestino = cotizaDisponible ? 'cotizaciones' : tab;
   }
@@ -1975,8 +1988,10 @@ const obtenerTabInicialAdmin = () => {
     const params = new URLSearchParams(window.location.search || '');
     const tabQuery = params.get('tab');
     if (tabQuery) {
-      const existeTab = adminTabs.some((tab) => tab.dataset.adminTab === tabQuery);
-      if (existeTab && !tabsDeshabilitados.includes(tabQuery)) {
+      const tabBtn = adminTabs.find((tab) => tab.dataset.adminTab === tabQuery);
+      const tabHabilitado =
+        tabBtn && !tabBtn.classList.contains('hidden') && tabBtn.style?.display !== 'none';
+      if (tabHabilitado && !tabsDeshabilitados.includes(tabQuery)) {
         return tabQuery;
       }
     }
@@ -2084,29 +2099,59 @@ const renderMenuPublicoAccesos = () => {
     const fila = document.createElement('tr');
     const urlMenu = construirUrlAbsoluta(acceso?.url);
     const qrUrl = obtenerUrlQrMenuPublico(acceso);
+    const activo = Number(acceso?.activo) === 1;
 
     const nombreTd = document.createElement('td');
     nombreTd.textContent = acceso?.nombre || acceso?.mesa || 'Menu publico';
 
-    const tipoTd = document.createElement('td');
-    tipoTd.textContent = acceso?.tipo === 'mesa' ? 'Mesa' : 'Para llevar';
+    const mesaTd = document.createElement('td');
+    mesaTd.textContent = acceso?.mesa || acceso?.nombre || '--';
 
     const rutaTd = document.createElement('td');
     rutaTd.textContent = obtenerRutaVisibleMenuPublico(urlMenu);
 
     const estadoTd = document.createElement('td');
-    estadoTd.textContent = Number(acceso?.activo) ? 'Activo' : 'Inactivo';
+    const estadoBadge = document.createElement('span');
+    estadoBadge.className = activo ? 'estado-pill' : 'estado-pill estado-suspendido';
+    estadoBadge.textContent = activo ? 'Activo' : 'Inactivo';
+    estadoTd.appendChild(estadoBadge);
 
     const accionesTd = document.createElement('td');
     const accionesWrap = document.createElement('div');
     accionesWrap.className = 'admin-menu-publico-link-actions';
-    accionesWrap.append(
-      crearLinkBotonMenuPublico('Abrir menu', urlMenu),
-      crearLinkBotonMenuPublico('Ver QR', qrUrl),
-    );
+    accionesWrap.style.flexWrap = 'wrap';
+
+    accionesWrap.appendChild(crearLinkBotonMenuPublico('Abrir', urlMenu));
+    accionesWrap.appendChild(crearLinkBotonMenuPublico('QR', qrUrl));
+
+    const editarBtn = document.createElement('button');
+    editarBtn.type = 'button';
+    editarBtn.className = 'kanm-button ghost sm';
+    editarBtn.textContent = 'Editar';
+    editarBtn.dataset.menuPublicoAccion = 'editar';
+    editarBtn.dataset.accesoId = acceso?.id ?? '';
+    accionesWrap.appendChild(editarBtn);
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'kanm-button ghost sm';
+    toggleBtn.textContent = activo ? 'Desactivar' : 'Activar';
+    toggleBtn.dataset.menuPublicoAccion = 'toggle';
+    toggleBtn.dataset.accesoId = acceso?.id ?? '';
+    accionesWrap.appendChild(toggleBtn);
+
+    const eliminarBtn = document.createElement('button');
+    eliminarBtn.type = 'button';
+    eliminarBtn.className = 'kanm-button ghost sm';
+    eliminarBtn.style.color = '#ff4b4b';
+    eliminarBtn.textContent = 'Eliminar';
+    eliminarBtn.dataset.menuPublicoAccion = 'eliminar';
+    eliminarBtn.dataset.accesoId = acceso?.id ?? '';
+    accionesWrap.appendChild(eliminarBtn);
+
     accionesTd.appendChild(accionesWrap);
 
-    fila.append(nombreTd, tipoTd, rutaTd, estadoTd, accionesTd);
+    fila.append(nombreTd, mesaTd, rutaTd, estadoTd, accionesTd);
     menuPublicoAccesosBody.appendChild(fila);
   });
 
@@ -2182,6 +2227,134 @@ const cargarMenuPublicoAccesos = async ({ force = false } = {}) => {
       error?.message || 'No se pudo cargar el modulo del menu publico.',
       'warning',
     );
+  }
+};
+
+const abrirModalMesa = (acceso = null) => {
+  if (!menuPublicoMesaModal) return;
+  if (menuPublicoMesaIdInput) menuPublicoMesaIdInput.value = acceso?.id ?? '';
+  if (menuPublicoMesaNombreInput) {
+    menuPublicoMesaNombreInput.value = acceso?.nombre || acceso?.mesa || '';
+  }
+  if (menuPublicoMesaActivoInput) {
+    menuPublicoMesaActivoInput.checked = acceso ? Number(acceso.activo) === 1 : true;
+  }
+  if (menuPublicoMesaTitulo) {
+    menuPublicoMesaTitulo.textContent = acceso?.id ? 'Editar mesa' : 'Nueva mesa';
+  }
+  setMessage(menuPublicoMesaMensaje, '', 'info');
+  menuPublicoMesaModal.hidden = false;
+  requestAnimationFrame(() => {
+    menuPublicoMesaModal.classList.add('is-visible');
+  });
+  setTimeout(() => menuPublicoMesaNombreInput?.focus(), 50);
+};
+
+const cerrarModalMesa = () => {
+  if (!menuPublicoMesaModal) return;
+  menuPublicoMesaModal.classList.remove('is-visible');
+  menuPublicoMesaModal.hidden = true;
+};
+
+const guardarMesaMenuPublico = async (event) => {
+  event?.preventDefault?.();
+  if (!menuPublicoMesaForm) return;
+  const id = (menuPublicoMesaIdInput?.value || '').trim();
+  const nombre = (menuPublicoMesaNombreInput?.value || '').trim();
+  const activo = menuPublicoMesaActivoInput?.checked ? 1 : 0;
+  if (!nombre) {
+    setMessage(menuPublicoMesaMensaje, 'El nombre de la mesa es obligatorio.', 'warning');
+    return;
+  }
+  const payload = {
+    id: id ? Number(id) : undefined,
+    nombre,
+    mesa: nombre,
+    tipo: 'mesa',
+    activo,
+  };
+  if (menuPublicoMesaGuardarBtn) menuPublicoMesaGuardarBtn.disabled = true;
+  setMessage(menuPublicoMesaMensaje, 'Guardando mesa...', 'info');
+  try {
+    const resp = await fetchJsonAutorizado('/api/menu-publico/accesos', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const data = await leerRespuestaApi(resp);
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo guardar la mesa.');
+    }
+    cerrarModalMesa();
+    setMessage(menuPublicoMensaje, id ? 'Mesa actualizada.' : 'Mesa creada.', 'success');
+    await cargarMenuPublicoAccesos({ force: true });
+  } catch (error) {
+    setMessage(menuPublicoMesaMensaje, error?.message || 'No se pudo guardar la mesa.', 'error');
+  } finally {
+    if (menuPublicoMesaGuardarBtn) menuPublicoMesaGuardarBtn.disabled = false;
+  }
+};
+
+const toggleMesaMenuPublico = async (acceso) => {
+  if (!acceso?.id) return;
+  const nuevoActivo = Number(acceso.activo) === 1 ? 0 : 1;
+  setMessage(menuPublicoMensaje, 'Actualizando estado...', 'info');
+  try {
+    const resp = await fetchJsonAutorizado('/api/menu-publico/accesos', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: Number(acceso.id),
+        nombre: acceso.nombre || acceso.mesa,
+        mesa: acceso.mesa || acceso.nombre,
+        tipo: acceso.tipo || 'mesa',
+        activo: nuevoActivo,
+      }),
+    });
+    const data = await leerRespuestaApi(resp);
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo actualizar el estado.');
+    }
+    setMessage(menuPublicoMensaje, nuevoActivo ? 'Mesa activada.' : 'Mesa desactivada.', 'success');
+    await cargarMenuPublicoAccesos({ force: true });
+  } catch (error) {
+    setMessage(menuPublicoMensaje, error?.message || 'No se pudo actualizar el estado.', 'error');
+  }
+};
+
+const eliminarMesaMenuPublico = async (acceso) => {
+  if (!acceso?.id) return;
+  const nombre = acceso.nombre || acceso.mesa || `mesa #${acceso.id}`;
+  if (!confirm(`Eliminar la mesa "${nombre}"? Esta accion no se puede deshacer y el QR dejara de funcionar.`)) {
+    return;
+  }
+  setMessage(menuPublicoMensaje, 'Eliminando mesa...', 'info');
+  try {
+    const resp = await fetchConAutorizacion(`/api/menu-publico/accesos/${encodeURIComponent(acceso.id)}`, {
+      method: 'DELETE',
+    });
+    const data = await leerRespuestaApi(resp);
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo eliminar la mesa.');
+    }
+    setMessage(menuPublicoMensaje, 'Mesa eliminada.', 'success');
+    await cargarMenuPublicoAccesos({ force: true });
+  } catch (error) {
+    setMessage(menuPublicoMensaje, error?.message || 'No se pudo eliminar la mesa.', 'error');
+  }
+};
+
+const manejarAccionMesaMenuPublico = async (event) => {
+  const btn = event.target?.closest?.('[data-menu-publico-accion]');
+  if (!btn) return;
+  const accion = btn.dataset.menuPublicoAccion;
+  const id = Number(btn.dataset.accesoId);
+  const acceso = (menuPublicoAccesos || []).find((item) => Number(item.id) === id);
+  if (!acceso) return;
+  if (accion === 'editar') {
+    abrirModalMesa(acceso);
+  } else if (accion === 'toggle') {
+    await toggleMesaMenuPublico(acceso);
+  } else if (accion === 'eliminar') {
+    await eliminarMesaMenuPublico(acceso);
   }
 };
 
@@ -2329,6 +2502,7 @@ const limpiarFormularioProducto = () => {
   if (inputProdCostoPromedio) setMoneyInputValueAdmin(inputProdCostoPromedio, '');
   if (inputProdUltimoCosto) setMoneyInputValueAdmin(inputProdUltimoCosto, '');
   if (inputProdActualizaCostoCompras) inputProdActualizaCostoCompras.checked = true;
+  if (inputProdVisibleMenuQr) inputProdVisibleMenuQr.checked = true;
   if (inputProdCostoReal) setMoneyInputValueAdmin(inputProdCostoReal, '');
   if (inputProdCostoRealIncluyeItbis) inputProdCostoRealIncluyeItbis.checked = false;
   if (inputProdEsInsumo) inputProdEsInsumo.checked = false;
@@ -2907,6 +3081,12 @@ const seleccionarProductoEdicion = (producto) => {
         : formatNumberInput(contenidoValor, 2);
   }
   if (inputProdActualizaCostoCompras) inputProdActualizaCostoCompras.checked = actualizaCostoCompras;
+  if (inputProdVisibleMenuQr) {
+    const visibleMenuQrValor = producto.visible_menu_qr ?? producto.visibleMenuQr;
+    inputProdVisibleMenuQr.checked = visibleMenuQrValor === undefined || visibleMenuQrValor === null
+      ? true
+      : Number(visibleMenuQrValor) === 1;
+  }
   if (inputProdStockIndefinido) inputProdStockIndefinido.checked = stockEsIndefinido;
   if (inputProdStock) {
     const stockValorForm = producto.stock;
@@ -3364,6 +3544,7 @@ const obtenerValoresProducto = () => {
   const categoriaId = categoriaValor === '' ? null : parseInt(categoriaValor, 10);
   const activo = inputProdActivo?.checked ?? true;
   const actualizaCostoCompras = inputProdActualizaCostoCompras?.checked ?? true;
+  const visibleMenuQr = inputProdVisibleMenuQr ? inputProdVisibleMenuQr.checked : true;
   const imageUrlValidacion = validarUrlImagenProducto(inputProdImagenUrl?.value ?? '');
   const { precios } = leerPreciosProductoUI();
 
@@ -3384,6 +3565,7 @@ const obtenerValoresProducto = () => {
     unidadBase,
     contenidoPorUnidad,
     actualizaCostoCompras,
+    visibleMenuQr,
   };
 };
 
@@ -3520,6 +3702,7 @@ const crearProducto = async ({
   unidadBase,
   contenidoPorUnidad,
   actualizaCostoCompras,
+  visibleMenuQr,
 }) => {
   const body = {
     nombre,
@@ -3534,6 +3717,7 @@ const crearProducto = async ({
     unidad_base: unidadBase,
     contenido_por_unidad: Number(contenidoPorUnidad.toFixed(4)),
     actualiza_costo_con_compras: actualizaCostoCompras ? 1 : 0,
+    visible_menu_qr: visibleMenuQr === false ? 0 : 1,
   };
   if (stockIndefinido) {
     body.stock = null;
@@ -3574,6 +3758,7 @@ const actualizarProducto = async (
     unidadBase,
     contenidoPorUnidad,
     actualizaCostoCompras,
+    visibleMenuQr,
   }
 ) => {
   const body = {
@@ -3591,6 +3776,7 @@ const actualizarProducto = async (
     unidad_base: unidadBase,
     contenido_por_unidad: Number(contenidoPorUnidad.toFixed(4)),
     actualiza_costo_con_compras: actualizaCostoCompras ? 1 : 0,
+    visible_menu_qr: visibleMenuQr === false ? 0 : 1,
   };
   if (stockIndefinido) {
     body.stock = null;
@@ -8639,6 +8825,7 @@ const DEFAULT_CONFIG_MODULOS = {
   mostrador: true,
   delivery: true,
   historialCocina: true,
+  menuQr: false,
 };
 const DEFAULT_NEGOCIO_COLORS = {
   primario: '#255bc7',
@@ -8689,6 +8876,7 @@ const getNegociosDom = () => ({
     chkModuloMostrador: document.getElementById('kanm-modulo-mostrador'),
     chkModuloDelivery: document.getElementById('kanm-modulo-delivery'),
     chkModuloHistorial: document.getElementById('kanm-modulo-historial'),
+    chkModuloMenuQr: document.getElementById('kanm-modulo-menu-qr'),
   inputAdminCorreo: document.getElementById('kanm-negocios-admin-correo'),
   inputAdminUsuario: document.getElementById('kanm-negocios-admin-usuario'),
   chkCambiarPassword: document.getElementById('kanm-negocios-cambiar-password'),
@@ -9737,6 +9925,7 @@ const abrirModalNegocio = async (id = null) => {
     if (dom.chkModuloMostrador) dom.chkModuloMostrador.checked = configParsed.mostrador !== false;
     if (dom.chkModuloDelivery) dom.chkModuloDelivery.checked = configParsed.delivery !== false;
     if (dom.chkModuloHistorial) dom.chkModuloHistorial.checked = configParsed.historialCocina !== false;
+    if (dom.chkModuloMenuQr) dom.chkModuloMenuQr.checked = configParsed.menuQr === true;
 
   if (dom.inputAdminCorreo) {
     dom.inputAdminCorreo.value =
@@ -9803,6 +9992,7 @@ const guardarNegocio = async (event) => {
       mostrador: dom.chkModuloMostrador?.checked !== false,
       delivery: dom.chkModuloDelivery?.checked !== false,
       historialCocina: dom.chkModuloHistorial?.checked !== false,
+      menuQr: dom.chkModuloMenuQr?.checked === true,
     };
 
   const passwordEditable = dom.chkCambiarPassword?.checked === true;
@@ -11710,8 +11900,38 @@ menuPublicoRefrescarBtn?.addEventListener('click', () => {
   });
 });
 
+menuPublicoNuevoBtn?.addEventListener('click', () => {
+  abrirModalMesa(null);
+});
+
+menuPublicoMesaCancelarBtn?.addEventListener('click', () => {
+  cerrarModalMesa();
+});
+
+menuPublicoMesaForm?.addEventListener('submit', (event) => {
+  guardarMesaMenuPublico(event).catch((error) => {
+    console.warn('Error al guardar mesa:', error);
+  });
+});
+
+menuPublicoAccesosBody?.addEventListener('click', (event) => {
+  manejarAccionMesaMenuPublico(event).catch((error) => {
+    console.warn('Error en accion de mesa:', error);
+  });
+});
+
+menuPublicoMesaModal?.addEventListener('click', (event) => {
+  if (event.target === menuPublicoMesaModal) {
+    cerrarModalMesa();
+  }
+});
+
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  if (menuPublicoMesaModal && !menuPublicoMesaModal.hidden) {
+    cerrarModalMesa();
+    return;
+  }
   if (modalEliminarOverlay && !modalEliminarOverlay.hidden) {
     cerrarModalEliminar();
     return;

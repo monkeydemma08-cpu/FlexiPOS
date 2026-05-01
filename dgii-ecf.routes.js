@@ -267,7 +267,7 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
 
     // Determine flow and send
     if (flujo === 'FC_MENOR_250K') {
-      return await emitirFcMenor250k({ pedidoId, negocioId, pedido, cliente, negocio, config, encfData, xmlGenerado, firmado, token, rncEmisor, payload });
+      return await emitirFcMenor250k({ pedidoId, negocioId, pedido, cliente, negocio, config, encfData, xmlGenerado, firmado, token, rncEmisor, payload, emisorIdentidad });
     }
 
     // Normal ECF flow
@@ -360,14 +360,15 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
   // FC < 250k flow (sign ECF → compute security code → build RFCE → send)
   // ---------------------------------------------------------------------------
 
-  const emitirFcMenor250k = async ({ pedidoId, negocioId, pedido, cliente, negocio, config, encfData, xmlGenerado, firmado, token, rncEmisor, payload }) => {
+  const emitirFcMenor250k = async ({ pedidoId, negocioId, pedido, cliente, negocio, config, encfData, xmlGenerado, firmado, token, rncEmisor, payload, emisorIdentidad }) => {
     const signatureValue = extractSignatureValueFromXml(firmado.xml);
     const codigoSeguridad = computeCodigoSeguridadeCF(signatureValue);
 
     await actualizarPedidoEcf(pedidoId, { ecf_codigo_seguridad: codigoSeguridad });
 
-    // Build RFCE — pasar ecfPayload para que herede los totales ya derivados de items
-    // (garantiza coherencia entre el ECF firmado y el RFCE que se envia a DGII)
+    // Build RFCE — pasar ecfPayload + emisorIdentidad para garantizar coherencia
+    // perfecta entre ECF y RFCE (DGII rechaza el lote si difieren razon social,
+    // RNC, fecha emision, totales, etc — incluyendo diferencias de mayusculas).
     const rfcePayload = buildResumenFcPayload({
       pedido: { ...pedido, ecf_tipo: encfData.encf.slice(0, 3) },
       cliente,
@@ -376,7 +377,21 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
       configDgii: config,
       codigoSeguridadeCF: codigoSeguridad,
       ecfPayload: payload,
+      emisorIdentidad,
     });
+
+    // Defensa: verificar que los campos sensibles coincidan exactamente con
+    // el ECF firmado antes de enviar el RFCE a DGII.
+    const camposCriticos = ['RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'eNCF'];
+    for (const campo of camposCriticos) {
+      if (payload[campo] !== rfcePayload[campo]) {
+        throw new Error(
+          `Inconsistencia ECF vs RFCE en campo ${campo}: ` +
+          `ECF="${payload[campo]}" vs RFCE="${rfcePayload[campo]}". ` +
+          `DGII rechazaria el lote completo. Revisa la fuente de datos del emisor.`
+        );
+      }
+    }
 
     const rfceXml = buildResumenFcXml({
       payload: rfcePayload,
@@ -639,6 +654,20 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
           codigoSeguridadeCF: codigoSeguridad,
           ecfPayload: payload,
         });
+
+        // Defensa: bloquear envio si ECF y RFCE difieren en algun campo critico
+        // (DGII rechaza el lote completo cuando hay discrepancia, incluso de mayusculas).
+        const camposCriticos = ['RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'eNCF'];
+        for (const campo of camposCriticos) {
+          if (payload[campo] !== rfcePayload[campo]) {
+            throw new Error(
+              `Inconsistencia ECF vs RFCE en ${campo}: ` +
+              `ECF="${payload[campo]}" vs RFCE="${rfcePayload[campo]}". ` +
+              `Revisa la fuente de datos del emisor.`
+            );
+          }
+        }
+
         const rfceXml = buildResumenFcXml({ payload: rfcePayload, rncEmisorFallback: rncEmisor, codigoSeguridadeCF: codigoSeguridad });
         const rfceFirmado = signEcfXml({ xml: rfceXml, config });
         const envio = await sendXmlToDgii({

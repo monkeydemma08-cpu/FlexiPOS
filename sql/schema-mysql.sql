@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS productos (
   stock DECIMAL(12,4) DEFAULT 0,
   stock_indefinido TINYINT(1) NOT NULL DEFAULT 0,
   activo TINYINT DEFAULT 1,
+  visible_menu_qr TINYINT(1) NOT NULL DEFAULT 1,
   negocio_id INT NOT NULL,
   CONSTRAINT fk_productos_categoria FOREIGN KEY (categoria_id) REFERENCES categorias(id),
   CONSTRAINT fk_productos_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)

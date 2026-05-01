@@ -31,6 +31,7 @@ const AUTH_DEFAULT_CONFIG_MODULOS = Object.freeze({
   mostrador: true,
   delivery: true,
   historialCocina: true,
+  menuQr: false,
 });
 
 const normalizarModuloFlag = (value, fallback = true) => {

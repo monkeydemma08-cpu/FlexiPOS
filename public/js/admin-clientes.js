@@ -19,6 +19,9 @@
   const resumenClienteTelefono = document.getElementById('admin-cliente-resumen-telefono');
   const resumenClienteEmail = document.getElementById('admin-cliente-resumen-email');
   const resumenClienteEstado = document.getElementById('admin-cliente-estado-badge');
+  const resumenClienteBloque = document.getElementById('admin-cliente-resumen-bloque');
+  const perfilTitulo = document.getElementById('admin-cliente-perfil-titulo');
+  const perfilSub = document.getElementById('admin-cliente-perfil-sub');
 
   const form = document.getElementById('cliente-form');
   const inputId = document.getElementById('cliente-id');
@@ -119,19 +122,33 @@
   };
 
   const actualizarResumenCliente = (cliente = null) => {
+    // Mostrar/ocultar el bloque de resumen segun haya cliente seleccionado
+    if (resumenClienteBloque) resumenClienteBloque.hidden = !cliente;
+
     if (resumenClienteNombre) resumenClienteNombre.textContent = cliente?.nombre || '--';
     if (resumenClienteDocumento) resumenClienteDocumento.textContent = cliente?.documento || '--';
     if (resumenClienteTelefono) resumenClienteTelefono.textContent = cliente?.telefono || '--';
     if (resumenClienteEmail) resumenClienteEmail.textContent = cliente?.email || '--';
+
     if (resumenClienteEstado) {
       if (!cliente) {
-        resumenClienteEstado.textContent = 'Sin selección';
+        resumenClienteEstado.textContent = 'Sin seleccion';
         resumenClienteEstado.dataset.status = 'none';
       } else {
         const activo = Number(cliente?.activo ?? 1) !== 0;
         resumenClienteEstado.textContent = activo ? 'Activo' : 'Inactivo';
         resumenClienteEstado.dataset.status = activo ? 'activo' : 'inactivo';
       }
+    }
+
+    // Actualizar el header del perfil con contexto util
+    if (perfilTitulo) {
+      perfilTitulo.textContent = cliente?.nombre ? cliente.nombre : 'Perfil del cliente';
+    }
+    if (perfilSub) {
+      perfilSub.textContent = cliente
+        ? 'Edita los datos o registra una factura.'
+        : 'Selecciona un cliente o crea uno nuevo.';
     }
   };
 

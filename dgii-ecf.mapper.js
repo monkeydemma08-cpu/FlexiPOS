@@ -406,11 +406,22 @@ const buildResumenFcPayload = ({ pedido, cliente, negocio, encfData, configDgii,
   payload.TipoPago = deriveTipoPago(pedido);
   Object.assign(payload, buildFormasPago(pedido));
 
-  payload.RNCEmisor = ident.rnc;
-  payload.RazonSocialEmisor = ident.razonSocial;
-  payload.FechaEmision = fechaEmision;
+  // CRITICO: si tenemos el ecfPayload, usar EXACTAMENTE el mismo RNCEmisor /
+  // RazonSocialEmisor / FechaEmision / RNCComprador / RazonSocialComprador
+  // que el ECF firmado. La DGII rechaza el lote completo si cualquiera de
+  // estos campos difiere entre ECF y RFCE — incluyendo diferencias de
+  // mayusculas (ej. "Endry Emmanuel" vs "ENDRY EMMANUEL").
+  // Solo caemos al resolver async/sync si no hay ecfPayload (camino externo).
+  payload.RNCEmisor = (ecfPayload && ecfPayload.RNCEmisor) || ident.rnc;
+  payload.RazonSocialEmisor = (ecfPayload && ecfPayload.RazonSocialEmisor) || ident.razonSocial;
+  payload.FechaEmision = (ecfPayload && ecfPayload.FechaEmision) || fechaEmision;
 
-  if (cliente?.documento) {
+  if (ecfPayload && ecfPayload.RNCComprador) {
+    payload.RNCComprador = ecfPayload.RNCComprador;
+    if (ecfPayload.RazonSocialComprador) {
+      payload.RazonSocialComprador = ecfPayload.RazonSocialComprador;
+    }
+  } else if (cliente?.documento) {
     const docLimpio = String(cliente.documento).replace(/[^0-9]/g, '');
     if (docLimpio.length >= 9) {
       payload.RNCComprador = docLimpio;

@@ -86,6 +86,7 @@ const DEFAULT_CONFIG_MODULOS = {
   mostrador: true,
   delivery: true,
   historialCocina: true,
+  menuQr: false,
 };
 const AREAS_PREPARACION = ['ninguna', 'cocina', 'bar'];
 const ESTADOS_PREPARACION_DETALLE = new Set(['pendiente', 'preparando', 'listo']);
@@ -10856,6 +10857,11 @@ app.get('/api/public/menu/:token/qr.svg', async (req, res) => {
       return res.status(404).type('text/plain').send('Acceso de menu no encontrado.');
     }
 
+    const menuQrHabilitado = await moduloActivoParaNegocio('menuQr', acceso.negocio_id);
+    if (!menuQrHabilitado) {
+      return res.status(403).type('text/plain').send('El menu QR no esta disponible.');
+    }
+
     const qrUrl = construirUrlMenuPublico(req, acceso.token);
     const svg = await QRCode.toString(qrUrl, {
       type: 'svg',
@@ -10891,6 +10897,14 @@ app.get('/api/public/menu/:token', async (req, res) => {
     }
     if (normalizarFlag(acceso.activo, 1) !== 1) {
       return res.status(403).json({ ok: false, error: 'Este acceso del menu esta inactivo.' });
+    }
+
+    const menuQrHabilitado = await moduloActivoParaNegocio('menuQr', acceso.negocio_id);
+    if (!menuQrHabilitado) {
+      return res.status(403).json({
+        ok: false,
+        error: 'El menu QR no esta disponible para este negocio.',
+      });
     }
 
     const estadoNegocio = await validarEstadoNegocio(acceso.negocio_id);
@@ -10968,6 +10982,14 @@ app.post('/api/public/menu/:token/pedidos', async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Acceso del menu no encontrado.' });
     }
 
+    const menuQrHabilitado = await moduloActivoParaNegocio('menuQr', acceso.negocio_id);
+    if (!menuQrHabilitado) {
+      return res.status(403).json({
+        ok: false,
+        error: 'El menu QR no esta disponible para este negocio.',
+      });
+    }
+
     const sesionPedidos = obtenerSesionPedidosRequest(req);
     validarSesionPedidosMenuPublico(sesionPedidos, acceso);
     validarRateLimitMenuPublicoPedidos(req, token);
@@ -10997,6 +11019,13 @@ app.get('/api/menu-publico/accesos', (req, res) => {
     }
 
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const menuQrHabilitado = await moduloActivoParaNegocio('menuQr', negocioId);
+    if (!menuQrHabilitado) {
+      return res.status(403).json({
+        ok: false,
+        error: 'El modulo Menu QR no esta habilitado para este negocio.',
+      });
+    }
 
     try {
       const rows = await db.all(
@@ -11024,6 +11053,13 @@ app.post('/api/menu-publico/accesos', (req, res) => {
     }
 
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const menuQrHabilitado = await moduloActivoParaNegocio('menuQr', negocioId);
+    if (!menuQrHabilitado) {
+      return res.status(403).json({
+        ok: false,
+        error: 'El modulo Menu QR no esta habilitado para este negocio.',
+      });
+    }
     const entradas = Array.isArray(req.body?.accesos) ? req.body.accesos : [req.body || {}];
 
     if (!entradas.length) {
@@ -11148,6 +11184,42 @@ app.post('/api/menu-publico/accesos', (req, res) => {
         ok: false,
         error: error?.message || 'No se pudieron guardar los accesos del menu publico.',
       });
+    }
+  });
+});
+
+app.delete('/api/menu-publico/accesos/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const menuQrHabilitado = await moduloActivoParaNegocio('menuQr', negocioId);
+    if (!menuQrHabilitado) {
+      return res.status(403).json({
+        ok: false,
+        error: 'El modulo Menu QR no esta habilitado para este negocio.',
+      });
+    }
+
+    const accesoId = Number(req.params?.id);
+    if (!Number.isFinite(accesoId) || accesoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de acceso invalido.' });
+    }
+
+    try {
+      const resultado = await db.run(
+        'DELETE FROM menu_publico_accesos WHERE id = ? AND negocio_id = ?',
+        [accesoId, negocioId]
+      );
+      if (!resultado || Number(resultado.changes) === 0) {
+        return res.status(404).json({ ok: false, error: 'Acceso no encontrado.' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al eliminar acceso del menu publico:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo eliminar el acceso del menu publico.' });
     }
   });
 });
@@ -11676,6 +11748,7 @@ app.get('/api/productos', (req, res) => {
                p.costo_base_sin_itbis, p.costo_promedio_actual, p.ultimo_costo_sin_itbis,
                p.actualiza_costo_con_compras, p.costo_unitario_real, p.costo_unitario_real_incluye_itbis,
                p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad,
+               COALESCE(p.visible_menu_qr, 1) AS visible_menu_qr,
                c.nombre AS categoria_nombre
         FROM productos p
         ${joinCond}
@@ -23788,6 +23861,7 @@ const obtenerCatalogoMenuPublico = async (negocioId) => {
         ${joinCond}
        WHERE p.negocio_id = ?
          AND COALESCE(p.activo, 1) = 1
+         AND COALESCE(p.visible_menu_qr, 1) = 1
          AND (COALESCE(p.tipo_producto, 'FINAL') <> 'INSUMO' OR COALESCE(p.insumo_vendible, 0) = 1)
        ORDER BY COALESCE(c.nombre, 'Menu') ASC, p.nombre ASC
     `,
@@ -25320,6 +25394,10 @@ app.post('/api/productos', (req, res) => {
       req.body.actualiza_costo_con_compras ?? req.body.actualizaCostoCompras,
       1
     );
+    const visibleMenuQr = normalizarFlag(
+      req.body.visible_menu_qr ?? req.body.visibleMenuQr,
+      1
+    );
     const preciosLista = normalizarListaPrecios(preciosEntrada);
     const preciosJson = preciosLista.length ? JSON.stringify(preciosLista) : null;
     const categoriaId = categoria_id ?? req.body.categoriaId ?? null;
@@ -25358,9 +25436,9 @@ app.post('/api/productos', (req, res) => {
         nombre, image_url, precio, precios, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
         actualiza_costo_con_compras, costo_unitario_real, costo_unitario_real_incluye_itbis,
         tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad,
-        stock, stock_indefinido, categoria_id, activo, negocio_id
+        stock, stock_indefinido, visible_menu_qr, categoria_id, activo, negocio_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
     `;
     const params = [
       nombre,
@@ -25379,6 +25457,7 @@ app.post('/api/productos', (req, res) => {
       Number(contenidoPorUnidad.toFixed(4)),
       stockFinal,
       stockIndefinido,
+      visibleMenuQr,
       categoriaId,
       usuarioSesion.negocio_id,
     ];
@@ -25407,6 +25486,7 @@ app.post('/api/productos', (req, res) => {
         contenido_por_unidad: Number(contenidoPorUnidad.toFixed(4)),
         stock: stockIndefinido ? null : stockFinal,
         stock_indefinido: stockIndefinido,
+        visible_menu_qr: visibleMenuQr,
         categoria_id: categoriaId || null,
         activo: 1,
       });
@@ -25441,11 +25521,14 @@ app.put('/api/productos/:id', (req, res) => {
     const contenidoPorUnidadEntrada = req.body.contenido_por_unidad ?? req.body.contenidoPorUnidad;
     const actualizaCostoComprasEntrada =
       req.body.actualiza_costo_con_compras ?? req.body.actualizaCostoCompras;
+    const visibleMenuQrEntrada =
+      req.body.visible_menu_qr ?? req.body.visibleMenuQr;
 
     db.get(
         `SELECT stock, stock_indefinido, image_url, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
                 actualiza_costo_con_compras, costo_unitario_real, costo_unitario_real_incluye_itbis,
-                tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad
+                tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad,
+                COALESCE(visible_menu_qr, 1) AS visible_menu_qr
            FROM productos WHERE id = ? AND negocio_id = ?`,
       [id, usuarioSesion.negocio_id],
       async (productoErr, productoActual) => {
@@ -25577,6 +25660,14 @@ app.put('/api/productos/:id', (req, res) => {
           );
         }
 
+        let visibleMenuQr = null;
+        if (visibleMenuQrEntrada !== undefined) {
+          visibleMenuQr = normalizarFlag(
+            visibleMenuQrEntrada,
+            Number(productoActual.visible_menu_qr ?? 1)
+          );
+        }
+
         let imageUrl = null;
         let imageUrlProporcionada = false;
         if (imageUrlEntrada !== undefined) {
@@ -25663,6 +25754,11 @@ app.put('/api/productos/:id', (req, res) => {
           params.push(actualizaCostoCompras);
         }
 
+        if (visibleMenuQr !== null) {
+          campos.push('visible_menu_qr = ?');
+          params.push(visibleMenuQr);
+        }
+
         if (stockProporcionado) {
           campos.push('stock = ?');
           params.push(stockValor);
@@ -25691,6 +25787,8 @@ app.put('/api/productos/:id', (req, res) => {
             message: 'Producto actualizado correctamente',
             stock_indefinido: stockIndefinido,
             stock: stockProporcionado ? stockValor : productoActual.stock,
+            visible_menu_qr:
+              visibleMenuQr !== null ? visibleMenuQr : Number(productoActual.visible_menu_qr ?? 1),
           });
         });
       }

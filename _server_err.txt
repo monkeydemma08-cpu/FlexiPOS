@@ -1,0 +1,1 @@
+[analytics/inventario] sin compras_inventario: Unknown column 'estado' in 'where clause'
