@@ -28,6 +28,10 @@ const inputProdCostoPromedio = document.getElementById('prod-costo-promedio');
 const inputProdUltimoCosto = document.getElementById('prod-ultimo-costo');
 const inputProdActualizaCostoCompras = document.getElementById('prod-actualiza-costo');
 const inputProdVisibleMenuQr = document.getElementById('prod-visible-menu-qr');
+const prodSaboresChipsEl = document.getElementById('prod-sabores-chips');
+const prodSaborInput = document.getElementById('prod-sabor-input');
+const prodSaborAgregarBtn = document.getElementById('prod-sabor-agregar');
+let prodSaboresActuales = [];
 const inputProdCostoReal = document.getElementById('prod-costo-real');
 const inputProdCostoRealIncluyeItbis = document.getElementById('prod-costo-real-incluye-itbis');
 const inputProdEsInsumo = document.getElementById('prod-es-insumo');
@@ -1603,16 +1607,31 @@ const obtenerInicialesProducto = (value, fallback = 'KM') => {
   return iniciales || fallback;
 };
 
+const PRODUCTO_IMAGEN_INLINE_MAX_BYTES = 600 * 1024; // ~450 KB binario despues de base64
+const PRODUCTO_IMAGEN_INLINE_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
 const validarUrlImagenProducto = (value) => {
   const texto = value === null || value === undefined ? '' : String(value).trim();
   if (!texto) {
     return { ok: true, value: null };
   }
   if (/^data:/i.test(texto)) {
-    return {
-      ok: false,
-      error: 'La imagen del producto debe ser una URL http/https. No pegues base64.',
-    };
+    const match = texto.match(/^data:([\w/+.-]+)(?:;[^,]+)*,/i);
+    const mime = (match?.[1] || '').toLowerCase();
+    if (!PRODUCTO_IMAGEN_INLINE_MIMES.includes(mime)) {
+      return {
+        ok: false,
+        error: 'Solo se aceptan imagenes JPG, PNG o WebP.',
+      };
+    }
+    if (texto.length > PRODUCTO_IMAGEN_INLINE_MAX_BYTES) {
+      const limiteKb = Math.round(PRODUCTO_IMAGEN_INLINE_MAX_BYTES / 1024);
+      return {
+        ok: false,
+        error: `La imagen es demasiado pesada (limite ${limiteKb}KB). Sube otra imagen o reduce la calidad.`,
+      };
+    }
+    return { ok: true, value: texto };
   }
   if (texto.length > 2048) {
     return {
@@ -1632,6 +1651,134 @@ const validarUrlImagenProducto = (value) => {
   } catch (_) {
     return { ok: false, error: 'La imagen del producto no es valida.' };
   }
+};
+
+// Comprime y redimensiona una imagen del lado del cliente para que pese
+// pocos KB antes de enviarla al servidor. Devuelve un data URI JPEG.
+const PRODUCTO_IMAGEN_MAX_DIM = 800;
+const PRODUCTO_IMAGEN_CALIDAD = 0.78;
+
+const comprimirImagenProducto = (file) =>
+  new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error('No se selecciono archivo.'));
+      return;
+    }
+    if (!/^image\/(jpeg|jpg|png|webp)$/i.test(file.type || '')) {
+      reject(new Error('Formato no soportado. Usa JPG, PNG o WebP.'));
+      return;
+    }
+    // Hard limit: 10 MB del archivo original (el resultado se comprime mucho)
+    if (file.size > 10 * 1024 * 1024) {
+      reject(new Error('El archivo original es demasiado grande (max 10 MB).'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Imagen invalida o corrupta.'));
+      img.onload = () => {
+        const ratio = Math.min(
+          1,
+          PRODUCTO_IMAGEN_MAX_DIM / img.width,
+          PRODUCTO_IMAGEN_MAX_DIM / img.height
+        );
+        const targetW = Math.max(1, Math.round(img.width * ratio));
+        const targetH = Math.max(1, Math.round(img.height * ratio));
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Tu navegador no soporta compresion de imagenes.'));
+          return;
+        }
+        // Fondo blanco para los PNG con transparencia (el JPEG no lo soporta)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, targetW, targetH);
+        ctx.drawImage(img, 0, 0, targetW, targetH);
+        let calidad = PRODUCTO_IMAGEN_CALIDAD;
+        let dataUri = canvas.toDataURL('image/jpeg', calidad);
+        // Si quedo por encima del limite, reducir calidad iterativamente
+        while (dataUri.length > PRODUCTO_IMAGEN_INLINE_MAX_BYTES && calidad > 0.4) {
+          calidad = Math.max(0.4, calidad - 0.1);
+          dataUri = canvas.toDataURL('image/jpeg', calidad);
+        }
+        resolve({
+          dataUri,
+          calidad,
+          ancho: targetW,
+          alto: targetH,
+          bytes: dataUri.length,
+        });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+const SABOR_MAX_LENGTH_FRONT = 60;
+const SABORES_MAX_ITEMS_FRONT = 30;
+
+const renderProductoSaboresChips = () => {
+  if (!prodSaboresChipsEl) return;
+  prodSaboresChipsEl.innerHTML = '';
+  if (!prodSaboresActuales.length) {
+    const placeholder = document.createElement('span');
+    placeholder.className = 'kanm-subtitle';
+    placeholder.style.fontSize = '12px';
+    placeholder.style.padding = '0 6px';
+    placeholder.textContent = 'Sin sabores. El producto se vende tal cual.';
+    prodSaboresChipsEl.appendChild(placeholder);
+    return;
+  }
+  prodSaboresActuales.forEach((sabor, idx) => {
+    const chip = document.createElement('span');
+    chip.style.cssText =
+      'display:inline-flex;align-items:center;gap:4px;background:var(--color-primario,#255bc7);color:#fff;border-radius:14px;padding:4px 10px;font-size:13px;';
+    const txt = document.createElement('span');
+    txt.textContent = sabor;
+    chip.appendChild(txt);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.setAttribute('aria-label', `Quitar ${sabor}`);
+    close.textContent = '×';
+    close.style.cssText =
+      'background:transparent;border:0;color:#fff;font-size:16px;line-height:1;cursor:pointer;padding:0 0 0 2px;';
+    close.addEventListener('click', () => {
+      prodSaboresActuales.splice(idx, 1);
+      renderProductoSaboresChips();
+    });
+    chip.appendChild(close);
+    prodSaboresChipsEl.appendChild(chip);
+  });
+};
+
+const agregarSaborProducto = (texto) => {
+  const limpio = String(texto || '').trim().slice(0, SABOR_MAX_LENGTH_FRONT);
+  if (!limpio) return;
+  if (prodSaboresActuales.length >= SABORES_MAX_ITEMS_FRONT) {
+    setMessage(mensajeProductos, `Maximo ${SABORES_MAX_ITEMS_FRONT} sabores por producto.`, 'warning');
+    return;
+  }
+  if (prodSaboresActuales.some((s) => s.toLowerCase() === limpio.toLowerCase())) {
+    return;
+  }
+  prodSaboresActuales.push(limpio);
+  renderProductoSaboresChips();
+};
+
+const setProductoSabores = (lista) => {
+  if (!Array.isArray(lista)) {
+    prodSaboresActuales = [];
+  } else {
+    prodSaboresActuales = lista
+      .map((item) => String(item || '').trim())
+      .filter((item, idx, arr) => item && arr.findIndex((x) => x.toLowerCase() === item.toLowerCase()) === idx)
+      .slice(0, SABORES_MAX_ITEMS_FRONT);
+  }
+  renderProductoSaboresChips();
 };
 
 const obtenerCategoriaSeleccionadaProducto = () => {
@@ -2510,6 +2657,7 @@ const limpiarFormularioProducto = () => {
   if (inputProdUnidadBase) inputProdUnidadBase.value = 'UND';
   if (inputProdContenidoUnidad) inputProdContenidoUnidad.value = '';
   setPreciosProductoUI([]);
+  setProductoSabores([]);
   refrescarUiStockIndefinido(false);
   refrescarUiInsumo(true);
   limpiarRecetaUI();
@@ -2517,6 +2665,9 @@ const limpiarFormularioProducto = () => {
   productoEdicionBase = null;
   actualizarEstadoRecetaUI();
   actualizarVistaPreviaProducto();
+  if (typeof actualizarInfoImagenProducto === 'function') {
+    actualizarInfoImagenProducto();
+  }
 };
 
 const abrirInventarioModal = ({ limpiar = false } = {}) => {
@@ -3100,7 +3251,11 @@ const seleccionarProductoEdicion = (producto) => {
   if (inputProdCategoria) inputProdCategoria.value = producto.categoria_id ?? '';
   if (inputProdActivo) inputProdActivo.checked = activo;
   setPreciosProductoUI(producto.precios || []);
+  setProductoSabores(producto.sabores || []);
   actualizarVistaPreviaProducto();
+  if (typeof actualizarInfoImagenProducto === 'function') {
+    actualizarInfoImagenProducto();
+  }
   setMessage(mensajeProductos, `Editando producto: ${producto.nombre}`, 'info');
   cargarRecetaProducto(producto.id);
   inputProdNombre?.focus();
@@ -3487,8 +3642,140 @@ inputProdEsInsumo?.addEventListener('change', () => {
 inputProdNombre?.addEventListener('input', () => actualizarVistaPreviaProducto());
 inputProdCategoria?.addEventListener('change', () => actualizarVistaPreviaProducto());
 inputProdPrecio?.addEventListener('input', () => actualizarVistaPreviaProducto());
-inputProdImagenUrl?.addEventListener('input', () => actualizarVistaPreviaProducto());
+inputProdImagenUrl?.addEventListener('input', () => {
+  actualizarInfoImagenProducto();
+  actualizarVistaPreviaProducto();
+});
 inputProdActivo?.addEventListener('change', () => actualizarVistaPreviaProducto());
+
+const prodImagenDropzone = document.getElementById('prod-imagen-dropzone');
+const prodImagenSubirBtn = document.getElementById('prod-imagen-subir-btn');
+const prodImagenQuitarBtn = document.getElementById('prod-imagen-quitar-btn');
+const prodImagenArchivoInput = document.getElementById('prod-imagen-archivo');
+const prodImagenInfoEl = document.getElementById('prod-imagen-info');
+
+const formatearKb = (bytes) => `${(bytes / 1024).toFixed(1)} KB`;
+
+const actualizarInfoImagenProducto = (overrideTexto = null) => {
+  if (!prodImagenInfoEl) return;
+  const valor = (inputProdImagenUrl?.value || '').trim();
+  if (overrideTexto !== null) {
+    prodImagenInfoEl.textContent = overrideTexto;
+    prodImagenInfoEl.dataset.type = '';
+  } else if (!valor) {
+    prodImagenInfoEl.textContent = 'Aún no has elegido una imagen.';
+    prodImagenInfoEl.dataset.type = '';
+  } else if (/^data:/i.test(valor)) {
+    prodImagenInfoEl.textContent = `Imagen subida (${formatearKb(valor.length)}).`;
+    prodImagenInfoEl.dataset.type = 'success';
+  } else {
+    prodImagenInfoEl.textContent = `URL externa: ${valor.length} caracteres.`;
+    prodImagenInfoEl.dataset.type = '';
+  }
+  if (prodImagenQuitarBtn) {
+    prodImagenQuitarBtn.hidden = !valor;
+  }
+};
+
+const procesarImagenSeleccionadaProducto = async (file) => {
+  if (!file || !inputProdImagenUrl) return;
+  if (prodImagenInfoEl) {
+    prodImagenInfoEl.textContent = 'Comprimiendo imagen...';
+    prodImagenInfoEl.dataset.type = 'info';
+  }
+  try {
+    const resultado = await comprimirImagenProducto(file);
+    inputProdImagenUrl.value = resultado.dataUri;
+    actualizarInfoImagenProducto(
+      `Listo: ${resultado.ancho}x${resultado.alto}px • ${formatearKb(resultado.bytes)} • calidad ${Math.round(
+        resultado.calidad * 100
+      )}%.`
+    );
+    if (prodImagenQuitarBtn) prodImagenQuitarBtn.hidden = false;
+    actualizarVistaPreviaProducto();
+  } catch (error) {
+    actualizarInfoImagenProducto(error?.message || 'No se pudo procesar la imagen.');
+    if (prodImagenInfoEl) prodImagenInfoEl.dataset.type = 'error';
+  }
+};
+
+prodImagenSubirBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  prodImagenArchivoInput?.click();
+});
+
+prodImagenDropzone?.addEventListener('click', (event) => {
+  // Evita doble click si el target es el boton mismo o el input url dentro del details
+  if (event.target.closest('button') || event.target.closest('input') || event.target.closest('details')) {
+    return;
+  }
+  prodImagenArchivoInput?.click();
+});
+
+prodImagenArchivoInput?.addEventListener('change', (event) => {
+  const file = event.target?.files?.[0];
+  if (file) {
+    procesarImagenSeleccionadaProducto(file);
+  }
+  // Permite re-elegir el mismo archivo despues
+  if (prodImagenArchivoInput) prodImagenArchivoInput.value = '';
+});
+
+['dragenter', 'dragover'].forEach((evt) =>
+  prodImagenDropzone?.addEventListener(evt, (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    prodImagenDropzone.style.background = '#fff5f8';
+  })
+);
+
+['dragleave', 'drop'].forEach((evt) =>
+  prodImagenDropzone?.addEventListener(evt, (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    prodImagenDropzone.style.background = '#fafafa';
+  })
+);
+
+prodImagenDropzone?.addEventListener('drop', (event) => {
+  const file = event.dataTransfer?.files?.[0];
+  if (file) {
+    procesarImagenSeleccionadaProducto(file);
+  }
+});
+
+prodImagenQuitarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  if (inputProdImagenUrl) inputProdImagenUrl.value = '';
+  actualizarInfoImagenProducto();
+  actualizarVistaPreviaProducto();
+});
+
+const procesarEntradaSabor = () => {
+  const valor = prodSaborInput?.value || '';
+  // Permite "fresa, mora, chocolate" en una sola tanda
+  const partes = valor.split(/[,;|]+/);
+  partes.forEach((parte) => agregarSaborProducto(parte));
+  if (prodSaborInput) prodSaborInput.value = '';
+};
+
+prodSaborAgregarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  procesarEntradaSabor();
+  prodSaborInput?.focus();
+});
+
+prodSaborInput?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ',') {
+    event.preventDefault();
+    procesarEntradaSabor();
+  } else if (event.key === 'Backspace' && !prodSaborInput.value && prodSaboresActuales.length) {
+    prodSaboresActuales.pop();
+    renderProductoSaboresChips();
+  }
+});
+
+renderProductoSaboresChips();
 inputProdInsumoVendible?.addEventListener('change', () => actualizarVistaPreviaProducto());
 refrescarUiStockIndefinido(false);
 refrescarUiInsumo(false);
@@ -3547,6 +3834,7 @@ const obtenerValoresProducto = () => {
   const visibleMenuQr = inputProdVisibleMenuQr ? inputProdVisibleMenuQr.checked : true;
   const imageUrlValidacion = validarUrlImagenProducto(inputProdImagenUrl?.value ?? '');
   const { precios } = leerPreciosProductoUI();
+  const sabores = Array.isArray(prodSaboresActuales) ? [...prodSaboresActuales] : [];
 
   return {
     nombre,
@@ -3566,6 +3854,7 @@ const obtenerValoresProducto = () => {
     contenidoPorUnidad,
     actualizaCostoCompras,
     visibleMenuQr,
+    sabores,
   };
 };
 
@@ -3703,6 +3992,7 @@ const crearProducto = async ({
   contenidoPorUnidad,
   actualizaCostoCompras,
   visibleMenuQr,
+  sabores,
 }) => {
   const body = {
     nombre,
@@ -3718,6 +4008,7 @@ const crearProducto = async ({
     contenido_por_unidad: Number(contenidoPorUnidad.toFixed(4)),
     actualiza_costo_con_compras: actualizaCostoCompras ? 1 : 0,
     visible_menu_qr: visibleMenuQr === false ? 0 : 1,
+    sabores: Array.isArray(sabores) ? sabores : [],
   };
   if (stockIndefinido) {
     body.stock = null;
@@ -3759,6 +4050,7 @@ const actualizarProducto = async (
     contenidoPorUnidad,
     actualizaCostoCompras,
     visibleMenuQr,
+    sabores,
   }
 ) => {
   const body = {
@@ -3777,6 +4069,7 @@ const actualizarProducto = async (
     contenido_por_unidad: Number(contenidoPorUnidad.toFixed(4)),
     actualiza_costo_con_compras: actualizaCostoCompras ? 1 : 0,
     visible_menu_qr: visibleMenuQr === false ? 0 : 1,
+    sabores: Array.isArray(sabores) ? sabores : [],
   };
   if (stockIndefinido) {
     body.stock = null;

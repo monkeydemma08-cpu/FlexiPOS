@@ -713,8 +713,11 @@ const normalizarOpcionesPrecioProducto = (producto = {}) => {
   return opciones;
 };
 
-const construirClaveCarrito = (productoId, precioLabel, precioValor) =>
-  `${productoId}::${precioLabel || 'precio'}::${Number(precioValor).toFixed(2)}`;
+const construirClaveCarrito = (productoId, precioLabel, precioValor, sabor = '') => {
+  const saborLimpio = String(sabor || '').trim();
+  const saborSegmento = saborLimpio ? `::${saborLimpio.toLowerCase()}` : '';
+  return `${productoId}::${precioLabel || 'precio'}::${Number(precioValor).toFixed(2)}${saborSegmento}`;
+};
 
 const obtenerCantidadProductoEnCarrito = (productoId, excluirClave = null) => {
   let total = 0;
@@ -1077,6 +1080,12 @@ const actualizarCarritoUI = () => {
     const info = document.createElement('div');
     const titulo = document.createElement('h3');
     titulo.textContent = producto.nombre;
+    if (item.sabor) {
+      const saborChip = document.createElement('span');
+      saborChip.textContent = item.sabor;
+      saborChip.style.cssText = 'display:inline-block;margin-left:6px;padding:2px 8px;background:rgba(199,81,116,0.12);color:#c75174;border-radius:999px;font-size:12px;font-weight:600;';
+      titulo.appendChild(saborChip);
+    }
     const meta = document.createElement('p');
     meta.className = 'producto-meta';
     meta.textContent = `Precio: ${formatCurrency(precioUnitario)}${etiquetaPrecio} | Stock disponible: ${obtenerEtiquetaStock(producto)}`;
@@ -1210,7 +1219,95 @@ const renderProductos = () => {
   listaProductos.appendChild(fragment);
 };
 
-const agregarAlCarrito = (producto, selectPrecio = null) => {
+const productoTieneSabores = (producto) =>
+  Array.isArray(producto?.sabores) && producto.sabores.filter((s) => String(s || '').trim()).length > 0;
+
+const abrirSelectorSaborMesera = (producto, selectPrecio, onConfirm) => {
+  const overlay = document.createElement('div');
+  overlay.style.cssText =
+    'position:fixed;inset:0;background:rgba(20,14,25,0.55);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:flex-end;justify-content:center;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText =
+    'background:#fff;width:100%;max-width:520px;border-radius:24px 24px 0 0;padding:18px 18px 22px;box-shadow:0 -16px 40px rgba(0,0,0,0.2);max-height:80vh;overflow-y:auto;';
+
+  const handle = document.createElement('div');
+  handle.style.cssText = 'width:44px;height:5px;border-radius:999px;background:#d8d8d8;margin:0 auto 10px;';
+  panel.appendChild(handle);
+
+  const head = document.createElement('div');
+  head.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:14px;';
+  const titleWrap = document.createElement('div');
+  const kicker = document.createElement('p');
+  kicker.style.cssText = 'margin:0 0 2px;font-size:11px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;color:#c75174;';
+  kicker.textContent = 'Selecciona';
+  const titulo = document.createElement('h3');
+  titulo.style.cssText = 'margin:0;font-size:18px;font-weight:700;color:#1d1426;';
+  titulo.textContent = producto.nombre || 'Sabor';
+  titleWrap.appendChild(kicker);
+  titleWrap.appendChild(titulo);
+  const btnClose = document.createElement('button');
+  btnClose.type = 'button';
+  btnClose.textContent = '×';
+  btnClose.setAttribute('aria-label', 'Cerrar');
+  btnClose.style.cssText = 'width:36px;height:36px;border:0;background:rgba(0,0,0,0.06);border-radius:50%;font-size:22px;line-height:1;cursor:pointer;color:#1d1426;';
+  head.appendChild(titleWrap);
+  head.appendChild(btnClose);
+  panel.appendChild(head);
+
+  let seleccion = null;
+  const optionsWrap = document.createElement('div');
+  optionsWrap.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;';
+  (producto.sabores || []).filter((s) => String(s || '').trim()).forEach((sabor) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = String(sabor).trim();
+    btn.style.cssText =
+      'padding:14px 12px;border:2px solid rgba(20,14,25,0.1);border-radius:14px;background:#fff;font:inherit;font-weight:600;color:#1d1426;cursor:pointer;text-align:left;min-height:52px;transition:border-color .15s,background .15s;';
+    btn.addEventListener('click', () => {
+      seleccion = String(sabor).trim();
+      Array.from(optionsWrap.children).forEach((c) => {
+        c.style.borderColor = 'rgba(20,14,25,0.1)';
+        c.style.background = '#fff';
+        c.style.color = '#1d1426';
+      });
+      btn.style.borderColor = '#c75174';
+      btn.style.background = 'rgba(199,81,116,0.08)';
+      btn.style.color = '#c75174';
+      btnConfirm.disabled = false;
+    });
+    optionsWrap.appendChild(btn);
+  });
+  panel.appendChild(optionsWrap);
+
+  const btnConfirm = document.createElement('button');
+  btnConfirm.type = 'button';
+  btnConfirm.textContent = 'Agregar';
+  btnConfirm.disabled = true;
+  btnConfirm.className = 'kanm-button';
+  btnConfirm.style.cssText = 'width:100%;padding:14px;border-radius:18px;font-weight:700;';
+  panel.appendChild(btnConfirm);
+
+  const cerrar = () => {
+    document.body.removeChild(overlay);
+    document.body.style.overflow = '';
+  };
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) cerrar();
+  });
+  btnClose.addEventListener('click', cerrar);
+  btnConfirm.addEventListener('click', () => {
+    if (!seleccion) return;
+    cerrar();
+    onConfirm(seleccion);
+  });
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  document.body.style.overflow = 'hidden';
+};
+
+const agregarAlCarrito = (producto, selectPrecio = null, sabor = null) => {
   limpiarMensaje();
 
   if (!producto || !producto.id) {
@@ -1225,8 +1322,17 @@ const agregarAlCarrito = (producto, selectPrecio = null) => {
     return;
   }
 
+  // Si tiene sabores y no se pasó, abrir selector
+  if (productoTieneSabores(producto) && !sabor) {
+    abrirSelectorSaborMesera(producto, selectPrecio, (saborElegido) => {
+      agregarAlCarrito(producto, selectPrecio, saborElegido);
+    });
+    return;
+  }
+
+  const saborLimpio = sabor ? String(sabor).trim() : '';
   const seleccion = resolverPrecioSeleccionado(producto, selectPrecio);
-  const itemKey = construirClaveCarrito(producto.id, seleccion.label, seleccion.valor);
+  const itemKey = construirClaveCarrito(producto.id, seleccion.label, seleccion.valor, saborLimpio);
   const totalEnCarrito = obtenerCantidadProductoEnCarrito(producto.id);
   const itemActual = estado.carrito.get(itemKey) || { cantidad: 0 };
   const nuevaCantidad = itemActual.cantidad + 1;
@@ -1242,6 +1348,7 @@ const agregarAlCarrito = (producto, selectPrecio = null) => {
     cantidad: nuevaCantidad,
     precio_unitario: seleccion.valor,
     precio_label: seleccion.label,
+    sabor: saborLimpio || null,
   });
   actualizarCarritoUI();
 };
@@ -1298,6 +1405,7 @@ const obtenerPayloadPedido = (destino = 'cocina') => {
       producto_id: item.producto_id,
       cantidad: item.cantidad,
       precio_unitario: Number.isFinite(precioUnitario) ? precioUnitario : 0,
+      sabor: item.sabor || null,
     };
   });
   const modoServicioSeleccionado = esDelivery ? 'delivery' : selectServicio?.value || 'en_local';
@@ -1748,6 +1856,16 @@ const crearCardCuenta = (cuenta, vista = 'pendiente') => {
 
     tituloPedido.appendChild(badgePedido);
     tituloPedido.appendChild(badgeEstado);
+
+    // Mostrar quien pidio (alias o cliente) si vino de menu QR
+    const aliasComensal = pedido.cliente_alias || pedido.cliente;
+    if (aliasComensal) {
+      const badgeComensal = document.createElement('span');
+      badgeComensal.className = 'kanm-badge';
+      badgeComensal.style.cssText = 'background:rgba(199,81,116,0.12);color:#c75174;font-weight:600;';
+      badgeComensal.textContent = `👤 ${aliasComensal}`;
+      tituloPedido.appendChild(badgeComensal);
+    }
 
     const meta = document.createElement('p');
     const salida = pedido.fecha_listo || pedido.fecha_cierre || pedido.fecha_cancelacion;

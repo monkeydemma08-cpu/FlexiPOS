@@ -33,6 +33,10 @@ const dom = {
   languageMenu: document.getElementById('menu-publico-language-menu'),
   searchToggle: document.getElementById('menu-publico-search-toggle'),
   searchWrap: document.getElementById('menu-publico-search-wrap'),
+  flavorSheet: document.getElementById('menu-publico-flavor-sheet'),
+  flavorTitle: document.getElementById('menu-publico-flavor-title'),
+  flavorOptions: document.getElementById('menu-publico-flavor-options'),
+  flavorSubmit: document.getElementById('menu-publico-flavor-submit'),
 };
 
 const DEFAULT_LANGUAGE = 'es';
@@ -241,11 +245,23 @@ const state = {
   clientId: '',
   orderSession: '',
   orderingLocked: false,
+  expired: false,
+  aliasComensal: '',
+  aliasComensalSugerido: '',
   language: getStoredLanguage(),
   languageMenuOpen: false,
   lastSyncAt: null,
   syncBadgeKey: 'syncLoading',
   syncBadgeParams: {},
+};
+
+// Watchdog de inactividad: 18 min sin tocar -> aviso, 2 min mas -> expira (total 20 min)
+const SESSION_IDLE_WARN_MS = 18 * 60 * 1000;
+const SESSION_IDLE_MAX_MS = 20 * 60 * 1000;
+const sessionWatchdog = {
+  warnHandle: null,
+  expireHandle: null,
+  warnVisible: false,
 };
 
 const compactViewportQuery =
@@ -267,6 +283,136 @@ const getClientId = () => {
   } catch (_) {
     return `menu-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
   }
+};
+
+// =====================================================================
+// Watchdog de sesion del cliente: invalida sesion si lleva mucho rato sin tocar
+// =====================================================================
+
+const ensureSessionExpiredOverlay = () => {
+  let overlay = document.getElementById('menu-publico-expired-overlay');
+  if (overlay) return overlay;
+  overlay = document.createElement('div');
+  overlay.id = 'menu-publico-expired-overlay';
+  overlay.style.cssText =
+    'position:fixed;inset:0;background:rgba(20,14,25,0.88);backdrop-filter:blur(8px);z-index:99999;display:none;align-items:center;justify-content:center;padding:24px;';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:24px;padding:28px 22px;max-width:380px;width:100%;text-align:center;box-shadow:0 24px 48px rgba(0,0,0,0.3);">
+      <div style="font-size:48px;margin-bottom:8px;">⏱️</div>
+      <h2 style="font-family:'Playfair Display',serif;font-size:22px;margin:0 0 8px;color:#1d1426;">Sesión expirada</h2>
+      <p style="margin:0 0 20px;color:#5a4d65;font-size:15px;line-height:1.4;">
+        Por seguridad, después de un rato de inactividad cerramos tu sesión.
+        Vuelve a escanear el QR de tu mesa para seguir pidiendo.
+      </p>
+      <button type="button" id="menu-publico-expired-close"
+        style="background:linear-gradient(135deg,#d96a8a,#c75174);color:#fff;border:0;border-radius:18px;padding:14px 22px;font-weight:700;font-size:15px;cursor:pointer;width:100%;">
+        Entendido
+      </button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#menu-publico-expired-close')?.addEventListener('click', () => {
+    overlay.style.display = 'none';
+  });
+  return overlay;
+};
+
+const ensureSessionWarnOverlay = () => {
+  let overlay = document.getElementById('menu-publico-warn-overlay');
+  if (overlay) return overlay;
+  overlay = document.createElement('div');
+  overlay.id = 'menu-publico-warn-overlay';
+  overlay.style.cssText =
+    'position:fixed;inset:0;background:rgba(20,14,25,0.55);backdrop-filter:blur(4px);z-index:9998;display:none;align-items:center;justify-content:center;padding:24px;';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:24px;padding:24px 20px;max-width:360px;width:100%;text-align:center;box-shadow:0 18px 40px rgba(0,0,0,0.2);">
+      <div style="font-size:42px;margin-bottom:6px;">👋</div>
+      <h2 style="font-family:'Playfair Display',serif;font-size:20px;margin:0 0 8px;color:#1d1426;">¿Sigues por aquí?</h2>
+      <p style="margin:0 0 18px;color:#5a4d65;font-size:14px;line-height:1.4;">
+        Tu sesión va a cerrarse en 2 minutos por inactividad.
+        Toca el botón para seguir pidiendo.
+      </p>
+      <button type="button" id="menu-publico-warn-continue"
+        style="background:linear-gradient(135deg,#d96a8a,#c75174);color:#fff;border:0;border-radius:18px;padding:14px 22px;font-weight:700;font-size:15px;cursor:pointer;width:100%;">
+        Sigo aquí
+      </button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#menu-publico-warn-continue')?.addEventListener('click', () => {
+    overlay.style.display = 'none';
+    sessionWatchdog.warnVisible = false;
+    resetSessionWatchdog();
+  });
+  return overlay;
+};
+
+const expireSession = (motivo = '') => {
+  if (state.expired) return;
+  state.expired = true;
+  state.cart = [];
+  state.orderingLocked = true;
+  if (sessionWatchdog.warnHandle) {
+    clearTimeout(sessionWatchdog.warnHandle);
+    sessionWatchdog.warnHandle = null;
+  }
+  if (sessionWatchdog.expireHandle) {
+    clearTimeout(sessionWatchdog.expireHandle);
+    sessionWatchdog.expireHandle = null;
+  }
+  // Limpiar clientId de sessionStorage para forzar nuevo al rescanear
+  try {
+    window.sessionStorage?.removeItem?.('kanm-menu-publico-client');
+    window.localStorage?.removeItem?.('kanm-menu-publico-client');
+  } catch (_) { /* ignore */ }
+  // Ocultar warn si esta abierto
+  const warn = document.getElementById('menu-publico-warn-overlay');
+  if (warn) warn.style.display = 'none';
+  // Mostrar overlay de expirada
+  const overlay = ensureSessionExpiredOverlay();
+  overlay.style.display = 'flex';
+  if (motivo && dom.formMessage) {
+    setBoxMessage(dom.formMessage, motivo, 'error');
+  }
+  // Re-renderizar para ocultar botones
+  if (typeof renderAll === 'function') {
+    try { renderAll(); } catch (_) { /* nop */ }
+  }
+};
+
+const resetSessionWatchdog = () => {
+  if (state.expired) return;
+  if (sessionWatchdog.warnHandle) clearTimeout(sessionWatchdog.warnHandle);
+  if (sessionWatchdog.expireHandle) clearTimeout(sessionWatchdog.expireHandle);
+  sessionWatchdog.warnHandle = setTimeout(() => {
+    if (state.expired) return;
+    sessionWatchdog.warnVisible = true;
+    const overlay = ensureSessionWarnOverlay();
+    overlay.style.display = 'flex';
+  }, SESSION_IDLE_WARN_MS);
+  sessionWatchdog.expireHandle = setTimeout(() => {
+    expireSession('Tu sesión expiró. Escanea el QR de nuevo para seguir pidiendo.');
+  }, SESSION_IDLE_MAX_MS);
+};
+
+const installSessionWatchdogListeners = () => {
+  const eventos = ['touchstart', 'click', 'keydown', 'scroll', 'pointerdown'];
+  eventos.forEach((evento) => {
+    document.addEventListener(evento, () => {
+      // Si esta el modal de aviso visible, NO se considera interaccion
+      // hasta que toque "Sigo aqui" (lo maneja el handler del modal)
+      if (sessionWatchdog.warnVisible) return;
+      if (state.expired) return;
+      resetSessionWatchdog();
+    }, { passive: true });
+  });
+  // Visibilitychange: cuando vuelve, comprobar si paso mucho tiempo
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !state.expired) {
+      // No es interaccion fuerte, pero reseteamos para que no expire al cambiar de tab
+      resetSessionWatchdog();
+    }
+  });
 };
 
 const getActiveLanguage = () => (LANGUAGE_CODES.includes(state.language) ? state.language : DEFAULT_LANGUAGE);
@@ -462,7 +608,13 @@ const getInitials = (value, fallback = 'KM') => {
 
 const normalizeHttpUrl = (value) => {
   const text = String(value ?? '').trim();
-  if (!text || /^data:/i.test(text)) return '';
+  if (!text) return '';
+  // Aceptar imagenes en data URI (jpg/png/webp) generadas por la subida desde admin
+  if (/^data:image\/(jpe?g|png|webp)(?:;[^,]+)*,/i.test(text)) {
+    return text;
+  }
+  // Rechazar otros data URIs (svg, html, etc) por seguridad
+  if (/^data:/i.test(text)) return '';
   try {
     const parsed = new URL(text);
     return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : '';
@@ -849,8 +1001,10 @@ const renderHero = () => {
         : t('tableSubtitle', { place: mesaTexto });
   }
   if (dom.badgeAcceso) {
-    dom.badgeAcceso.textContent =
+    const aliasMostrar = state.aliasComensal || state.aliasComensalSugerido;
+    const baseBadge =
       acceso.tipo === 'pickup' ? getLocalizedValue(acceso, 'nombre') || t('pickupBadge') : mesaTexto;
+    dom.badgeAcceso.textContent = aliasMostrar ? `${baseBadge} • ${aliasMostrar}` : baseBadge;
   }
   document.title = `${titulo} - ${mesaTexto}`;
   renderLogo();
@@ -879,27 +1033,55 @@ const syncCartWithCatalog = () => {
       const product = findProductById(item.productId);
       if (!product) return null;
 
+      // Si el producto ahora tiene sabores y este item no tiene, marcarlo no disponible
+      // Si el producto perdió los sabores, limpiar el del item
+      const productHasNow = productHasFlavors(product);
+      let saborFinal = item.sabor || null;
+      if (!productHasNow) {
+        saborFinal = null;
+      } else if (saborFinal) {
+        const stillExists = (product.sabores || []).some(
+          (s) => String(s || '').trim().toLowerCase() === saborFinal.toLowerCase()
+        );
+        if (!stillExists) saborFinal = null;
+      }
+
       return {
         ...item,
+        sabor: saborFinal,
+        key: buildCartKey(product.id, saborFinal || ''),
         name: getProductName(product),
         categoryName: getLocalizedValue(product, 'categoria_nombre') || item.categoryName,
-        available: Boolean(product.disponible),
+        available: Boolean(product.disponible) && (!productHasNow || !!saborFinal),
         price: roundMoney(product.precio),
       };
     })
     .filter(Boolean);
 };
 
-const buildCartKey = (productId) => `${Number(productId)}`;
+const buildCartKey = (productId, sabor = '') => {
+  const saborLimpio = String(sabor || '').trim();
+  return saborLimpio ? `${Number(productId)}|${saborLimpio.toLowerCase()}` : `${Number(productId)}`;
+};
 
-const addToCart = (productId) => {
+const productHasFlavors = (product) =>
+  Array.isArray(product?.sabores) && product.sabores.filter((s) => String(s || '').trim()).length > 0;
+
+const addToCart = (productId, sabor = null) => {
   const product = findProductById(productId);
   if (!product || !product.disponible) {
     setTranslatedBoxMessage(dom.formMessage, 'productNoLongerAvailable', 'error');
     return;
   }
 
-  const key = buildCartKey(product.id);
+  // Si el producto tiene sabores y no se pasó uno, abrir el selector
+  if (productHasFlavors(product) && !sabor) {
+    openFlavorPicker(product);
+    return;
+  }
+
+  const saborLimpio = sabor ? String(sabor).trim() : '';
+  const key = buildCartKey(product.id, saborLimpio);
   const existing = state.cart.find((item) => item.key === key);
   if (existing) {
     existing.quantity += 1;
@@ -912,11 +1094,73 @@ const addToCart = (productId) => {
       available: Boolean(product.disponible),
       price: roundMoney(product.precio),
       quantity: 1,
+      sabor: saborLimpio || null,
     });
   }
 
   setBoxMessage(dom.formMessage, '');
   renderAll();
+};
+
+// Estado del bottom-sheet selector de sabor
+const flavorSheetState = {
+  productId: null,
+  selectedFlavor: null,
+};
+
+const closeFlavorPicker = () => {
+  if (!dom.flavorSheet) return;
+  dom.flavorSheet.hidden = true;
+  flavorSheetState.productId = null;
+  flavorSheetState.selectedFlavor = null;
+  if (dom.flavorOptions) dom.flavorOptions.innerHTML = '';
+  if (dom.flavorSubmit) dom.flavorSubmit.disabled = true;
+  document.body.style.overflow = '';
+};
+
+const updateFlavorSubmitState = () => {
+  if (!dom.flavorSubmit) return;
+  dom.flavorSubmit.disabled = !flavorSheetState.selectedFlavor;
+};
+
+const openFlavorPicker = (product) => {
+  if (!dom.flavorSheet || !dom.flavorOptions || !product) return;
+  flavorSheetState.productId = Number(product.id);
+  flavorSheetState.selectedFlavor = null;
+
+  if (dom.flavorTitle) {
+    const productName = getProductName(product);
+    dom.flavorTitle.textContent = productName ? `${productName}` : 'Selecciona una opción';
+  }
+
+  dom.flavorOptions.innerHTML = '';
+  const sabores = (product.sabores || []).filter((s) => String(s || '').trim());
+  sabores.forEach((sabor) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'menu-publico-flavor-option';
+    btn.textContent = String(sabor).trim();
+    btn.dataset.flavor = String(sabor).trim();
+    btn.addEventListener('click', () => {
+      flavorSheetState.selectedFlavor = String(sabor).trim();
+      Array.from(dom.flavorOptions.children).forEach((child) => child.classList.remove('is-selected'));
+      btn.classList.add('is-selected');
+      updateFlavorSubmitState();
+    });
+    dom.flavorOptions.appendChild(btn);
+  });
+
+  updateFlavorSubmitState();
+  dom.flavorSheet.hidden = false;
+  document.body.style.overflow = 'hidden';
+};
+
+const confirmFlavorSelection = () => {
+  if (!flavorSheetState.productId || !flavorSheetState.selectedFlavor) return;
+  const productId = flavorSheetState.productId;
+  const sabor = flavorSheetState.selectedFlavor;
+  closeFlavorPicker();
+  addToCart(productId, sabor);
 };
 
 const updateCartQuantity = (key, delta) => {
@@ -1103,6 +1347,19 @@ const renderCatalog = () => {
                     <div class="menu-publico-item-copy">
                       <h3>${escapeHtml(productName)}</h3>
                       ${statusChip}
+                      ${(() => {
+                        const sabores = (producto.sabores || []).filter((s) => String(s || '').trim());
+                        if (!sabores.length) return '';
+                        const visibles = sabores.slice(0, 3);
+                        const restantes = sabores.length - visibles.length;
+                        const chips = visibles
+                          .map((s) => `<span class="menu-publico-item-flavor-chip">${escapeHtml(String(s).trim())}</span>`)
+                          .join('');
+                        const masChip = restantes > 0
+                          ? `<span class="menu-publico-item-flavor-chip is-more">+${restantes}</span>`
+                          : '';
+                        return `<div class="menu-publico-item-flavors">${chips}${masChip}</div>`;
+                      })()}
                       <div class="menu-publico-item-price-line">
                         <p class="menu-publico-item-price">${escapeHtml(priceText)}</p>
                         ${hasDiscount ? `<p class="menu-publico-item-price-old">${escapeHtml(comparePriceText)}</p>` : ''}
@@ -1133,11 +1390,15 @@ const renderCart = () => {
     dom.cart.innerHTML = state.cart
       .map((item) => {
         const totalLinea = roundMoney((Number(item.price) || 0) * (Number(item.quantity) || 0));
+        const saborHtml = item.sabor
+          ? `<p class="menu-publico-cart-flavor">${escapeHtml(item.sabor)}</p>`
+          : '';
         return `
           <article class="menu-publico-cart-item${item.available ? '' : ' is-unavailable'}">
             <div class="menu-publico-cart-top">
               <div>
                 <p class="menu-publico-cart-name">${escapeHtml(item.name)}</p>
+                ${saborHtml}
                 <p class="menu-publico-cart-meta">${escapeHtml(formatCurrency(item.price))}${
                   item.available ? '' : ` - ${escapeHtml(t('productUnavailable'))}`
                 }</p>
@@ -1258,8 +1519,30 @@ const loadMenu = async ({ silent = false } = {}) => {
         : undefined,
     });
     const data = await response.json().catch(() => ({}));
+    if (response.status === 410) {
+      // TTL del cliente expirado en backend -> mostrar overlay sin reintentos
+      expireSession(data?.error || 'Tu sesión expiró. Vuelve a escanear el QR.');
+      return;
+    }
     if (!response.ok || !data?.ok) {
       throw new Error(data?.error ? localizeArbitraryText(data.error) : t('loadFailed'));
+    }
+
+    // Capturar alias y secuencia que devolvio el backend
+    if (data.cliente) {
+      if (data.cliente.alias_actual) {
+        state.aliasComensal = String(data.cliente.alias_actual);
+      } else if (Number(data.cliente.comensal_secuencia_proxima) > 0) {
+        state.aliasComensalSugerido = `Comensal #${data.cliente.comensal_secuencia_proxima}`;
+      }
+      // Actualizar placeholder del input cliente con el alias sugerido para que el cliente sepa
+      // cómo quedará identificado si no escribe nombre
+      if (dom.cliente && !dom.cliente.value) {
+        const sug = state.aliasComensal || state.aliasComensalSugerido;
+        if (sug) {
+          dom.cliente.placeholder = `Ej. ${sug} (opcional)`;
+        }
+      }
     }
 
     const nextOrderSession = String(data?.acceso?.sesion_pedidos || '').trim();
@@ -1352,10 +1635,15 @@ const submitOrder = async (event) => {
         items: state.cart.map((item) => ({
           producto_id: item.productId,
           cantidad: item.quantity,
+          sabor: item.sabor || null,
         })),
       }),
     });
     const data = await response.json().catch(() => ({}));
+    if (response.status === 410) {
+      expireSession(data?.error || 'Tu sesión expiró. Vuelve a escanear el QR.');
+      return;
+    }
     if (!response.ok || !data?.ok) {
       if (response.status === 409) {
         lockOrdering(data?.error || '');
@@ -1365,9 +1653,14 @@ const submitOrder = async (event) => {
 
     const pedidoId = Number(data?.pedido?.id) || null;
     const cuentaId = Number(data?.pedido?.cuenta_id) || null;
+    // Si el backend asigno un alias y aun no lo teniamos, guardarlo
+    if (data?.pedido?.cliente_alias && !state.aliasComensal) {
+      state.aliasComensal = String(data.pedido.cliente_alias);
+    }
     state.cart = [];
     if (dom.nota) dom.nota.value = '';
     renderAll();
+    resetSessionWatchdog();
     setBoxMessage(dom.formMessage, buildOrderSuccessMessage(pedidoId, cuentaId), 'success');
     await loadMenu({ silent: true });
   } catch (error) {
@@ -1475,6 +1768,22 @@ const init = async () => {
   dom.cart?.addEventListener('click', handleCartClick);
   dom.nav?.addEventListener('click', handleNavClick);
   dom.form?.addEventListener('submit', submitOrder);
+
+  // Bottom-sheet selector de sabor
+  dom.flavorSheet?.addEventListener('click', (event) => {
+    if (event.target.closest('[data-flavor-close]')) {
+      closeFlavorPicker();
+    }
+  });
+  dom.flavorSubmit?.addEventListener('click', (event) => {
+    event.preventDefault();
+    confirmFlavorSelection();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && dom.flavorSheet && !dom.flavorSheet.hidden) {
+      closeFlavorPicker();
+    }
+  });
   dom.back?.addEventListener('click', () => {
     if (window.history.length > 1) {
       window.history.back();
@@ -1511,8 +1820,13 @@ const init = async () => {
   document.addEventListener('keydown', handleGlobalKeydown);
   compactViewportQuery?.addEventListener?.('change', syncDrawerViewport);
 
+  // Activar el watchdog de inactividad (20 min totales)
+  installSessionWatchdogListeners();
+  resetSessionWatchdog();
+
   await loadMenu();
   state.pollHandle = window.setInterval(() => {
+    if (state.expired) return;
     loadMenu({ silent: true });
   }, 30000);
 };

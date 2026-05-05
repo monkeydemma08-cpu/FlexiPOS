@@ -612,8 +612,10 @@ const cambiarTab = (tab) => {
 const textoMesaCliente = (pedido) => {
   const partes = [];
   if (pedido.mesa) partes.push(pedido.mesa);
-  if (pedido.cliente) partes.push(pedido.cliente);
-  return partes.length ? partes.join('  ') : 'Mesa/cliente no especificado';
+  // Priorizar cliente_alias (Comensal #N o nombre dado por menu QR)
+  const aliasOrCliente = pedido.cliente_alias || pedido.cliente;
+  if (aliasOrCliente) partes.push(`👤 ${aliasOrCliente}`);
+  return partes.length ? partes.join(' · ') : 'Mesa/cliente no especificado';
 };
 
 const textoServicio = (pedido) => {
@@ -820,7 +822,8 @@ const listaProductosFoco = (pedido) => {
   };
 
   items.forEach((item) => {
-    const nombreProducto = item.nombre || ('Producto ' + item.producto_id);
+    const baseName = item.nombre || ('Producto ' + item.producto_id);
+    const nombreProducto = item.sabor ? `${baseName} (${item.sabor})` : baseName;
 
     const cantidadTotal = Math.max(Number(item.cantidad) || 0, 0);
     let cantidadLista = Number(item.cantidad_lista);
@@ -1004,7 +1007,9 @@ const listaProductos = (items = [], opciones = {}) => {
     }
 
     const li = document.createElement('li');
-    li.textContent = `${item.nombre || `Producto ${item.producto_id}`} × ${formatearCantidadItem(cantidadMostrar)}`;
+    const baseName = item.nombre || `Producto ${item.producto_id}`;
+    const displayName = item.sabor ? `${baseName} (${item.sabor})` : baseName;
+    li.textContent = `${displayName} × ${formatearCantidadItem(cantidadMostrar)}`;
     ul.appendChild(li);
     agregados += 1;
   });

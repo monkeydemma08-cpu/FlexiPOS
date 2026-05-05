@@ -362,16 +362,40 @@ function normalizarCampoTexto(valor) {
   return limpio === '' ? null : limpio;
 }
 
-function validarUrlHttpPublica(valorEntrada, etiqueta = 'La URL') {
+// Limite para imagenes incrustadas como data URI (en caracteres base64).
+// 600 KB de payload base64 ≈ 450 KB binario, suficiente para JPEG 800x800 calidad 0.8
+const DATA_URI_IMAGE_MAX_LENGTH = 600 * 1024;
+const DATA_URI_IMAGE_MIMES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
+
+function validarUrlHttpPublica(valorEntrada, etiqueta = 'La URL', opciones = {}) {
   const valor = normalizarCampoTexto(valorEntrada);
   if (!valor) {
     return { ok: true, valor: null };
   }
+  // Aceptar data URIs de imagen comprimida cuando se permite explicitamente
   if (/^data:/i.test(valor)) {
-    return {
-      ok: false,
-      error: `${etiqueta} debe ser una URL http/https. No pegues imagen en base64/data URI.`,
-    };
+    if (!opciones.permitirImagenInline) {
+      return {
+        ok: false,
+        error: `${etiqueta} debe ser una URL http/https. No pegues imagen en base64/data URI.`,
+      };
+    }
+    const match = valor.match(/^data:([\w/+.-]+)(?:;[^,]+)*,/i);
+    const mime = (match?.[1] || '').toLowerCase();
+    if (!DATA_URI_IMAGE_MIMES.has(mime)) {
+      return {
+        ok: false,
+        error: `${etiqueta}: solo se aceptan imagenes JPG, PNG o WebP.`,
+      };
+    }
+    if (valor.length > DATA_URI_IMAGE_MAX_LENGTH) {
+      const limiteKb = Math.round(DATA_URI_IMAGE_MAX_LENGTH / 1024);
+      return {
+        ok: false,
+        error: `${etiqueta} es demasiado pesada (limite ${limiteKb}KB). Sube una imagen mas pequena o reduce la calidad.`,
+      };
+    }
+    return { ok: true, valor };
   }
   if (valor.length > 2048) {
     return {
@@ -2955,7 +2979,7 @@ const registrarHistorialCocina = (pedidoId, negocioId, callback = () => {}) => {
           }
 
           db.all(
-            `SELECT d.cantidad, p.nombre
+            `SELECT d.cantidad, d.sabor, p.nombre
              FROM detalle_pedido d
              JOIN productos p ON p.id = d.producto_id
              LEFT JOIN categorias c ON c.id = p.categoria_id
@@ -2987,10 +3011,13 @@ const registrarHistorialCocina = (pedidoId, negocioId, callback = () => {}) => {
               );
 
               items.forEach((item) => {
+                const nombreConSabor = item.sabor
+                  ? `${item.nombre} (${item.sabor})`
+                  : item.nombre;
                 stmt.run(
                   pedido.cuenta_id || pedidoId,
                   pedidoId,
-                  item.nombre,
+                  nombreConSabor,
                   item.cantidad,
                   pedido.cocinero_id || null,
                   pedido.cocinero_nombre || null,
@@ -3041,7 +3068,7 @@ const registrarHistorialBar = (pedidoId, negocioId, callback = () => {}) => {
           }
 
           db.all(
-            `SELECT d.cantidad, p.nombre
+            `SELECT d.cantidad, d.sabor, p.nombre
              FROM detalle_pedido d
              JOIN productos p ON p.id = d.producto_id
              LEFT JOIN categorias c ON c.id = p.categoria_id
@@ -3073,10 +3100,13 @@ const registrarHistorialBar = (pedidoId, negocioId, callback = () => {}) => {
               );
 
               items.forEach((item) => {
-              stmt.run(
+                const nombreConSabor = item.sabor
+                  ? `${item.nombre} (${item.sabor})`
+                  : item.nombre;
+                stmt.run(
                   pedido.cuenta_id || pedidoId,
                   pedidoId,
-                  item.nombre,
+                  nombreConSabor,
                   item.cantidad,
                   pedido.bartender_id || null,
                   pedido.bartender_nombre || null,
@@ -4073,6 +4103,56 @@ const normalizarListaPrecios = (entrada) => {
   });
 
   return resultado;
+};
+
+const SABOR_MAX_LENGTH = 60;
+const SABORES_MAX_ITEMS = 30;
+
+const normalizarListaSabores = (entrada) => {
+  if (entrada === undefined || entrada === null || entrada === '') {
+    return [];
+  }
+  let lista = entrada;
+  if (typeof lista === 'string') {
+    try {
+      lista = JSON.parse(lista);
+    } catch (_) {
+      // Permitir lista separada por comas / saltos de linea
+      lista = entrada.split(/[\n,;|]+/);
+    }
+  }
+  if (!Array.isArray(lista)) {
+    return [];
+  }
+  const vistos = new Set();
+  const resultado = [];
+  for (const item of lista) {
+    if (resultado.length >= SABORES_MAX_ITEMS) break;
+    const texto = item && typeof item === 'object'
+      ? normalizarCampoTexto(item.nombre ?? item.label ?? item.value ?? item.name, null)
+      : normalizarCampoTexto(item, null);
+    if (!texto) continue;
+    const limpio = texto.slice(0, SABOR_MAX_LENGTH);
+    const key = limpio.toLowerCase();
+    if (vistos.has(key)) continue;
+    vistos.add(key);
+    resultado.push(limpio);
+  }
+  return resultado;
+};
+
+const normalizarSaborPedido = (entrada, saboresPermitidos = null) => {
+  if (entrada === undefined || entrada === null) return null;
+  const texto = normalizarCampoTexto(entrada, null);
+  if (!texto) return null;
+  const limpio = texto.slice(0, SABOR_MAX_LENGTH);
+  if (Array.isArray(saboresPermitidos) && saboresPermitidos.length) {
+    const match = saboresPermitidos.find(
+      (sabor) => String(sabor).toLowerCase() === limpio.toLowerCase()
+    );
+    return match || null;
+  }
+  return limpio;
 };
 
 const construirOpcionesPrecioProducto = (producto) => {
@@ -5280,6 +5360,7 @@ const obtenerDetallePedidosPorIds = async (pedidoIds, negocioId, opciones = {}) 
              COALESCE(dp.cantidad_descuento, 0) AS cantidad_descuento,
              COALESCE(dp.estado_preparacion, 'pendiente') AS estado_preparacion,
              COALESCE(dp.cantidad_lista, 0) AS cantidad_lista,
+             dp.sabor,
              dp.created_at AS detalle_creado_at,
              p.nombre,
              COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
@@ -5327,6 +5408,7 @@ const obtenerDetallePedidosPorIds = async (pedidoIds, negocioId, opciones = {}) 
       cantidad,
       precio_unitario: precio,
       nombre: row.nombre || null,
+      sabor: row.sabor || null,
       descuento_porcentaje: Number(row.descuento_porcentaje) || 0,
       descuento_monto: descuentoMonto,
       cantidad_descuento: Number(row.cantidad_descuento) || null,
@@ -5891,6 +5973,7 @@ const obtenerCuentasPorEstados = async (estados, negocioId, opciones = {}) => {
              impuesto, total, fecha_creacion, fecha_listo, fecha_cierre,
              cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, negocio_id,
              cliente_documento, ncf, tipo_comprobante, comentarios,
+             cliente_dispositivo_id, cliente_alias,
              COALESCE(descuento_porcentaje, 0) AS descuento_porcentaje,
              COALESCE(descuento_monto, 0) AS descuento_monto,
              COALESCE(propina_porcentaje, 0) AS propina_porcentaje,
@@ -5969,7 +6052,8 @@ const obtenerPedidoConDetalle = async (pedidoId, negocioId) => {
                impuesto, total, fecha_creacion, fecha_listo, fecha_cierre,
                cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, cliente_documento, ncf, tipo_comprobante, propina_monto,
                descuento_monto, delivery_estado, delivery_usuario_id, delivery_usuario_nombre, delivery_fecha_asignacion,
-               delivery_fecha_entrega, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas
+               delivery_fecha_entrega, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas,
+               cliente_dispositivo_id, cliente_alias
         FROM pedidos
       WHERE id = ? AND negocio_id = ?
     `,
@@ -10754,6 +10838,16 @@ const MENU_PUBLICO_PEDIDOS_COOLDOWN_MS = 20 * 1000;
 const menuPublicoPedidosRateMap = new Map();
 const MENU_PUBLICO_SESION_EXPIRADA_ERROR = 'Esta mesa fue reiniciada. Vuelve a escanear el QR para seguir pidiendo.';
 
+// TTL absoluto de inactividad de un cliente (dispositivo) que pidio en una mesa.
+// Si pasa este tiempo sin nuevos pedidos, debera reescanear el QR.
+const MENU_PUBLICO_CLIENTE_TTL_MS = 20 * 60 * 1000;
+// Rate limit por mesa (suma de todos los comensales): protege ante abusos coordinados.
+const MENU_PUBLICO_MESA_PEDIDOS_MAXIMO = 40;
+// Map de sesiones cliente: clave = `${token}|${clientId}` -> { firstSeen, lastSeen, alias }
+const menuPublicoClientesActivos = new Map();
+const MENU_PUBLICO_CLIENTE_EXPIRADO_ERROR =
+  'Tu sesion expiro por inactividad. Escanea el QR de nuevo para seguir pidiendo.';
+
 const construirClienteMenuPublicoKey = (req = {}) => {
   const clientId = normalizarCampoTexto(
     req.get?.('x-menu-publico-client') ?? req.body?.client_id ?? req.query?.client_id,
@@ -10784,6 +10878,76 @@ const validarSesionPedidosMenuPublico = (sesionCliente, acceso) => {
     error.status = 409;
     throw error;
   }
+};
+
+const limpiarSesionesClienteExpiradas = (now = Date.now()) => {
+  if (menuPublicoClientesActivos.size <= 5000) return;
+  for (const [key, valor] of menuPublicoClientesActivos.entries()) {
+    if (now - (valor?.lastSeen || 0) > MENU_PUBLICO_CLIENTE_TTL_MS * 2) {
+      menuPublicoClientesActivos.delete(key);
+    }
+  }
+};
+
+const validarTtlClienteMenuPublico = (req, acceso) => {
+  const tokenAcceso = normalizarCampoTexto(acceso?.token, null);
+  if (!tokenAcceso) return null;
+  const clienteId = normalizarCampoTexto(
+    req.get?.('x-menu-publico-client') ?? req.body?.client_id ?? req.query?.client_id,
+    null
+  );
+  if (!clienteId) {
+    // No hay clientId: no aplicamos TTL pero el rate-limit por IP sigue activo
+    return null;
+  }
+  const clave = `${tokenAcceso}|${clienteId.slice(0, 120)}`;
+  const now = Date.now();
+  const registro = menuPublicoClientesActivos.get(clave);
+
+  if (registro && now - registro.lastSeen > MENU_PUBLICO_CLIENTE_TTL_MS) {
+    menuPublicoClientesActivos.delete(clave);
+    const error = new Error(MENU_PUBLICO_CLIENTE_EXPIRADO_ERROR);
+    error.status = 410;
+    throw error;
+  }
+
+  if (!registro) {
+    menuPublicoClientesActivos.set(clave, {
+      firstSeen: now,
+      lastSeen: now,
+      tokenAcceso,
+      clienteId,
+    });
+  } else {
+    registro.lastSeen = now;
+  }
+
+  limpiarSesionesClienteExpiradas(now);
+  return clienteId;
+};
+
+const validarRateLimitMesaMenuPublico = (acceso) => {
+  const tokenAcceso = normalizarCampoTexto(acceso?.token, null);
+  if (!tokenAcceso) return;
+  const now = Date.now();
+  const rateKey = `mesa:${tokenAcceso}`;
+  const registro = menuPublicoPedidosRateMap.get(rateKey) || {
+    eventos: [],
+    ultimoPedidoAt: 0,
+  };
+  registro.eventos = registro.eventos.filter(
+    (timestamp) => now - timestamp < MENU_PUBLICO_PEDIDOS_WINDOW_MS
+  );
+  if (registro.eventos.length >= MENU_PUBLICO_MESA_PEDIDOS_MAXIMO) {
+    const error = new Error(
+      'Esta mesa alcanzo el limite de pedidos. Pide a un mesero que tome el siguiente.'
+    );
+    error.status = 429;
+    throw error;
+  }
+  registro.eventos.push(now);
+  registro.ultimoPedidoAt = now;
+  menuPublicoPedidosRateMap.set(rateKey, registro);
 };
 
 const validarRateLimitMenuPublicoPedidos = (req, token) => {
@@ -10915,6 +11079,17 @@ app.get('/api/public/menu/:token', async (req, res) => {
       });
     }
 
+    // Validar TTL del cliente (si envia clientId). Si pasaron >20 min sin pedidos -> 410
+    let clienteDispositivoId = null;
+    let aliasComensalActual = null;
+    let comensalSecuencia = 0;
+    try {
+      clienteDispositivoId = validarTtlClienteMenuPublico(req, acceso);
+    } catch (errorTtl) {
+      const status = errorTtl?.status || 410;
+      return res.status(status).json({ ok: false, error: errorTtl.message });
+    }
+
     const [negocioTema, catalogo, configImpuesto] = await Promise.all([
       obtenerTemaNegocioPublico(acceso.negocio_id),
       obtenerCatalogoMenuPublico(acceso.negocio_id),
@@ -10925,9 +11100,48 @@ app.get('/api/public/menu/:token', async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Negocio no encontrado.' });
     }
 
+    // Si el cliente ya tiene alias asignado en una cuenta abierta, lo devolvemos para mostrarlo
+    if (clienteDispositivoId && acceso.tipo === 'mesa' && acceso.mesa) {
+      const cuentaActiva = await obtenerCuentaActivaMenuPublico(acceso.negocio_id, acceso.mesa);
+      if (cuentaActiva) {
+        try {
+          const filaPrev = await db.get(
+            `SELECT cliente_alias FROM pedidos
+              WHERE negocio_id = ? AND cuenta_id = ? AND cliente_dispositivo_id = ?
+                AND cliente_alias IS NOT NULL
+              ORDER BY id DESC
+              LIMIT 1`,
+            [acceso.negocio_id, cuentaActiva, clienteDispositivoId]
+          );
+          if (filaPrev?.cliente_alias) {
+            aliasComensalActual = String(filaPrev.cliente_alias).slice(0, 120);
+          } else {
+            const filaCount = await db.get(
+              `SELECT COUNT(DISTINCT cliente_dispositivo_id) AS total
+                 FROM pedidos
+                WHERE negocio_id = ? AND cuenta_id = ?
+                  AND cliente_dispositivo_id IS NOT NULL`,
+              [acceso.negocio_id, cuentaActiva]
+            );
+            comensalSecuencia = (Number(filaCount?.total) || 0) + 1;
+          }
+        } catch (_) {
+          /* ignorar y dejar alias null */
+        }
+      } else {
+        comensalSecuencia = 1;
+      }
+    }
+
     res.json({
       ok: true,
       acceso,
+      cliente: {
+        dispositivo_id: clienteDispositivoId,
+        alias_actual: aliasComensalActual,
+        comensal_secuencia_proxima: comensalSecuencia,
+        ttl_seg: Math.floor(MENU_PUBLICO_CLIENTE_TTL_MS / 1000),
+      },
       negocio: {
         id: negocioTema.id,
         slug: negocioTema.slug,
@@ -10992,8 +11206,13 @@ app.post('/api/public/menu/:token/pedidos', async (req, res) => {
 
     const sesionPedidos = obtenerSesionPedidosRequest(req);
     validarSesionPedidosMenuPublico(sesionPedidos, acceso);
+    const clienteDispositivoId = validarTtlClienteMenuPublico(req, acceso);
     validarRateLimitMenuPublicoPedidos(req, token);
-    const resultado = await crearPedidoMenuPublico(acceso, req.body || {}, { sesionPedidos });
+    validarRateLimitMesaMenuPublico(acceso);
+    const resultado = await crearPedidoMenuPublico(acceso, req.body || {}, {
+      sesionPedidos,
+      clienteDispositivoId,
+    });
     res.status(201).json({
       ok: true,
       acceso,
@@ -11749,6 +11968,7 @@ app.get('/api/productos', (req, res) => {
                p.actualiza_costo_con_compras, p.costo_unitario_real, p.costo_unitario_real_incluye_itbis,
                p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad,
                COALESCE(p.visible_menu_qr, 1) AS visible_menu_qr,
+               p.sabores,
                c.nombre AS categoria_nombre
         FROM productos p
         ${joinCond}
@@ -11769,6 +11989,7 @@ app.get('/api/productos', (req, res) => {
       const productosBase = (rows || []).map((row) => ({
         ...row,
         precios: normalizarListaPrecios(row.precios),
+        sabores: normalizarListaSabores(row.sabores),
       }));
 
       const productosRecetaIds = productosBase
@@ -14463,7 +14684,7 @@ app.post('/api/pedidos', (req, res) => {
 
         const producto = await db.get(
           `SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido,
-                  p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad,
+                  p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad, p.sabores,
                   COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
            FROM productos p
            LEFT JOIN categorias c ON c.id = p.categoria_id
@@ -14514,6 +14735,17 @@ app.post('/api/pedidos', (req, res) => {
           precioUnitario = precioRedondeado;
         }
 
+        const saboresProducto = normalizarListaSabores(producto.sabores);
+        const saborSeleccionado = normalizarSaborPedido(
+          item?.sabor ?? item?.flavor ?? item?.sabor_seleccionado,
+          saboresProducto
+        );
+        if (saboresProducto.length && !saborSeleccionado) {
+          return res.status(400).json({
+            error: `Selecciona un sabor para ${producto.nombre || `el producto ${productoId}`}.`,
+          });
+        }
+
         itemsProcesados.push({
           producto_id: producto.id,
           cantidad,
@@ -14525,6 +14757,7 @@ app.post('/api/pedidos', (req, res) => {
           insumo_vendible: insumoVendible ? 1 : 0,
           unidad_base: normalizarUnidadBase(producto.unidad_base, 'UND'),
           contenido_por_unidad: normalizarContenidoPorUnidad(producto.contenido_por_unidad, 1),
+          sabor: saborSeleccionado,
         });
       }
 
@@ -14689,8 +14922,8 @@ app.post('/api/pedidos', (req, res) => {
       for (const item of itemsProcesados) {
         const cantidadListaInicial = marcarListo ? item.cantidad : 0;
         const detalleResult = await db.run(
-          'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id, estado_preparacion, cantidad_lista) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId, estadoPreparacionDetalleInicial, cantidadListaInicial]
+          'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id, estado_preparacion, cantidad_lista, sabor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId, estadoPreparacionDetalleInicial, cantidadListaInicial, item.sabor || null]
         );
         const detalleId = detalleResult?.lastID;
         if (detalleId && Array.isArray(item.consumos) && item.consumos.length) {
@@ -23790,6 +24023,69 @@ const obtenerAccesoMenuPublicoPorToken = async (token, opciones = {}) => {
   return row ? mapAccesoMenuPublico(row, opciones.req || null) : null;
 };
 
+const calcularAliasComensalMenuPublico = async ({
+  negocioId,
+  cuentaId,
+  pedidoId,
+  clienteDispositivoId,
+  nombreCliente,
+}) => {
+  const nombreLimpio = normalizarCampoTexto(nombreCliente, null);
+  if (nombreLimpio) {
+    return nombreLimpio.slice(0, 120);
+  }
+  const dispId = normalizarCampoTexto(clienteDispositivoId, null);
+  if (!dispId) {
+    return 'Comensal';
+  }
+  // Si el dispositivo ya pidio en esta cuenta, reutilizar el alias previo
+  const params = [negocioId, dispId];
+  let cuentaCondicion = '';
+  if (Number.isFinite(Number(cuentaId)) && Number(cuentaId) > 0) {
+    cuentaCondicion = ' AND cuenta_id = ?';
+    params.push(cuentaId);
+  } else if (Number.isFinite(Number(pedidoId)) && Number(pedidoId) > 0) {
+    cuentaCondicion = ' AND id <> ?';
+    params.push(pedidoId);
+  }
+  try {
+    const filaPrev = await db.get(
+      `SELECT cliente_alias FROM pedidos
+        WHERE negocio_id = ?
+          AND cliente_dispositivo_id = ?
+          ${cuentaCondicion}
+          AND cliente_alias IS NOT NULL
+        ORDER BY id DESC
+        LIMIT 1`,
+      params
+    );
+    if (filaPrev?.cliente_alias) {
+      return String(filaPrev.cliente_alias).slice(0, 120);
+    }
+  } catch (_) {
+    // Ignorar y caer al fallback de numeracion
+  }
+  // Numerar segun cuantos dispositivos distintos pidieron en esta cuenta
+  let nroComensal = 1;
+  if (Number.isFinite(Number(cuentaId)) && Number(cuentaId) > 0) {
+    try {
+      const fila = await db.get(
+        `SELECT COUNT(DISTINCT cliente_dispositivo_id) AS total
+           FROM pedidos
+          WHERE negocio_id = ?
+            AND cuenta_id = ?
+            AND cliente_dispositivo_id IS NOT NULL
+            AND cliente_dispositivo_id <> ?`,
+        [negocioId, cuentaId, dispId]
+      );
+      nroComensal = Math.max(1, (Number(fila?.total) || 0) + 1);
+    } catch (_) {
+      nroComensal = 1;
+    }
+  }
+  return `Comensal #${nroComensal}`;
+};
+
 const obtenerCuentaActivaMenuPublico = async (negocioId, mesa) => {
   const mesaNormalizada = limpiarTextoGeneral(mesa);
   if (!mesaNormalizada) {
@@ -23836,6 +24132,26 @@ const reiniciarSesionPedidosMenuPublicoPorMesas = async (negocioId, mesas = []) 
         AND mesa IN (${placeholders})`,
     [negocioNormalizado, ...mesasNormalizadas]
   );
+  // Tambien limpiar las sesiones cliente activas de los tokens afectados
+  // para que la siguiente persona empiece con alias #1 fresco.
+  try {
+    const tokens = await db.all(
+      `SELECT token FROM menu_publico_accesos
+        WHERE negocio_id = ? AND tipo = 'mesa' AND mesa IN (${placeholders})`,
+      [negocioNormalizado, ...mesasNormalizadas]
+    );
+    const tokensSet = new Set((tokens || []).map((t) => t?.token).filter(Boolean));
+    for (const key of menuPublicoClientesActivos.keys()) {
+      const tokenSeparator = key.indexOf('|');
+      if (tokenSeparator <= 0) continue;
+      const tokenAcceso = key.slice(0, tokenSeparator);
+      if (tokensSet.has(tokenAcceso)) {
+        menuPublicoClientesActivos.delete(key);
+      }
+    }
+  } catch (_) {
+    /* limpieza best-effort, no romper el flujo principal */
+  }
   return Number(resultado?.changes) || 0;
 };
 
@@ -23854,7 +24170,7 @@ const obtenerCatalogoMenuPublico = async (negocioId) => {
   const rows = await db.all(
     `
       SELECT p.id, p.nombre, p.image_url, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo,
-             p.tipo_producto, p.insumo_vendible, p.categoria_id,
+             p.tipo_producto, p.insumo_vendible, p.categoria_id, p.sabores,
              COALESCE(c.nombre, 'Menu') AS categoria_nombre,
              COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
         FROM productos p
@@ -23906,6 +24222,7 @@ const obtenerCatalogoMenuPublico = async (negocioId) => {
     }
 
     const categoriaNombre = limpiarTextoGeneral(row.categoria_nombre) || 'Menu';
+    const sabores = normalizarListaSabores(row.sabores);
     const producto = {
       id: Number(row.id),
       nombre: row.nombre,
@@ -23918,6 +24235,7 @@ const obtenerCatalogoMenuPublico = async (negocioId) => {
       area_preparacion: normalizarAreaPreparacion(row.area_preparacion),
       tipo_producto: normalizarTipoProducto(row.tipo_producto, 'FINAL'),
       insumo_vendible: normalizarFlag(row.insumo_vendible, 0),
+      sabores,
     };
 
     const categoriaKey = `${producto.categoria_id || 'sin-categoria'}:${categoriaNombre}`;
@@ -23979,7 +24297,7 @@ const prepararItemsPedidoMenuPublico = async (
   const productos = await db.all(
     `
       SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo,
-             p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad,
+             p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad, p.sabores,
              COALESCE(c.area_preparacion, 'ninguna') AS area_preparacion
         FROM productos p
         ${joinCond}
@@ -24027,6 +24345,17 @@ const prepararItemsPedidoMenuPublico = async (
     }
 
     const precioUnitario = Number((normalizarNumero(producto.precio, 0) || 0).toFixed(2));
+    const saboresProducto = normalizarListaSabores(producto.sabores);
+    const saborSeleccionado = normalizarSaborPedido(
+      item?.sabor ?? item?.flavor ?? item?.sabor_seleccionado,
+      saboresProducto
+    );
+    if (saboresProducto.length && !saborSeleccionado) {
+      throw crearErrorEstado(
+        400,
+        `Selecciona un sabor para ${producto.nombre || `el producto ${productoId}`}.`
+      );
+    }
 
     itemsProcesados.push({
       producto_id: productoId,
@@ -24039,6 +24368,7 @@ const prepararItemsPedidoMenuPublico = async (
       insumo_vendible: insumoVendible ? 1 : 0,
       unidad_base: normalizarUnidadBase(producto.unidad_base, 'UND'),
       contenido_por_unidad: normalizarContenidoPorUnidad(producto.contenido_por_unidad, 1),
+      sabor: saborSeleccionado,
     });
   }
 
@@ -24185,13 +24515,23 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
     const cuentaReferencia =
       accesoBloqueado.tipo === 'mesa' ? await obtenerCuentaActivaMenuPublico(negocioId, accesoBloqueado.mesa) : null;
 
+    const clienteDispositivoId = normalizarCampoTexto(opciones?.clienteDispositivoId, null);
+    const clienteAlias = await calcularAliasComensalMenuPublico({
+      negocioId,
+      cuentaId: cuentaReferencia,
+      pedidoId: null,
+      clienteDispositivoId,
+      nombreCliente: cliente,
+    });
+
     const insertResult = await db.run(
       `
         INSERT INTO pedidos (
           cuenta_id, mesa, cliente, modo_servicio, nota, estado,
           subtotal, impuesto, total, fecha_listo, origen_caja, creado_por, negocio_id,
-          delivery_estado, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          delivery_estado, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas,
+          cliente_dispositivo_id, cliente_alias
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         cuentaReferencia,
@@ -24212,6 +24552,8 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
         null,
         null,
         null,
+        clienteDispositivoId,
+        clienteAlias,
       ]
     );
 
@@ -24232,8 +24574,8 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
     for (const item of resultadoItems.itemsProcesados) {
       const cantidadListaInicial = estadoInicial === 'listo' ? item.cantidad : 0;
       const detalleResult = await db.run(
-        'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id, estado_preparacion, cantidad_lista) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId, estadoPreparacionDetalleMenuPublico, cantidadListaInicial]
+        'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id, estado_preparacion, cantidad_lista, sabor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId, estadoPreparacionDetalleMenuPublico, cantidadListaInicial, item.sabor || null]
       );
       const detalleId = detalleResult?.lastID;
       if (detalleId && Array.isArray(item.consumos) && item.consumos.length) {
@@ -25366,7 +25708,7 @@ app.put('/api/categorias/:id', (req, res) => {
 app.post('/api/productos', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const { nombre, precio, stock, categoria_id } = req.body;
-    const imageUrlValidacion = validarUrlHttpPublica(req.body?.image_url ?? req.body?.imageUrl, 'La imagen del producto');
+    const imageUrlValidacion = validarUrlHttpPublica(req.body?.image_url ?? req.body?.imageUrl, 'La imagen del producto', { permitirImagenInline: true });
     const preciosEntrada = req.body.precios ?? req.body.preciosLista ?? req.body.precios_lista;
     const stockIndefinido = normalizarFlag(req.body.stock_indefinido ?? req.body.stockIndefinido, 0);
     const precioValor = Number(precio);
@@ -25398,6 +25740,8 @@ app.post('/api/productos', (req, res) => {
       req.body.visible_menu_qr ?? req.body.visibleMenuQr,
       1
     );
+    const saboresLista = normalizarListaSabores(req.body.sabores ?? req.body.saboresLista);
+    const saboresJson = saboresLista.length ? JSON.stringify(saboresLista) : null;
     const preciosLista = normalizarListaPrecios(preciosEntrada);
     const preciosJson = preciosLista.length ? JSON.stringify(preciosLista) : null;
     const categoriaId = categoria_id ?? req.body.categoriaId ?? null;
@@ -25436,9 +25780,9 @@ app.post('/api/productos', (req, res) => {
         nombre, image_url, precio, precios, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
         actualiza_costo_con_compras, costo_unitario_real, costo_unitario_real_incluye_itbis,
         tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad,
-        stock, stock_indefinido, visible_menu_qr, categoria_id, activo, negocio_id
+        stock, stock_indefinido, visible_menu_qr, sabores, categoria_id, activo, negocio_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
     `;
     const params = [
       nombre,
@@ -25458,6 +25802,7 @@ app.post('/api/productos', (req, res) => {
       stockFinal,
       stockIndefinido,
       visibleMenuQr,
+      saboresJson,
       categoriaId,
       usuarioSesion.negocio_id,
     ];
@@ -25487,6 +25832,7 @@ app.post('/api/productos', (req, res) => {
         stock: stockIndefinido ? null : stockFinal,
         stock_indefinido: stockIndefinido,
         visible_menu_qr: visibleMenuQr,
+        sabores: saboresLista,
         categoria_id: categoriaId || null,
         activo: 1,
       });
@@ -25523,6 +25869,10 @@ app.put('/api/productos/:id', (req, res) => {
       req.body.actualiza_costo_con_compras ?? req.body.actualizaCostoCompras;
     const visibleMenuQrEntrada =
       req.body.visible_menu_qr ?? req.body.visibleMenuQr;
+    const saboresKeys = ['sabores', 'saboresLista', 'sabores_lista'];
+    const saboresKey = saboresKeys.find((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
+    const saboresEntrada = saboresKey ? req.body[saboresKey] : undefined;
+    const saboresFueEnviado = Boolean(saboresKey);
 
     db.get(
         `SELECT stock, stock_indefinido, image_url, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
@@ -25672,7 +26022,7 @@ app.put('/api/productos/:id', (req, res) => {
         let imageUrlProporcionada = false;
         if (imageUrlEntrada !== undefined) {
           imageUrlProporcionada = true;
-          const imageUrlValidacion = validarUrlHttpPublica(imageUrlEntrada, 'La imagen del producto');
+          const imageUrlValidacion = validarUrlHttpPublica(imageUrlEntrada, 'La imagen del producto', { permitirImagenInline: true });
           if (!imageUrlValidacion.ok) {
             return res.status(400).json({ error: imageUrlValidacion.error || 'La imagen del producto no es valida' });
           }
@@ -25757,6 +26107,12 @@ app.put('/api/productos/:id', (req, res) => {
         if (visibleMenuQr !== null) {
           campos.push('visible_menu_qr = ?');
           params.push(visibleMenuQr);
+        }
+
+        if (saboresFueEnviado) {
+          const lista = normalizarListaSabores(saboresEntrada);
+          campos.push('sabores = ?');
+          params.push(lista.length ? JSON.stringify(lista) : null);
         }
 
         if (stockProporcionado) {

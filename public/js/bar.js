@@ -191,7 +191,8 @@ const cambiarTab = (tab) => {
 const textoMesaCliente = (pedido) => {
   const partes = [];
   if (pedido.mesa) partes.push(pedido.mesa);
-  if (pedido.cliente) partes.push(pedido.cliente);
+  const aliasOrCliente = pedido.cliente_alias || pedido.cliente;
+  if (aliasOrCliente) partes.push(`👤 ${aliasOrCliente}`);
   return partes.length ? partes.join(' • ') : 'Mesa/cliente no especificado';
 };
 
@@ -334,7 +335,9 @@ const listaProductosFoco = (pedido) => {
 
     const titulo = document.createElement('span');
     titulo.className = 'cocina-focus-item-title';
-    titulo.textContent = (item.nombre || ('Producto ' + item.producto_id)) + ' x ' + formatearCantidadItem(item.cantidad);
+    const baseNombre = item.nombre || ('Producto ' + item.producto_id);
+    const nombreConSabor = item.sabor ? `${baseNombre} (${item.sabor})` : baseNombre;
+    titulo.textContent = nombreConSabor + ' x ' + formatearCantidadItem(item.cantidad);
     main.appendChild(titulo);
 
     const cantidadTotal = Math.max(Number(item.cantidad) || 0, 0);
@@ -509,7 +512,9 @@ const listaProductos = (items = []) => {
   }
   items.forEach((item) => {
     const li = document.createElement('li');
-    li.textContent = `${item.nombre || `Producto ${item.producto_id}`} × ${item.cantidad}`;
+    const baseNombre = item.nombre || `Producto ${item.producto_id}`;
+    const nombreConSabor = item.sabor ? `${baseNombre} (${item.sabor})` : baseNombre;
+    li.textContent = `${nombreConSabor} × ${item.cantidad}`;
     ul.appendChild(li);
   });
   return ul;

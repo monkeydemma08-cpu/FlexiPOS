@@ -4365,6 +4365,25 @@
                     Si está desactivado, el producto no aparecerá en el menú público que ven los clientes desde el QR.
                   </p>
                 </div>
+
+                <div class="kanm-input-group product-form-span">
+                  <label for="prod-sabor-input">Sabores / rellenos disponibles</label>
+                  <div id="prod-sabores-chips" style="display:flex;flex-wrap:wrap;gap:6px;padding:6px;border:1px solid var(--color-secundario,#cfd6e4);border-radius:8px;min-height:42px;align-items:center;background:#fff;"></div>
+                  <div style="display:flex;gap:6px;margin-top:6px;">
+                    <input
+                      type="text"
+                      id="prod-sabor-input"
+                      placeholder="Ej. Chinola, Fresa, Chocolate"
+                      maxlength="60"
+                      style="flex:1;"
+                    />
+                    <button type="button" class="kanm-button ghost" id="prod-sabor-agregar">+ Agregar</button>
+                  </div>
+                  <p class="kanm-input-help">
+                    Si añades sabores, el cliente debe elegir uno antes de pedir el producto.
+                    Presiona Enter o coma para añadir.
+                  </p>
+                </div>
               </div>
             </section>
 
@@ -4375,16 +4394,37 @@
               </div>
               <div class="product-form-grid">
                 <div class="kanm-input-group product-form-span">
-                  <label for="prod-imagen-url">Imagen del producto (URL)</label>
-                  <input
-                    type="url"
-                    id="prod-imagen-url"
-                    inputmode="url"
-                    placeholder="https://tu-cdn.com/productos/hamburguesa.jpg"
-                  />
-                  <span class="kanm-input-help">
-                    Recomendado: imagen cuadrada o vertical, liviana y publica. No pegues base64.
-                  </span>
+                  <label>Imagen del producto</label>
+                  <div
+                    id="prod-imagen-dropzone"
+                    style="border:2px dashed var(--color-secundario,#7b8fb8);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;text-align:center;background:#fafafa;cursor:pointer;transition:background .15s;"
+                  >
+                    <span style="font-size:14px;font-weight:600;">Arrastra una foto aquí o haz clic para subir</span>
+                    <span class="kanm-subtitle" style="font-size:12px;">
+                      Se redimensiona y comprime automáticamente (máx ~50KB).
+                    </span>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;">
+                      <button type="button" class="kanm-button" id="prod-imagen-subir-btn">Subir desde mi PC</button>
+                      <button type="button" class="kanm-button ghost" id="prod-imagen-quitar-btn" hidden>
+                        Quitar imagen
+                      </button>
+                    </div>
+                    <input type="file" id="prod-imagen-archivo" accept="image/jpeg,image/png,image/webp" hidden />
+                  </div>
+                  <span id="prod-imagen-info" class="kanm-input-help" style="margin-top:6px;"></span>
+                  <details style="margin-top:8px;">
+                    <summary style="cursor:pointer;font-size:13px;color:var(--color-secundario);">¿Prefieres usar una URL pública?</summary>
+                    <input
+                      type="url"
+                      id="prod-imagen-url"
+                      inputmode="url"
+                      placeholder="https://tu-cdn.com/productos/hamburguesa.jpg"
+                      style="margin-top:6px;"
+                    />
+                    <span class="kanm-input-help">
+                      Recomendado para imágenes ya alojadas. La URL debe ser http:// o https://.
+                    </span>
+                  </details>
                 </div>
                 <div class="product-form-span">
                   <div class="product-menu-preview" id="prod-menu-preview">

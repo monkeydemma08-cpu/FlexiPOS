@@ -12,8 +12,8 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Playfair+Display:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/css/menu-publico.css?v=20260311b" />
-    <script src="/js/menu-publico.js?v=20260311b" defer></script>
+    <link rel="stylesheet" href="/css/menu-publico.css?v=20260502b" />
+    <script src="/js/menu-publico.js?v=20260502b" defer></script>
   </head>
   <body class="menu-publico-body">
     <div class="menu-publico-shell" id="menu-publico-top">
@@ -199,6 +199,38 @@
       </main>
 
       <div class="menu-publico-overlay" id="menu-publico-overlay" hidden></div>
+
+      <!-- Bottom-sheet selector de sabor / relleno -->
+      <div class="menu-publico-flavor-sheet" id="menu-publico-flavor-sheet" hidden>
+        <div class="menu-publico-flavor-backdrop" data-flavor-close></div>
+        <section
+          class="menu-publico-flavor-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="menu-publico-flavor-title"
+        >
+          <div class="menu-publico-flavor-handle" aria-hidden="true"></div>
+          <header class="menu-publico-flavor-header">
+            <div>
+              <p class="menu-publico-flavor-kicker" data-i18n="flavorPickerKicker">Elige tu opción</p>
+              <h2 id="menu-publico-flavor-title">Selecciona un sabor</h2>
+            </div>
+            <button
+              type="button"
+              class="menu-publico-flavor-close"
+              aria-label="Cerrar"
+              data-flavor-close
+            >×</button>
+          </header>
+          <div class="menu-publico-flavor-options" id="menu-publico-flavor-options"></div>
+          <button
+            type="button"
+            class="menu-publico-flavor-submit"
+            id="menu-publico-flavor-submit"
+            disabled
+          >Agregar al pedido</button>
+        </section>
+      </div>
     </div>
   </body>
 </html>

@@ -2182,6 +2182,10 @@ async function runMigrations() {
   await modifyColumn('consumo_insumos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB') NOT NULL DEFAULT 'UND'");
   await ensureColumn('productos', 'contenido_por_unidad DECIMAL(12,4) NOT NULL DEFAULT 1');
   await ensureColumn('productos', 'visible_menu_qr TINYINT(1) NOT NULL DEFAULT 1');
+  await ensureColumn('productos', 'sabores JSON NULL');
+  await ensureColumn('detalle_pedido', 'sabor VARCHAR(120) NULL');
+  await ensureColumn('pedidos', 'cliente_dispositivo_id VARCHAR(64) NULL');
+  await ensureColumn('pedidos', 'cliente_alias VARCHAR(120) NULL');
   await modifyColumn('productos', 'stock DECIMAL(12,4) NULL DEFAULT 0');
   await ensureColumn('pedidos', 'bartender_id INT NULL');
   await ensureColumn('pedidos', 'bartender_nombre VARCHAR(255) NULL');
