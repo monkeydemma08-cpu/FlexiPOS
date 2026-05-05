@@ -241,15 +241,69 @@ const handlerAprobacionComercial = async (req, res) => {
   }
 };
 
+/**
+ * GET /fe/autenticacion/api/semilla
+ * Devuelve un XML SemillaModel con un valor aleatorio que el emisor
+ * debe firmar y reenviarnos por POST a /validacioncertificado.
+ */
+const handlerGetSemilla = (req, res) => {
+  try {
+    const { xml } = dgiiReceptor.generarSemillaXml();
+    return res.status(200).type('application/xml').send(xml);
+  } catch (error) {
+    console.error('[DGII] Error generando semilla:', error?.message || error);
+    return res.status(500).type('text/plain').send('No se pudo generar la semilla.');
+  }
+};
+
+/**
+ * POST /fe/autenticacion/api/validacioncertificado
+ * Recibe la SemillaModel firmada por el emisor y devuelve un JWT
+ * que el emisor debe usar para llamar a /fe/recepcion/api/ecf.
+ */
+const handlerValidacionCertificado = async (req, res) => {
+  const validacion = validarContenido(req);
+  if (!validacion.ok) {
+    return res.status(400).json({ status: 'ERROR', message: validacion.message });
+  }
+  // Auditoria (no bloqueante)
+  try {
+    await persistirPayload({ tipo: 'validacioncertificado', req });
+  } catch (_) { /* noop */ }
+
+  if (!validacion.esXml) {
+    return res.status(400).json({ status: 'ERROR', message: 'Se requiere XML de SemillaModel firmada.' });
+  }
+
+  try {
+    const resultado = dgiiReceptor.validarSemillaYGenerarToken(serializarBody(req));
+    if (!resultado.ok) {
+      return res.status(400).json({ status: 'ERROR', message: resultado.error });
+    }
+    return res.status(200).json({
+      token: resultado.token,
+      expira: resultado.expira,
+      expedido: resultado.expedido,
+    });
+  } catch (error) {
+    console.error('[DGII] Error validando certificado:', error?.message || error);
+    return res.status(500).json({ status: 'ERROR', message: 'Error interno validando certificado.' });
+  }
+};
+
 router.post('/fe/recepcion/api/ecf', ...dgiiMiddlewares, handlerRecepcionEcf);
 router.post('/fe/aprobacioncomercial/api/ecf', ...dgiiMiddlewares, handlerAprobacionComercial);
+
+// Servicio de autenticacion: GET para obtener la semilla, POST para validar el cert firmado.
+// Mantenemos el POST /semilla por compatibilidad (algunos clientes lo usan como echo).
+router.get('/fe/autenticacion/api/semilla', rateLimitMiddleware, handlerGetSemilla);
 router.post('/fe/autenticacion/api/semilla', ...dgiiMiddlewares, crearHandler('semilla'));
 router.post(
   '/fe/autenticacion/api/validacioncertificado',
   ...dgiiMiddlewares,
-  crearHandler('validacioncertificado')
+  handlerValidacionCertificado
 );
-router.post('/fe/autenticacion/api/validarsemilla', ...dgiiMiddlewares, crearHandler('validarsemilla'));
+router.post('/fe/autenticacion/api/validarsemilla', ...dgiiMiddlewares, handlerValidacionCertificado);
 
 router.use((err, req, res, next) => {
   if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {

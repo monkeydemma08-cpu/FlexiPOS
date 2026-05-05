@@ -406,6 +406,133 @@ const procesarAprobacionComercial = async ({ xmlEntrante, db, ip }) => {
   return { status: 200, contentType: 'application/xml', body: respuesta };
 };
 
+// =====================================================================
+// Servicio de autenticacion (semilla + ValidacionCertificado + token)
+// que la DGII y otros emisores deben llamar antes de mandar el e-CF.
+// =====================================================================
+
+const SEMILLA_TTL_MS = 5 * 60 * 1000; // 5 minutos
+const TOKEN_TTL_MS = 60 * 60 * 1000;  // 1 hora
+const semillasEmitidas = new Map(); // valor -> { emitida_at }
+
+const limpiarSemillasExpiradas = (now = Date.now()) => {
+  if (semillasEmitidas.size <= 200) return;
+  for (const [valor, info] of semillasEmitidas.entries()) {
+    if (now - (info?.emitida_at || 0) > SEMILLA_TTL_MS) {
+      semillasEmitidas.delete(valor);
+    }
+  }
+};
+
+const generarSemillaXml = () => {
+  const valor =
+    crypto.randomBytes(16).toString('hex').toUpperCase() +
+    Date.now().toString(36).toUpperCase();
+  const fecha = FECHA_HORA_FORMATO(new Date());
+  semillasEmitidas.set(valor, { emitida_at: Date.now() });
+  limpiarSemillasExpiradas();
+  return {
+    valor,
+    fecha,
+    xml:
+      `<?xml version="1.0" encoding="UTF-8"?>` +
+      `<SemillaModel xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` +
+      `<valor>${valor}</valor>` +
+      `<fecha>${fecha}</fecha>` +
+      `</SemillaModel>`,
+  };
+};
+
+const construirJwt = ({ rnc = '', semilla = '' }) => {
+  const now = Date.now();
+  const exp = Math.floor((now + TOKEN_TTL_MS) / 1000);
+  const iat = Math.floor(now / 1000);
+  const secret =
+    process.env.DGII_RECEPTOR_JWT_SECRET ||
+    process.env.JWT_SECRET ||
+    'dgii-receptor-default-secret-change-me';
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const payload = { rnc: rnc || '', semilla: semilla || '', iat, exp };
+  const b64url = (data) =>
+    Buffer.from(typeof data === 'string' ? data : JSON.stringify(data))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  const headerEnc = b64url(header);
+  const payloadEnc = b64url(payload);
+  const signing = `${headerEnc}.${payloadEnc}`;
+  const sig = crypto
+    .createHmac('sha256', secret)
+    .update(signing)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return {
+    token: `${signing}.${sig}`,
+    expira: new Date(now + TOKEN_TTL_MS).toISOString(),
+    expedido: new Date(now).toISOString(),
+  };
+};
+
+/**
+ * Recibe la SemillaModel firmada por el emisor (o por DGII actuando como emisor).
+ * Valida (a nivel laxo) que la semilla este viva y devuelve un token JWT.
+ */
+const validarSemillaYGenerarToken = (xmlEntrante) => {
+  if (!DOMParser) throw new Error('@xmldom/xmldom no esta instalado');
+  if (!xmlEntrante || typeof xmlEntrante !== 'string') {
+    return { ok: false, error: 'XML vacio' };
+  }
+  let doc;
+  try {
+    doc = new DOMParser({
+      errorHandler: { warning() {}, error() {}, fatalError() {} },
+    }).parseFromString(xmlEntrante, 'text/xml');
+  } catch (error) {
+    return { ok: false, error: 'XML invalido: ' + (error.message || '') };
+  }
+
+  const valor = tomarTexto(doc, 'valor');
+  if (!valor) return { ok: false, error: 'No se encontro <valor> en la semilla.' };
+
+  const registro = semillasEmitidas.get(valor);
+  if (!registro) {
+    return { ok: false, error: 'La semilla no fue emitida por este servicio o ya expiro.' };
+  }
+  if (Date.now() - registro.emitida_at > SEMILLA_TTL_MS) {
+    semillasEmitidas.delete(valor);
+    return { ok: false, error: 'La semilla expiro.' };
+  }
+
+  // Intentar extraer el RNC del cert X509 incluido en la firma (informativo, no bloqueante)
+  let rncEmisor = '';
+  try {
+    const certB64 = tomarTexto(doc, 'X509Certificate');
+    if (certB64) {
+      const forge = require('node-forge');
+      const der = forge.util.decode64(certB64.replace(/\s+/g, ''));
+      const asn1 = forge.asn1.fromDer(der);
+      const cert = forge.pki.certificateFromAsn1(asn1);
+      const subject = cert.subject?.attributes || [];
+      const cn = subject.find((a) => a.shortName === 'CN' || a.name === 'commonName');
+      if (cn?.value) rncEmisor = String(cn.value).replace(/\D+/g, '');
+      if (!rncEmisor) {
+        const serial = subject.find((a) => a.shortName === 'serialNumber');
+        if (serial?.value) rncEmisor = String(serial.value).replace(/\D+/g, '');
+      }
+    }
+  } catch (_) {
+    /* no bloqueante */
+  }
+
+  // Consumir la semilla (one-shot)
+  semillasEmitidas.delete(valor);
+
+  return { ok: true, ...construirJwt({ rnc: rncEmisor, semilla: valor }) };
+};
+
 module.exports = {
   parsearEcfRecibido,
   construirAcuseReciboXml,
@@ -413,4 +540,6 @@ module.exports = {
   procesarRecepcionEcf,
   procesarAprobacionComercial,
   asegurarTablasReceptor,
+  generarSemillaXml,
+  validarSemillaYGenerarToken,
 };
