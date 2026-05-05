@@ -3,6 +3,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('./db');
+const dgiiReceptor = require('./dgii-receptor');
 
 const router = express.Router();
 
@@ -158,8 +159,90 @@ const crearHandler = (tipo) => async (req, res) => {
 
 const dgiiMiddlewares = [jsonParser, xmlParser, rateLimitMiddleware];
 
-router.post('/fe/recepcion/api/ecf', ...dgiiMiddlewares, crearHandler('recepcion'));
-router.post('/fe/aprobacioncomercial/api/ecf', ...dgiiMiddlewares, crearHandler('aprobacioncomercial'));
+/**
+ * Handler real para /fe/recepcion/api/ecf
+ * Procesa el e-CF entrante y responde con AcuseRecibo XML firmado.
+ * (Mantiene tambien la persistencia "echo" del payload para auditoria).
+ */
+const handlerRecepcionEcf = async (req, res) => {
+  const validacion = validarContenido(req);
+  if (!validacion.ok) {
+    return res
+      .status(400)
+      .type('application/xml')
+      .send(
+        `<?xml version="1.0" encoding="UTF-8"?>` +
+          `<ACECF><DetalleAcuseRecibo><Estado>1</Estado>` +
+          `<CodigoMotivoNoRecibido>1</CodigoMotivoNoRecibido></DetalleAcuseRecibo></ACECF>`
+      );
+  }
+
+  // Persistencia auditoria (no bloqueante para la respuesta a DGII)
+  let payloadInfo = { bytes: 0, id: '' };
+  try {
+    payloadInfo = await persistirPayload({ tipo: 'recepcion', req });
+    logBasico(req, payloadInfo.bytes, payloadInfo.id);
+  } catch (error) {
+    console.error('[DGII] No se pudo persistir auditoria de recepcion:', error?.message || error);
+  }
+
+  // Solo procesamos como e-CF cuando el body es XML
+  if (!validacion.esXml) {
+    return res.status(200).json({ status: 'OK' });
+  }
+
+  try {
+    const resultado = await dgiiReceptor.procesarRecepcionEcf({
+      xmlEntrante: serializarBody(req),
+      db,
+      ip: req.dgiiMeta?.ip,
+    });
+    return res
+      .status(resultado.status)
+      .type(resultado.contentType || 'application/xml')
+      .send(resultado.body);
+  } catch (error) {
+    console.error('[DGII] Error procesando recepcion e-CF:', error?.message || error);
+    return res
+      .status(500)
+      .type('application/xml')
+      .send(
+        `<?xml version="1.0" encoding="UTF-8"?>` +
+          `<ACECF><DetalleAcuseRecibo><Estado>1</Estado>` +
+          `<CodigoMotivoNoRecibido>1</CodigoMotivoNoRecibido></DetalleAcuseRecibo></ACECF>`
+      );
+  }
+};
+
+const handlerAprobacionComercial = async (req, res) => {
+  const validacion = validarContenido(req);
+  if (!validacion.ok) {
+    return res.status(400).json({ status: 'ERROR', message: validacion.message });
+  }
+  try {
+    await persistirPayload({ tipo: 'aprobacioncomercial', req }).catch((err) =>
+      console.error('[DGII] persist AC:', err?.message || err)
+    );
+    if (!validacion.esXml) {
+      return res.status(200).json({ status: 'OK' });
+    }
+    const resultado = await dgiiReceptor.procesarAprobacionComercial({
+      xmlEntrante: serializarBody(req),
+      db,
+      ip: req.dgiiMeta?.ip,
+    });
+    return res
+      .status(resultado.status)
+      .type(resultado.contentType || 'application/xml')
+      .send(resultado.body);
+  } catch (error) {
+    console.error('[DGII] Error procesando AC:', error?.message || error);
+    return res.status(500).json({ status: 'ERROR' });
+  }
+};
+
+router.post('/fe/recepcion/api/ecf', ...dgiiMiddlewares, handlerRecepcionEcf);
+router.post('/fe/aprobacioncomercial/api/ecf', ...dgiiMiddlewares, handlerAprobacionComercial);
 router.post('/fe/autenticacion/api/semilla', ...dgiiMiddlewares, crearHandler('semilla'));
 router.post(
   '/fe/autenticacion/api/validacioncertificado',
