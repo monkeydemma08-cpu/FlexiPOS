@@ -305,6 +305,49 @@ router.post(
 );
 router.post('/fe/autenticacion/api/validarsemilla', ...dgiiMiddlewares, handlerValidacionCertificado);
 
+// =====================================================================
+// Workaround: el portal de pruebas DGII a veces guarda las URLs con el
+// path duplicado (ej. https://posium.tech/fe/autenticacion/api/semilla
+// concatenado con su sufijo automatico /fe/autenticacion/api/semilla).
+// Aliasamos esos paths duplicados a los handlers reales para no quedar
+// bloqueados mientras DGII actualiza su cache interna.
+// =====================================================================
+router.get(
+  '/fe/autenticacion/api/semilla/fe/autenticacion/api/semilla',
+  rateLimitMiddleware,
+  handlerGetSemilla
+);
+router.post(
+  '/fe/autenticacion/api/semilla/fe/autenticacion/api/semilla',
+  ...dgiiMiddlewares,
+  crearHandler('semilla')
+);
+router.get(
+  '/fe/autenticacion/api/semilla/fe/autenticacion/api/validacioncertificado',
+  rateLimitMiddleware,
+  handlerGetSemilla
+);
+router.post(
+  '/fe/autenticacion/api/validacioncertificado/fe/autenticacion/api/validacioncertificado',
+  ...dgiiMiddlewares,
+  handlerValidacionCertificado
+);
+router.post(
+  '/fe/autenticacion/api/semilla/fe/autenticacion/api/validacioncertificado',
+  ...dgiiMiddlewares,
+  handlerValidacionCertificado
+);
+router.post(
+  '/fe/recepcion/api/ecf/fe/recepcion/api/ecf',
+  ...dgiiMiddlewares,
+  handlerRecepcionEcf
+);
+router.post(
+  '/fe/aprobacioncomercial/api/ecf/fe/aprobacioncomercial/api/ecf',
+  ...dgiiMiddlewares,
+  handlerAprobacionComercial
+);
+
 router.use((err, req, res, next) => {
   if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
     return res.status(400).json({ status: 'ERROR', message: 'Formato JSON invalido.' });
