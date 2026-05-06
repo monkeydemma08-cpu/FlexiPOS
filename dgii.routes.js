@@ -535,17 +535,20 @@ router.get('/fe/_debug/recepcion', async (req, res) => {
 // ultimos N e-CF recibidos en ecf_recibidos.
 router.get('/fe/_debug/ultimo', async (req, res) => {
   try {
-    const limit = Math.min(20, Math.max(1, Number(req.query.limit) || 5));
+    // Validamos limit como entero para inyectarlo directo en la query
+    // (algunos adapters MySQL no aceptan ? para LIMIT)
+    const limit = Math.min(20, Math.max(1, Math.floor(Number(req.query.limit) || 5)));
+    const previewLen = Math.min(8000, Math.max(200, Math.floor(Number(req.query.preview) || 1500)));
+
     let payloads = [];
     let ecfs = [];
     try {
       payloads = await db.all(
         `SELECT id, endpoint, content_type, ip, bytes,
-                LEFT(payload, 800) AS payload_preview, recibido_en
+                LEFT(payload, ${previewLen}) AS payload_preview, recibido_en
            FROM dgii_payloads
           ORDER BY id DESC
-          LIMIT ?`,
-        [limit]
+          LIMIT ${limit}`
       );
     } catch (e) {
       payloads = [{ error: e?.message || String(e) }];
@@ -553,12 +556,11 @@ router.get('/fe/_debug/ultimo', async (req, res) => {
     try {
       ecfs = await db.all(
         `SELECT id, rnc_emisor, rnc_comprador, e_ncf, estado_recepcion, ip_origen,
-                LEFT(xml_recibido, 800) AS xml_recibido_preview,
-                LEFT(xml_acuse, 400) AS xml_acuse_preview, recibido_en
+                LEFT(xml_recibido, ${previewLen}) AS xml_recibido_preview,
+                LEFT(xml_acuse, ${previewLen}) AS xml_acuse_preview, recibido_en
            FROM ecf_recibidos
           ORDER BY id DESC
-          LIMIT ?`,
-        [limit]
+          LIMIT ${limit}`
       );
     } catch (e) {
       ecfs = [{ error: e?.message || String(e) }];
