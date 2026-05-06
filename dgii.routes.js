@@ -257,8 +257,8 @@ const handlerRecepcionEcf = async (req, res) => {
     );
     return res.status(200).type('application/xml').send(
       `<?xml version="1.0" encoding="UTF-8"?>` +
-        `<ACECF><DetalleAcuseRecibo><Estado>1</Estado>` +
-        `<CodigoMotivoNoRecibido>1</CodigoMotivoNoRecibido></DetalleAcuseRecibo></ACECF>`
+        `<ARECF><DetalleAcusedeRecibo><Estado>1</Estado>` +
+        `<CodigoMotivoNoRecibido>1</CodigoMotivoNoRecibido></DetalleAcusedeRecibo></ARECF>`
     );
   }
 
@@ -279,8 +279,8 @@ const handlerRecepcionEcf = async (req, res) => {
       .type('application/xml')
       .send(
         `<?xml version="1.0" encoding="UTF-8"?>` +
-          `<ACECF><DetalleAcuseRecibo><Estado>1</Estado>` +
-          `<CodigoMotivoNoRecibido>1</CodigoMotivoNoRecibido></DetalleAcuseRecibo></ACECF>`
+          `<ARECF><DetalleAcusedeRecibo><Estado>1</Estado>` +
+          `<CodigoMotivoNoRecibido>1</CodigoMotivoNoRecibido></DetalleAcusedeRecibo></ARECF>`
       );
   }
 };

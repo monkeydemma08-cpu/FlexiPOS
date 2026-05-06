@@ -118,9 +118,13 @@ const buscarConfigDgiiPorRnc = async (db, rncReceptor) => {
 };
 
 /**
- * Genera el XML AcuseRecibo (ACECF) que devolvemos a quien nos envio el e-CF.
- * Estructura mínima compatible con DGII v1.0.
+ * Genera el XML AcuseRecibo (ARECF) que devolvemos a quien nos envio el e-CF.
+ * Estructura segun el XSD oficial DGII v1.0 (AcusedeRecibo.xsd).
  * Estado: 0 = Recibido OK; 1 = Rechazado por estructura/firma.
+ *
+ * IMPORTANTE: El root es <ARECF> (Acuse de Recibo de e-CF), no <ACECF>.
+ * <ACECF> es para la APROBACION COMERCIAL (otro flujo distinto).
+ * El detalle se llama <DetalleAcusedeRecibo> (con "de" pegada).
  */
 const construirAcuseReciboXml = ({
   rncEmisor,
@@ -130,27 +134,28 @@ const construirAcuseReciboXml = ({
   codigoMotivoNoRecibido = '',
 }) => {
   const fechaHora = FECHA_HORA_FORMATO(new Date());
-  const motivo = estado === 0 ? '' : String(codigoMotivoNoRecibido || '1');
   return (
     `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<ACECF xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` +
-    `<DetalleAcuseRecibo>` +
+    `<ARECF xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` +
+    `<DetalleAcusedeRecibo>` +
     `<Version>1.0</Version>` +
     `<RNCEmisor>${rncEmisor}</RNCEmisor>` +
     `<RNCComprador>${rncComprador}</RNCComprador>` +
     `<eNCF>${eNCF}</eNCF>` +
     `<Estado>${estado}</Estado>` +
-    `<CodigoMotivoNoRecibido>${motivo}</CodigoMotivoNoRecibido>` +
-    `</DetalleAcuseRecibo>` +
+    (estado === 0
+      ? ''
+      : `<CodigoMotivoNoRecibido>${String(codigoMotivoNoRecibido || '1')}</CodigoMotivoNoRecibido>`) +
+    `</DetalleAcusedeRecibo>` +
     `<FechaHoraAcuseRecibo>${fechaHora}</FechaHoraAcuseRecibo>` +
-    `</ACECF>`
+    `</ARECF>`
   );
 };
 
 /**
  * Firma un AcuseRecibo XML con el P12 del receptor.
  */
-const firmarAcuseRecibo = (xml, p12Base64, p12Password, rootTag = 'ACECF') => {
+const firmarAcuseRecibo = (xml, p12Base64, p12Password, rootTag = 'ARECF') => {
   if (!p12Base64) {
     return { xml, firmado: false };
   }
