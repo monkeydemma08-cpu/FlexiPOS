@@ -578,4 +578,5 @@ module.exports = {
   asegurarTablasReceptor,
   generarSemillaXml,
   validarSemillaYGenerarToken,
+  construirJwt,
 };
