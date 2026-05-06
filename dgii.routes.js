@@ -259,7 +259,11 @@ const handlerRecepcionEcf = async (req, res) => {
       `<?xml version="1.0" encoding="UTF-8"?>` +
         `<ARECF><DetalleAcusedeRecibo><Estado>1</Estado>` +
         `<CodigoMotivoNoRecibido>2</CodigoMotivoNoRecibido>` +
-        `<FechaHoraAcuseRecibo>${new Date().toISOString().slice(0, 19)}</FechaHoraAcuseRecibo>` +
+        `<FechaHoraAcuseRecibo>${(() => {
+          const d = new Date();
+          const p = (n) => String(n).padStart(2, '0');
+          return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+        })()}</FechaHoraAcuseRecibo>` +
         `</DetalleAcusedeRecibo></ARECF>`
     );
   }
@@ -283,7 +287,11 @@ const handlerRecepcionEcf = async (req, res) => {
         `<?xml version="1.0" encoding="UTF-8"?>` +
           `<ARECF><DetalleAcusedeRecibo><Estado>1</Estado>` +
           `<CodigoMotivoNoRecibido>2</CodigoMotivoNoRecibido>` +
-          `<FechaHoraAcuseRecibo>${new Date().toISOString().slice(0, 19)}</FechaHoraAcuseRecibo>` +
+          `<FechaHoraAcuseRecibo>${(() => {
+            const d = new Date();
+            const p = (n) => String(n).padStart(2, '0');
+            return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+          })()}</FechaHoraAcuseRecibo>` +
           `</DetalleAcusedeRecibo></ARECF>`
       );
   }

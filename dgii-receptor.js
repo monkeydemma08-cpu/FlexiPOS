@@ -27,10 +27,13 @@ try {
 
 const dgiiCore = require('./dgii-core');
 
+// Formato de fecha exigido por DGII: dd-MM-yyyy HH:mm:ss (con guiones,
+// dia primero, espacio en lugar de T, sin offset). Es el patron del
+// DateAndTimeType del XSD oficial. NO confundir con ISO 8601.
 const FECHA_HORA_FORMATO = (date = new Date()) => {
   const pad = (n) => String(n).padStart(2, '0');
   return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T` +
+    `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ` +
     `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
   );
 };
