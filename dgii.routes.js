@@ -420,9 +420,22 @@ const handlerValidacionCertificado = async (req, res) => {
 // verificar el deploy antes de pedir a DGII que reintente.
 router.get('/fe/_debug/recepcion', async (req, res) => {
   try {
-    const filas = await db.all(
-      "SELECT negocio_id, rnc_emisor, (p12_base64 IS NOT NULL AND CHAR_LENGTH(p12_base64) > 0) AS tiene_p12 FROM dgii_paso2_config"
-    );
+    let filas = [];
+    let filasFE = [];
+    try {
+      filas = await db.all(
+        "SELECT negocio_id, rnc_emisor, (p12_base64 IS NOT NULL AND CHAR_LENGTH(p12_base64) > 0) AS tiene_p12 FROM dgii_paso2_config"
+      );
+    } catch (e) {
+      filas = [{ error: e?.message || String(e) }];
+    }
+    try {
+      filasFE = await db.all(
+        "SELECT negocio_id, rnc_emisor, (certificado_base64 IS NOT NULL AND CHAR_LENGTH(certificado_base64) > 0) AS tiene_cert FROM facturacion_electronica_config"
+      );
+    } catch (e) {
+      filasFE = [{ error: e?.message || String(e) }];
+    }
     let pruebaFirma = null;
     try {
       const cfg = await dgiiReceptor.buscarConfigDgiiPorRnc?.(db, '40229712860');
@@ -447,7 +460,8 @@ router.get('/fe/_debug/recepcion', async (req, res) => {
     }
     return res.json({
       ok: true,
-      configs: filas || [],
+      dgii_paso2_config: filas || [],
+      facturacion_electronica_config: filasFE || [],
       pruebaFirma,
     });
   } catch (error) {

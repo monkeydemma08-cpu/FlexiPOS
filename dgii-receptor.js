@@ -27,6 +27,36 @@ try {
 
 const dgiiCore = require('./dgii-core');
 
+// Descifra secretos guardados en facturacion_electronica_config.
+// Replica decryptFacturacionElectronicaSecret de server.js para que
+// dgii-receptor pueda leer el cert P12 de cualquiera de las dos tablas.
+const decryptFacturacionElectronicaSecret = (encoded) => {
+  if (!encoded) return '';
+  const value = String(encoded);
+  if (!value.startsWith('v1:')) return value;
+  try {
+    const parts = value.split(':');
+    if (parts.length !== 4) return '';
+    const [, ivB64, tagB64, dataB64] = parts;
+    const secret =
+      process.env.FACTURACION_ELECTRONICA_SECRET ||
+      process.env.DGII_PASO2_SECRET ||
+      process.env.IMPERSONATION_JWT_SECRET ||
+      process.env.JWT_SECRET ||
+      'kanm-facturacion-electronica-dev-secret';
+    const key = crypto.createHash('sha256').update(String(secret)).digest();
+    const iv = Buffer.from(ivB64, 'base64');
+    const tag = Buffer.from(tagB64, 'base64');
+    const data = Buffer.from(dataB64, 'base64');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    const plain = Buffer.concat([decipher.update(data), decipher.final()]);
+    return plain.toString('utf8');
+  } catch (_) {
+    return '';
+  }
+};
+
 // Formato de fecha exigido por DGII: dd-MM-yyyy HH:mm:ss (con guiones,
 // dia primero, espacio en lugar de T, sin offset). Es el patron del
 // DateAndTimeType del XSD oficial. NO confundir con ISO 8601.
@@ -154,6 +184,51 @@ const buscarConfigDgiiPorRnc = async (db, rncReceptor) => {
     } else {
       console.warn('[dgii-receptor] No hay ningun config DGII con P12 cargado en la tabla dgii_paso2_config');
     }
+
+    // 3) Fallback: tabla facturacion_electronica_config (sistema original)
+    let feRow = null;
+    if (rncLimpio) {
+      feRow = await db.get(
+        `SELECT negocio_id, rnc_emisor, certificado_base64, certificado_password_enc
+           FROM facturacion_electronica_config
+          WHERE REPLACE(REPLACE(REPLACE(rnc_emisor, '-', ''), '.', ''), ' ', '') = ?
+            AND certificado_base64 IS NOT NULL
+            AND CHAR_LENGTH(certificado_base64) > 0
+          ORDER BY negocio_id DESC
+          LIMIT 1`,
+        [rncLimpio]
+      );
+    }
+    if (!feRow) {
+      const feFilas = await db.all(
+        `SELECT negocio_id, rnc_emisor, certificado_base64, certificado_password_enc
+           FROM facturacion_electronica_config
+          WHERE certificado_base64 IS NOT NULL
+            AND CHAR_LENGTH(certificado_base64) > 0
+          ORDER BY negocio_id DESC`
+      );
+      if (feFilas && feFilas.length === 1) {
+        feRow = feFilas[0];
+        console.log(`[dgii-receptor] Fallback FE unico: negocio_id=${feRow.negocio_id}, RNC=${feRow.rnc_emisor}`);
+      } else if (feFilas && feFilas.length > 1) {
+        console.warn(
+          `[dgii-receptor] FE: ${feFilas.length} configs y ninguno matchea ${rncLimpio}. RNCs:`,
+          feFilas.map((f) => f.rnc_emisor).join(', ')
+        );
+      }
+    } else {
+      console.log(`[dgii-receptor] config FE encontrada por RNC ${rncLimpio} -> negocio_id=${feRow.negocio_id}`);
+    }
+    if (feRow) {
+      return {
+        negocioId: Number(feRow.negocio_id),
+        p12Base64: feRow.certificado_base64 || '',
+        p12Password: decryptFacturacionElectronicaSecret(feRow.certificado_password_enc || '') || '',
+        rncEmisor: feRow.rnc_emisor || rncLimpio,
+      };
+    }
+
+    console.warn('[dgii-receptor] Tampoco hay config en facturacion_electronica_config con cert');
     return null;
   } catch (error) {
     console.error('[dgii-receptor] Error buscando config por RNC:', error?.message || error);
