@@ -150,7 +150,7 @@ const construirAcuseReciboXml = ({
 /**
  * Firma un AcuseRecibo XML con el P12 del receptor.
  */
-const firmarAcuseRecibo = (xml, p12Base64, p12Password) => {
+const firmarAcuseRecibo = (xml, p12Base64, p12Password, rootTag = 'ACECF') => {
   if (!p12Base64) {
     return { xml, firmado: false };
   }
@@ -159,10 +159,15 @@ const firmarAcuseRecibo = (xml, p12Base64, p12Password) => {
       p12Base64,
       p12Password: p12Password || '',
     });
-    const { xml: signedXml } = dgiiCore.signXmlDocument({
+    // Usamos la firma estricta DGII (digest con atributos ordenados, C14N
+    // 1.0, transform enveloped-signature, KeyInfo con X509Certificate inline)
+    // que es la que el SIT de DGII verifica en los AcuseRecibo.
+    const firmar = dgiiCore.signXmlForDgii || dgiiCore.signXmlDocument;
+    const { xml: signedXml } = firmar({
       xml,
       privateKeyPem,
       certPem,
+      rootTag,
     });
     return { xml: signedXml, firmado: true };
   } catch (error) {
@@ -212,6 +217,19 @@ const asegurarTablasReceptor = async (db) => {
     );
   } catch (error) {
     console.warn('[dgii-receptor] No se pudieron crear tablas:', error?.message || error);
+  }
+};
+
+const yaExisteEcfRecibido = async (db, rncEmisor, eNCF) => {
+  if (!db || typeof db.get !== 'function' || !rncEmisor || !eNCF) return false;
+  try {
+    const fila = await db.get(
+      'SELECT id FROM ecf_recibidos WHERE rnc_emisor = ? AND e_ncf = ? LIMIT 1',
+      [rncEmisor, eNCF]
+    );
+    return Boolean(fila?.id);
+  } catch (_) {
+    return false;
   }
 };
 
@@ -294,6 +312,24 @@ const procesarRecepcionEcf = async ({ xmlEntrante, db, ip }) => {
         codigoMotivoNoRecibido: '1',
       }),
     };
+  }
+
+  // Detectar duplicado: mismo eNCF de mismo emisor
+  if (await yaExisteEcfRecibido(db, parsed.rncEmisor, parsed.eNCF)) {
+    const xmlBaseDup = construirAcuseReciboXml({
+      rncEmisor: parsed.rncEmisor,
+      rncComprador: parsed.rncComprador,
+      eNCF: parsed.eNCF,
+      estado: 1,
+      codigoMotivoNoRecibido: '5', // 5 = ECF duplicado
+    });
+    const cfgDup = await buscarConfigDgiiPorRnc(db, parsed.rncComprador);
+    let xmlDupFinal = xmlBaseDup;
+    if (cfgDup) {
+      const r = firmarAcuseRecibo(xmlBaseDup, cfgDup.p12Base64, cfgDup.p12Password);
+      xmlDupFinal = r.xml;
+    }
+    return { status: 200, contentType: 'application/xml', body: xmlDupFinal };
   }
 
   // Buscar el negocio receptor (el RNC al que va dirigido el e-CF)
