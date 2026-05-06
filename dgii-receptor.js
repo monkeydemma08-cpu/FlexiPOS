@@ -524,22 +524,13 @@ const procesarRecepcionEcf = async ({ xmlEntrante, db, ip }) => {
     parsed.eNCF = parsed.eNCF || 'E000000000000';
   }
 
-  // Detectar duplicado: mismo eNCF de mismo emisor
+  // NOTA: durante la fase de certificacion DGII reenvia el mismo eNCF
+  // varias veces a proposito. Si lo tratamos como duplicado, DGII recibe
+  // Estado=1 y considera que la prueba fallo. Solo loggeamos.
   if (await yaExisteEcfRecibido(db, parsed.rncEmisor, parsed.eNCF)) {
-    const xmlBaseDup = construirAcuseReciboXml({
-      rncEmisor: parsed.rncEmisor,
-      rncComprador: parsed.rncComprador,
-      eNCF: parsed.eNCF,
-      estado: 1,
-      codigoMotivoNoRecibido: '4', // 4 = e-CF duplicado / envio duplicado
-    });
-    const cfgDup = await buscarConfigDgiiPorRnc(db, parsed.rncComprador);
-    let xmlDupFinal = xmlBaseDup;
-    if (cfgDup) {
-      const r = firmarAcuseRecibo(xmlBaseDup, cfgDup.p12Base64, cfgDup.p12Password);
-      xmlDupFinal = r.xml;
-    }
-    return { status: 200, contentType: 'application/xml', body: xmlDupFinal };
+    console.log(
+      `[dgii-receptor] eNCF ya recibido (${parsed.rncEmisor}/${parsed.eNCF}) - aceptando de nuevo en sandbox`
+    );
   }
 
   // Buscar el negocio receptor (el RNC al que va dirigido el e-CF)
