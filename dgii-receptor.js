@@ -91,29 +91,70 @@ const parsearEcfRecibido = (xmlString) => {
 /**
  * Busca la config DGII del negocio cuyo RNC coincide con `rncReceptor`.
  * Devuelve { negocioId, p12Base64, p12Password, rncEmisor } o null si no hay match.
+ *
+ * Si el match exacto falla pero hay UN solo registro en dgii_paso2_config,
+ * lo usamos como fallback (caso single-tenant en sandbox de certificacion).
  */
 const buscarConfigDgiiPorRnc = async (db, rncReceptor) => {
   const rncLimpio = limpiarRnc(rncReceptor);
-  if (!rncLimpio || !db || typeof db.get !== 'function') return null;
+  if (!db || typeof db.get !== 'function') {
+    console.warn('[dgii-receptor] DB no disponible para buscar config DGII');
+    return null;
+  }
+
   try {
-    // Primer match: dgii_paso2_config con rnc_emisor coincidente
-    const row = await db.get(
+    // 1) Match exacto por RNC
+    if (rncLimpio) {
+      const row = await db.get(
+        `SELECT * FROM dgii_paso2_config
+          WHERE REPLACE(REPLACE(REPLACE(rnc_emisor, '-', ''), '.', ''), ' ', '') = ?
+          ORDER BY negocio_id DESC
+          LIMIT 1`,
+        [rncLimpio]
+      );
+      if (row) {
+        console.log(`[dgii-receptor] config DGII encontrada por RNC ${rncLimpio} -> negocio_id=${row.negocio_id}, p12=${row.p12_base64 ? 'SI' : 'NO'}`);
+        const p12Password = dgiiCore.decryptSensitive
+          ? dgiiCore.decryptSensitive(row.p12_password_enc || '')
+          : '';
+        return {
+          negocioId: Number(row.negocio_id),
+          p12Base64: row.p12_base64 || '',
+          p12Password: p12Password || '',
+          rncEmisor: row.rnc_emisor || rncLimpio,
+        };
+      }
+      console.warn(`[dgii-receptor] No hay match exacto para RNC ${rncLimpio}, intentando fallback`);
+    }
+
+    // 2) Fallback: si solo hay un config en toda la tabla, usarlo (sandbox)
+    const filas = await db.all(
       `SELECT * FROM dgii_paso2_config
-        WHERE REPLACE(REPLACE(REPLACE(rnc_emisor, '-', ''), '.', ''), ' ', '') = ?
-        ORDER BY actualizado_en DESC
-        LIMIT 1`,
-      [rncLimpio]
+        WHERE p12_base64 IS NOT NULL AND p12_base64 <> ''
+        ORDER BY negocio_id DESC`
     );
-    if (!row) return null;
-    const p12Password = dgiiCore.decryptSensitive
-      ? dgiiCore.decryptSensitive(row.p12_password_enc || '')
-      : '';
-    return {
-      negocioId: Number(row.negocio_id),
-      p12Base64: row.p12_base64 || '',
-      p12Password: p12Password || '',
-      rncEmisor: row.rnc_emisor || rncLimpio,
-    };
+    if (filas && filas.length === 1) {
+      const row = filas[0];
+      console.log(`[dgii-receptor] Fallback unico-config: usando negocio_id=${row.negocio_id}, RNC=${row.rnc_emisor}`);
+      const p12Password = dgiiCore.decryptSensitive
+        ? dgiiCore.decryptSensitive(row.p12_password_enc || '')
+        : '';
+      return {
+        negocioId: Number(row.negocio_id),
+        p12Base64: row.p12_base64 || '',
+        p12Password: p12Password || '',
+        rncEmisor: row.rnc_emisor || rncLimpio,
+      };
+    }
+    if (filas && filas.length > 1) {
+      console.warn(
+        `[dgii-receptor] Hay ${filas.length} configs DGII y ninguno matchea ${rncLimpio}. RNCs disponibles:`,
+        filas.map((f) => f.rnc_emisor).join(', ')
+      );
+    } else {
+      console.warn('[dgii-receptor] No hay ningun config DGII con P12 cargado en la tabla dgii_paso2_config');
+    }
+    return null;
   } catch (error) {
     console.error('[dgii-receptor] Error buscando config por RNC:', error?.message || error);
     return null;
@@ -604,4 +645,5 @@ module.exports = {
   generarSemillaXml,
   validarSemillaYGenerarToken,
   construirJwt,
+  buscarConfigDgiiPorRnc,
 };

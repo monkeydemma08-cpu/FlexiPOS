@@ -415,6 +415,46 @@ const handlerValidacionCertificado = async (req, res) => {
   }
 };
 
+// Endpoint de diagnostico: muestra que configs DGII estan cargados,
+// si tienen P12, y si firmaria un AcuseRecibo de prueba. Util para
+// verificar el deploy antes de pedir a DGII que reintente.
+router.get('/fe/_debug/recepcion', async (req, res) => {
+  try {
+    const filas = await db.all(
+      'SELECT negocio_id, rnc_emisor, (p12_base64 IS NOT NULL AND p12_base64 <> "") AS tiene_p12 FROM dgii_paso2_config'
+    );
+    let pruebaFirma = null;
+    try {
+      const cfg = await dgiiReceptor.buscarConfigDgiiPorRnc?.(db, '40229712860');
+      if (cfg && cfg.p12Base64) {
+        const xml = dgiiReceptor.construirAcuseReciboXml({
+          rncEmisor: '999999999',
+          rncComprador: cfg.rncEmisor,
+          eNCF: 'E310000000DEBUG',
+          estado: 0,
+        });
+        const r = dgiiReceptor.firmarAcuseRecibo(xml, cfg.p12Base64, cfg.p12Password);
+        pruebaFirma = {
+          firmado: r.firmado,
+          incluyeSignature: /<Signature[\s>]/.test(r.xml),
+          longitud: r.xml.length,
+        };
+      } else {
+        pruebaFirma = { ok: false, error: 'Sin config DGII para RNC 40229712860' };
+      }
+    } catch (errFirma) {
+      pruebaFirma = { ok: false, error: errFirma?.message || String(errFirma) };
+    }
+    return res.json({
+      ok: true,
+      configs: filas || [],
+      pruebaFirma,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error?.message || 'Error' });
+  }
+});
+
 router.post('/fe/recepcion/api/ecf', ...dgiiMiddlewares, handlerRecepcionEcf);
 router.post('/fe/aprobacioncomercial/api/ecf', ...dgiiMiddlewares, handlerAprobacionComercial);
 

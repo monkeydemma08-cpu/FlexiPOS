@@ -1,1 +1,8 @@
-[dotenv@17.2.3] injecting env (13) from .env -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+[dotenv@17.2.3] injecting env (13) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
+server.js carga correctamente
+DGII Paso 2 desactivado. Usa ENABLE_DGII_PASO2=true para reactivarlo.
+Preparando para escuchar en el puerto... { HOST: '0.0.0.0', PORT: 3000 }
+Servidor iniciado en http://0.0.0.0:3000
+[dgii-receptor] config DGII encontrada por RNC 40229712860 -> negocio_id=1, p12=SI
