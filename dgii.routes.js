@@ -421,7 +421,7 @@ const handlerValidacionCertificado = async (req, res) => {
 router.get('/fe/_debug/recepcion', async (req, res) => {
   try {
     const filas = await db.all(
-      'SELECT negocio_id, rnc_emisor, (p12_base64 IS NOT NULL AND p12_base64 <> "") AS tiene_p12 FROM dgii_paso2_config'
+      "SELECT negocio_id, rnc_emisor, (p12_base64 IS NOT NULL AND CHAR_LENGTH(p12_base64) > 0) AS tiene_p12 FROM dgii_paso2_config"
     );
     let pruebaFirma = null;
     try {
