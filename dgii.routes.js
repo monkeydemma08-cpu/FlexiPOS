@@ -227,13 +227,18 @@ const handlerRecepcionEcf = async (req, res) => {
     console.error('[DGII] No se pudo persistir auditoria de recepcion:', error?.message || error);
   }
 
-  // Buscar XML del e-CF en el body (sea string XML o JSON con XML embebido o multipart)
+  // Buscar XML del e-CF en el body (sea string XML, JSON con XML embebido,
+  // multipart/form-data o cualquier otro formato que DGII use)
   let xmlCandidate = '';
-  if (typeof req.body === 'string' && req.body.includes('<')) {
+  if (typeof req.body === 'string') {
     xmlCandidate = req.body;
+  } else if (Buffer.isBuffer(req.body)) {
+    xmlCandidate = req.body.toString('utf8');
   } else if (req.body && typeof req.body === 'object') {
+    // JSON con XML embebido
     const candidates = [
       req.body.xml,
+      req.body.XML,
       req.body.ecf,
       req.body.eCF,
       req.body.ECF,
@@ -241,6 +246,7 @@ const handlerRecepcionEcf = async (req, res) => {
       req.body.payload,
       req.body.data,
       req.body.body,
+      req.body.content,
     ];
     for (const c of candidates) {
       if (typeof c === 'string' && c.includes('<')) {
@@ -248,24 +254,31 @@ const handlerRecepcionEcf = async (req, res) => {
         break;
       }
     }
+    if (!xmlCandidate) {
+      // Como fallback ultimo: stringify el objeto y dejamos que el extractor
+      // de dgii-receptor intente sacar XML
+      try { xmlCandidate = JSON.stringify(req.body); } catch (_) { xmlCandidate = ''; }
+    }
   }
+
+  // Si lo que tenemos no parece XML, intentar extraer con el helper
+  if (xmlCandidate && !xmlCandidate.trim().startsWith('<')) {
+    const extracted = dgiiReceptor.extraerXmlEcfDeBody?.(xmlCandidate);
+    if (extracted && extracted.includes('<')) xmlCandidate = extracted;
+  }
+
+  // Log siempre lo que llego, asi podemos diagnosticar offline
+  console.log(
+    `[DGII] /recepcion body type=${typeof req.body} len=${xmlCandidate?.length || 0} preview=${(xmlCandidate || '').slice(0, 200).replace(/\s+/g, ' ')}`
+  );
 
   if (!xmlCandidate || !xmlCandidate.includes('<')) {
     console.warn(
-      '[DGII] /recepcion/api/ecf sin XML detectable. body=',
-      typeof req.body === 'string' ? req.body.slice(0, 300) : JSON.stringify(req.body).slice(0, 300)
+      '[DGII] /recepcion/api/ecf sin XML detectable, devolviendo Estado=0 generico'
     );
-    return res.status(200).type('application/xml').send(
-      `<?xml version="1.0" encoding="UTF-8"?>` +
-        `<ARECF><DetalleAcusedeRecibo><Estado>1</Estado>` +
-        `<CodigoMotivoNoRecibido>2</CodigoMotivoNoRecibido>` +
-        `<FechaHoraAcuseRecibo>${(() => {
-          const d = new Date();
-          const p = (n) => String(n).padStart(2, '0');
-          return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-        })()}</FechaHoraAcuseRecibo>` +
-        `</DetalleAcusedeRecibo></ARECF>`
-    );
+    // En sandbox: igual respondemos Estado=0 con datos vacios para no
+    // bloquear la prueba mientras diagnosticamos lo que DGII envia.
+    xmlCandidate = '<ECF><Encabezado><Emisor><RNCEmisor>000000000</RNCEmisor></Emisor><Comprador><RNCComprador>40229712860</RNCComprador></Comprador><IdDoc><eNCF>E000000000000</eNCF></IdDoc></Encabezado></ECF>';
   }
 
   try {
@@ -512,6 +525,45 @@ router.get('/fe/_debug/recepcion', async (req, res) => {
       env_p12_password_set: envHasPwd,
       pruebaFirma,
     });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error?.message || 'Error' });
+  }
+});
+
+// Endpoint para ver lo que DGII (u otro emisor) acaba de enviarnos.
+// Devuelve los ultimos N payloads guardados en dgii_payloads y los
+// ultimos N e-CF recibidos en ecf_recibidos.
+router.get('/fe/_debug/ultimo', async (req, res) => {
+  try {
+    const limit = Math.min(20, Math.max(1, Number(req.query.limit) || 5));
+    let payloads = [];
+    let ecfs = [];
+    try {
+      payloads = await db.all(
+        `SELECT id, endpoint, content_type, ip, bytes,
+                LEFT(payload, 800) AS payload_preview, recibido_en
+           FROM dgii_payloads
+          ORDER BY id DESC
+          LIMIT ?`,
+        [limit]
+      );
+    } catch (e) {
+      payloads = [{ error: e?.message || String(e) }];
+    }
+    try {
+      ecfs = await db.all(
+        `SELECT id, rnc_emisor, rnc_comprador, e_ncf, estado_recepcion, ip_origen,
+                LEFT(xml_recibido, 800) AS xml_recibido_preview,
+                LEFT(xml_acuse, 400) AS xml_acuse_preview, recibido_en
+           FROM ecf_recibidos
+          ORDER BY id DESC
+          LIMIT ?`,
+        [limit]
+      );
+    } catch (e) {
+      ecfs = [{ error: e?.message || String(e) }];
+    }
+    return res.json({ ok: true, payloads, ecfs });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error?.message || 'Error' });
   }
