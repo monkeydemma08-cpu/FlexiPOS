@@ -9811,7 +9811,11 @@ const obtenerRangoAnterior = (desde, dias) => {
   };
 };
 
-if (ENABLE_DGII_PASO2) {
+// DGII Paso 2: el router siempre se monta porque la pantalla de configuracion
+// (subir P12, RNC, razon social) es necesaria para que el receptor de e-CF
+// pueda firmar los AcuseRecibo. Antes estaba detras de ENABLE_DGII_PASO2 que
+// resultaba en "Ruta no existe" al intentar guardar desde el admin.
+{
   const createDgiiPaso2Router = require('./dgii-paso2.routes');
   app.use(
     '/api/dgii/paso2',
@@ -9822,8 +9826,9 @@ if (ENABLE_DGII_PASO2) {
       obtenerNegocioIdUsuario,
     })
   );
-} else {
-  console.log('DGII Paso 2 desactivado. Usa ENABLE_DGII_PASO2=true para reactivarlo.');
+  if (!ENABLE_DGII_PASO2) {
+    console.log('DGII Paso 2 montado (configuracion certificacion). Set ENABLE_DGII_PASO2=true para activar el procesamiento batch tambien.');
+  }
 }
 
 const { createDgiiEcfRouter } = require('./dgii-ecf.routes');
