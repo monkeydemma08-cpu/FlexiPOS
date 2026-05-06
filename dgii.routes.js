@@ -258,7 +258,9 @@ const handlerRecepcionEcf = async (req, res) => {
     return res.status(200).type('application/xml').send(
       `<?xml version="1.0" encoding="UTF-8"?>` +
         `<ARECF><DetalleAcusedeRecibo><Estado>1</Estado>` +
-        `<CodigoMotivoNoRecibido>1</CodigoMotivoNoRecibido></DetalleAcusedeRecibo></ARECF>`
+        `<CodigoMotivoNoRecibido>2</CodigoMotivoNoRecibido>` +
+        `<FechaHoraAcuseRecibo>${new Date().toISOString().slice(0, 19)}</FechaHoraAcuseRecibo>` +
+        `</DetalleAcusedeRecibo></ARECF>`
     );
   }
 
@@ -280,7 +282,9 @@ const handlerRecepcionEcf = async (req, res) => {
       .send(
         `<?xml version="1.0" encoding="UTF-8"?>` +
           `<ARECF><DetalleAcusedeRecibo><Estado>1</Estado>` +
-          `<CodigoMotivoNoRecibido>1</CodigoMotivoNoRecibido></DetalleAcusedeRecibo></ARECF>`
+          `<CodigoMotivoNoRecibido>2</CodigoMotivoNoRecibido>` +
+          `<FechaHoraAcuseRecibo>${new Date().toISOString().slice(0, 19)}</FechaHoraAcuseRecibo>` +
+          `</DetalleAcusedeRecibo></ARECF>`
       );
   }
 };

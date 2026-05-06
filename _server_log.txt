@@ -1,7 +1,11 @@
-[dotenv@17.2.3] injecting env (13) from .env -- tip: ⚙️  suppress all logs with { quiet: true }
-[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
-[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+[dotenv@17.2.3] injecting env (13) from .env -- tip: 👥 sync secrets across teammates & machines: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔄 add secrets lifecycle management: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
 server.js carga correctamente
 DGII Paso 2 desactivado. Usa ENABLE_DGII_PASO2=true para reactivarlo.
 Preparando para escuchar en el puerto... { HOST: '0.0.0.0', PORT: 3000 }
 Servidor iniciado en http://0.0.0.0:3000
+[DGII-IN] POST /fe/recepcion/api/ecf ip=127.0.0.1 type=application/xml len=175 ua=curl/8.17.0
+[DGII] POST /fe/recepcion/api/ecf ip=127.0.0.1 id=9e86acf922fd bytes=175 type=application/xml
+[DGII-IN] POST /fe/recepcion/api/ecf ip=127.0.0.1 type=application/xml len=175 ua=curl/8.17.0
+[DGII] POST /fe/recepcion/api/ecf ip=127.0.0.1 id=86a8f91e2937 bytes=175 type=application/xml

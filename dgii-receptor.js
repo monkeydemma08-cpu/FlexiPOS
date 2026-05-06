@@ -120,12 +120,24 @@ const buscarConfigDgiiPorRnc = async (db, rncReceptor) => {
 /**
  * Genera el XML AcuseRecibo (ARECF) que devolvemos a quien nos envio el e-CF.
  * Estructura segun el XSD oficial DGII v1.0 (AcusedeRecibo.xsd).
- * Estado: 0 = Recibido OK; 1 = Rechazado por estructura/firma.
  *
- * IMPORTANTE: El root es <ARECF> (Acuse de Recibo de e-CF), no <ACECF>.
- * <ACECF> es para la APROBACION COMERCIAL (otro flujo distinto).
- * El detalle se llama <DetalleAcusedeRecibo> (con "de" pegada).
+ * Estado:
+ *   0 = Recibido (estructura y firma validas)
+ *   1 = No Recibido (rechazado por algun motivo)
+ *
+ * CodigoMotivoNoRecibido (solo si Estado=1, enum 1-4):
+ *   1 = RNC Comprador no corresponde
+ *   2 = Error en estructura del XML
+ *   3 = Error en firma digital
+ *   4 = e-CF duplicado / envio duplicado
+ *
+ * IMPORTANTE:
+ *   - Root: <ARECF> (no <ACECF> que es Aprobacion Comercial)
+ *   - Detalle: <DetalleAcusedeRecibo> (con "de" pegada)
+ *   - <FechaHoraAcuseRecibo> va DENTRO de <DetalleAcusedeRecibo> (no afuera)
  */
+const CODIGOS_MOTIVO_NO_RECIBIDO_VALIDOS = new Set(['1', '2', '3', '4']);
+
 const construirAcuseReciboXml = ({
   rncEmisor,
   rncComprador,
@@ -134,6 +146,13 @@ const construirAcuseReciboXml = ({
   codigoMotivoNoRecibido = '',
 }) => {
   const fechaHora = FECHA_HORA_FORMATO(new Date());
+  let motivo = '';
+  if (estado === 1) {
+    motivo = String(codigoMotivoNoRecibido || '2');
+    if (!CODIGOS_MOTIVO_NO_RECIBIDO_VALIDOS.has(motivo)) {
+      motivo = '2'; // por defecto "Error en estructura" si llega un codigo desconocido
+    }
+  }
   return (
     `<?xml version="1.0" encoding="UTF-8"?>` +
     `<ARECF xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` +
@@ -143,11 +162,9 @@ const construirAcuseReciboXml = ({
     `<RNCComprador>${rncComprador}</RNCComprador>` +
     `<eNCF>${eNCF}</eNCF>` +
     `<Estado>${estado}</Estado>` +
-    (estado === 0
-      ? ''
-      : `<CodigoMotivoNoRecibido>${String(codigoMotivoNoRecibido || '1')}</CodigoMotivoNoRecibido>`) +
-    `</DetalleAcusedeRecibo>` +
+    (estado === 1 ? `<CodigoMotivoNoRecibido>${motivo}</CodigoMotivoNoRecibido>` : '') +
     `<FechaHoraAcuseRecibo>${fechaHora}</FechaHoraAcuseRecibo>` +
+    `</DetalleAcusedeRecibo>` +
     `</ARECF>`
   );
 };
@@ -300,7 +317,7 @@ const procesarRecepcionEcf = async ({ xmlEntrante, db, ip }) => {
         rncComprador: '',
         eNCF: '',
         estado: 1,
-        codigoMotivoNoRecibido: '1', // Estructura invalida
+        codigoMotivoNoRecibido: '2', // 2 = Error en estructura
       }),
     };
   }
@@ -314,7 +331,7 @@ const procesarRecepcionEcf = async ({ xmlEntrante, db, ip }) => {
         rncComprador: parsed.rncComprador || '',
         eNCF: parsed.eNCF || '',
         estado: 1,
-        codigoMotivoNoRecibido: '1',
+        codigoMotivoNoRecibido: '2', // 2 = Error en estructura (faltan campos requeridos)
       }),
     };
   }
@@ -326,7 +343,7 @@ const procesarRecepcionEcf = async ({ xmlEntrante, db, ip }) => {
       rncComprador: parsed.rncComprador,
       eNCF: parsed.eNCF,
       estado: 1,
-      codigoMotivoNoRecibido: '5', // 5 = ECF duplicado
+      codigoMotivoNoRecibido: '4', // 4 = e-CF duplicado / envio duplicado
     });
     const cfgDup = await buscarConfigDgiiPorRnc(db, parsed.rncComprador);
     let xmlDupFinal = xmlBaseDup;

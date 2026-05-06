@@ -1,0 +1,2 @@
+[dgii-receptor] Error buscando config por RNC: Unknown column 'actualizado_en' in 'order clause'
+[dgii-receptor] Error buscando config por RNC: Unknown column 'actualizado_en' in 'order clause'
