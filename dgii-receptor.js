@@ -633,14 +633,35 @@ const procesarAprobacionComercial = async ({ xmlEntrante, db, ip }) => {
     }
   }
 
-  // Respuesta OK simple (DGII solo necesita HTTP 200 con cuerpo XML breve)
-  const respuesta =
+  // Respuesta firmada (DGII verifica firma del receptor en AC tambien).
+  // Estructura: RespuestaACECF con detalle minimo + FechaHora + Signature
+  const fechaHora = FECHA_HORA_FORMATO(new Date());
+  const respuestaBase =
     `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<RespuestaACECF>` +
+    `<RespuestaACECF xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` +
+    `<DetalleRespuesta>` +
+    `<Version>1.0</Version>` +
+    `<RNCEmisor>${parsed.rncEmisor || ''}</RNCEmisor>` +
+    `<RNCComprador>${parsed.rncComprador || ''}</RNCComprador>` +
+    `<eNCF>${parsed.eNCF || ''}</eNCF>` +
     `<Estado>0</Estado>` +
-    `<FechaHoraRespuesta>${FECHA_HORA_FORMATO(new Date())}</FechaHoraRespuesta>` +
+    `<FechaHoraRespuesta>${fechaHora}</FechaHoraRespuesta>` +
+    `</DetalleRespuesta>` +
     `</RespuestaACECF>`;
-  return { status: 200, contentType: 'application/xml', body: respuesta };
+
+  // Buscar el config DGII del comprador para firmar la respuesta
+  let respuestaFinal = respuestaBase;
+  try {
+    const cfg = await buscarConfigDgiiPorRnc(db, parsed.rncComprador);
+    if (cfg && cfg.p12Base64) {
+      const r = firmarAcuseRecibo(respuestaBase, cfg.p12Base64, cfg.p12Password, 'RespuestaACECF');
+      if (r.firmado) respuestaFinal = r.xml;
+    }
+  } catch (errFirma) {
+    console.warn('[dgii-receptor] No se pudo firmar RespuestaACECF:', errFirma?.message || errFirma);
+  }
+
+  return { status: 200, contentType: 'application/xml', body: respuestaFinal };
 };
 
 // =====================================================================
