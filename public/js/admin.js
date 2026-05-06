@@ -2068,7 +2068,10 @@ const tabsSoloAdmin = [
   'historial',
 ];
 const tabsSoloSuperAdmin = ['negocios'];
-const tabsDeshabilitados = ['dgiiPaso2'];
+// dgiiPaso2 era el tab deshabilitado por defecto. Lo habilitamos para que
+// el admin pueda subir el certificado P12 que necesita el receptor de
+// e-CF y el flujo de pruebas de certificacion DGII.
+const tabsDeshabilitados = [];
 
 const aplicarModulosUI = () => {
   const modulos = obtenerConfigModulosUI();

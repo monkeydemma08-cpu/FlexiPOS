@@ -229,6 +229,21 @@ const buscarConfigDgiiPorRnc = async (db, rncReceptor) => {
     }
 
     console.warn('[dgii-receptor] Tampoco hay config en facturacion_electronica_config con cert');
+
+    // 4) ULTIMO fallback: variables de entorno DGII_RECEPTOR_P12_BASE64 + _PASSWORD
+    // Util para deployments donde la DB no tiene el P12 cargado todavia.
+    const envP12 = process.env.DGII_RECEPTOR_P12_BASE64;
+    const envPwd = process.env.DGII_RECEPTOR_P12_PASSWORD;
+    if (envP12 && envP12.length > 100) {
+      console.log('[dgii-receptor] Usando P12 desde variable de entorno DGII_RECEPTOR_P12_BASE64');
+      return {
+        negocioId: 0,
+        p12Base64: envP12,
+        p12Password: envPwd || '',
+        rncEmisor: process.env.DGII_RECEPTOR_RNC || rncLimpio,
+      };
+    }
+
     return null;
   } catch (error) {
     console.error('[dgii-receptor] Error buscando config por RNC:', error?.message || error);

@@ -436,6 +436,51 @@ router.get('/fe/_debug/recepcion', async (req, res) => {
     } catch (e) {
       filasFE = [{ error: e?.message || String(e) }];
     }
+
+    // Escaneo completo: busca en information_schema cualquier tabla/columna
+    // que pueda contener un P12 o certificado, y reporta cuantas filas tienen
+    // datos. Util para encontrar donde el usuario realmente subio el cert.
+    let escaneo = [];
+    try {
+      const cols = await db.all(
+        `SELECT TABLE_NAME, COLUMN_NAME
+           FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND (
+              COLUMN_NAME LIKE '%p12%'
+              OR COLUMN_NAME LIKE '%pkcs12%'
+              OR COLUMN_NAME LIKE '%certificad%'
+              OR COLUMN_NAME LIKE '%cert_base%'
+            )
+          ORDER BY TABLE_NAME, COLUMN_NAME`
+      );
+      for (const c of cols || []) {
+        try {
+          const r = await db.get(
+            `SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN \`${c.COLUMN_NAME}\` IS NOT NULL AND CHAR_LENGTH(\`${c.COLUMN_NAME}\`) > 100 THEN 1 ELSE 0 END) AS con_dato
+               FROM \`${c.TABLE_NAME}\``
+          );
+          escaneo.push({
+            tabla: c.TABLE_NAME,
+            columna: c.COLUMN_NAME,
+            filas_total: Number(r?.total || 0),
+            filas_con_dato: Number(r?.con_dato || 0),
+          });
+        } catch (e) {
+          escaneo.push({
+            tabla: c.TABLE_NAME,
+            columna: c.COLUMN_NAME,
+            error: e?.message || String(e),
+          });
+        }
+      }
+    } catch (e) {
+      escaneo = [{ error: e?.message || String(e) }];
+    }
+
+    const envHasP12 = Boolean(process.env.DGII_RECEPTOR_P12_BASE64);
+    const envHasPwd = Boolean(process.env.DGII_RECEPTOR_P12_PASSWORD);
     let pruebaFirma = null;
     try {
       const cfg = await dgiiReceptor.buscarConfigDgiiPorRnc?.(db, '40229712860');
@@ -462,6 +507,9 @@ router.get('/fe/_debug/recepcion', async (req, res) => {
       ok: true,
       dgii_paso2_config: filas || [],
       facturacion_electronica_config: filasFE || [],
+      escaneo_columnas_cert: escaneo || [],
+      env_p12_set: envHasP12,
+      env_p12_password_set: envHasPwd,
       pruebaFirma,
     });
   } catch (error) {
