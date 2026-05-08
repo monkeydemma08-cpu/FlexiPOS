@@ -40,6 +40,13 @@
   const rncSpan = document.getElementById('factura-rnc');
   const telefonoSpan = document.getElementById('factura-telefono');
   const pieSpan = document.getElementById('factura-pie');
+  const ecfBlock = document.getElementById('factura-ecf-block');
+  const ecfTituloSpan = document.getElementById('factura-ecf-titulo');
+  const ecfEncfSpan = document.getElementById('factura-ecf-encf');
+  const ecfFechaFirmaRow = document.getElementById('factura-ecf-fecha-firma-row');
+  const ecfFechaFirmaSpan = document.getElementById('factura-ecf-fecha-firma');
+  const ecfCodigoSeguridadSpan = document.getElementById('factura-ecf-codigo-seguridad');
+  const ecfQrImg = document.getElementById('factura-ecf-qr-img');
 
   const DEFAULT_THEME = {
     colorPrimario: '#255bc7',
@@ -264,6 +271,53 @@
     aplicarIdentidadFactura();
   };
 
+  const TIPO_ECF_NOMBRE = {
+    E31: 'Factura de Credito Fiscal Electronica',
+    E32: 'Factura de Consumo Electronica',
+  };
+
+  const renderEcfBlock = (pedido) => {
+    if (!ecfBlock) return;
+    const tipo = String(pedido?.ecf_tipo || '').toUpperCase();
+    const encf = String(pedido?.ecf_encf || '').trim();
+    const codigoSeguridad = String(pedido?.ecf_codigo_seguridad || '').trim();
+    const qrDataUrl = String(pedido?.ecf_qr_data_url || '').trim();
+    const fechaFirma = String(pedido?.ecf_fecha_firma || '').trim();
+
+    // Solo mostrar para E31 / E32 con datos minimos disponibles.
+    const tipoValido = tipo === 'E31' || tipo === 'E32';
+    const datosValidos = encf || qrDataUrl;
+    if (!tipoValido || !datosValidos) {
+      ecfBlock.hidden = true;
+      return;
+    }
+
+    ecfBlock.hidden = false;
+    if (ecfTituloSpan) {
+      const nombreTipo = TIPO_ECF_NOMBRE[tipo] || 'Comprobante Fiscal Electronico';
+      ecfTituloSpan.textContent = nombreTipo;
+    }
+    if (ecfEncfSpan) ecfEncfSpan.textContent = encf || '-';
+    if (ecfCodigoSeguridadSpan) ecfCodigoSeguridadSpan.textContent = codigoSeguridad || '-';
+    if (ecfFechaFirmaRow && ecfFechaFirmaSpan) {
+      if (fechaFirma) {
+        ecfFechaFirmaSpan.textContent = fechaFirma;
+        ecfFechaFirmaRow.hidden = false;
+      } else {
+        ecfFechaFirmaRow.hidden = true;
+      }
+    }
+    if (ecfQrImg) {
+      if (qrDataUrl) {
+        ecfQrImg.src = qrDataUrl;
+        ecfQrImg.style.display = 'block';
+      } else {
+        ecfQrImg.removeAttribute('src');
+        ecfQrImg.style.display = 'none';
+      }
+    }
+  };
+
   const renderFactura = (data) => {
     if (!data || !data.pedido) return;
     const { pedido, items } = data;
@@ -323,6 +377,9 @@
     }
     if (propinaSpan) propinaSpan.textContent = formatCurrency(propinaMostrar);
     if (totalSpan) totalSpan.textContent = formatCurrency(totalMostrar);
+
+    // Bloque e-CF (solo aparece para E31/E32). No afecta facturas regulares (B02/B01/etc).
+    renderEcfBlock(pedido);
 
     if (itemsBody) {
       itemsBody.innerHTML = '';

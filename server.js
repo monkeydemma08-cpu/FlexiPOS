@@ -4797,6 +4797,17 @@ const guardarConfiguracionFacturacionElectronica = async (negocioId, payload = {
     );
   }
 
+  // Si el negocio se marco como facturador electronico, apagamos las secuencias
+  // legacy B01/B02/B14 en la tabla `negocios`. La logica de
+  // `validarTipoComprobanteVentaNegocio` ya rechaza B0X cuando habilitada=1,
+  // pero esto asegura ademas que la UI legacy refleje el bloqueo.
+  if (Number(habilitada) === 1) {
+    await db.run(
+      `UPDATE negocios SET permitir_b01 = 0, permitir_b02 = 0, permitir_b14 = 0 WHERE id = ?`,
+      [negocio]
+    );
+  }
+
   return obtenerConfiguracionFacturacionElectronica(negocio, { includeSecrets: false });
 };
 
@@ -8129,7 +8140,8 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
       SELECT id, cuenta_id, numero_cuenta_negocio, mesa, cliente, modo_servicio, estado, nota, subtotal,
              impuesto, total, descuento_monto, propina_monto, tipo_comprobante, ncf,
              pago_efectivo, pago_tarjeta, pago_transferencia,
-             cliente_documento, fecha_creacion, fecha_cierre, fecha_factura
+             cliente_documento, fecha_creacion, fecha_cierre, fecha_factura,
+             ecf_tipo, ecf_encf, ecf_estado, ecf_track_id, ecf_codigo_seguridad, ecf_qr_url
       FROM pedidos
       WHERE (cuenta_id = ? OR id = ?)
         AND negocio_id = ?
@@ -8173,6 +8185,31 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
     pedidosRelacionados[0] ||
     pedido;
 
+  // Para e-CF (E31/E32), generamos el QR DGII en data URL para imprimir en el ticket 80mm.
+  // Se hace de forma segura: si falla, simplemente no se incluye y la factura sigue funcionando.
+  let ecfQrDataUrl = null;
+  let ecfFechaFirma = null;
+  try {
+    const tipoEcf = String(pedidoReferencia?.ecf_tipo || '').toUpperCase();
+    const qrUrl = pedidoReferencia?.ecf_qr_url || null;
+    if (qrUrl && (tipoEcf === 'E31' || tipoEcf === 'E32')) {
+      ecfQrDataUrl = await QRCode.toDataURL(String(qrUrl), {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 220,
+        color: { dark: '#000000', light: '#FFFFFF' },
+      });
+    }
+    // Intentar extraer FechaHoraFirma del XML firmado para mostrarla en el ticket
+    const xmlFirmado = pedido.ecf_xml_firmado || null;
+    if (xmlFirmado) {
+      const m = String(xmlFirmado).match(/<FechaHoraFirma[^>]*>([\s\S]*?)<\/FechaHoraFirma>/i);
+      if (m) ecfFechaFirma = String(m[1]).trim();
+    }
+  } catch (qrError) {
+    console.warn('No se pudo generar QR e-CF para factura:', qrError?.message || qrError);
+  }
+
   return {
     pedido: {
       ...pedidoReferencia,
@@ -8191,6 +8228,8 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
         pedidoReferencia.fecha_creacion,
       total: totalFinal,
       total_final: totalFinal,
+      ecf_qr_data_url: ecfQrDataUrl,
+      ecf_fecha_firma: ecfFechaFirma,
     },
     items: itemsAgregados,
   };
@@ -11793,6 +11832,39 @@ app.put('/api/facturacion-electronica/config', (req, res) => {
       res.status(status).json({
         ok: false,
         error: error?.message || 'No se pudo guardar la configuracion de facturacion electronica',
+      });
+    }
+  });
+});
+
+// Toggle dedicado: activa o desactiva al negocio como emisor electronico.
+// Cuando se activa, automaticamente apaga B01/B02/B14 (validarTipoComprobante
+// tambien los rechaza, pero asi la UI legacy queda consistente).
+app.patch('/api/facturacion-electronica/habilitada', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const habilitar = normalizarFlag(req.body?.habilitada ?? req.body?.enabled, 0) === 1 ? 1 : 0;
+    try {
+      const config = await guardarConfiguracionFacturacionElectronica(
+        negocioId,
+        { habilitada: habilitar },
+        usuarioSesion?.id || null
+      );
+      return res.json({
+        ok: true,
+        habilitada: habilitar,
+        config,
+        legacy_bloqueada: habilitar === 1,
+      });
+    } catch (error) {
+      const status = error?.status || 500;
+      console.error('Error al cambiar flag habilitada FE:', error?.message || error);
+      return res.status(status).json({
+        ok: false,
+        error: error?.message || 'No se pudo cambiar el estado de facturacion electronica',
       });
     }
   });

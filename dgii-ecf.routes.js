@@ -25,6 +25,7 @@ const {
   generarEncf,
   avanzarSecuenciaTrasDuplicado,
   inicializarSecuencia,
+  actualizarRangoSecuencia,
   obtenerSecuencias,
   obtenerFechaVencimiento,
 } = require('./dgii-ecf.sequences');
@@ -267,7 +268,7 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
 
     // Determine flow and send
     if (flujo === 'FC_MENOR_250K') {
-      return await emitirFcMenor250k({ pedidoId, negocioId, pedido, cliente, negocio, config, encfData, xmlGenerado, firmado, token, rncEmisor, payload, emisorIdentidad });
+      return await emitirFcMenor250k({ pedidoId, negocioId, pedido, cliente, negocio, config, encfData, xmlGenerado, firmado, token, rncEmisor, payload });
     }
 
     // Normal ECF flow
@@ -360,15 +361,14 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
   // FC < 250k flow (sign ECF → compute security code → build RFCE → send)
   // ---------------------------------------------------------------------------
 
-  const emitirFcMenor250k = async ({ pedidoId, negocioId, pedido, cliente, negocio, config, encfData, xmlGenerado, firmado, token, rncEmisor, payload, emisorIdentidad }) => {
+  const emitirFcMenor250k = async ({ pedidoId, negocioId, pedido, cliente, negocio, config, encfData, xmlGenerado, firmado, token, rncEmisor, payload }) => {
     const signatureValue = extractSignatureValueFromXml(firmado.xml);
     const codigoSeguridad = computeCodigoSeguridadeCF(signatureValue);
 
     await actualizarPedidoEcf(pedidoId, { ecf_codigo_seguridad: codigoSeguridad });
 
-    // Build RFCE — pasar ecfPayload + emisorIdentidad para garantizar coherencia
-    // perfecta entre ECF y RFCE (DGII rechaza el lote si difieren razon social,
-    // RNC, fecha emision, totales, etc — incluyendo diferencias de mayusculas).
+    // Build RFCE — pasar ecfPayload para que herede los totales ya derivados de items
+    // (garantiza coherencia entre el ECF firmado y el RFCE que se envia a DGII)
     const rfcePayload = buildResumenFcPayload({
       pedido: { ...pedido, ecf_tipo: encfData.encf.slice(0, 3) },
       cliente,
@@ -377,21 +377,7 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
       configDgii: config,
       codigoSeguridadeCF: codigoSeguridad,
       ecfPayload: payload,
-      emisorIdentidad,
     });
-
-    // Defensa: verificar que los campos sensibles coincidan exactamente con
-    // el ECF firmado antes de enviar el RFCE a DGII.
-    const camposCriticos = ['RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'eNCF'];
-    for (const campo of camposCriticos) {
-      if (payload[campo] !== rfcePayload[campo]) {
-        throw new Error(
-          `Inconsistencia ECF vs RFCE en campo ${campo}: ` +
-          `ECF="${payload[campo]}" vs RFCE="${rfcePayload[campo]}". ` +
-          `DGII rechazaria el lote completo. Revisa la fuente de datos del emisor.`
-        );
-      }
-    }
 
     const rfceXml = buildResumenFcXml({
       payload: rfcePayload,
@@ -654,20 +640,6 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
           codigoSeguridadeCF: codigoSeguridad,
           ecfPayload: payload,
         });
-
-        // Defensa: bloquear envio si ECF y RFCE difieren en algun campo critico
-        // (DGII rechaza el lote completo cuando hay discrepancia, incluso de mayusculas).
-        const camposCriticos = ['RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'eNCF'];
-        for (const campo of camposCriticos) {
-          if (payload[campo] !== rfcePayload[campo]) {
-            throw new Error(
-              `Inconsistencia ECF vs RFCE en ${campo}: ` +
-              `ECF="${payload[campo]}" vs RFCE="${rfcePayload[campo]}". ` +
-              `Revisa la fuente de datos del emisor.`
-            );
-          }
-        }
-
         const rfceXml = buildResumenFcXml({ payload: rfcePayload, rncEmisorFallback: rncEmisor, codigoSeguridadeCF: codigoSeguridad });
         const rfceFirmado = signEcfXml({ xml: rfceXml, config });
         const envio = await sendXmlToDgii({
@@ -1195,25 +1167,69 @@ const createDgiiEcfRouter = ({ db, requireUsuarioSesion, tienePermisoAdmin, obte
     })
   );
 
-  // POST /secuencias/inicializar — Initialize e-CF sequences
+  // POST /secuencias/inicializar — Initialize e-CF sequences (bulk)
   router.post('/secuencias/inicializar', (req, res) =>
     ensureAdmin(req, res, async (usuario) => {
       try {
         const negocioId = obtenerNegocioIdUsuario(usuario);
         const { secuencias } = req.body || {};
         if (!Array.isArray(secuencias) || !secuencias.length) {
-          return res.status(400).json({ ok: false, error: 'Envia un array de secuencias [{tipo, rnc_emisor, correlativo_inicial, fecha_vencimiento}].' });
+          return res.status(400).json({ ok: false, error: 'Envia un array de secuencias [{tipo, rnc_emisor, correlativo_inicial, correlativo_fin, fecha_vencimiento, activa}].' });
         }
         for (const seq of secuencias) {
           await inicializarSecuencia(seq.tipo, seq.rnc_emisor, negocioId, db, {
             correlativoInicial: seq.correlativo_inicial || 1,
+            correlativoFin: seq.correlativo_fin != null && seq.correlativo_fin !== '' ? Number(seq.correlativo_fin) : null,
             fechaVencimiento: seq.fecha_vencimiento || null,
+            activa: seq.activa != null ? Number(seq.activa) : 1,
           });
         }
         const updated = await obtenerSecuencias(negocioId, db);
         return res.json({ ok: true, secuencias: updated });
       } catch (error) {
         return res.status(500).json({ ok: false, error: error.message });
+      }
+    })
+  );
+
+  // GET /secuencias — Devuelve solo el listado de secuencias del negocio.
+  // Util para la UI de Configuracion DGII (sin pegar resumen de pedidos).
+  router.get('/secuencias', (req, res) =>
+    ensureAdmin(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const secuencias = await obtenerSecuencias(negocioId, db);
+        return res.json({ ok: true, secuencias });
+      } catch (error) {
+        return res.status(500).json({ ok: false, error: error.message });
+      }
+    })
+  );
+
+  // PUT /secuencias/:tipo — Actualiza el rango (inicio/fin), vencimiento o flag
+  // activa de UNA secuencia existente, sin perder el correlativo actual.
+  router.put('/secuencias/:tipo', (req, res) =>
+    ensureAdmin(req, res, async (usuario) => {
+      try {
+        const negocioId = obtenerNegocioIdUsuario(usuario);
+        const tipo = String(req.params.tipo || '').toUpperCase();
+        if (!/^E\d{2}$/.test(tipo)) {
+          return res.status(400).json({ ok: false, error: 'Tipo e-CF invalido (ej. E31, E32).' });
+        }
+        const body = req.body || {};
+        const result = await actualizarRangoSecuencia(tipo, negocioId, db, {
+          correlativoInicial:
+            body.correlativo_inicial !== undefined ? body.correlativo_inicial : body.correlativoInicial,
+          correlativoFin:
+            body.correlativo_fin !== undefined ? body.correlativo_fin : body.correlativoFin,
+          fechaVencimiento:
+            body.fecha_vencimiento !== undefined ? body.fecha_vencimiento : body.fechaVencimiento,
+          activa: body.activa,
+        });
+        return res.json({ ok: true, secuencia: result });
+      } catch (error) {
+        const status = error?.status || 500;
+        return res.status(status).json({ ok: false, error: error.message });
       }
     })
   );

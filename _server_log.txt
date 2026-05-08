@@ -1,8 +1,7 @@
-[dotenv@17.2.3] injecting env (13) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
-[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  enable debug logging with { debug: true }
-[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+[dotenv@17.2.3] injecting env (13) from .env -- tip: ⚙️  enable debug logging with { debug: true }
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
 server.js carga correctamente
-DGII Paso 2 desactivado. Usa ENABLE_DGII_PASO2=true para reactivarlo.
+DGII Paso 2 montado (configuracion certificacion). Set ENABLE_DGII_PASO2=true para activar el procesamiento batch tambien.
 Preparando para escuchar en el puerto... { HOST: '0.0.0.0', PORT: 3000 }
 Servidor iniciado en http://0.0.0.0:3000
-[dgii-receptor] config DGII encontrada por RNC 40229712860 -> negocio_id=1, p12=SI

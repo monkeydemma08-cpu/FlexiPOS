@@ -347,6 +347,15 @@ const dgiiSetResumen = document.getElementById('dgii-set-resumen');
 const dgiiSetsTabla = document.getElementById('dgii-sets-tabla');
 const dgiiCasosMensaje = document.getElementById('dgii-casos-mensaje');
 const dgiiCasosTabla = document.getElementById('dgii-casos-tabla');
+// Configuracion FE moderna (toggle + secuencias) — modulo "Certificacion DGII"
+const dgiiFeToggleInput = document.getElementById('dgii-fe-toggle');
+const dgiiFeEstadoBadge = document.getElementById('dgii-fe-estado-badge');
+const dgiiFeEstadoDetalle = document.getElementById('dgii-fe-estado-detalle');
+const dgiiFeMensaje = document.getElementById('dgii-fe-mensaje');
+const dgiiEcfSecuenciasTbody = document.getElementById('dgii-ecf-secuencias-tbody');
+const dgiiEcfSecuenciasMensaje = document.getElementById('dgii-ecf-secuencias-mensaje');
+const dgiiEcfSecuenciasRefrescarBtn = document.getElementById('dgii-ecf-secuencias-refrescar');
+const dgiiEcfSecuenciasInicializarBtn = document.getElementById('dgii-ecf-secuencias-inicializar');
 const dgiiCasoXmlFirmadoInput = document.createElement('input');
 dgiiCasoXmlFirmadoInput.type = 'file';
 dgiiCasoXmlFirmadoInput.accept = '.xml,text/xml,application/xml';
@@ -1210,6 +1219,220 @@ const procesarXmlFirmadoCasoDgii = async ({ casoId, file, modo = 'RESUMEN_FC' })
     setMessage(dgiiCasosMensaje, error.message || 'No se pudo procesar el XML firmado.', 'error');
   }
 };
+
+// ===========================================================================
+// Configuracion FE moderna en modulo "Certificacion DGII":
+//   - toggle activacion negocio como facturador electronico
+//   - tabla editable de secuencias e-CF (inicio / fin / vencimiento / activa)
+// ===========================================================================
+
+const TIPOS_ECF_LISTA_DEFAULT = ['E31', 'E32', 'E33', 'E34', 'E41', 'E43', 'E44', 'E45', 'E46', 'E47'];
+
+const formatearFechaIsoCorta = (valor) => {
+  if (!valor) return '';
+  if (typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valor)) return valor;
+  try {
+    const fecha = new Date(valor);
+    if (Number.isNaN(fecha.getTime())) return '';
+    const yyyy = fecha.getFullYear();
+    const mm = String(fecha.getMonth() + 1).padStart(2, '0');
+    const dd = String(fecha.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  } catch (_) {
+    return '';
+  }
+};
+
+const renderDgiiFeEstado = (habilitada) => {
+  const activo = Number(habilitada) === 1;
+  if (dgiiFeToggleInput) dgiiFeToggleInput.checked = activo;
+  if (dgiiFeEstadoBadge) {
+    dgiiFeEstadoBadge.textContent = activo ? 'Activado' : 'Desactivado';
+    dgiiFeEstadoBadge.className = activo ? 'kanm-badge kanm-badge--success' : 'kanm-badge kanm-badge--neutral';
+  }
+  if (dgiiFeEstadoDetalle) {
+    dgiiFeEstadoDetalle.textContent = activo
+      ? 'El negocio emite e-CF (E31/E32/etc.). B01, B02 y B14 quedaron desactivados automaticamente.'
+      : 'El negocio NO emite facturas electronicas. Sigue usando B01, B02 y B14 segun configuracion legacy.';
+  }
+};
+
+const cargarDgiiFeEstado = async () => {
+  if (!dgiiFeToggleInput) return;
+  try {
+    const resp = await fetchConAutorizacion('/api/facturacion-electronica/config');
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    const data = await resp.json().catch(() => ({}));
+    renderDgiiFeEstado(data?.config?.habilitada);
+  } catch (error) {
+    console.error('No se pudo cargar estado FE:', error);
+    if (dgiiFeEstadoDetalle) {
+      dgiiFeEstadoDetalle.textContent = 'No se pudo consultar el estado actual.';
+    }
+  }
+};
+
+const guardarDgiiFeToggle = async (habilitar) => {
+  setMessage(dgiiFeMensaje, 'Guardando...', 'info');
+  try {
+    const resp = await fetchJsonAutorizado('/api/facturacion-electronica/habilitada', {
+      method: 'PATCH',
+      body: JSON.stringify({ habilitada: habilitar ? 1 : 0 }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo cambiar el estado.');
+    }
+    renderDgiiFeEstado(data?.habilitada ?? (habilitar ? 1 : 0));
+    setMessage(
+      dgiiFeMensaje,
+      habilitar
+        ? 'Negocio activado como facturador electronico. B01/B02/B14 desactivados.'
+        : 'Negocio desactivado como facturador electronico.',
+      'success'
+    );
+    // Refresca tambien la config legacy si estamos en pantalla con esa info
+    if (typeof cargarConfigSecuencias === 'function') {
+      cargarConfigSecuencias().catch(() => {});
+    }
+  } catch (error) {
+    console.error('Error toggle FE:', error);
+    setMessage(dgiiFeMensaje, error.message || 'No se pudo cambiar el estado.', 'error');
+    // revertir checkbox
+    if (dgiiFeToggleInput) dgiiFeToggleInput.checked = !habilitar;
+  }
+};
+
+const renderDgiiEcfSecuenciasEditable = (secuencias = []) => {
+  if (!dgiiEcfSecuenciasTbody) return;
+  // Asegurar que aparecen TODOS los tipos (aun los que no se han inicializado)
+  const map = new Map();
+  for (const s of secuencias) {
+    if (s?.tipo) map.set(String(s.tipo).toUpperCase(), s);
+  }
+  const tipos = TIPOS_ECF_LISTA_DEFAULT.slice();
+  // Tambien incluir tipos no estandar que esten en BD
+  for (const t of map.keys()) {
+    if (!tipos.includes(t)) tipos.push(t);
+  }
+  const filas = tipos.map((tipo) => {
+    const s = map.get(tipo) || {};
+    const inicial = s.correlativo_inicial != null ? s.correlativo_inicial : '';
+    const fin = s.correlativo_fin != null ? s.correlativo_fin : '';
+    const correlativoActual = s.correlativo != null ? s.correlativo : '-';
+    const restantes = s.restantes != null ? s.restantes : (fin && Number(fin) > 0 && Number(correlativoActual) > 0 ? Math.max(Number(fin) - Number(correlativoActual) + 1, 0) : '-');
+    const vencimiento = formatearFechaIsoCorta(s.fecha_vencimiento);
+    const activa = s.activa != null ? Number(s.activa) === 1 : true;
+    const yaInicializada = map.has(tipo);
+    return `<tr data-tipo="${tipo}">
+      <td><strong>${tipo}</strong></td>
+      <td><input type="number" min="1" class="kanm-input kanm-input--sm" data-field="inicio" value="${inicial}" ${yaInicializada ? '' : 'placeholder="1"'} /></td>
+      <td><input type="number" min="1" class="kanm-input kanm-input--sm" data-field="fin" value="${fin}" placeholder="opcional" /></td>
+      <td><span data-field="actual">${correlativoActual}</span></td>
+      <td><span data-field="restantes">${restantes}</span></td>
+      <td><input type="date" class="kanm-input kanm-input--sm" data-field="vencimiento" value="${vencimiento}" /></td>
+      <td><label class="kanm-input-toggle"><input type="checkbox" data-field="activa" ${activa ? 'checked' : ''} /></label></td>
+      <td>
+        ${yaInicializada
+          ? `<button class="kanm-button kanm-button--outline kanm-button--sm" data-action="guardar">Guardar</button>`
+          : `<button class="kanm-button kanm-button--primary kanm-button--sm" data-action="inicializar">Inicializar</button>`}
+      </td>
+    </tr>`;
+  });
+  dgiiEcfSecuenciasTbody.innerHTML = filas.join('');
+};
+
+const cargarDgiiEcfSecuenciasEditable = async () => {
+  if (!dgiiEcfSecuenciasTbody) return;
+  dgiiEcfSecuenciasTbody.innerHTML = '<tr><td colspan="8">Cargando secuencias...</td></tr>';
+  try {
+    const resp = await fetchConAutorizacion('/api/dgii/ecf/secuencias');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json().catch(() => ({}));
+    renderDgiiEcfSecuenciasEditable(data?.secuencias || []);
+  } catch (error) {
+    console.error('No se pudo cargar secuencias e-CF:', error);
+    dgiiEcfSecuenciasTbody.innerHTML = `<tr><td colspan="8">Error: ${error.message || error}</td></tr>`;
+  }
+};
+
+const guardarDgiiEcfSecuenciaFila = async (tr) => {
+  if (!tr) return;
+  const tipo = tr.getAttribute('data-tipo');
+  const inicio = tr.querySelector('[data-field="inicio"]')?.value;
+  const fin = tr.querySelector('[data-field="fin"]')?.value;
+  const vencimiento = tr.querySelector('[data-field="vencimiento"]')?.value;
+  const activa = tr.querySelector('[data-field="activa"]')?.checked ? 1 : 0;
+  setMessage(dgiiEcfSecuenciasMensaje, `Guardando ${tipo}...`, 'info');
+  try {
+    const resp = await fetchJsonAutorizado(`/api/dgii/ecf/secuencias/${tipo}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        correlativo_inicial: inicio === '' ? null : Number(inicio),
+        correlativo_fin: fin === '' ? null : Number(fin),
+        fecha_vencimiento: vencimiento || null,
+        activa,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo guardar la secuencia.');
+    }
+    setMessage(dgiiEcfSecuenciasMensaje, `Secuencia ${tipo} actualizada.`, 'success');
+    cargarDgiiEcfSecuenciasEditable();
+  } catch (error) {
+    console.error('Error guardando secuencia e-CF:', error);
+    setMessage(dgiiEcfSecuenciasMensaje, error.message || 'No se pudo guardar la secuencia.', 'error');
+  }
+};
+
+const inicializarDgiiEcfSecuenciaFila = async (tr) => {
+  if (!tr) return;
+  const tipo = tr.getAttribute('data-tipo');
+  const inicio = Number(tr.querySelector('[data-field="inicio"]')?.value || 1);
+  const fin = tr.querySelector('[data-field="fin"]')?.value;
+  const vencimiento = tr.querySelector('[data-field="vencimiento"]')?.value;
+  const activa = tr.querySelector('[data-field="activa"]')?.checked ? 1 : 0;
+  // Necesitamos el RNC del config FE
+  let rncEmisor = '';
+  try {
+    const resp = await fetchConAutorizacion('/api/facturacion-electronica/config');
+    const data = await resp.json().catch(() => ({}));
+    rncEmisor = String(data?.config?.rnc_emisor || '').trim();
+  } catch (_) {}
+  if (!rncEmisor) {
+    setMessage(dgiiEcfSecuenciasMensaje, 'Configura primero el RNC emisor en la seccion superior.', 'warning');
+    return;
+  }
+  setMessage(dgiiEcfSecuenciasMensaje, `Inicializando ${tipo}...`, 'info');
+  try {
+    const resp = await fetchJsonAutorizado('/api/dgii/ecf/secuencias/inicializar', {
+      method: 'POST',
+      body: JSON.stringify({
+        secuencias: [{
+          tipo,
+          rnc_emisor: rncEmisor,
+          correlativo_inicial: inicio,
+          correlativo_fin: fin === '' ? null : Number(fin),
+          fecha_vencimiento: vencimiento || null,
+          activa,
+        }],
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo inicializar la secuencia.');
+    }
+    setMessage(dgiiEcfSecuenciasMensaje, `Secuencia ${tipo} inicializada.`, 'success');
+    cargarDgiiEcfSecuenciasEditable();
+  } catch (error) {
+    console.error('Error inicializando secuencia e-CF:', error);
+    setMessage(dgiiEcfSecuenciasMensaje, error.message || 'No se pudo inicializar la secuencia.', 'error');
+  }
+};
+
 
 const FE_SECUENCIAS_UI = {
   E31: {
@@ -9053,6 +9276,10 @@ const recargarEstadoAdmin = async (mostrarCarga = false) => {
         tareas.push(cargarCasosDgii(dgiiSetSelect.value));
       }
     }
+    if (dgiiSectionActiva && (dgiiFeToggleInput || dgiiEcfSecuenciasTbody)) {
+      tareas.push(cargarDgiiFeEstado());
+      tareas.push(cargarDgiiEcfSecuenciasEditable());
+    }
 
     if (tareas.length) {
       await Promise.allSettled(tareas);
@@ -12106,6 +12333,51 @@ dgiiCasoXmlFirmadoInput?.addEventListener('change', async () => {
   dgiiCasoXmlFirmadoInput.value = '';
 });
 
+// Listeners modulo "Certificacion DGII" — toggle FE + tabla secuencias e-CF
+dgiiFeToggleInput?.addEventListener('change', () => {
+  guardarDgiiFeToggle(dgiiFeToggleInput.checked);
+});
+dgiiEcfSecuenciasRefrescarBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  cargarDgiiEcfSecuenciasEditable();
+});
+dgiiEcfSecuenciasInicializarBtn?.addEventListener('click', async (event) => {
+  event.preventDefault();
+  // Inicializa todas las filas que aun no estan en BD (boton inicializar visible).
+  const filas = dgiiEcfSecuenciasTbody?.querySelectorAll('tr[data-tipo]') || [];
+  let pendientes = [];
+  filas.forEach((tr) => {
+    const btn = tr.querySelector('[data-action="inicializar"]');
+    if (btn) pendientes.push(tr);
+  });
+  if (!pendientes.length) {
+    setMessage(dgiiEcfSecuenciasMensaje, 'Todos los tipos ya estan inicializados.', 'info');
+    return;
+  }
+  for (const tr of pendientes) {
+    // Pone valor 1 por defecto en inicio si esta vacio
+    const inicioInput = tr.querySelector('[data-field="inicio"]');
+    if (inicioInput && !inicioInput.value) inicioInput.value = '1';
+    // eslint-disable-next-line no-await-in-loop
+    await inicializarDgiiEcfSecuenciaFila(tr);
+  }
+});
+dgiiEcfSecuenciasTbody?.addEventListener('click', async (event) => {
+  const btnGuardar = event.target.closest('[data-action="guardar"]');
+  if (btnGuardar) {
+    event.preventDefault();
+    const tr = btnGuardar.closest('tr[data-tipo]');
+    if (tr) await guardarDgiiEcfSecuenciaFila(tr);
+    return;
+  }
+  const btnInicializar = event.target.closest('[data-action="inicializar"]');
+  if (btnInicializar) {
+    event.preventDefault();
+    const tr = btnInicializar.closest('tr[data-tipo]');
+    if (tr) await inicializarDgiiEcfSecuenciaFila(tr);
+  }
+});
+
 dgiiCasosTabla?.addEventListener('click', (event) => {
   const btnProcesar = event.target.closest('[data-dgii-procesar-caso]');
   if (btnProcesar) {
@@ -12167,6 +12439,11 @@ adminTabs.forEach((btn) =>
     }
     if (tab === 'facturacionEcf') {
       cargarEcfPanel();
+    }
+    if (tab === 'dgiiPaso2') {
+      // Cargar estado FE + secuencias e-CF al abrir el modulo Certificacion DGII
+      cargarDgiiFeEstado().catch(() => {});
+      cargarDgiiEcfSecuenciasEditable().catch(() => {});
     }
     const tabUrl = btn.dataset.tabUrl;
     if (tabUrl) {

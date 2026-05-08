@@ -259,3 +259,62 @@
 .factura-body .factura-resumen-total {
   font-size: 10px;
 }
+
+/* Bloque e-CF (solo aparece para E31/E32). Compacto para ticket 80mm. */
+.factura-body .factura-ecf {
+  border-top: 1px dashed #000;
+  padding-top: 5px;
+  margin-top: 5px;
+  text-align: center;
+}
+
+.factura-body .factura-ecf h2 {
+  font-size: 9px;
+  margin: 0 0 3px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  text-align: center;
+}
+
+.factura-body .factura-ecf-datos {
+  text-align: left;
+  margin: 0 0 4px 0;
+}
+
+.factura-body .factura-ecf-datos p {
+  font-size: 8px;
+  margin: 1px 0;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.factura-body .factura-ecf-datos strong {
+  font-weight: 700;
+}
+
+.factura-body .factura-ecf-qr {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0 3px 0;
+}
+
+.factura-body .factura-ecf-qr img {
+  width: 32mm;
+  height: 32mm;
+  max-width: 100%;
+  display: block;
+}
+
+.factura-body .factura-ecf-leyenda {
+  font-size: 7px;
+  text-align: center;
+  margin: 2px 0 0 0;
+  line-height: 1.2;
+}
+
+@media print {
+  .factura-body .factura-ecf-qr img {
+    /* Asegura impresion nitida del QR en termica 80mm */
+    image-rendering: pixelated;
+  }
+}

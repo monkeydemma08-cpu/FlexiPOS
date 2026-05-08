@@ -1965,13 +1965,23 @@ async function ensureTableSecuenciasEcf() {
       tipo VARCHAR(10) NOT NULL,
       rnc_emisor VARCHAR(20) NOT NULL DEFAULT '',
       correlativo INT NOT NULL DEFAULT 1,
+      correlativo_inicial INT NULL,
+      correlativo_fin INT NULL,
       fecha_vencimiento DATE NULL,
+      activa TINYINT(1) NOT NULL DEFAULT 1,
       negocio_id INT NOT NULL,
       actualizado_en DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (tipo, negocio_id),
       CONSTRAINT fk_secuencias_ecf_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+}
+
+// Para tablas existentes: agrega las columnas nuevas si todavia no existen.
+async function ensureSecuenciasEcfColumns() {
+  await ensureColumn('secuencias_ecf', 'correlativo_inicial INT NULL');
+  await ensureColumn('secuencias_ecf', 'correlativo_fin INT NULL');
+  await ensureColumn('secuencias_ecf', 'activa TINYINT(1) NOT NULL DEFAULT 1');
 }
 
 async function ensureTableEcfIntentos() {
@@ -2268,6 +2278,7 @@ async function runMigrations() {
   await normalizeConfiguracionKeys();
   await normalizeSecuenciasPk();
   await ensureTableSecuenciasEcf();
+  await ensureSecuenciasEcfColumns();
   await ensureTableEcfIntentos();
   await ensurePedidosEcfColumns();
   await ensureTableEcfDocumentosExternos();

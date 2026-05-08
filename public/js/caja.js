@@ -5723,28 +5723,40 @@ const inicializarEventos = () => {
 
 
 
+  // El cobro SOLO se dispara con click explicito en el boton "Confirmar pago".
+  // Bloqueamos el submit del form (que sale al presionar Enter en cualquier
+  // input del form) para evitar cobros accidentales.
   formulario?.addEventListener('submit', (event) => {
-
     event.preventDefault();
+  });
 
+  // Tambien interceptamos Enter en inputs del form para no quedar en el
+  // limbo (algunos navegadores siguen procesando el submit aunque haya
+  // preventDefault si hay un solo input). Permitimos Enter en textarea
+  // (notas, comentarios) por ergonomia.
+  formulario?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    const tag = (event.target?.tagName || '').toLowerCase();
+    if (tag === 'textarea') return;
+    event.preventDefault();
+    event.stopPropagation();
+  });
+
+  // Click explicito del boton es la unica forma de cobrar.
+  botonCobrar?.addEventListener('click', (event) => {
+    event.preventDefault();
     if (!cuentaSeleccionada) {
-
       setMensajeDetalle('Selecciona una cuenta para confirmar el pago.', 'error');
-
       return;
-
     }
-
     if (!cuentaEstaListaParaCobro(cuentaSeleccionada)) {
-
-      setMensajeDetalle('Esta cuenta aun no esta lista. Usa Cobrar por adelantado para registrar el pago.', 'error');
-
+      setMensajeDetalle(
+        'Esta cuenta aun no esta lista. Usa Cobrar por adelantado para registrar el pago.',
+        'error'
+      );
       return;
-
     }
-
     cerrarCuenta();
-
   });
 
 

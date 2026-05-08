@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/styles.css?v=20260430d" />
+  <link rel="stylesheet" href="/css/styles.css?v=20260425c" />
   <link rel="stylesheet" href="/css/admin-shell.css?v=20260424a" />
   <style>
     /* ================================================================
@@ -1108,61 +1108,68 @@
 
     <!-- Clientes -->
     <section class="admin-panel hidden" data-admin-section="clientes" id="admin-section-clientes">
-      <!-- Hero compacto con titulo + stats inline -->
       <section class="kanm-card admin-clientes-hero">
         <div class="admin-clientes-hero-row">
-          <div class="admin-clientes-hero-title">
+          <div>
             <h2>Clientes &amp; facturacion</h2>
-            <p class="kanm-subtitle">Gestiona clientes, facturas y cuentas por cobrar.</p>
-          </div>
-          <div class="admin-clientes-hero-stats">
-            <div class="admin-clientes-stat">
-              <span class="admin-clientes-stat-label">Total</span>
-              <strong class="admin-clientes-stat-value" id="admin-clientes-total">0</strong>
-            </div>
-            <div class="admin-clientes-stat">
-              <span class="admin-clientes-stat-label">Activos</span>
-              <strong class="admin-clientes-stat-value" id="admin-clientes-activos">0</strong>
-            </div>
-            <div class="admin-clientes-stat admin-clientes-stat--accent">
-              <span class="admin-clientes-stat-label">Saldo por cobrar</span>
-              <strong class="admin-clientes-stat-value" id="admin-clientes-saldo-total">RD$0.00</strong>
-            </div>
+            <p class="kanm-subtitle">Gestiona clientes, facturas y cuentas por cobrar en un mismo flujo.</p>
           </div>
           <div class="admin-clientes-hero-actions">
-            <button type="button" class="kanm-button primary" id="cliente-nuevo">+ Nuevo cliente</button>
+            <button type="button" class="kanm-button ghost" id="cliente-nuevo">Nuevo cliente</button>
           </div>
         </div>
-      </section>
-
-      <!-- Toolbar de filtros compacta horizontal -->
-      <section class="kanm-card admin-clientes-toolbar">
-        <div class="admin-clientes-toolbar-row">
-          <div class="admin-clientes-toolbar-search">
-            <input type="text" id="clientes-buscar" placeholder="Buscar por nombre, documento o telefono..." />
+        <div class="admin-clientes-hero-stats">
+          <div class="empresa-mini-stat">
+            <span>Total clientes</span>
+            <strong id="admin-clientes-total">0</strong>
           </div>
-          <div class="admin-clientes-toolbar-filters">
-            <select id="clientes-estado" class="admin-clientes-select">
-              <option value="">Todos los estados</option>
-              <option value="activos">Activos</option>
-              <option value="inactivos">Inactivos</option>
-            </select>
-            <select id="clientes-saldo" class="admin-clientes-select">
-              <option value="">Todos los saldos</option>
-              <option value="pendiente">Con saldo</option>
-              <option value="cero">En cero</option>
-            </select>
-            <button type="button" class="kanm-button" id="clientes-filtrar">Buscar</button>
-            <button type="button" class="kanm-button ghost" id="clientes-limpiar">Limpiar</button>
+          <div class="empresa-mini-stat">
+            <span>Clientes activos</span>
+            <strong id="admin-clientes-activos">0</strong>
           </div>
-        </div>
-        <div class="admin-clientes-toolbar-msg">
-          <span id="clientes-lista-mensaje" class="kanm-subtitle"></span>
+          <div class="empresa-mini-stat">
+            <span>Saldo total</span>
+            <strong id="admin-clientes-saldo-total">RD$0.00</strong>
+          </div>
         </div>
       </section>
 
       <div class="admin-clientes-layout">
         <div class="admin-clientes-col admin-clientes-col--list">
+          <aside class="kanm-card admin-clientes-filtros">
+            <header class="kanm-card-header">
+              <h3>Filtros</h3>
+              <p class="kanm-subtitle">Encuentra clientes por estado o documento.</p>
+            </header>
+            <div class="admin-clientes-filtros-scroll">
+              <div class="kanm-input-group">
+                <label for="clientes-buscar">Buscar</label>
+                <input type="text" id="clientes-buscar" placeholder="Nombre, documento o telefono" />
+              </div>
+              <div class="kanm-input-group">
+                <label for="clientes-estado">Estado</label>
+                <select id="clientes-estado">
+                  <option value="">Todos</option>
+                  <option value="activos">Activos</option>
+                  <option value="inactivos">Inactivos</option>
+                </select>
+              </div>
+              <div class="kanm-input-group">
+                <label for="clientes-saldo">Saldo</label>
+                <select id="clientes-saldo">
+                  <option value="">Todos</option>
+                  <option value="pendiente">Con saldo</option>
+                  <option value="cero">En cero</option>
+                </select>
+              </div>
+            </div>
+            <div class="admin-clientes-filtros-actions">
+              <button type="button" class="kanm-button" id="clientes-filtrar">Buscar</button>
+              <button type="button" class="kanm-button ghost" id="clientes-limpiar">Limpiar</button>
+              <span id="clientes-lista-mensaje" class="kanm-subtitle"></span>
+            </div>
+          </aside>
+
           <section class="kanm-card admin-clientes-lista">
             <header class="kanm-card-header admin-clientes-lista-header">
               <div>
@@ -1178,7 +1185,7 @@
                     <th>Documento</th>
                     <th>Telefono</th>
                     <th>Email</th>
-                    <th class="text-right">Saldo</th>
+                    <th>Saldo pendiente</th>
                     <th>Estado</th>
                     <th></th>
                   </tr>
@@ -1193,14 +1200,13 @@
           <section class="kanm-card admin-clientes-perfil">
             <header class="kanm-card-header admin-clientes-perfil-header">
               <div>
-                <h3 id="admin-cliente-perfil-titulo">Perfil del cliente</h3>
-                <p class="kanm-subtitle" id="admin-cliente-perfil-sub">Selecciona un cliente o crea uno nuevo.</p>
+                <h3>Perfil del cliente</h3>
+                <p class="kanm-subtitle">Datos esenciales y contacto.</p>
               </div>
-              <span class="admin-clientes-badge" id="admin-cliente-estado-badge" data-status="none">Sin seleccion</span>
+              <span class="admin-clientes-badge" id="admin-cliente-estado-badge">Sin selecci?n</span>
             </header>
 
-            <!-- Resumen oculto por defecto, solo se muestra al seleccionar -->
-            <div class="admin-clientes-resumen" id="admin-cliente-resumen-bloque" hidden>
+            <div class="admin-clientes-resumen">
               <div class="admin-clientes-resumen-item">
                 <span>Cliente</span>
                 <strong id="admin-cliente-resumen-nombre">--</strong>
@@ -2753,11 +2759,11 @@
       </section>
     </section>
 
-    <!-- DGII Paso 2 -->
+    <!-- Certificacion DGII / Configuracion FE -->
     <section class="admin-panel hidden" data-admin-section="dgiiPaso2" id="admin-section-dgii-paso2">
       <div class="kanm-card-header">
-        <h2>Pruebas DGII Paso 2</h2>
-        <p class="kanm-subtitle">Importa set XLSX, genera XML sin firma en carpeta y procesa certificacion.</p>
+        <h2>Certificacion DGII</h2>
+        <p class="kanm-subtitle">Credenciales DGII, certificado P12, secuencias e-CF y activacion del negocio como facturador electronico.</p>
       </div>
 
       <section class="kanm-card admin-card">
@@ -2830,91 +2836,51 @@
 
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
-          <h3>Importar set de pruebas</h3>
-          <p class="kanm-subtitle">Carga el XLSX descargado del portal de certificacion DGII.</p>
+          <h3>Activacion facturacion electronica</h3>
+          <p class="kanm-subtitle">Cuando se activa, el negocio emite e-CF (E31/E32/etc.) y se desactivan automaticamente B01, B02 y B14.</p>
         </header>
-        <div class="admin-report-controls">
-          <div class="kanm-input-group">
-            <label for="dgii-set-file">Archivo set (XLSX)</label>
-            <input type="file" id="dgii-set-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+        <div class="dgii-fe-activacion">
+          <div class="dgii-fe-estado" id="dgii-fe-estado">
+            <span class="kanm-badge" id="dgii-fe-estado-badge">Cargando...</span>
+            <span class="kanm-subtitle" id="dgii-fe-estado-detalle">Consultando estado actual...</span>
           </div>
-          <div class="admin-report-actions">
-            <button type="button" class="kanm-button" id="dgii-set-importar">Importar set</button>
-            <button type="button" class="kanm-button ghost" id="dgii-set-refrescar">Recargar lotes</button>
-          </div>
+          <label class="kanm-input-toggle" for="dgii-fe-toggle">
+            <span>Activar negocio como facturador electronico</span>
+            <input type="checkbox" id="dgii-fe-toggle" />
+          </label>
         </div>
-        <div id="dgii-set-mensaje" class="kanm-message"></div>
+        <div id="dgii-fe-mensaje" class="kanm-message"></div>
       </section>
 
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
-          <h3>Ejecucion y progreso</h3>
-          <p class="kanm-subtitle">Controla el procesamiento y revisa aceptados/rechazados.</p>
+          <h3>Secuencias e-CF</h3>
+          <p class="kanm-subtitle">Define el rango (inicio / fin) y vencimiento de cada tipo electronico autorizado por la DGII para este negocio. Al agotar el rango, debes solicitar otro a la DGII.</p>
         </header>
-        <div class="admin-report-controls">
-          <div class="kanm-input-group">
-            <label for="dgii-set-select">Lote cargado</label>
-            <select id="dgii-set-select">
-              <option value="">Selecciona lote</option>
-            </select>
-          </div>
-          <div class="admin-report-actions">
-            <button type="button" class="kanm-button ghost" id="dgii-set-generar-xml">Generar XML sin firma</button>
-            <button type="button" class="kanm-button" id="dgii-set-procesar">Procesar pendientes</button>
-            <button type="button" class="kanm-button secondary" id="dgii-set-reprocesar">Reprocesar rechazados</button>
-          </div>
-        </div>
-        <div id="dgii-set-resumen" class="kanm-subtitle">Sin datos.</div>
         <div class="kanm-table-wrapper">
-          <table class="kanm-table">
+          <table class="kanm-table" id="dgii-ecf-secuencias-tabla-editable">
             <thead>
               <tr>
-                <th>Lote</th>
-                <th>Archivo</th>
-                <th>Total</th>
-                <th>Aceptados</th>
-                <th>Rechazados</th>
-                <th>Resúmenes</th>
-              </tr>
-            </thead>
-            <tbody id="dgii-sets-tabla">
-              <tr>
-                <td colspan="6">Sin lotes cargados.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="kanm-card admin-card">
-        <header class="kanm-card-header">
-          <h3>Casos del set</h3>
-          <p class="kanm-subtitle">Trazabilidad por caso: flujo, trackId, codigo y estado final.</p>
-        </header>
-        <div id="dgii-casos-mensaje" class="kanm-message"></div>
-        <div class="kanm-table-wrapper">
-          <table class="kanm-table">
-            <thead>
-              <tr>
-                <th>Orden</th>
-                <th>Caso</th>
-                <th>Flujo</th>
-                <th>Monto</th>
-                <th>Estado</th>
-                <th>Codigo</th>
-                <th>Mensaje DGII</th>
-                <th>TrackId</th>
-                <th>Intentos</th>
+                <th>Tipo</th>
+                <th>Inicio</th>
+                <th>Fin</th>
+                <th>Correlativo actual</th>
+                <th>Restantes</th>
+                <th>Vencimiento</th>
+                <th>Activa</th>
                 <th>Acciones</th>
               </tr>
             </thead>
-            <tbody id="dgii-casos-tabla">
-              <tr>
-                <td colspan="9">Selecciona un lote.</td>
-              </tr>
+            <tbody id="dgii-ecf-secuencias-tbody">
+              <tr><td colspan="8">Cargando secuencias...</td></tr>
             </tbody>
           </table>
         </div>
+        <div class="admin-report-actions" style="margin-top:8px">
+          <button type="button" class="kanm-button ghost" id="dgii-ecf-secuencias-refrescar">Refrescar</button>
+          <button type="button" class="kanm-button" id="dgii-ecf-secuencias-inicializar">Inicializar tipos faltantes</button>
+        </div>
+        <div id="dgii-ecf-secuencias-mensaje" class="kanm-message"></div>
       </section>
     </section>
 
@@ -5189,7 +5155,7 @@
   <script src="/js/admin.js?v=20260430b"></script>
   <script src="/js/admin-facturacion-posium.js"></script>
   <script src="/js/admin-cotizaciones.js"></script>
-  <script src="/js/admin-clientes.js?v=20260430c"></script>
+  <script src="/js/admin-clientes.js"></script>
   <script src="/js/admin-categorias.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/notifications.js" defer></script>
