@@ -53,20 +53,20 @@ const resolveLoginErrorMessage = (status, payload, rawBody) => {
   if (payloadError) return payloadError;
 
   if (status === 429) {
-    return 'Demasiados intentos de inicio de sesion. Espera unos segundos e intenta nuevamente.';
+    return 'Demasiados intentos de inicio de sesión. Espera unos segundos e intenta nuevamente.';
   }
   if (status === 401 || status === 403) {
-    return 'No tienes permiso para iniciar sesion con este usuario.';
+    return 'No tienes permiso para iniciar sesión con este usuario.';
   }
   if (status >= 500) {
-    return 'El servidor reporto un error al iniciar sesion.';
+    return 'El servidor reportó un error al iniciar sesión.';
   }
 
   const raw = (rawBody || '').toString().trim();
   if (raw && raw.length <= 180) {
     return raw;
   }
-  return 'No fue posible iniciar sesion.';
+  return 'No fue posible iniciar sesión.';
 };
 
 const isLoginPayloadOk = (response, payload) => {
@@ -126,7 +126,7 @@ form?.addEventListener('submit', async (event) => {
   const password = passwordInput?.value.trim() ?? '';
 
   if (!usuario || !password) {
-    showError('Por favor ingresa tu usuario y contrasena.');
+    showError('Por favor ingresa tu usuario y contraseña.');
     return;
   }
 
@@ -164,7 +164,7 @@ form?.addEventListener('submit', async (event) => {
     });
   } catch (error) {
     console.error('Error en el proceso de login:', error);
-    showError('Ocurrio un problema al conectar con el servidor. Intenta nuevamente.');
+    showError('Ocurrió un problema al conectar con el servidor. Intenta nuevamente.');
   } finally {
     setLoadingState(false);
   }

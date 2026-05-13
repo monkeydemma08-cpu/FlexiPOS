@@ -459,7 +459,10 @@ let dgiiCasoXmlFirmadoPendienteModo = '';
 let menuPublicoAccesos = [];
 let menuPublicoCargado = false;
 
-const REFRESH_INTERVAL_ADMIN = 15000;
+// Auto-refresh del panel admin: antes 15s, ahora 45s. El admin no necesita
+// refresco constante de TODOS los tabs; basta con que se actualice al cambiar
+// de pestaña o cada minuto.
+const REFRESH_INTERVAL_ADMIN = 45000;
 const SYNC_STORAGE_KEY = 'kanm:last-update';
 let refreshTimerAdmin = null;
 let recargandoAdmin = false;
@@ -757,7 +760,7 @@ const cargarConfigDgii = async () => {
     const resp = await fetchConAutorizacion('/api/dgii/paso2/config');
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || data?.ok === false) {
-      throw new Error(data?.error || 'No se pudo cargar configuracion DGII.');
+      throw new Error(data?.error || 'No se pudo cargar configuración DGII.');
     }
     const config = data?.config || {};
     dgiiConfigUsuarioInput.value = config.usuario_certificacion || '';
@@ -774,11 +777,11 @@ const cargarConfigDgii = async () => {
       parts.push(`Certificado guardado${config.p12_nombre_archivo ? `: ${config.p12_nombre_archivo}` : ''}`);
     }
     if (config.token_expira_en) parts.push(`Token cache hasta ${formatDateTime(config.token_expira_en)}`);
-    if (!config.razon_social) parts.push('Falta Razon Social oficial DGII');
+    if (!config.razon_social) parts.push('Falta Razón Social oficial DGII');
     setMessage(dgiiConfigMensaje, parts.join(' | '), 'info');
   } catch (error) {
     console.error('Error cargando configuracion DGII:', error);
-    setMessage(dgiiConfigMensaje, error.message || 'No se pudo cargar configuracion DGII.', 'error');
+    setMessage(dgiiConfigMensaje, error.message || 'No se pudo cargar configuración DGII.', 'error');
   }
 };
 
@@ -9853,13 +9856,29 @@ const guardarUsuarioEmpresa = async () => {
 };
 
 
+const PLAN_BADGE_INFO = {
+  starter: { label: 'STARTER', color: '#6b7280' },
+  pro: { label: 'PRO', color: '#255bc7' },
+  full: { label: 'FULL', color: '#b8860b' },
+};
+
+const renderPlanBadge = (neg) => {
+  const planKey = String(neg?.plan_id || 'full').toLowerCase();
+  const info = PLAN_BADGE_INFO[planKey] || PLAN_BADGE_INFO.full;
+  const lim = [];
+  if (neg?.limite_usuarios != null) lim.push(`${neg.limite_usuarios}u`);
+  if (neg?.limite_menu_qr != null) lim.push(`${neg.limite_menu_qr}qr`);
+  const limTxt = lim.length ? `<span class="kanm-subtitle" style="margin-left:6px;font-size:0.72rem;">${lim.join('·')}</span>` : '';
+  return `<span style="display:inline-block;padding:3px 8px;border-radius:999px;background:${info.color};color:#fff;font-weight:700;font-size:0.72rem;letter-spacing:0.06em;">${info.label}</span>${limTxt}`;
+};
+
 const renderNegociosTabla = (lista = [], opciones = {}) => {
   const { tablaBody } = getNegociosDom();
   if (!tablaBody) return;
   tablaBody.innerHTML = '';
   const emptyText = opciones.emptyText || 'No hay negocios registrados.';
   if (!lista.length) {
-    tablaBody.innerHTML = `<tr><td colspan="7">${emptyText}</td></tr>`;
+    tablaBody.innerHTML = `<tr><td colspan="8">${emptyText}</td></tr>`;
     return;
   }
   tablaBody.innerHTML = lista
@@ -9874,12 +9893,15 @@ const renderNegociosTabla = (lista = [], opciones = {}) => {
       const estadoHtml = renderEstadoNegocio(neg);
       const accionesHtml = renderAccionesNegocio(neg);
       const rnc = neg.rnc ? `<span class="kanm-mono">${neg.rnc}</span>` : '<span class="kanm-subtitle">-</span>';
+      const planBadge = renderPlanBadge(neg);
+      const planBtn = `<button type="button" class="kanm-button kanm-button--outline kanm-button--sm" data-negocios-action="editar-plan" data-id="${neg.id}" style="margin-left:6px;">Editar</button>`;
       return `
         <tr>
           <td>${nombre}</td>
           <td><span class="kanm-mono">${neg.slug || '-'}</span></td>
           <td>${neg.empresa_nombre || neg.empresaNombre || '-'}</td>
           <td>${rnc}</td>
+          <td>${planBadge}${planBtn}</td>
           <td>${estadoHtml}</td>
           <td>${temaCell}</td>
           <td><div class="negocio-actions">${accionesHtml}</div></td>
@@ -10138,6 +10160,106 @@ const confirmarSuspenderNegocio = async () => {
   } catch (error) {
     console.error('Error suspendiendo negocio:', error);
     setNegociosMsg(error.message || 'No se pudo suspender el negocio.', 'error');
+  }
+};
+
+// ===========================================================================
+// Modal: editar plan del negocio (super admin)
+// ===========================================================================
+let negocioPlanEditando = null; // { id, plan, limite_usuarios, limite_menu_qr }
+
+const cerrarModalPlanNegocio = () => {
+  const modal = document.getElementById('kanm-negocios-plan-modal');
+  if (modal) modal.classList.add('oculto');
+  negocioPlanEditando = null;
+};
+
+const abrirModalPlanNegocio = async (id) => {
+  const modal = document.getElementById('kanm-negocios-plan-modal');
+  const nombreEl = document.getElementById('kanm-negocios-plan-nombre');
+  const selectEl = document.getElementById('kanm-negocios-plan-select');
+  const limUsuariosEl = document.getElementById('kanm-negocios-plan-limusuarios');
+  const limQrEl = document.getElementById('kanm-negocios-plan-limqr');
+  const venceEl = document.getElementById('kanm-negocios-plan-vence');
+  const infoEl = document.getElementById('kanm-negocios-plan-info');
+  if (!modal || !selectEl) return;
+
+  if (infoEl) {
+    infoEl.textContent = 'Cargando...';
+    infoEl.className = 'kanm-message';
+  }
+  if (nombreEl) nombreEl.textContent = 'Negocio: --';
+  modal.classList.remove('oculto');
+
+  try {
+    const resp = await fetchJsonAutorizado(`/api/negocios/${id}/plan`);
+    const data = await leerRespuestaApi(resp);
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo obtener el plan');
+    }
+    negocioPlanEditando = { id };
+    if (nombreEl) nombreEl.textContent = `Negocio: ${data.negocio?.nombre || ('id ' + id)}`;
+    if (selectEl) selectEl.value = data.plan?.key || 'full';
+    if (limUsuariosEl) limUsuariosEl.value = data.plan?.limite_usuarios ?? '';
+    if (limQrEl) limQrEl.value = data.plan?.limite_menu_qr ?? '';
+    if (venceEl) {
+      const v = data.plan?.vence_en;
+      venceEl.value = v ? new Date(v).toISOString().slice(0, 10) : '';
+    }
+    if (infoEl) {
+      infoEl.textContent = '';
+      infoEl.className = 'kanm-message';
+    }
+  } catch (error) {
+    console.error('Error al cargar plan:', error);
+    if (infoEl) {
+      infoEl.textContent = error.message || 'No se pudo cargar el plan.';
+      infoEl.className = 'kanm-message error';
+    }
+  }
+};
+
+const guardarPlanNegocio = async () => {
+  if (!negocioPlanEditando?.id) return;
+  const selectEl = document.getElementById('kanm-negocios-plan-select');
+  const limUsuariosEl = document.getElementById('kanm-negocios-plan-limusuarios');
+  const limQrEl = document.getElementById('kanm-negocios-plan-limqr');
+  const venceEl = document.getElementById('kanm-negocios-plan-vence');
+  const infoEl = document.getElementById('kanm-negocios-plan-info');
+  const plan = selectEl?.value || 'full';
+  const limUsuariosRaw = limUsuariosEl?.value?.trim() || '';
+  const limQrRaw = limQrEl?.value?.trim() || '';
+  const venceRaw = venceEl?.value?.trim() || '';
+
+  const payload = {
+    plan,
+    limite_usuarios: limUsuariosRaw === '' ? null : Number(limUsuariosRaw),
+    limite_menu_qr: limQrRaw === '' ? null : Number(limQrRaw),
+    vence_en: venceRaw || null,
+  };
+
+  try {
+    if (infoEl) {
+      infoEl.textContent = 'Guardando...';
+      infoEl.className = 'kanm-message';
+    }
+    const resp = await fetchJsonAutorizado(`/api/negocios/${negocioPlanEditando.id}/plan`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    const data = await leerRespuestaApi(resp);
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo actualizar el plan');
+    }
+    cerrarModalPlanNegocio();
+    await cargarNegocios();
+    setNegociosMsg('Plan del negocio actualizado.', 'info');
+  } catch (error) {
+    console.error('Error guardando plan:', error);
+    if (infoEl) {
+      infoEl.textContent = error.message || 'No se pudo actualizar el plan.';
+      infoEl.className = 'kanm-message error';
+    }
   }
 };
 
@@ -10470,6 +10592,52 @@ const abrirModalNegocio = async (id = null) => {
   setEstadoPasswordAdmin(!esEdicion);
   actualizarModoSucursales(dom.chkTieneSucursales?.checked);
 
+  // === Plan POSIUM + Secuencias NCF (solo en edición; al crear se usa el
+  // flujo de registro o defaults del backend). ===
+  const planSection = document.getElementById('kanm-negocios-plan-section');
+  const secuenciasSection = document.getElementById('kanm-negocios-secuencias-section');
+  if (esEdicion) {
+    if (planSection) planSection.hidden = false;
+    if (secuenciasSection) secuenciasSection.hidden = false;
+
+    const planSelect = document.getElementById('kanm-negocios-plan-id');
+    const limUsuariosInput = document.getElementById('kanm-negocios-limite-usuarios');
+    const limQrInput = document.getElementById('kanm-negocios-limite-menu-qr');
+    const venceInput = document.getElementById('kanm-negocios-plan-vence');
+    const planInfoTexto = document.getElementById('kanm-negocios-plan-info-texto');
+    const chkB01 = document.getElementById('kanm-negocios-permitir-b01');
+    const chkB02 = document.getElementById('kanm-negocios-permitir-b02');
+    const chkB14 = document.getElementById('kanm-negocios-permitir-b14');
+
+    const planActual = String(negocioSeleccionado?.plan_id || 'full').toLowerCase();
+    if (planSelect) planSelect.value = ['starter', 'pro', 'full'].includes(planActual) ? planActual : 'full';
+    if (limUsuariosInput) {
+      limUsuariosInput.value =
+        negocioSeleccionado?.limite_usuarios != null ? negocioSeleccionado.limite_usuarios : '';
+    }
+    if (limQrInput) {
+      limQrInput.value =
+        negocioSeleccionado?.limite_menu_qr != null ? negocioSeleccionado.limite_menu_qr : '';
+    }
+    if (venceInput) {
+      const vence = negocioSeleccionado?.plan_vence_en;
+      venceInput.value = vence ? new Date(vence).toISOString().slice(0, 10) : '';
+    }
+    if (chkB01) chkB01.checked = Number(negocioSeleccionado?.permitir_b01 ?? 1) === 1;
+    if (chkB02) chkB02.checked = Number(negocioSeleccionado?.permitir_b02 ?? 1) === 1;
+    if (chkB14) chkB14.checked = Number(negocioSeleccionado?.permitir_b14 ?? 1) === 1;
+
+    if (planInfoTexto) {
+      const activado = negocioSeleccionado?.plan_activado_en
+        ? new Date(negocioSeleccionado.plan_activado_en).toLocaleDateString('es-DO')
+        : 'No registrado';
+      planInfoTexto.textContent = `Plan actual: ${planActual.toUpperCase()} · Activado: ${activado}`;
+    }
+  } else {
+    if (planSection) planSection.hidden = true;
+    if (secuenciasSection) secuenciasSection.hidden = true;
+  }
+
   if (dom.modalTitulo) {
     dom.modalTitulo.textContent = negocioSeleccionado?.id ? 'Editar negocio' : 'Nuevo negocio';
   }
@@ -10567,6 +10735,26 @@ const guardarNegocio = async (event) => {
     if (dom.inputMonedaSimbolo?.value?.trim()) {
       payload.moneda_simbolo = dom.inputMonedaSimbolo.value.trim();
     }
+  } else {
+    // Edición: incluir Plan + límites + secuencias NCF.
+    const planSelect = document.getElementById('kanm-negocios-plan-id');
+    const limUsuariosInput = document.getElementById('kanm-negocios-limite-usuarios');
+    const limQrInput = document.getElementById('kanm-negocios-limite-menu-qr');
+    const venceInput = document.getElementById('kanm-negocios-plan-vence');
+    const chkB01 = document.getElementById('kanm-negocios-permitir-b01');
+    const chkB02 = document.getElementById('kanm-negocios-permitir-b02');
+    const chkB14 = document.getElementById('kanm-negocios-permitir-b14');
+
+    if (planSelect?.value) payload.plan_id = planSelect.value;
+    const luRaw = (limUsuariosInput?.value || '').trim();
+    payload.limite_usuarios = luRaw === '' ? null : Number(luRaw);
+    const lqRaw = (limQrInput?.value || '').trim();
+    payload.limite_menu_qr = lqRaw === '' ? null : Number(lqRaw);
+    const venceRaw = (venceInput?.value || '').trim();
+    payload.plan_vence_en = venceRaw || null;
+    if (chkB01) payload.permitir_b01 = chkB01.checked ? 1 : 0;
+    if (chkB02) payload.permitir_b02 = chkB02.checked ? 1 : 0;
+    if (chkB14) payload.permitir_b14 = chkB14.checked ? 1 : 0;
   }
 
   const id = dom.inputId?.value;
@@ -10686,6 +10874,14 @@ const initNegociosAdmin = () => {
         return;
       }
 
+      // Boton "Editar plan" en la columna Plan
+      const btnEditarPlan = event.target.closest('[data-negocios-action="editar-plan"]');
+      if (btnEditarPlan) {
+        const id = Number(btnEditarPlan.dataset.id);
+        if (Number.isFinite(id) && id > 0) abrirModalPlanNegocio(id);
+        return;
+      }
+
       // Dropdown toggle (menu de mas acciones)
       const toggle = event.target.closest('[data-kanm-dropdown-toggle]');
       if (toggle) {
@@ -10760,6 +10956,19 @@ const initNegociosAdmin = () => {
   const suspenderBackdrop = suspenderModal?.querySelector('.kanm-modal-backdrop');
   if (suspenderBackdrop) {
     suspenderBackdrop.addEventListener('click', () => cerrarModalSuspenderNegocio());
+  }
+
+  // Modal de plan
+  const btnPlanCerrar = document.getElementById('kanm-negocios-plan-cerrar');
+  const btnPlanCancelar = document.getElementById('kanm-negocios-plan-cancelar');
+  const btnPlanGuardar = document.getElementById('kanm-negocios-plan-guardar');
+  if (btnPlanCerrar) btnPlanCerrar.addEventListener('click', () => cerrarModalPlanNegocio());
+  if (btnPlanCancelar) btnPlanCancelar.addEventListener('click', () => cerrarModalPlanNegocio());
+  if (btnPlanGuardar) btnPlanGuardar.addEventListener('click', () => guardarPlanNegocio());
+  const planModal = document.getElementById('kanm-negocios-plan-modal');
+  const planBackdrop = planModal?.querySelector('.kanm-modal-backdrop');
+  if (planBackdrop) {
+    planBackdrop.addEventListener('click', () => cerrarModalPlanNegocio());
   }
 
   if (dom.tablaRegistrosBody) {

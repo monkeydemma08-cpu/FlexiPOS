@@ -92,7 +92,80 @@ let secuenciasConfig = {
   permitir_b01: 1,
   permitir_b02: 1,
   permitir_b14: 1,
+  permitir_e31: 1,
+  permitir_e32: 1,
+  facturacion_electronica_habilitada: 0,
 };
+
+// === Helpers de tipo de comprobante (portado desde caja.js para paridad) ===
+const normalizarTipoComprobanteMostrador = (valor) =>
+  String(valor || '').trim().toUpperCase();
+
+const esTipoComprobanteElectronicoMostrador = (valor) =>
+  ['E31', 'E32'].includes(normalizarTipoComprobanteMostrador(valor));
+
+const esSinComprobanteMostrador = (valor) => {
+  const v = normalizarTipoComprobanteMostrador(valor);
+  return v === '' || v === 'SIN' || v === 'NONE' || v === 'NA';
+};
+
+const esFacturacionElectronicaActivaMostrador = () =>
+  Number(secuenciasConfig.facturacion_electronica_habilitada) === 1;
+
+const obtenerTipoComprobantePredeterminadoMostrador = () =>
+  esFacturacionElectronicaActivaMostrador() ? 'E32' : 'B02';
+
+// Adapta el tipo seleccionado al modo fiscal del negocio: si tiene FE
+// activa, B01 -> E31 y B02 -> E32; si NO tiene FE, E31 -> B01 y E32 -> B02.
+// Esto garantiza que el payload enviado al backend siempre sea consistente
+// con el plan del negocio (mismo patrón que caja.js).
+const adaptarTipoComprobanteAlModoFiscalMostrador = (valor) => {
+  const tipo = normalizarTipoComprobanteMostrador(valor || obtenerTipoComprobantePredeterminadoMostrador());
+  if (!tipo || esSinComprobanteMostrador(tipo)) return tipo;
+  if (esFacturacionElectronicaActivaMostrador()) {
+    if (tipo === 'B01') return 'E31';
+    if (tipo === 'B02') return 'E32';
+    if (tipo === 'B14') return 'B14';
+    return tipo;
+  }
+  if (tipo === 'E31') return 'B01';
+  if (tipo === 'E32') return 'B02';
+  return tipo;
+};
+
+const _normalizarFlagMostrador = (valor, fallback = 0) => {
+  if (valor === undefined || valor === null) return fallback;
+  if (valor === true || valor === 1 || valor === '1') return 1;
+  if (valor === false || valor === 0 || valor === '0') return 0;
+  return fallback;
+};
+
+const resolverConfigSecuenciasMostrador = (tema = {}) => ({
+  permitir_b01: _normalizarFlagMostrador(tema?.permitir_b01 ?? tema?.permitirB01, 1),
+  permitir_b02: _normalizarFlagMostrador(tema?.permitir_b02 ?? tema?.permitirB02, 1),
+  permitir_b14: _normalizarFlagMostrador(tema?.permitir_b14 ?? tema?.permitirB14, 1),
+  permitir_e31: _normalizarFlagMostrador(
+    tema?.permitir_e31 ??
+      tema?.permitirE31 ??
+      tema?.facturacionElectronica?.permitir_e31 ??
+      tema?.facturacion_electronica?.permitir_e31,
+    1
+  ),
+  permitir_e32: _normalizarFlagMostrador(
+    tema?.permitir_e32 ??
+      tema?.permitirE32 ??
+      tema?.facturacionElectronica?.permitir_e32 ??
+      tema?.facturacion_electronica?.permitir_e32,
+    1
+  ),
+  facturacion_electronica_habilitada: _normalizarFlagMostrador(
+    tema?.facturacion_electronica_habilitada ??
+      tema?.facturacionElectronicaHabilitada ??
+      tema?.facturacionElectronica?.habilitada ??
+      tema?.facturacion_electronica?.habilitada,
+    0
+  ),
+});
 
 const esProductoStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
 const obtenerStockDisponible = (producto) => {
@@ -1093,6 +1166,27 @@ const resolverConfigSecuencias = (tema = {}) => ({
   permitir_b01: normalizarFlagUI(tema?.permitir_b01 ?? tema?.permitirB01, 1),
   permitir_b02: normalizarFlagUI(tema?.permitir_b02 ?? tema?.permitirB02, 1),
   permitir_b14: normalizarFlagUI(tema?.permitir_b14 ?? tema?.permitirB14, 1),
+  permitir_e31: normalizarFlagUI(
+    tema?.permitir_e31 ??
+      tema?.permitirE31 ??
+      tema?.facturacionElectronica?.permitir_e31 ??
+      tema?.facturacion_electronica?.permitir_e31,
+    1
+  ),
+  permitir_e32: normalizarFlagUI(
+    tema?.permitir_e32 ??
+      tema?.permitirE32 ??
+      tema?.facturacionElectronica?.permitir_e32 ??
+      tema?.facturacion_electronica?.permitir_e32,
+    1
+  ),
+  facturacion_electronica_habilitada: normalizarFlagUI(
+    tema?.facturacion_electronica_habilitada ??
+      tema?.facturacionElectronicaHabilitada ??
+      tema?.facturacionElectronica?.habilitada ??
+      tema?.facturacion_electronica?.habilitada,
+    0
+  ),
 });
 
 const normalizarTipoComprobante = (valor) => {
@@ -1130,22 +1224,25 @@ const obtenerOpcionDisponible = () => {
 
 const seleccionarTipoComprobantePermitido = (preferido) => {
   if (!selectTipoComprobante) return;
-  const valorPreferido = normalizarTipoComprobante(preferido || 'B02');
+  // Adaptar al modo fiscal del negocio: si tiene FE activa, B0X se convierte
+  // automáticamente al e-CF equivalente (B01->E31, B02->E32).
+  const valorPreferido = adaptarTipoComprobanteAlModoFiscalMostrador(
+    preferido || obtenerTipoComprobantePredeterminadoMostrador()
+  );
   const valorPreferidoUpper = valorPreferido.toUpperCase();
-  const permitirB01 = Number(secuenciasConfig.permitir_b01) !== 0;
-  const permitirB02 = Number(secuenciasConfig.permitir_b02) !== 0;
-  const permitirB14 = Number(secuenciasConfig.permitir_b14) !== 0;
+  const feActiva = esFacturacionElectronicaActivaMostrador();
+  const permitirB01 = !feActiva && Number(secuenciasConfig.permitir_b01) !== 0;
+  const permitirB02 = !feActiva && Number(secuenciasConfig.permitir_b02) !== 0;
+  const permitirB14 = !feActiva && Number(secuenciasConfig.permitir_b14) !== 0;
+  const permitirE31 = feActiva && Number(secuenciasConfig.permitir_e31) !== 0;
+  const permitirE32 = feActiva && Number(secuenciasConfig.permitir_e32) !== 0;
 
   let valorFinal = valorPreferido;
-  if (valorPreferidoUpper === 'B01' && !permitirB01) {
-    valorFinal = null;
-  }
-  if (valorPreferidoUpper === 'B02' && !permitirB02) {
-    valorFinal = null;
-  }
-  if (valorPreferidoUpper === 'B14' && !permitirB14) {
-    valorFinal = null;
-  }
+  if (valorPreferidoUpper === 'B01' && !permitirB01) valorFinal = null;
+  if (valorPreferidoUpper === 'B02' && !permitirB02) valorFinal = null;
+  if (valorPreferidoUpper === 'B14' && !permitirB14) valorFinal = null;
+  if (valorPreferidoUpper === 'E31' && !permitirE31) valorFinal = null;
+  if (valorPreferidoUpper === 'E32' && !permitirE32) valorFinal = null;
 
   if (!valorFinal) {
     const fallback = obtenerOpcionDisponible();
@@ -1162,13 +1259,25 @@ const aplicarConfigSecuencias = (config = {}) => {
     permitir_b01: normalizarFlagUI(config.permitir_b01 ?? config.permitirB01, 1),
     permitir_b02: normalizarFlagUI(config.permitir_b02 ?? config.permitirB02, 1),
     permitir_b14: normalizarFlagUI(config.permitir_b14 ?? config.permitirB14, 1),
+    permitir_e31: normalizarFlagUI(config.permitir_e31 ?? config.permitirE31, 1),
+    permitir_e32: normalizarFlagUI(config.permitir_e32 ?? config.permitirE32, 1),
+    facturacion_electronica_habilitada: normalizarFlagUI(
+      config.facturacion_electronica_habilitada ??
+        config.facturacionElectronicaHabilitada ??
+        config.facturacionElectronica?.habilitada ??
+        config.facturacion_electronica?.habilitada,
+      0
+    ),
   };
 
   if (!selectTipoComprobante) return;
 
-  const permitirB01 = Number(secuenciasConfig.permitir_b01) !== 0;
-  const permitirB02 = Number(secuenciasConfig.permitir_b02) !== 0;
-  const permitirB14 = Number(secuenciasConfig.permitir_b14) !== 0;
+  const feActiva = esFacturacionElectronicaActivaMostrador();
+  const permitirB01 = !feActiva && Number(secuenciasConfig.permitir_b01) !== 0;
+  const permitirB02 = !feActiva && Number(secuenciasConfig.permitir_b02) !== 0;
+  const permitirB14 = !feActiva && Number(secuenciasConfig.permitir_b14) !== 0;
+  const permitirE31 = feActiva && Number(secuenciasConfig.permitir_e31) !== 0;
+  const permitirE32 = feActiva && Number(secuenciasConfig.permitir_e32) !== 0;
   const opciones = Array.from(selectTipoComprobante.options || []);
 
   opciones.forEach((opt) => {
@@ -1184,9 +1293,19 @@ const aplicarConfigSecuencias = (config = {}) => {
       opt.hidden = !permitirB14;
       opt.disabled = !permitirB14;
     }
+    if (opt.value === 'E31') {
+      opt.hidden = !permitirE31;
+      opt.disabled = !permitirE31;
+    }
+    if (opt.value === 'E32') {
+      opt.hidden = !permitirE32;
+      opt.disabled = !permitirE32;
+    }
   });
 
-  seleccionarTipoComprobantePermitido(selectTipoComprobante.value || 'B02');
+  seleccionarTipoComprobantePermitido(
+    selectTipoComprobante.value || obtenerTipoComprobantePredeterminadoMostrador()
+  );
 };
 
 const cargarConfigSecuencias = async () => {
@@ -1401,7 +1520,7 @@ const limpiarFormularioCobro = () => {
   reiniciarLookupDgii();
   if (inputDescuento) inputDescuento.value = '0';
   aplicarPropinaPreferida({ force: true });
-  seleccionarTipoComprobantePermitido('B02');
+  seleccionarTipoComprobantePermitido(obtenerTipoComprobantePredeterminadoMostrador());
   if (inputNcfManual) inputNcfManual.value = '';
   if (inputComentarios) inputComentarios.value = '';
   if (facturaAcciones) {
@@ -1682,7 +1801,7 @@ const mostrarDetalleVenta = () => {
 
   limpiarMensajeCobro();
   aplicarPropinaPreferida({ force: true });
-  seleccionarTipoComprobantePermitido('B02');
+  seleccionarTipoComprobantePermitido(obtenerTipoComprobantePredeterminadoMostrador());
   actualizarResumenCobro();
   resetPagosFormulario(calculo.total);
 };
@@ -1834,7 +1953,12 @@ const confirmarPago = async () => {
       botonCobrar.classList.add('is-loading');
     }
 
-    const tipoComprobante = normalizarTipoComprobante(selectTipoComprobante?.value || '');
+    const tipoComprobanteUI = normalizarTipoComprobante(selectTipoComprobante?.value || '');
+    // Adaptar al modo fiscal del negocio (B0X <-> E3X). Si el negocio tiene
+    // FE activa y el select muestra B02, el payload va como E32, etc.
+    const tipoComprobante = adaptarTipoComprobanteAlModoFiscalMostrador(
+      tipoComprobanteUI || obtenerTipoComprobantePredeterminadoMostrador()
+    );
     const sinComprobante = esSinComprobante(tipoComprobante);
     const ncfManual = sinComprobante ? null : inputNcfManual?.value;
     const usuario = obtenerUsuarioActual();
@@ -1851,7 +1975,7 @@ const confirmarPago = async () => {
         propina_porcentaje: calculo.propinaPorcentaje,
         cliente: inputClienteNombre?.value,
         cliente_documento: inputClienteDocumento?.value,
-        tipo_comprobante: tipoComprobante || 'B02',
+        tipo_comprobante: tipoComprobante || obtenerTipoComprobantePredeterminadoMostrador(),
         ncf: ncfManual,
         generar_ncf: !sinComprobante,
         comentarios: inputComentarios?.value,
@@ -1873,10 +1997,10 @@ const confirmarPago = async () => {
       throw new Error(data.error || 'No se pudo cerrar la venta.');
     }
 
-    const tipoComp = selectTipoComprobante?.value || '';
-    const esEcf = /^E(31|32|33|34|41|43|44|45|46|47)$/i.test(tipoComp);
+    const tipoCompFinal = tipoComprobante || '';
+    const esEcf = /^E(31|32|33|34|41|43|44|45|46|47)$/i.test(tipoCompFinal);
     mostrarMensajeCobro(
-      esEcf ? 'Pago registrado. e-CF pendiente de emision.' : 'Pago registrado correctamente.',
+      esEcf ? 'Pago registrado. e-CF pendiente de emisión.' : 'Pago registrado correctamente.',
       'info'
     );
     const facturaGenerada = data.factura;
@@ -1885,19 +2009,47 @@ const confirmarPago = async () => {
     if (esEcf && pedidoIdParaSeguir) {
       seguirEstadoEcfPedido(pedidoIdParaSeguir);
     }
-    if (facturaGenerada?.id) {
-      const facturaId = Number(facturaGenerada.id);
-      if (Number.isFinite(facturaId)) {
-        window.open(`/factura.html?id=${facturaId}`, '_blank');
+
+    // Resolver el ID de factura para acciones post-cobro (ver/reimprimir).
+    const facturaIdFinal =
+      Number(facturaGenerada?.id) || Number(estado.ventaActual?.id) || 0;
+    if (facturaIdFinal) {
+      window.open(`/factura.html?id=${facturaIdFinal}`, '_blank');
+      // Guardamos el ID en el botón para que "Ver / Imprimir" funcione
+      // aunque el usuario cierre la ventana abierta.
+      if (botonImprimir) {
+        botonImprimir.dataset.facturaId = String(facturaIdFinal);
+        botonImprimir.disabled = false;
       }
-    } else if (estado.ventaActual?.id) {
-      window.open(`/factura.html?id=${estado.ventaActual.id}`, '_blank');
+      // Mostrar info de la factura emitida
+      if (facturaInfo) {
+        const ncfMostrar =
+          facturaGenerada?.ecf_encf ||
+          facturaGenerada?.ncf ||
+          (esEcf ? 'e-CF en proceso' : 'NCF en proceso');
+        const totalMostrar = facturaGenerada?.total != null
+          ? formatCurrency(facturaGenerada.total)
+          : formatCurrency(calculo.total);
+        facturaInfo.innerHTML = `
+          <div><strong>Tipo:</strong> ${tipoCompFinal || '—'}</div>
+          <div><strong>NCF / e-NCF:</strong> ${ncfMostrar}</div>
+          <div><strong>Total:</strong> ${totalMostrar}</div>
+        `;
+      }
+      if (facturaAcciones) facturaAcciones.hidden = false;
     }
 
     notificarActualizacionGlobal('cuenta-cobrada', {
       cuentaId: estado.ventaActual.cuenta_id,
     });
+    // Guardar el ID antes de limpiar (para que el botón siga funcionando).
+    const idFacturaPersist = facturaIdFinal;
     limpiarVenta();
+    // Volver a mostrar la sección de factura tras limpiar (limpiarVenta la oculta).
+    if (idFacturaPersist && botonImprimir && facturaAcciones) {
+      botonImprimir.dataset.facturaId = String(idFacturaPersist);
+      facturaAcciones.hidden = false;
+    }
     await cargarProductos(false);
     mostrarMensajePedido('Pago registrado correctamente.', 'info');
   } catch (error) {
@@ -1991,9 +2143,29 @@ const inicializarEventos = () => {
     actualizarResumenCobro();
   });
 
+  // El form ya no dispara cobro al hacer submit (Enter). Solo el botón "Cobrar".
+  // Patrón validado en caja.js (commit 9b403c6) — previene cobros accidentales
+  // al presionar Enter mientras se edita un campo del formulario.
   cobroForm?.addEventListener('submit', (event) => {
     event.preventDefault();
+  });
+  cobroForm?.addEventListener('keydown', (event) => {
+    // Permitir Enter en textarea para saltos de línea naturales.
+    if (event.key === 'Enter' && event.target?.tagName !== 'TEXTAREA') {
+      event.preventDefault();
+    }
+  });
+  botonCobrar?.addEventListener('click', () => {
     confirmarPago();
+  });
+
+  // Reabrir / reimprimir la factura recién cobrada (lee el ID del dataset).
+  botonImprimir?.addEventListener('click', (event) => {
+    event.preventDefault();
+    const id = Number(botonImprimir.dataset.facturaId);
+    if (Number.isFinite(id) && id > 0) {
+      window.open(`/factura.html?id=${id}`, '_blank');
+    }
   });
 
   inputDescuento?.addEventListener('change', () => {
@@ -2129,4 +2301,48 @@ window.addEventListener('DOMContentLoaded', async () => {
   actualizarCarritoUI();
   inicializarEventos();
   mostrarDetalleVenta();
+
+  // UX: focus automático en el buscador de productos al cargar.
+  // Útil para que el usuario pueda empezar a buscar al instante sin clicks.
+  setTimeout(() => {
+    try { buscadorInput?.focus(); } catch (_) {}
+  }, 200);
+
+  // Atajos de teclado globales:
+  //   F2  → focus en el buscador de productos
+  //   F9  → confirmar pago (si hay venta activa)
+  //   Esc → cancelar venta (con confirmación implícita del backend)
+  //   Ctrl+L → limpiar búsqueda
+  document.addEventListener('keydown', (event) => {
+    // Si está escribiendo en un input/textarea/select, no interceptar (salvo F2/F9/Esc).
+    const enInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target?.tagName);
+    if (event.key === 'F2') {
+      event.preventDefault();
+      try { buscadorInput?.focus(); buscadorInput?.select(); } catch (_) {}
+      return;
+    }
+    if (event.key === 'F9') {
+      event.preventDefault();
+      if (estado.ventaActual && botonCobrar && !botonCobrar.disabled) {
+        confirmarPago();
+      }
+      return;
+    }
+    if (event.key === 'Escape' && !enInput) {
+      // Solo cancela si NO está escribiendo (evita cancelar por accidente al cerrar autocompletar).
+      if (estado.ventaActual && botonCancelarVenta && !botonCancelarVenta.disabled) {
+        // Disparar el flujo normal de cancelación (que ya pide al backend).
+        botonCancelarVenta.click();
+      }
+      return;
+    }
+    if (event.ctrlKey && (event.key === 'l' || event.key === 'L')) {
+      event.preventDefault();
+      if (buscadorInput) {
+        buscadorInput.value = '';
+        buscadorInput.dispatchEvent(new Event('input', { bubbles: true }));
+        buscadorInput.focus();
+      }
+    }
+  });
 });

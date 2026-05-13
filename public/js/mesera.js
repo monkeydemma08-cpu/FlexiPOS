@@ -37,7 +37,9 @@ const listasPorEstado = {
   preparando: document.getElementById('lista-pedidos-preparando'),
   listo: document.getElementById('lista-pedidos-listos'),
 };
-const REFRESCO_PEDIDOS_MS = 2000;
+// Polling: 10s es suficiente para cocina/mesera. Antes era 2s, generaba carga
+// excesiva en el server (4 req/seg constantes con 2 dispositivos).
+const REFRESCO_PEDIDOS_MS = 10000;
 const MESERA_ALARMA_TONO_MS = 1400;
 const MESERA_ALARMA_TITULO_MS = 900;
 const MESERA_ALARMA_FRECUENCIA = 980;
@@ -2209,9 +2211,20 @@ const cargarPedidosActivos = async (mostrarCarga = true) => {
 const iniciarRefrescoPedidos = () => {
   detenerRefrescoPedidos();
   temporizadorPedidos = setInterval(() => {
+    // Pausar polling cuando la pestaña esté oculta para ahorrar requests.
+    if (typeof document !== 'undefined' && document.hidden) return;
     Promise.all([cargarPedidosActivos(false), cargarProductos(false)]).catch(() => {});
   }, REFRESCO_PEDIDOS_MS);
 };
+
+// Refrescar inmediatamente cuando la pestaña vuelve a ser visible.
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && typeof cargarPedidosActivos === 'function') {
+      try { cargarPedidosActivos(false); } catch (_) {}
+    }
+  });
+}
 
 const detenerRefrescoPedidos = () => {
   if (temporizadorPedidos) {

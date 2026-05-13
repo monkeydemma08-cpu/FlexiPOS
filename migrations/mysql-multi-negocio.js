@@ -1569,6 +1569,20 @@ async function ensureNegocioThemeAndModulesColumns() {
   await ensureColumn('negocios', 'permitir_b14 TINYINT(1) NOT NULL DEFAULT 1');
   await ensureColumn('negocios', 'admin_principal_correo VARCHAR(255) NULL');
   await ensureColumn('negocios', 'admin_principal_usuario_id BIGINT NULL');
+  // Plan POSIUM contratado (starter / pro / full). Por defecto 'full' para no
+  // bloquear nada en negocios pre-existentes; el super admin puede ajustar.
+  await ensureColumn('negocios', "plan_id VARCHAR(20) NOT NULL DEFAULT 'full'");
+  await ensureColumn('negocios', 'plan_activado_en DATETIME NULL');
+  await ensureColumn('negocios', 'plan_vence_en DATETIME NULL');
+  await ensureColumn('negocios', 'limite_usuarios INT NULL');
+  await ensureColumn('negocios', 'limite_menu_qr INT NULL');
+  await ensureColumn('negocios', 'plan_extras_json JSON NULL');
+  // Backfill defensivo: cualquier registro sin plan queda como 'full' (no se bloquea nada).
+  try {
+    await query(`UPDATE negocios SET plan_id = 'full' WHERE plan_id IS NULL OR plan_id = ''`);
+  } catch (error) {
+    console.warn('No se pudo backfill plan_id en negocios:', error?.message || error);
+  }
   const fkCompatible = await columnsCompatibleForFk('negocios', 'admin_principal_usuario_id', 'usuarios', 'id');
   if (fkCompatible) {
     await ensureForeignKey('negocios', 'admin_principal_usuario_id', 'usuarios');
@@ -1818,6 +1832,17 @@ async function ensureTableRegistroSolicitudes() {
   await ensureColumn('registro_solicitudes', 'negocio_id INT NULL');
   await ensureColumn('registro_solicitudes', 'negocio_slug VARCHAR(140) NULL');
   await ensureColumn('registro_solicitudes', 'admin_usuario_id INT NULL');
+  await ensureColumn('registro_solicitudes', "plan VARCHAR(20) NULL");
+  await ensureColumn('registro_solicitudes', "rnc VARCHAR(20) NULL");
+  await ensureColumn('registro_solicitudes', "razon_social VARCHAR(180) NULL");
+  await ensureColumn('registro_solicitudes', "menu_qr_cantidad INT NOT NULL DEFAULT 0");
+  await ensureColumn('registro_solicitudes', "ecf_solicitado TINYINT(1) NOT NULL DEFAULT 0");
+  await ensureColumn('registro_solicitudes', "menu_qr_solicitado TINYINT(1) NOT NULL DEFAULT 0");
+  await ensureColumn('registro_solicitudes', "terminos_aceptados_at DATETIME NULL");
+  await ensureColumn('registro_solicitudes', "privacidad_aceptada_at DATETIME NULL");
+  await ensureColumn('registro_solicitudes', "resumen_costos_json JSON NULL");
+  await ensureColumn('registro_solicitudes', "correo_cliente_enviado TINYINT(1) NOT NULL DEFAULT 0");
+  await ensureColumn('registro_solicitudes', "correo_cliente_error TEXT NULL");
   await ensureIndexByName('registro_solicitudes', 'idx_registro_solicitudes_negocio', '(negocio_id)');
   await ensureIndexByName('registro_solicitudes', 'idx_registro_solicitudes_admin_usuario', '(admin_usuario_id)');
 }

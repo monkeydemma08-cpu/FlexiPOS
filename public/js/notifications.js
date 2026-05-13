@@ -248,7 +248,9 @@
     if (!isMesera || isMeseraPage) return;
     cargarEstadoAreasDesdeStorage();
     revisarPedidosListos();
-    pedidosInterval = setInterval(revisarPedidosListos, 25000);
+    // Antes 25s; subido a 60s. Las notificaciones de pedidos listos no
+    // requieren actualización tan agresiva (el mesero ya tiene su polling).
+    pedidosInterval = setInterval(revisarPedidosListos, 60000);
   };
 
   iniciarNotificacionesPedidosMesera();

@@ -51,8 +51,10 @@ let io = null;
 
 app.set('trust proxy', 1);
 
-// Allow larger payloads for long logo URLs or data URIs in configuration.
-app.use(express.json({ limit: '35mb' }));
+// Body parser principal a 5mb (antes 35mb que era excesivo y abria riesgo OOM
+// con un POST malicioso). Las rutas que reciben P12 / logo URI se manejan
+// con su propio limit donde aplica.
+app.use(express.json({ limit: '5mb' }));
 app.use(cors());
 app.use((req, res, next) => {
   if (
@@ -66,7 +68,23 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use(express.static(path.join(__dirname, 'public')));
+// Static assets con cache de 7 dias. Esto reduce drasticamente el ancho de
+// banda y carga de servidor para JS/CSS/imagenes que rara vez cambian.
+// HTML SE EXCLUYE (last-modified) para que los cambios de UI se vean al
+// recargar. Si necesitas invalidar JS/CSS, versiona la URL (?v=...).
+app.use(
+  express.static(path.join(__dirname, 'public'), {
+    maxAge: '7d',
+    etag: true,
+    lastModified: true,
+    setHeaders: (res, filePath) => {
+      // HTML siempre fresco (validacion con etag).
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  })
+);
 app.use(dgiiRoutes);
 const LOG_DELIVERY_REQUESTS = process.env.LOG_DELIVERY_REQUESTS === '1';
 app.use((req, res, next) => {
@@ -125,8 +143,101 @@ const REGISTRO_MODULOS_CATALOGO = Object.freeze([
   { key: 'clientes', label: 'Clientes', disponible: true },
   { key: 'gastos', label: 'Gastos', disponible: true },
   { key: 'reportes', label: 'Reportes', disponible: true },
-  { key: 'facturacion_electronica', label: 'Facturacion electronica', disponible: false },
+  { key: 'facturacion_electronica', label: 'Facturacion electronica', disponible: true },
 ]);
+
+// Catalogo de planes POSIUM. Se usa en backend para validar lo que llega del
+// formulario y para configurar el negocio (FE habilitada, modulos, etc.).
+//
+// Reglas importantes (acuerdo comercial):
+//   - Por defecto TODOS los planes traen admin + mostrador (no requieren toggle).
+//   - KDS = sistema sincronizado de cocina/mesera/bar/caja. Solo disponible
+//     desde Plan Pro en adelante. NO esta disponible en Starter.
+//   - Delivery: incluido en Pro y Full. En Starter es opcional con +RD$150/mes.
+const DELIVERY_EXTRA_STARTER_DOP = 150;
+const PLANES_POSIUM = Object.freeze({
+  starter: {
+    key: 'starter',
+    nombre: 'Plan Starter - POP',
+    precio_mensual: 1200,
+    moneda: 'DOP',
+    descripcion: 'Pequenos negocios que necesitan control de ventas simple y rapido.',
+    incluye: [
+      'POS clasico',
+      'Registro de productos',
+      'Inventario basico',
+      'Reportes diarios de ventas',
+      'Control de caja basica (mostrador)',
+      'Soporte por WhatsApp',
+      'Admin + mostrador por defecto',
+    ],
+    opcionales_disponibles: ['ecf', 'menu_qr', 'delivery'],
+    fe_incluida: false,
+    fe_costo_mensual_extra: 700,
+    kds_disponible: false,
+    kds_incluido: false,
+    delivery_incluido: false,
+    delivery_costo_extra_mensual: DELIVERY_EXTRA_STARTER_DOP,
+  },
+  pro: {
+    key: 'pro',
+    nombre: 'Plan Pro - Negocio',
+    precio_mensual: 1500,
+    moneda: 'DOP',
+    descripcion: 'Negocios que necesitan mayor control operativo y crecimiento administrativo.',
+    incluye: [
+      'POS completo',
+      'Inventario avanzado',
+      'Control por turnos',
+      'Reportes avanzados',
+      'Multiusuarios, roles y permisos',
+      'KDS incluido (cocina + mesera + bar + caja sincronizados)',
+      'Delivery incluido',
+      'Soporte tecnico prioritario basico',
+    ],
+    opcionales_disponibles: ['ecf', 'menu_qr'],
+    fe_incluida: false,
+    fe_costo_mensual_extra: 700,
+    kds_disponible: true,
+    kds_incluido: true,
+    delivery_incluido: true,
+    delivery_costo_extra_mensual: 0,
+  },
+  full: {
+    key: 'full',
+    nombre: 'Plan Full - Pro + KDS',
+    precio_mensual: 2000,
+    moneda: 'DOP',
+    descripcion: 'Restaurantes, negocios con cocina y operaciones multiples.',
+    incluye: [
+      'POS completo',
+      'Facturacion Electronica e-CF DGII incluida',
+      'KDS incluido (cocina + mesera + bar + caja sincronizados)',
+      'Chat interno entre equipo (exclusivo Full)',
+      'Delivery incluido',
+      'Multiusuarios avanzados',
+      'Reportes y alertas, control por estaciones',
+      'Soporte prioritario',
+      '1 Menu QR incluido opcionalmente',
+    ],
+    opcionales_disponibles: ['menu_qr_extra'],
+    fe_incluida: true,
+    fe_costo_mensual_extra: 0,
+    kds_disponible: true,
+    kds_incluido: true,
+    delivery_incluido: true,
+    delivery_costo_extra_mensual: 0,
+  },
+});
+
+const PLAN_DEFAULT = 'starter';
+const ACTIVACION_INICIAL_DOP = 1800;
+const MENU_QR_PRIMERO_PRECIO = 100;
+const MENU_QR_TERCERO_EN_ADELANTE = 50;
+// Modulos que vienen siempre con cualquier plan (no requieren toggle):
+const MODULOS_SIEMPRE_INCLUIDOS = Object.freeze(['admin', 'mostrador']);
+// Modulos que solo se habilitan cuando KDS esta activo:
+const MODULOS_DEPENDIENTES_KDS = Object.freeze(['cocina', 'mesera', 'bar', 'caja']);
 const REGISTRO_MODULOS_MAP = new Map(REGISTRO_MODULOS_CATALOGO.map((item) => [item.key, item]));
 const DGII_CONSULTA_RNC_URL = 'https://dgii.gov.do/app/WebApps/ConsultasWeb2/ConsultasWeb/consultas/rnc.aspx';
 
@@ -667,6 +778,76 @@ function normalizarCantidadUsuariosRegistro(valor) {
   return normalized.slice(0, 40);
 }
 
+function normalizarPlanRegistro(planKey) {
+  const k = String(planKey || '').toLowerCase().trim();
+  return PLANES_POSIUM[k] ? k : PLAN_DEFAULT;
+}
+
+function obtenerPlanRegistro(planKey) {
+  return PLANES_POSIUM[normalizarPlanRegistro(planKey)];
+}
+
+function calcularCostoMenuQr(cantidad) {
+  const n = Math.max(Number(cantidad) || 0, 0);
+  if (n === 0) return 0;
+  if (n <= 2) return n * MENU_QR_PRIMERO_PRECIO;
+  // 1 y 2: 100 c/u; del 3 en adelante: 50
+  return 2 * MENU_QR_PRIMERO_PRECIO + (n - 2) * MENU_QR_TERCERO_EN_ADELANTE;
+}
+
+function calcularResumenPlanRegistro({ planKey, opcionales = {}, menuQrCantidad = 0 } = {}) {
+  const plan = obtenerPlanRegistro(planKey);
+  const ecfActivo = !!opcionales.ecf || plan.fe_incluida;
+  const ecfCostoExtra = plan.fe_incluida || !opcionales.ecf ? 0 : plan.fe_costo_mensual_extra;
+
+  // Delivery: incluido en pro/full. En starter es opcional con costo extra.
+  const deliverySolicitado = !!opcionales.delivery;
+  const deliveryActivo = plan.delivery_incluido || deliverySolicitado;
+  const deliveryCostoExtra =
+    plan.delivery_incluido || !deliverySolicitado ? 0 : plan.delivery_costo_extra_mensual;
+
+  // Plan Full incluye 1 Menu QR opcional sin costo. Los demas se cobran segun escala.
+  let qrCantidadFacturable = Math.max(Number(menuQrCantidad) || 0, 0);
+  if (plan.key === 'full' && qrCantidadFacturable > 0) {
+    qrCantidadFacturable = qrCantidadFacturable - 1;
+  }
+  const menuQrCosto = calcularCostoMenuQr(qrCantidadFacturable);
+
+  const totalMensual = plan.precio_mensual + ecfCostoExtra + deliveryCostoExtra;
+  const totalActivacion = ACTIVACION_INICIAL_DOP + menuQrCosto;
+  return {
+    plan_key: plan.key,
+    plan_nombre: plan.nombre,
+    plan_precio_mensual: plan.precio_mensual,
+    ecf_activo: ecfActivo,
+    ecf_incluida_en_plan: plan.fe_incluida,
+    ecf_costo_extra_mensual: ecfCostoExtra,
+    delivery_activo: deliveryActivo,
+    delivery_incluido_en_plan: plan.delivery_incluido,
+    delivery_costo_extra_mensual: deliveryCostoExtra,
+    menu_qr_cantidad: Math.max(Number(menuQrCantidad) || 0, 0),
+    menu_qr_facturable: qrCantidadFacturable,
+    menu_qr_costo: menuQrCosto,
+    kds_disponible: plan.kds_disponible,
+    kds_incluido: plan.kds_incluido,
+    activacion_inicial: ACTIVACION_INICIAL_DOP,
+    total_mensual: totalMensual,
+    total_activacion_unica: totalActivacion,
+    moneda: plan.moneda,
+    incluye: plan.incluye,
+  };
+}
+
+function recomendarPlanRegistro({ tipoNegocio, usaCocina, usaDelivery, usaBar, cantidadUsuarios, requiereFacturaFiscal } = {}) {
+  const tipo = String(tipoNegocio || '').toLowerCase();
+  const muchosUsuarios = cantidadUsuarios === '11+' || cantidadUsuarios === '4-10';
+  if (usaCocina || tipo.includes('restaurante')) return 'full';
+  if (requiereFacturaFiscal || muchosUsuarios || tipo.includes('cafeteria') || tipo.includes('bar') || usaBar || usaDelivery) {
+    return 'pro';
+  }
+  return 'starter';
+}
+
 function recomendarModulosRegistro({
   tipoNegocio = null,
   usaCocina = false,
@@ -906,20 +1087,62 @@ function getRegistroMailTransporter() {
   return registroMailTransporter;
 }
 
+function _formatFechaSantoDomingo(value) {
+  if (!value) return '--';
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '--';
+  return d.toLocaleString('es-DO', { timeZone: 'America/Santo_Domingo', hour12: false });
+}
+
+function _formatRegistroMonto(n) {
+  return 'RD$' + Number(n || 0).toLocaleString('es-DO');
+}
+
+function _construirResumenCostosTexto(resumen, nombrePlan) {
+  if (!resumen) return [];
+  const lineas = [
+    `Plan: ${nombrePlan || resumen.plan_nombre || '--'}`,
+    `Plan mensual: ${_formatRegistroMonto(resumen.plan_precio_mensual || 0)}`,
+  ];
+  if (resumen.ecf_activo) {
+    if (resumen.ecf_incluida_en_plan) {
+      lineas.push('e-CF DGII: incluida en el plan');
+    } else if (resumen.ecf_costo_extra_mensual > 0) {
+      lineas.push(`e-CF DGII (opcional): + ${_formatRegistroMonto(resumen.ecf_costo_extra_mensual)} /mes`);
+    } else {
+      lineas.push('e-CF DGII: solicitada');
+    }
+  }
+  if (resumen.delivery_activo) {
+    if (resumen.delivery_incluido_en_plan) {
+      lineas.push('Delivery: incluido en el plan');
+    } else if (resumen.delivery_costo_extra_mensual > 0) {
+      lineas.push(`Delivery (opcional): + ${_formatRegistroMonto(resumen.delivery_costo_extra_mensual)} /mes`);
+    }
+  }
+  if (resumen.menu_qr_cantidad > 0) {
+    if (resumen.plan_key === 'full' && resumen.menu_qr_facturable === 0) {
+      lineas.push(`Menus QR: ${resumen.menu_qr_cantidad} (1 incluido en Plan Full)`);
+    } else {
+      lineas.push(
+        `Menus QR: ${resumen.menu_qr_cantidad} -> ${_formatRegistroMonto(resumen.menu_qr_costo)} (unico pago)`
+      );
+    }
+  }
+  lineas.push('');
+  lineas.push(`Total mensual: ${_formatRegistroMonto(resumen.total_mensual || 0)}`);
+  lineas.push(`Activacion inicial (unico pago): ${_formatRegistroMonto(resumen.total_activacion_unica || 0)}`);
+  return lineas;
+}
+
 async function enviarCorreoRegistroSolicitud(registro = {}) {
   const smtpFrom = normalizarCampoTexto(process.env.SMTP_FROM) || normalizarCampoTexto(process.env.SMTP_USER);
   const destinatario = normalizarCampoTexto(REGISTRO_DESTINO_CORREO) || 'posiumtech@gmail.com';
   const webhookUrl = normalizarCampoTexto(process.env.REGISTRO_EMAIL_WEBHOOK_URL);
   const transporter = getRegistroMailTransporter();
-  const fechaRegistro = registro?.created_at ? new Date(registro.created_at) : new Date();
-  const fechaLimite = registro?.estado_pago_limite ? new Date(registro.estado_pago_limite) : null;
-  const fechaRegistroTexto = Number.isNaN(fechaRegistro.getTime())
-    ? '--'
-    : fechaRegistro.toLocaleString('es-DO', { timeZone: 'America/Santo_Domingo', hour12: false });
-  const fechaLimiteTexto =
-    fechaLimite && !Number.isNaN(fechaLimite.getTime())
-      ? fechaLimite.toLocaleString('es-DO', { timeZone: 'America/Santo_Domingo', hour12: false })
-      : '--';
+  const fechaRegistroTexto = _formatFechaSantoDomingo(registro?.created_at || new Date());
+  const fechaLimiteTexto = _formatFechaSantoDomingo(registro?.estado_pago_limite);
+  const resumen = registro?.resumen_costos || null;
 
   const lineas = [
     `Nueva solicitud de registro POSIUM (${registro?.codigo || 'sin-codigo'})`,
@@ -927,6 +1150,7 @@ async function enviarCorreoRegistroSolicitud(registro = {}) {
     `Negocio: ${registro?.negocio_nombre || '--'}`,
     `Negocio ID: ${registro?.negocio_id || '--'} | Slug: ${registro?.negocio_slug || '--'}`,
     `Tipo de negocio: ${registro?.negocio_tipo || '--'}`,
+    `RNC: ${registro?.rnc || '--'} | Razon social: ${registro?.razon_social || '--'}`,
     `Ciudad: ${registro?.ciudad || '--'}`,
     `Admin: ${registro?.admin_nombre || '--'}`,
     `Usuario admin: ${registro?.admin_usuario || '--'} (listo para usar en /login.html)`,
@@ -937,10 +1161,19 @@ async function enviarCorreoRegistroSolicitud(registro = {}) {
     `Usa delivery: ${registro?.usa_delivery ? 'Si' : 'No'}`,
     `Modulos solicitados: ${(registro?.modulos_solicitados_labels || []).join(', ') || '--'}`,
     `Modulos recomendados: ${(registro?.modulos_recomendados_labels || []).join(', ') || '--'}`,
+    `e-CF solicitado: ${registro?.ecf_solicitado ? 'Si' : 'No'}`,
+    `Menus QR solicitados: ${registro?.menu_qr_cantidad || 0}`,
+    '',
+    '== Plan y costos ==',
+    ..._construirResumenCostosTexto(resumen, registro?.plan_nombre),
+    '',
     `Fecha registro: ${fechaRegistroTexto}`,
     `Limite de pago (24h): ${fechaLimiteTexto}`,
     '',
-    'Recordatorio para el cliente: enviar foto del comprobante por WhatsApp o correo.',
+    'Acciones a tomar:',
+    '- Revisar el panel de super admin para validar la solicitud.',
+    '- Esperar comprobante de pago por WhatsApp (+1 809-967-2501) o correo (posiumtech@gmail.com).',
+    '- Si pidio facturacion electronica, asegurate que el cliente cargue su P12 desde Certificacion DGII.',
   ];
 
   if (!transporter && webhookUrl) {
@@ -950,7 +1183,7 @@ async function enviarCorreoRegistroSolicitud(registro = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: destinatario,
-          subject: `Nuevo registro POSIUM - ${registro?.negocio_nombre || 'Negocio sin nombre'}`,
+          subject: `Nuevo registro POSIUM - ${registro?.negocio_nombre || 'Negocio sin nombre'} (${registro?.plan_nombre || ''})`,
           text: lineas.join('\n'),
           registro,
         }),
@@ -976,7 +1209,94 @@ async function enviarCorreoRegistroSolicitud(registro = {}) {
     await transporter.sendMail({
       from: smtpFrom || destinatario,
       to: destinatario,
-      subject: `Nuevo registro POSIUM - ${registro?.negocio_nombre || 'Negocio sin nombre'}`,
+      replyTo: registro?.email || undefined,
+      subject: `Nuevo registro POSIUM - ${registro?.negocio_nombre || 'Negocio sin nombre'} (${registro?.plan_nombre || ''})`,
+      text: lineas.join('\n'),
+    });
+    return { enviado: true, error: null };
+  } catch (error) {
+    const detalle = normalizarErrorCorreoRegistro(error);
+    return { enviado: false, error: detalle };
+  }
+}
+
+// Correo de confirmacion al cliente: bienvenida + plan + instrucciones de pago.
+async function enviarCorreoBienvenidaCliente(registro = {}) {
+  const correoCliente = normalizarCampoTexto(registro?.email);
+  if (!correoCliente) {
+    return { enviado: false, error: 'No hay correo del cliente.' };
+  }
+
+  const smtpFrom = normalizarCampoTexto(process.env.SMTP_FROM) || normalizarCampoTexto(process.env.SMTP_USER);
+  const webhookUrl = normalizarCampoTexto(process.env.REGISTRO_EMAIL_WEBHOOK_URL);
+  const transporter = getRegistroMailTransporter();
+  const fechaLimiteTexto = _formatFechaSantoDomingo(registro?.estado_pago_limite);
+  const resumen = registro?.resumen_costos || null;
+
+  const subject = `POSIUM - Registro recibido (${registro?.codigo || ''})`;
+  const lineas = [
+    `Hola ${registro?.admin_nombre || ''},`,
+    '',
+    `Recibimos tu registro de "${registro?.negocio_nombre || 'tu negocio'}" en POSIUM.`,
+    `Codigo de solicitud: ${registro?.codigo || '--'}`,
+    '',
+    'Tu cuenta de administrador ya esta lista para usarse:',
+    `  Usuario admin: ${registro?.admin_usuario || '--'}`,
+    `  Inicia sesion en: https://posium.tech/login.html`,
+    '  (usa la password que creaste en el formulario)',
+    '',
+    '== Plan seleccionado ==',
+    ..._construirResumenCostosTexto(resumen, registro?.plan_nombre),
+    '',
+    `Para activar el servicio, debes realizar el pago dentro de las proximas 24 horas (limite ${fechaLimiteTexto}).`,
+    '',
+    'Como pagar:',
+    '- Envia el comprobante de pago por WhatsApp al +1 809-967-2501',
+    '- O por correo a posiumtech@gmail.com',
+    '- Indica el codigo de solicitud para acelerar la validacion.',
+    '',
+    registro?.ecf_solicitado
+      ? 'Activacion de Facturacion Electronica e-CF DGII: cuando hayas pagado, ingresa al panel admin > Certificacion DGII para cargar tu certificado P12 y configurar las secuencias e-CF autorizadas por la DGII para tu RNC.'
+      : '',
+    '',
+    'Que pasa si no pagas dentro de 24 horas?',
+    'La solicitud quedara en estado "pendiente" pero el servicio no se activara hasta validar el pago.',
+    '',
+    'Cualquier duda nos puedes escribir directamente.',
+    '',
+    'Equipo POSIUM',
+    'WhatsApp: +1 809-967-2501',
+    'Correo: posiumtech@gmail.com',
+    'Web: https://posium.tech',
+  ].filter((l) => l !== null && l !== undefined);
+
+  if (!transporter && webhookUrl) {
+    try {
+      const resp = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: correoCliente, subject, text: lineas.join('\n'), tipo: 'cliente' }),
+      });
+      if (!resp.ok) throw new Error(`Webhook respondio ${resp.status}`);
+      return { enviado: true, error: null };
+    } catch (error) {
+      return { enviado: false, error: error?.message || 'No se pudo enviar correo al cliente.' };
+    }
+  }
+
+  if (!transporter) {
+    return {
+      enviado: false,
+      error:
+        'Correo al cliente no configurado: define SMTP_HOST/SMTP_USER/SMTP_PASS o REGISTRO_EMAIL_WEBHOOK_URL.',
+    };
+  }
+
+  try {
+    await transporter.sendMail({
+      from: smtpFrom || 'posiumtech@gmail.com',
+      to: correoCliente,
+      subject,
       text: lineas.join('\n'),
     });
     return { enviado: true, error: null };
@@ -1317,11 +1637,42 @@ function stringifyConfigModulos(configModulos) {
   return JSON.stringify(parsed);
 }
 
+// Cache de config_modulos por negocio. TTL 60s: si el super admin cambia los
+// modulos, tomara hasta 60s en propagar (aceptable). Invalidar manualmente
+// con invalidarConfigModulosCache(negocioId) en PUT/PATCH de negocios.
+const _configModulosCache = new Map(); // negocioId -> { config, expiresAt }
+const CONFIG_MODULOS_TTL_MS = 60_000;
+const CONFIG_MODULOS_CACHE_MAX = 200;
+
+function invalidarConfigModulosCache(negocioId) {
+  if (negocioId == null) {
+    _configModulosCache.clear();
+    return;
+  }
+  _configModulosCache.delete(Number(negocioId));
+}
+
 async function obtenerConfigModulosNegocio(negocioId) {
   const id = negocioId || NEGOCIO_ID_DEFAULT;
+  const ahora = Date.now();
+  const cached = _configModulosCache.get(id);
+  if (cached && cached.expiresAt > ahora) {
+    return cached.config;
+  }
   try {
     const row = await db.get('SELECT config_modulos FROM negocios WHERE id = ? LIMIT 1', [id]);
-    return parseConfigModulos(row?.config_modulos ?? row?.configModulos);
+    const config = parseConfigModulos(row?.config_modulos ?? row?.configModulos);
+    // GC simple: si el Map crecio demasiado, limpiar las mas viejas.
+    if (_configModulosCache.size >= CONFIG_MODULOS_CACHE_MAX) {
+      const aRemover = _configModulosCache.size - Math.floor(CONFIG_MODULOS_CACHE_MAX * 0.7);
+      let n = 0;
+      for (const k of _configModulosCache.keys()) {
+        if (n++ >= aRemover) break;
+        _configModulosCache.delete(k);
+      }
+    }
+    _configModulosCache.set(id, { config, expiresAt: ahora + CONFIG_MODULOS_TTL_MS });
+    return config;
   } catch (error) {
     console.warn(`No se pudo obtener config_modulos para el negocio ${id}:`, error?.message || error);
     return { ...DEFAULT_CONFIG_MODULOS };
@@ -1334,6 +1685,110 @@ async function moduloActivoParaNegocio(modulo, negocioId) {
     return false;
   }
   return config[modulo] !== false;
+}
+
+// ---------------------------------------------------------------------------
+// Plan POSIUM por negocio: gating de features y limites cuantitativos.
+// IMPORTANTE: si un negocio no tiene plan en BD (legacy), se asume 'full' para
+// no romper nada. El super admin puede ajustar el plan luego.
+// ---------------------------------------------------------------------------
+const _planNegocioCache = new Map();
+const PLAN_NEGOCIO_CACHE_TTL_MS = 30_000;
+
+async function obtenerPlanNegocio(negocioId) {
+  const id = Number(negocioId) || NEGOCIO_ID_DEFAULT;
+  const ahora = Date.now();
+  const hit = _planNegocioCache.get(id);
+  if (hit && ahora - hit.t < PLAN_NEGOCIO_CACHE_TTL_MS) return hit.v;
+  let row = null;
+  try {
+    row = await db.get(
+      'SELECT plan_id, plan_activado_en, plan_vence_en, limite_usuarios, limite_menu_qr FROM negocios WHERE id = ? LIMIT 1',
+      [id]
+    );
+  } catch (error) {
+    console.warn(`No se pudo obtener plan para negocio ${id}:`, error?.message || error);
+  }
+  const planKey = String(row?.plan_id || 'full').toLowerCase();
+  const plan = PLANES_POSIUM[planKey] || PLANES_POSIUM.full;
+  const v = {
+    key: planKey,
+    nombre: plan.nombre,
+    kds_disponible: plan.kds_disponible,
+    kds_incluido: plan.kds_incluido,
+    fe_incluida: plan.fe_incluida,
+    delivery_incluido: plan.delivery_incluido,
+    limite_usuarios: row?.limite_usuarios != null ? Number(row.limite_usuarios) : _limitesDefaultPlan(planKey).limite_usuarios,
+    limite_menu_qr: row?.limite_menu_qr != null ? Number(row.limite_menu_qr) : _limitesDefaultPlan(planKey).limite_menu_qr,
+    activado_en: row?.plan_activado_en || null,
+    vence_en: row?.plan_vence_en || null,
+  };
+  _planNegocioCache.set(id, { t: ahora, v });
+  return v;
+}
+
+function invalidarCachePlanNegocio(negocioId) {
+  if (negocioId == null) {
+    _planNegocioCache.clear();
+    return;
+  }
+  _planNegocioCache.delete(Number(negocioId));
+}
+
+function _limitesDefaultPlan(planKey) {
+  const k = String(planKey || 'full').toLowerCase();
+  if (k === 'starter') return { limite_usuarios: 3, limite_menu_qr: 1 };
+  if (k === 'pro') return { limite_usuarios: 10, limite_menu_qr: 3 };
+  return { limite_usuarios: null, limite_menu_qr: null }; // ilimitado
+}
+
+// Verifica si el plan del negocio es de la lista de aceptados.
+// Acepta plan keys (starter/pro/full) o niveles ('basico','medio','premium').
+function planNegocioCumple(planActualKey, planesPermitidos = []) {
+  const lista = (Array.isArray(planesPermitidos) ? planesPermitidos : [planesPermitidos])
+    .map((p) => String(p || '').toLowerCase());
+  return lista.includes(String(planActualKey || '').toLowerCase());
+}
+
+// Middleware express STANDALONE: valida sesion + plan del negocio.
+//   app.use('/api/cocina', requierePlan(['pro', 'full']));
+// Si super admin: pasa siempre. Si no hay sesion: 401. Si plan no cumple: 403.
+// Si la consulta falla por algun motivo, deja pasar (fail-open) — el default
+// del schema es 'full' asi que esto solo aplica a errores de BD transitorios.
+function requierePlan(planesPermitidos = []) {
+  const lista = (Array.isArray(planesPermitidos) ? planesPermitidos : [planesPermitidos])
+    .map((p) => String(p || '').toLowerCase());
+  return (req, res, next) => {
+    obtenerUsuarioDesdeHeaders(req, async (sessionErr, usuarioSesion) => {
+      try {
+        if (sessionErr) {
+          // Si no se puede validar sesion, deja que el handler real responda 401.
+          return next();
+        }
+        if (!usuarioSesion) {
+          // Si no hay sesion, dejamos pasar para que el handler real (con
+          // requireUsuarioSesion) sea quien devuelva 401 con su propio formato.
+          return next();
+        }
+        // Super admin pasa siempre (soporte cross-negocio).
+        if (esSuperAdmin(usuarioSesion)) return next();
+
+        const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+        const plan = await obtenerPlanNegocio(negocioId);
+        if (planNegocioCumple(plan.key, lista)) return next();
+
+        return res.status(403).json({
+          ok: false,
+          error: `Funcion no disponible en tu plan (${plan.key.toUpperCase()}). Requiere: ${lista.join(', ').toUpperCase()}.`,
+          plan_actual: plan.key,
+          planes_requeridos: lista,
+        });
+      } catch (error) {
+        console.error('Error en requierePlan:', error?.message || error);
+        return next();
+      }
+    });
+  };
 }
 
 async function asegurarAdminPrincipalNegocio({ negocioId, negocioNombre, payload }) {
@@ -2187,9 +2642,77 @@ const extraerTokenDeHeaders = (req) => {
   return null;
 };
 
+// ---------------------------------------------------------------------------
+// Cache de sesion en memoria + bacheo de UPDATE ultimo_uso.
+//
+// PROBLEMA QUE RESUELVE: cada request hace 5 queries (sesiones_usuarios,
+// usuarios, UPDATE ultimo_uso, negocios.config_modulos, validarEstadoNegocio).
+// Con polling de 2-15s por dispositivo y multiples tabs abiertas, son miles
+// de queries por minuto solo para autenticacion. Esto agota el pool de
+// conexiones MySQL y pone lento todo el sistema.
+//
+// SOLUCION:
+//   - Cache por token con TTL 30s. Si el token esta cacheado, devolvemos
+//     el sesion-object sin tocar la BD.
+//   - El UPDATE ultimo_uso se bachea: solo se ejecuta si han pasado >=120s
+//     desde el ultimo update (suficiente para tracking de inactividad).
+//   - El cache se invalida automaticamente en logout y en cambios criticos
+//     (cambio de password, force_password_change activado, suspension).
+//
+// IMPACTO: una sesion activa con polling de 10s pasa de ~30 queries/min a
+// ~0 queries/min para auth, solo 1 query cada 30s para refresh del cache.
+// ---------------------------------------------------------------------------
+const _sesionCacheTokens = new Map(); // token -> { sesion, expiresAt, ultimoUpdateAt }
+const SESION_CACHE_TTL_MS = 30_000; // 30 segundos (suficientemente fresco)
+const SESION_CACHE_MAX = 500; // limite duro para evitar leak
+const SESION_ULTIMO_USO_BATCH_MS = 120_000; // UPDATE solo cada 2 minutos por token
+
+function invalidarSesionCachePorToken(token) {
+  if (token) _sesionCacheTokens.delete(token);
+}
+
+function invalidarSesionCacheCompleto() {
+  _sesionCacheTokens.clear();
+}
+
+// Invalidar TODAS las sesiones cacheadas de un usuario (por logout-all, cambio
+// de password, etc). Lento (recorre el Map) pero raro.
+function invalidarSesionCachePorUsuarioId(usuarioId) {
+  if (usuarioId == null) return;
+  const id = Number(usuarioId);
+  for (const [token, entry] of _sesionCacheTokens.entries()) {
+    if (entry?.sesion?.id === id) _sesionCacheTokens.delete(token);
+  }
+}
+
+function _gcSesionCache() {
+  if (_sesionCacheTokens.size <= SESION_CACHE_MAX) return;
+  // Eliminar las mas viejas (Map mantiene orden de inserción)
+  const aRemover = _sesionCacheTokens.size - Math.floor(SESION_CACHE_MAX * 0.8);
+  let n = 0;
+  for (const k of _sesionCacheTokens.keys()) {
+    if (n++ >= aRemover) break;
+    _sesionCacheTokens.delete(k);
+  }
+}
+
 async function obtenerUsuarioSesionPorToken(token) {
   if (!token) {
     return null;
+  }
+
+  // Cache hit: si el token esta cacheado y no expiró, devolvemos directo.
+  const ahora = Date.now();
+  const cached = _sesionCacheTokens.get(token);
+  if (cached && cached.expiresAt > ahora) {
+    // Bacheo de ultimo_uso: solo UPDATE si pasaron >=2min desde el ultimo.
+    if (cached.sesionId && ahora - (cached.ultimoUpdateAt || 0) >= SESION_ULTIMO_USO_BATCH_MS) {
+      cached.ultimoUpdateAt = ahora;
+      // Fire-and-forget; no esperar (no afecta el response time).
+      db.run('UPDATE sesiones_usuarios SET ultimo_uso = CURRENT_TIMESTAMP WHERE id = ?', [cached.sesionId])
+        .catch((err) => console.warn('No se pudo actualizar ultimo_uso:', err?.message || err));
+    }
+    return cached.sesion;
   }
 
   const sql = `
@@ -2210,12 +2733,14 @@ async function obtenerUsuarioSesionPorToken(token) {
       return null;
     }
 
-    await db.run('UPDATE sesiones_usuarios SET ultimo_uso = CURRENT_TIMESTAMP WHERE id = ?', [row.sesion_id]);
+    // Update inicial (al primer cache miss). Despues se bachea cada 2 min.
+    db.run('UPDATE sesiones_usuarios SET ultimo_uso = CURRENT_TIMESTAMP WHERE id = ?', [row.sesion_id])
+      .catch((err) => console.warn('No se pudo actualizar ultimo_uso:', err?.message || err));
 
     const negocioId = usuario.negocio_id != null ? usuario.negocio_id : NEGOCIO_ID_DEFAULT;
     const configModulosSesion = await obtenerConfigModulosNegocio(negocioId);
 
-    return {
+    const sesion = {
       id: usuario.id,
       nombre: usuario.nombre,
       usuario: usuario.usuario,
@@ -2230,6 +2755,17 @@ async function obtenerUsuarioSesionPorToken(token) {
       configModulos: configModulosSesion,
       token,
     };
+
+    // Cachear con TTL.
+    _gcSesionCache();
+    _sesionCacheTokens.set(token, {
+      sesion,
+      sesionId: row.sesion_id,
+      expiresAt: ahora + SESION_CACHE_TTL_MS,
+      ultimoUpdateAt: ahora,
+    });
+
+    return sesion;
   }
 
   const payload = verificarTokenImpersonacion(token);
@@ -9901,8 +10437,24 @@ const {
   obtenerRangoAnterior,
   NEGOCIO_ID_DEFAULT,
 });
+// Gating por plan ANTES del router de analytics avanzado:
+// /api/admin/analytics/advanced (y todo el sub-router) requiere Pro o Full.
+// El analisisExtensionRouter expone los KPIs avanzados; lo dejamos solo como
+// "advanced" en el path para que las queries simples sigan abiertas.
+app.use('/api/admin/analytics/advanced', requierePlan(['pro', 'full']));
 app.use('/api/admin/analytics', __analisisExtensionRouter);
 global.__limpiarCacheAnalisisExtension = __limpiarCacheAnalisisExtension;
+
+// Gating de modulos KDS (cocina, bar, historial de preparacion). Solo Pro+.
+// Estos endpoints estan definidos mas abajo en el archivo, pero como Express
+// evalua los middlewares en orden, este app.use los protege a TODOS.
+app.use('/api/cocina', requierePlan(['pro', 'full']));
+app.use('/api/bar', requierePlan(['pro', 'full']));
+app.use('/api/preparacion/historial', requierePlan(['pro', 'full']));
+app.use('/api/historial-cocina', requierePlan(['pro', 'full']));
+
+// Gating de chat interno: EXCLUSIVO del plan Full.
+app.use('/api/chat', requierePlan(['full']));
 
 app.post('/api/caja/cierres', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
@@ -11327,6 +11879,58 @@ app.post('/api/menu-publico/accesos', (req, res) => {
 
     if (!entradas.length) {
       return res.status(400).json({ ok: false, error: 'No se recibieron accesos para guardar.' });
+    }
+
+    // Limite cuantitativo de Menus QR segun plan. Super admin no esta sujeto.
+    if (!esSuperAdmin(usuarioSesion)) {
+      try {
+        const plan = await obtenerPlanNegocio(negocioId);
+        if (plan?.limite_menu_qr != null && Number.isFinite(Number(plan.limite_menu_qr))) {
+          const limite = Number(plan.limite_menu_qr);
+          // Cuenta accesos activos actuales (excluyendo los que esten en el
+          // batch con id, porque seran actualizados/preservados).
+          const idsBatch = entradas
+            .map((e) => Number(e?.id))
+            .filter((n) => Number.isFinite(n) && n > 0);
+          const placeholders = idsBatch.map(() => '?').join(',');
+          const params = [negocioId];
+          let sqlExcl = '';
+          if (idsBatch.length) {
+            sqlExcl = ` AND id NOT IN (${placeholders})`;
+            params.push(...idsBatch);
+          }
+          const rowConteo = await db.get(
+            `SELECT COUNT(*) AS total FROM menu_publico_accesos
+             WHERE negocio_id = ? AND activo = 1${sqlExcl}`,
+            params
+          );
+          const actuales = Number(rowConteo?.total || 0);
+          // Suma cuantos NUEVOS quedarian activos al cierre del batch.
+          const nuevosActivos = entradas.filter((e) => {
+            const id = Number(e?.id);
+            const activoFlag = Number(e?.activo ?? 1) === 1;
+            return !(Number.isFinite(id) && id > 0) && activoFlag;
+          }).length;
+          // Ademas, sumar los que en batch tienen id Y activo=1 (re-activacion).
+          const reactivados = entradas.filter((e) => {
+            const id = Number(e?.id);
+            return Number.isFinite(id) && id > 0 && Number(e?.activo ?? 1) === 1;
+          }).length;
+          const totalProyectado = actuales + nuevosActivos + reactivados;
+          if (totalProyectado > limite) {
+            return res.status(403).json({
+              ok: false,
+              error: `Tu plan ${plan.key.toUpperCase()} permite hasta ${limite} Menus QR activos. Quedarian ${totalProyectado} activos. Desactiva uno o actualiza tu plan.`,
+              plan_actual: plan.key,
+              limite_menu_qr: limite,
+              menu_qr_proyectado: totalProyectado,
+            });
+          }
+        }
+      } catch (limiteErr) {
+        console.warn('No se pudo validar limite de Menus QR por plan:', limiteErr?.message || limiteErr);
+        // fail-open: si la consulta falla, seguimos (no romper en error transitorio).
+      }
     }
 
     const crearErrorEstado = (status, message) => {
@@ -15776,7 +16380,9 @@ app.get('/api/negocios', (req, res) => {
              e.nombre AS empresa_nombre,
              u.usuario AS admin_principal_usuario,
              n.logo_url, n.titulo_sistema, n.activo, n.suspendido, n.deleted_at, n.motivo_suspension, n.updated_at,
-             n.creado_en
+             n.creado_en,
+             n.plan_id, n.plan_activado_en, n.plan_vence_en, n.limite_usuarios, n.limite_menu_qr,
+             n.permitir_b01, n.permitir_b02, n.permitir_b14
         FROM negocios n
         LEFT JOIN usuarios u ON u.id = n.admin_principal_usuario_id
         LEFT JOIN empresas e ON e.id = n.empresa_id
@@ -16353,6 +16959,54 @@ app.put('/api/negocios/:id', (req, res) => {
       params.push(payload.activo === 0 || payload.activo === false ? 0 : 1);
     }
 
+    // Plan POSIUM + limites cuantitativos (super admin only desde modal).
+    let planNuevo = null;
+    if (payload.plan_id !== undefined || payload.planId !== undefined) {
+      const planRaw = String(payload.plan_id ?? payload.planId ?? '').toLowerCase();
+      if (planRaw && PLANES_POSIUM[planRaw]) {
+        planNuevo = planRaw;
+        fields.push('plan_id = ?');
+        params.push(planRaw);
+        // Marcar activado_en si cambio
+        fields.push('plan_activado_en = ?');
+        params.push(new Date());
+      }
+    }
+    if (payload.limite_usuarios !== undefined || payload.limiteUsuarios !== undefined) {
+      const lu = payload.limite_usuarios ?? payload.limiteUsuarios;
+      const valor = lu === null || lu === '' ? null : Math.max(Number(lu) || 0, 1);
+      fields.push('limite_usuarios = ?');
+      params.push(valor);
+    }
+    if (payload.limite_menu_qr !== undefined || payload.limiteMenuQr !== undefined) {
+      const lq = payload.limite_menu_qr ?? payload.limiteMenuQr;
+      const valor = lq === null || lq === '' ? null : Math.max(Number(lq) || 0, 0);
+      fields.push('limite_menu_qr = ?');
+      params.push(valor);
+    }
+    if (payload.plan_vence_en !== undefined || payload.planVenceEn !== undefined) {
+      const fechaRaw = payload.plan_vence_en ?? payload.planVenceEn;
+      const fecha = fechaRaw ? new Date(fechaRaw) : null;
+      fields.push('plan_vence_en = ?');
+      params.push(fecha && !Number.isNaN(fecha.getTime()) ? fecha : null);
+    }
+    // Secuencias NCF legacy B01 / B02 / B14
+    if (payload.permitir_b01 !== undefined || payload.permitirB01 !== undefined) {
+      const v = payload.permitir_b01 ?? payload.permitirB01;
+      fields.push('permitir_b01 = ?');
+      params.push(v === 0 || v === false ? 0 : 1);
+    }
+    if (payload.permitir_b02 !== undefined || payload.permitirB02 !== undefined) {
+      const v = payload.permitir_b02 ?? payload.permitirB02;
+      fields.push('permitir_b02 = ?');
+      params.push(v === 0 || v === false ? 0 : 1);
+    }
+    if (payload.permitir_b14 !== undefined || payload.permitirB14 !== undefined) {
+      const v = payload.permitir_b14 ?? payload.permitirB14;
+      fields.push('permitir_b14 = ?');
+      params.push(v === 0 || v === false ? 0 : 1);
+    }
+
     if (!fields.length) {
       return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
     }
@@ -16368,6 +17022,41 @@ app.put('/api/negocios/:id', (req, res) => {
       if (this.changes === 0) {
         return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
       }
+      // Si se cambio el plan a uno con FE incluida (full), asegurar habilitada=1
+      // en facturacion_electronica_config (sin tocar credenciales / P12).
+      if (planNuevo && PLANES_POSIUM[planNuevo]?.fe_incluida) {
+        try {
+          await db.run(
+            `INSERT INTO facturacion_electronica_config (negocio_id, habilitada, ambiente, proveedor)
+             VALUES (?, 1, 'certificacion', 'DGII')
+             ON DUPLICATE KEY UPDATE habilitada = 1, updated_at = CURRENT_TIMESTAMP`,
+            [id]
+          );
+        } catch (feErr) {
+          console.warn('No se pudo sincronizar FE en PUT negocios:', feErr?.message || feErr);
+        }
+      }
+      // Si el plan no permite KDS, apagar el modulo en config_modulos.
+      if (planNuevo && PLANES_POSIUM[planNuevo] && !PLANES_POSIUM[planNuevo].kds_disponible) {
+        try {
+          const row = await db.get('SELECT config_modulos FROM negocios WHERE id = ? LIMIT 1', [id]);
+          const config = parseConfigModulos(row?.config_modulos);
+          config.cocina = false;
+          config.bar = false;
+          config.historialCocina = false;
+          await db.run(
+            'UPDATE negocios SET config_modulos = ? WHERE id = ?',
+            [stringifyConfigModulos(config), id]
+          );
+          invalidarConfigModulosCache(id);
+        } catch (cmErr) {
+          console.warn('No se pudo apagar modulos KDS tras cambio de plan:', cmErr?.message || cmErr);
+        }
+      }
+      // Invalidar cache del plan para que el siguiente request lo recargue.
+      if (planNuevo) invalidarCachePlanNegocio(id);
+      // Si se tocaron modulos, invalidar el cache de config_modulos.
+      if (configModulosProvided !== undefined) invalidarConfigModulosCache(id);
 
             try {
         if (adminPrincipalCorreo || adminPrincipalUsuario || adminPrincipalPassword) {
@@ -16429,6 +17118,176 @@ app.patch('/api/negocios/:id/estado', (req, res) => {
       }
       res.json({ ok: true, activo: valor });
     });
+  });
+});
+
+// GET /api/negocios/:id/plan — devuelve el plan + limites actuales del negocio.
+// Super admin only.
+app.get('/api/negocios/:id/plan', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+    try {
+      const row = await db.get(
+        `SELECT id, nombre, plan_id, plan_activado_en, plan_vence_en,
+                limite_usuarios, limite_menu_qr, plan_extras_json
+         FROM negocios WHERE id = ? LIMIT 1`,
+        [id]
+      );
+      if (!row) return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+      const planKey = String(row.plan_id || 'full').toLowerCase();
+      const plan = PLANES_POSIUM[planKey] || PLANES_POSIUM.full;
+      const extras = (() => {
+        try {
+          return row.plan_extras_json ? JSON.parse(row.plan_extras_json) : {};
+        } catch (_) {
+          return {};
+        }
+      })();
+      const limitesDefault = _limitesDefaultPlan(planKey);
+      return res.json({
+        ok: true,
+        negocio: {
+          id: row.id,
+          nombre: row.nombre,
+        },
+        plan: {
+          key: planKey,
+          nombre: plan.nombre,
+          activado_en: row.plan_activado_en,
+          vence_en: row.plan_vence_en,
+          limite_usuarios: row.limite_usuarios != null ? Number(row.limite_usuarios) : limitesDefault.limite_usuarios,
+          limite_menu_qr: row.limite_menu_qr != null ? Number(row.limite_menu_qr) : limitesDefault.limite_menu_qr,
+          kds_disponible: plan.kds_disponible,
+          kds_incluido: plan.kds_incluido,
+          fe_incluida: plan.fe_incluida,
+          delivery_incluido: plan.delivery_incluido,
+          extras,
+        },
+        planes_disponibles: Object.keys(PLANES_POSIUM).map((k) => ({
+          key: k,
+          nombre: PLANES_POSIUM[k].nombre,
+          precio_mensual: PLANES_POSIUM[k].precio_mensual,
+          kds_disponible: PLANES_POSIUM[k].kds_disponible,
+          fe_incluida: PLANES_POSIUM[k].fe_incluida,
+          delivery_incluido: PLANES_POSIUM[k].delivery_incluido,
+        })),
+      });
+    } catch (error) {
+      console.error('Error al obtener plan de negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el plan del negocio' });
+    }
+  });
+});
+
+// PATCH /api/negocios/:id/plan — cambia el plan o ajusta limites del negocio.
+// Body: { plan?: 'starter'|'pro'|'full', limite_usuarios?: int|null,
+//         limite_menu_qr?: int|null, vence_en?: 'YYYY-MM-DD'|null }
+// Super admin only. Cuando se cambia el plan, los limites se resetean al
+// default del nuevo plan salvo que el caller los envie explicitamente.
+app.patch('/api/negocios/:id/plan', (req, res) => {
+  requireSuperAdmin(req, res, async () => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de negocio invalido' });
+    }
+    const body = req.body || {};
+    const planSolicitado = body.plan != null ? String(body.plan).toLowerCase() : null;
+    if (planSolicitado && !PLANES_POSIUM[planSolicitado]) {
+      return res.status(400).json({
+        ok: false,
+        error: `Plan invalido. Usa uno de: ${Object.keys(PLANES_POSIUM).join(', ')}.`,
+      });
+    }
+
+    try {
+      const negocio = await db.get('SELECT id, plan_id FROM negocios WHERE id = ? LIMIT 1', [id]);
+      if (!negocio) return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
+
+      const planFinal = planSolicitado || String(negocio.plan_id || 'full').toLowerCase();
+      const limitesDefault = _limitesDefaultPlan(planFinal);
+
+      // Si cambio de plan y NO envia limites, usar default del nuevo plan.
+      // Si envia explicitamente, respetar valor (puede ser null para ilimitado).
+      const limiteUsuariosFinal = Object.prototype.hasOwnProperty.call(body, 'limite_usuarios')
+        ? (body.limite_usuarios === null || body.limite_usuarios === '' ? null : Math.max(Number(body.limite_usuarios) || 0, 1))
+        : limitesDefault.limite_usuarios;
+      const limiteMenuQrFinal = Object.prototype.hasOwnProperty.call(body, 'limite_menu_qr')
+        ? (body.limite_menu_qr === null || body.limite_menu_qr === '' ? null : Math.max(Number(body.limite_menu_qr) || 0, 0))
+        : limitesDefault.limite_menu_qr;
+      const venceEnFinal = Object.prototype.hasOwnProperty.call(body, 'vence_en')
+        ? (body.vence_en ? new Date(body.vence_en) : null)
+        : undefined;
+      const ahora = new Date();
+
+      const cambioPlan = planSolicitado && planSolicitado !== String(negocio.plan_id || '').toLowerCase();
+
+      const fields = ['plan_id = ?', 'limite_usuarios = ?', 'limite_menu_qr = ?'];
+      const params = [planFinal, limiteUsuariosFinal, limiteMenuQrFinal];
+      if (cambioPlan) {
+        fields.push('plan_activado_en = ?');
+        params.push(ahora);
+      }
+      if (venceEnFinal !== undefined) {
+        fields.push('plan_vence_en = ?');
+        params.push(venceEnFinal);
+      }
+      params.push(id);
+
+      await db.run(`UPDATE negocios SET ${fields.join(', ')} WHERE id = ?`, params);
+      invalidarCachePlanNegocio(id);
+
+      // Si pasa a Full o se solicita, sincronizar habilitacion FE en
+      // facturacion_electronica_config (pero SIN tocar el certificado P12 ni
+      // credenciales — solo el flag). Esto es seguro para FE.
+      // NOTA: solo activa, nunca desactiva (para no romper si ya esta funcionando).
+      try {
+        const planFinalInfo = PLANES_POSIUM[planFinal];
+        if (planFinalInfo?.fe_incluida) {
+          await db.run(
+            `INSERT INTO facturacion_electronica_config (negocio_id, habilitada, ambiente, proveedor)
+             VALUES (?, 1, 'certificacion', 'DGII')
+             ON DUPLICATE KEY UPDATE habilitada = 1, updated_at = CURRENT_TIMESTAMP`,
+            [id]
+          );
+        }
+      } catch (feErr) {
+        // No bloquear: si falla este paso, el plan ya quedo guardado.
+        console.warn('No se pudo sincronizar FE tras cambio de plan:', feErr?.message || feErr);
+      }
+
+      // Si el plan no permite KDS, apagar el modulo en config_modulos para
+      // que la UI lo refleje (los endpoints ya quedan gateados aparte).
+      try {
+        if (!PLANES_POSIUM[planFinal]?.kds_disponible) {
+          const row = await db.get('SELECT config_modulos FROM negocios WHERE id = ? LIMIT 1', [id]);
+          const config = parseConfigModulos(row?.config_modulos);
+          config.cocina = false;
+          config.bar = false;
+          config.historialCocina = false;
+          await db.run(
+            'UPDATE negocios SET config_modulos = ? WHERE id = ?',
+            [stringifyConfigModulos(config), id]
+          );
+          invalidarConfigModulosCache(id);
+        }
+      } catch (cmErr) {
+        console.warn('No se pudo ajustar config_modulos tras cambio de plan:', cmErr?.message || cmErr);
+      }
+
+      const planActual = await obtenerPlanNegocio(id);
+      return res.json({
+        ok: true,
+        negocio_id: id,
+        plan: planActual,
+        cambio_plan: cambioPlan,
+      });
+    } catch (error) {
+      console.error('Error al actualizar plan de negocio:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar el plan del negocio' });
+    }
   });
 });
 
@@ -17302,6 +18161,7 @@ app.post('/api/admin/negocios/:id/reset-admin-password', (req, res) => {
       });
 
       cerrarSesionesActivasDeUsuario(adminUsuario.id, () => {});
+      invalidarSesionCachePorUsuarioId(adminUsuario.id);
       await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'reset_password' });
 
       res.json({
@@ -17489,6 +18349,37 @@ app.post('/api/usuarios', (req, res) => {
       );
       if (existenteSupervisor) {
         return res.status(400).json({ error: 'Ya existe un supervisor asignado a esta sucursal.' });
+      }
+    }
+
+    // Limite cuantitativo de usuarios segun plan del negocio destino.
+    // Super admin no esta sujeto a limite. El propio admin del negocio si.
+    if (!esSuper) {
+      try {
+        const plan = await obtenerPlanNegocio(negocioDestino);
+        if (plan?.limite_usuarios != null && Number.isFinite(Number(plan.limite_usuarios))) {
+          const limite = Number(plan.limite_usuarios);
+          // Solo cuenta usuarios activos del negocio (excluye super admins).
+          const rowConteo = await db.get(
+            `SELECT COUNT(*) AS total FROM usuarios
+             WHERE negocio_id = ? AND activo = 1
+               AND (es_super_admin IS NULL OR es_super_admin = 0)`,
+            [negocioDestino]
+          );
+          const total = Number(rowConteo?.total || 0);
+          if (Number(activo) === 1 && total >= limite) {
+            return res.status(403).json({
+              ok: false,
+              error: `Tu plan ${plan.key.toUpperCase()} permite hasta ${limite} usuarios activos. Tienes ${total}. Para agregar mas usuarios, actualiza tu plan o desactiva un usuario existente.`,
+              plan_actual: plan.key,
+              limite_usuarios: limite,
+              usuarios_actuales: total,
+            });
+          }
+        }
+      } catch (limiteErr) {
+        console.warn('No se pudo validar limite de usuarios por plan:', limiteErr?.message || limiteErr);
+        // fail-open: si no se puede consultar el plan, dejamos pasar.
       }
     }
 
@@ -17760,7 +18651,8 @@ app.post('/api/usuarios/:id/cerrar-sesiones', (req, res) => {
             .status(500)
             .json({ ok: false, error: 'No se pudieron cerrar las sesiones del usuario' });
         }
-
+        // Invalidar el cache de sesiones del usuario afectado.
+        invalidarSesionCachePorUsuarioId(usuarioId);
         res.json({ ok: true, sesiones_cerradas: cerradas });
       });
     } catch (error) {
@@ -32285,16 +33177,54 @@ app.post('/api/public/registro', async (req, res) => {
   const usaCocina = normalizarBooleanRegistro(payload.usa_cocina ?? payload.usaCocina ?? payload.tiene_cocina, false);
   const usaDelivery = normalizarBooleanRegistro(payload.usa_delivery ?? payload.usaDelivery ?? payload.tiene_delivery, false);
   const usaBar = normalizarBooleanRegistro(payload.usa_bar ?? payload.usaBar, false);
+  const requiereFE = normalizarBooleanRegistro(
+    payload.requiere_facturacion_electronica ?? payload.requiereFacturacionElectronica,
+    false
+  );
 
-  if (!negocioNombre || !adminNombre || !adminUsuario || !adminPassword) {
+  // Plan + opcionales nuevos
+  const planKey = normalizarPlanRegistro(payload.plan ?? payload.plan_key ?? PLAN_DEFAULT);
+  const plan = obtenerPlanRegistro(planKey);
+  const ecfSolicitado =
+    plan.fe_incluida ||
+    requiereFE ||
+    normalizarBooleanRegistro(payload.ecf_solicitado ?? payload.ecfSolicitado, false);
+  const menuQrCantidad = Math.max(Number(payload.menu_qr_cantidad ?? payload.menuQrCantidad) || 0, 0);
+  const menuQrSolicitado = menuQrCantidad > 0 ||
+    normalizarBooleanRegistro(payload.menu_qr_solicitado ?? payload.menuQrSolicitado, false);
+  const rnc = normalizarCampoTexto(payload.rnc ?? payload.rnc_emisor ?? payload.rncEmisor) || '';
+  const razonSocial = normalizarCampoTexto(payload.razon_social ?? payload.razonSocial) || '';
+  const terminosAceptados = normalizarBooleanRegistro(payload.terminos_aceptados ?? payload.terminosAceptados, false);
+  const privacidadAceptada = normalizarBooleanRegistro(payload.privacidad_aceptada ?? payload.privacidadAceptada, false);
+
+  if (!negocioNombre || !adminNombre || !adminUsuario || !adminPassword || !email || !telefono) {
     return res.status(400).json({
       ok: false,
-      error: 'Completa negocio, nombre admin, usuario admin y password para registrarte.',
+      error: 'Completa nombre del negocio, telefono, correo, nombre del admin, usuario admin y password.',
     });
   }
 
   if (adminPassword.length < 6) {
     return res.status(400).json({ ok: false, error: 'La password del admin debe tener al menos 6 caracteres.' });
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ ok: false, error: 'Ingresa un correo electronico valido.' });
+  }
+
+  if (!terminosAceptados || !privacidadAceptada) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Debes aceptar los Terminos y Condiciones y la Politica de Privacidad para continuar.',
+    });
+  }
+
+  // Si solicita e-CF y no envio RNC, advertir.
+  if (ecfSolicitado && !rnc) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Para activar facturacion electronica debes proporcionar el RNC / cedula del negocio.',
+    });
   }
 
   try {
@@ -32317,12 +33247,53 @@ app.post('/api/public/registro', async (req, res) => {
     const modulosEntrada =
       payload.modulos_solicitados ?? payload.modulosSolicitados ?? payload.modulos ?? payload.modulos_requeridos ?? [];
     let modulosSolicitados = resolverModulosSolicitadosRegistro(modulosEntrada, recomendacion.keys);
-    const kdsSolicitado = normalizarBooleanRegistro(payload.modulo_kds ?? payload.kds, false);
-    if (kdsSolicitado && !modulosSolicitados.includes('kds') && moduloRegistroDisponible('kds')) {
-      modulosSolicitados.push('kds');
+    const kdsSolicitado =
+      plan.kds_incluido ||
+      normalizarBooleanRegistro(payload.modulo_kds ?? payload.kds, false) ||
+      modulosSolicitados.includes('kds');
+
+    // Validacion: starter no permite KDS ni los modulos dependientes (cocina/mesera/bar/caja).
+    if (!plan.kds_disponible && kdsSolicitado) {
+      return res.status(400).json({
+        ok: false,
+        error: `El ${plan.nombre} no incluye KDS ni sus modulos dependientes (cocina, mesera, bar, caja). Selecciona Plan Pro o Plan Full para activar el sistema sincronizado.`,
+      });
     }
 
-    modulosSolicitados = modulosSolicitados.filter((item) => item !== 'facturacion_electronica');
+    // Filtrar modulos dependientes de KDS si KDS no esta activo
+    if (!kdsSolicitado) {
+      modulosSolicitados = modulosSolicitados.filter((m) => !MODULOS_DEPENDIENTES_KDS.includes(m));
+    } else {
+      // Si KDS esta activo, asegurar que 'kds' este en la lista
+      if (!modulosSolicitados.includes('kds') && moduloRegistroDisponible('kds')) {
+        modulosSolicitados.push('kds');
+      }
+    }
+
+    // Si pidio FE, asegurar que el modulo este en la lista (ahora ya esta disponible).
+    if (ecfSolicitado && moduloRegistroDisponible('facturacion_electronica') && !modulosSolicitados.includes('facturacion_electronica')) {
+      modulosSolicitados.push('facturacion_electronica');
+    }
+
+    // Delivery: en starter es opcional con costo extra. En pro/full viene incluido.
+    const deliverySolicitado =
+      plan.delivery_incluido ||
+      normalizarBooleanRegistro(payload.delivery_solicitado ?? payload.deliverySolicitado, false) ||
+      modulosSolicitados.includes('delivery') ||
+      usaDelivery;
+    if (deliverySolicitado && !modulosSolicitados.includes('delivery') && moduloRegistroDisponible('delivery')) {
+      modulosSolicitados.push('delivery');
+    }
+    const deliveryCobraExtra = deliverySolicitado && !plan.delivery_incluido;
+
+    const resumenCostos = calcularResumenPlanRegistro({
+      planKey,
+      opcionales: {
+        ecf: ecfSolicitado && !plan.fe_incluida,
+        delivery: deliveryCobraExtra,
+      },
+      menuQrCantidad,
+    });
 
     const passwordHash = await hashPasswordIfNeeded(adminPassword);
     const configModulosNegocio = construirConfigModulosRegistro({
@@ -32345,9 +33316,19 @@ app.post('/api/public/registro', async (req, res) => {
       usa_delivery: usaDelivery,
       usa_bar: usaBar,
       cantidad_usuarios: cantidadUsuarios,
+      requiere_facturacion_electronica: requiereFE,
       canal_pago: 'whatsapp_o_correo',
-      facturacion_electronica_disponible: false,
+      facturacion_electronica_disponible: true,
       usuario_listo: true,
+      plan: planKey,
+      kds_solicitado: kdsSolicitado,
+      delivery_solicitado: deliverySolicitado,
+      delivery_cobra_extra: deliveryCobraExtra,
+      ecf_solicitado: ecfSolicitado,
+      menu_qr_cantidad: menuQrCantidad,
+      menu_qr_solicitado: menuQrSolicitado,
+      rnc,
+      razon_social: razonSocial,
     };
 
     let negocioId = null;
@@ -32356,15 +33337,18 @@ app.post('/api/public/registro', async (req, res) => {
 
     await db.run('BEGIN');
     try {
+      const limitesPlan = _limitesDefaultPlan(planKey);
       const negocioInsert = await db.run(
         `INSERT INTO negocios (
-           nombre, slug, color_primario, color_secundario, color_texto, color_header,
+           nombre, slug, rnc, color_primario, color_secundario, color_texto, color_header,
            color_boton_primario, color_boton_secundario, color_boton_peligro,
-           config_modulos, admin_principal_correo, logo_url, titulo_sistema, activo, empresa_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+           config_modulos, admin_principal_correo, telefono_principal, logo_url, titulo_sistema, activo, empresa_id,
+           plan_id, plan_activado_en, limite_usuarios, limite_menu_qr
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
         [
           negocioNombre,
           slugNegocio,
+          rnc || null,
           temaBase.colorPrimario,
           temaBase.colorSecundario,
           temaBase.colorTexto,
@@ -32374,15 +33358,82 @@ app.post('/api/public/registro', async (req, res) => {
           temaBase.colorBotonPeligro,
           configModulosJson,
           email || null,
+          telefono || null,
           temaBase.logoUrl || null,
           temaBase.tituloSistema || 'POSIUM',
           empresaId,
+          planKey,
+          ahora,
+          limitesPlan.limite_usuarios,
+          limitesPlan.limite_menu_qr,
         ]
-      );
+      ).catch(async (insertErr) => {
+        // Fallback escalonado si alguna columna nueva aun no existe en este ambiente.
+        try {
+          return await db.run(
+            `INSERT INTO negocios (
+               nombre, slug, rnc, color_primario, color_secundario, color_texto, color_header,
+               color_boton_primario, color_boton_secundario, color_boton_peligro,
+               config_modulos, admin_principal_correo, telefono_principal, logo_url, titulo_sistema, activo, empresa_id
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+            [
+              negocioNombre,
+              slugNegocio,
+              rnc || null,
+              temaBase.colorPrimario,
+              temaBase.colorSecundario,
+              temaBase.colorTexto,
+              temaBase.colorHeader,
+              temaBase.colorBotonPrimario,
+              temaBase.colorBotonSecundario,
+              temaBase.colorBotonPeligro,
+              configModulosJson,
+              email || null,
+              telefono || null,
+              temaBase.logoUrl || null,
+              temaBase.tituloSistema || 'POSIUM',
+              empresaId,
+            ]
+          );
+        } catch (_) {
+          return db.run(
+            `INSERT INTO negocios (
+               nombre, slug, color_primario, color_secundario, color_texto, color_header,
+               color_boton_primario, color_boton_secundario, color_boton_peligro,
+               config_modulos, admin_principal_correo, logo_url, titulo_sistema, activo, empresa_id
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+            [
+              negocioNombre,
+              slugNegocio,
+              temaBase.colorPrimario,
+              temaBase.colorSecundario,
+              temaBase.colorTexto,
+              temaBase.colorHeader,
+              temaBase.colorBotonPrimario,
+              temaBase.colorBotonSecundario,
+              temaBase.colorBotonPeligro,
+              configModulosJson,
+              email || null,
+              temaBase.logoUrl || null,
+              temaBase.tituloSistema || 'POSIUM',
+              empresaId,
+            ]
+          );
+        }
+      });
       negocioId = negocioInsert?.lastID || null;
       if (!negocioId) {
         throw new Error('No se pudo crear el negocio del registro.');
       }
+      // Best-effort: si el INSERT cayo al fallback, intentar setear plan_id
+      // por separado en una segunda query (asi negocios nuevos quedan con plan).
+      try {
+        await db.run(
+          `UPDATE negocios SET plan_id = ?, plan_activado_en = ?, limite_usuarios = ?, limite_menu_qr = ? WHERE id = ?`,
+          [planKey, ahora, limitesPlan.limite_usuarios, limitesPlan.limite_menu_qr, negocioId]
+        );
+      } catch (_) {}
+      invalidarCachePlanNegocio(negocioId);
 
       const usuarioInsert = await db.run(
         `INSERT INTO usuarios (
@@ -32400,14 +33451,53 @@ app.post('/api/public/registro', async (req, res) => {
         [adminUsuarioId, email || null, negocioId]
       );
 
+      // Si se solicito facturacion electronica, dejar pre-creada la fila de
+      // facturacion_electronica_config con habilitada=1 (el cliente debera
+      // luego subir su P12 desde Certificacion DGII).
+      if (ecfSolicitado || plan.fe_incluida) {
+        try {
+          await db.run(
+            `INSERT INTO facturacion_electronica_config (
+               negocio_id, habilitada, ambiente, proveedor, rnc_emisor, razon_social, nombre_comercial, correo, telefono
+             ) VALUES (?, 1, 'certificacion', 'DGII', ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+               habilitada = VALUES(habilitada),
+               rnc_emisor = COALESCE(VALUES(rnc_emisor), rnc_emisor),
+               razon_social = COALESCE(VALUES(razon_social), razon_social),
+               nombre_comercial = COALESCE(VALUES(nombre_comercial), nombre_comercial),
+               correo = COALESCE(VALUES(correo), correo),
+               telefono = COALESCE(VALUES(telefono), telefono),
+               updated_at = CURRENT_TIMESTAMP`,
+            [
+              negocioId,
+              rnc || null,
+              razonSocial || negocioNombre || null,
+              negocioNombre || null,
+              email || null,
+              telefono || null,
+            ]
+          );
+
+          // Cuando el negocio es facturador electronico, apagamos B0X legacy
+          await db.run(
+            `UPDATE negocios SET permitir_b01 = 0, permitir_b02 = 0, permitir_b14 = 0 WHERE id = ?`,
+            [negocioId]
+          ).catch(() => {});
+        } catch (feError) {
+          console.warn('No se pudo pre-configurar facturacion_electronica_config:', feError?.message || feError);
+        }
+      }
+
       const solicitudInsert = await db.run(
         `INSERT INTO registro_solicitudes (
            codigo, negocio_nombre, negocio_id, negocio_slug, negocio_tipo,
            admin_nombre, admin_usuario, admin_usuario_id, admin_password_hash,
            telefono, email, ciudad, cantidad_usuarios, usa_cocina, usa_delivery, modulo_kds,
            modulos_solicitados_json, modulos_recomendados_json, respuestas_json,
-           estado, estado_pago_limite, notas_publicas, correo_enviado, correo_error
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+           estado, estado_pago_limite, notas_publicas, correo_enviado, correo_error,
+           plan, rnc, razon_social, menu_qr_cantidad, ecf_solicitado, menu_qr_solicitado,
+           terminos_aceptados_at, privacidad_aceptada_at, resumen_costos_json
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           codigo,
           negocioNombre,
@@ -32431,6 +33521,15 @@ app.post('/api/public/registro', async (req, res) => {
           'pendiente_pago',
           limitePago,
           'Usuario habilitado. Enviar comprobante de pago por WhatsApp o correo dentro de 24 horas.',
+          planKey,
+          rnc || null,
+          razonSocial || null,
+          menuQrCantidad,
+          ecfSolicitado ? 1 : 0,
+          menuQrSolicitado ? 1 : 0,
+          ahora,
+          ahora,
+          JSON.stringify(resumenCostos),
         ]
       );
       solicitudId = solicitudInsert?.lastID || null;
@@ -32474,15 +33573,40 @@ app.post('/api/public/registro', async (req, res) => {
         created_at: ahora,
       }
     );
+    // Adjuntar campos extendidos al objeto que se le pasa a los correos
+    registro.plan = planKey;
+    registro.plan_nombre = plan.nombre;
+    registro.rnc = rnc || null;
+    registro.razon_social = razonSocial || null;
+    registro.menu_qr_cantidad = menuQrCantidad;
+    registro.ecf_solicitado = ecfSolicitado;
+    registro.menu_qr_solicitado = menuQrSolicitado;
+    registro.resumen_costos = resumenCostos;
 
     const correoResultado = await enviarCorreoRegistroSolicitud(registro);
+    const correoClienteResultado = await enviarCorreoBienvenidaCliente(registro).catch((err) => ({
+      enviado: false,
+      error: err?.message || 'No se pudo enviar correo al cliente.',
+    }));
     await db.run(
-      'UPDATE registro_solicitudes SET correo_enviado = ?, correo_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [correoResultado.enviado ? 1 : 0, correoResultado.error || null, solicitudId]
+      `UPDATE registro_solicitudes
+         SET correo_enviado = ?, correo_error = ?,
+             correo_cliente_enviado = ?, correo_cliente_error = ?,
+             updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [
+        correoResultado.enviado ? 1 : 0,
+        correoResultado.error || null,
+        correoClienteResultado.enviado ? 1 : 0,
+        correoClienteResultado.error || null,
+        solicitudId,
+      ]
     );
 
     registro.correo_enviado = correoResultado.enviado;
     registro.correo_error = correoResultado.error || null;
+    registro.correo_cliente_enviado = correoClienteResultado.enviado;
+    registro.correo_cliente_error = correoClienteResultado.error || null;
 
     res.status(201).json({
       ok: true,
@@ -32497,9 +33621,10 @@ app.post('/api/public/registro', async (req, res) => {
         modulos: recomendacion.keys,
         etiquetas: recomendacion.labels,
       },
+      resumen: resumenCostos,
       mensaje:
-        'Registro completado. Tu usuario admin ya esta listo para usarse. Tienes 24 horas para realizar el pago y enviar el comprobante por WhatsApp o correo.',
-      facturacion_electronica_disponible: false,
+        'Registro completado. Tu usuario admin ya esta listo. Tienes 24 horas para realizar el pago de activacion.',
+      facturacion_electronica_disponible: true,
     });
   } catch (error) {
     console.error('Error creando solicitud de registro publico:', error?.message || error);
@@ -32580,6 +33705,8 @@ app.post('/api/login', async (req, res) => {
 
   cerrarSesionesExpiradas(row.id, () => {
     cerrarSesionesActivasDeUsuario(row.id, () => {
+      // Invalidar cache de sesion del usuario (las viejas quedaron muertas).
+      invalidarSesionCachePorUsuarioId(row.id);
       const token = generarTokenSesion();
       const esSuperAdminUsuario = !!row.es_super_admin;
       db.run(
@@ -32613,6 +33740,10 @@ app.post('/api/login', async (req, res) => {
 app.post('/api/logout', (req, res) => {
   const token = req.headers['x-session-token'] || req.body?.token;
   const usuarioId = req.body?.usuario_id;
+
+  // Invalidar el cache de sesion para que el siguiente request requiera revalidar.
+  invalidarSesionCachePorToken(token);
+  if (usuarioId) invalidarSesionCachePorUsuarioId(usuarioId);
 
   const finalizar = () => res.json({ ok: true });
 

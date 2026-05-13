@@ -493,7 +493,7 @@
           </div>
           <div class="empresa-inventario-actions">
             <div class="kanm-input-group kanm-input-group--inline empresa-inventario-metodo">
-              <label for="admin-inventario-metodo">Valoracion</label>
+              <label for="admin-inventario-metodo">Valoración</label>
               <select id="admin-inventario-metodo">
                 <option value="PROMEDIO">Promedio</option>
               </select>
@@ -510,7 +510,7 @@
             <strong id="admin-inventario-total">0</strong>
           </div>
           <div class="empresa-mini-stat">
-            <span>Stock critico</span>
+            <span>Stock crítico</span>
             <strong id="admin-inventario-critico">0</strong>
           </div>
           <div class="empresa-mini-stat">
@@ -529,10 +529,10 @@
           <div class="empresa-inventario-filtros-scroll">
             <div class="kanm-input-group">
               <label for="admin-inventario-buscar">Buscar</label>
-              <input type="search" id="admin-inventario-buscar" placeholder="Nombre o categoria" />
+              <input type="search" id="admin-inventario-buscar" placeholder="Nombre o categoría" />
             </div>
             <div class="kanm-input-group">
-              <label for="productos-filtro-categoria">Categoria</label>
+              <label for="productos-filtro-categoria">Categoría</label>
               <select id="productos-filtro-categoria" class="admin-product-filter">
                 <option value="">Todas las categorías</option>
               </select>
@@ -557,7 +557,7 @@
               <label for="admin-inventario-stock">Stock</label>
               <select id="admin-inventario-stock">
                 <option value="">Todos</option>
-                <option value="critico">Critico</option>
+                <option value="critico">Crítico</option>
                 <option value="bajo">Bajo</option>
                 <option value="ok">Saludable</option>
                 <option value="sin_stock">Sin stock</option>
@@ -572,7 +572,7 @@
         <div class="empresa-inventario-lista">
           <div class="empresa-inventario-lista-header">
             <div>
-              <h3>Catalogo del negocio</h3>
+              <h3>Catálogo del negocio</h3>
               <p class="kanm-subtitle">Gestiona precios y estado en lote.</p>
             </div>
             <div class="empresa-inventario-bulk">
@@ -595,7 +595,7 @@
                 <tr>
                   <th></th>
                   <th>Producto</th>
-                  <th>Categoria</th>
+                  <th>Categoría</th>
                   <th>Stock</th>
                   <th>Costo</th>
                   <th>Precio</th>
@@ -639,7 +639,7 @@
                 <input type="checkbox" id="impuesto-productos-incluido" />
               </label>
               <p class="kanm-input-help">
-                Si esta activo, el total del producto ya incluye ITBIS y el sistema lo separa automaticamente.
+                Si está activo, el total del producto ya incluye ITBIS y el sistema lo separa automáticamente.
               </p>
             </div>
             <div class="kanm-input-group">
@@ -669,7 +669,7 @@
               </p>
             </div>
             <div class="admin-form-actions">
-              <button type="button" class="kanm-button" id="itbis-acredita-guardar">Guardar configuracion</button>
+              <button type="button" class="kanm-button" id="itbis-acredita-guardar">Guardar configuración</button>
             </div>
             <div id="itbis-acredita-mensaje" class="kanm-message"></div>
           </form>
@@ -678,17 +678,17 @@
         <section class="kanm-card admin-card" id="inventario-config">
           <header class="kanm-card-header">
             <h3>Modo de inventario y costos</h3>
-            <p class="kanm-subtitle">Define si el negocio opera por reventa o preparacion.</p>
+            <p class="kanm-subtitle">Define si el negocio opera por reventa o preparación.</p>
           </header>
           <form class="kanm-form" id="inventario-config-form" novalidate>
             <div class="kanm-input-group">
               <label for="inventario-modo">Modo de inventario</label>
               <select id="inventario-modo">
                 <option value="REVENTA">Reventa (costo unitario real)</option>
-                <option value="PREPARACION">Preparacion (recetas e insumos)</option>
+                <option value="PREPARACION">Preparación (recetas e insumos)</option>
               </select>
               <span class="kanm-input-help">
-                Reventa usa un costo simple por producto. Preparacion habilita recetas e insumos.
+                Reventa usa un costo simple por producto. Preparación habilita recetas e insumos.
               </span>
             </div>
             <div class="kanm-input-group">
@@ -696,7 +696,7 @@
                 <span>Bloquear venta si falta insumo</span>
                 <input type="checkbox" id="insumos-bloqueo" />
               </label>
-              <p class="kanm-input-help">Aplica solo cuando el modo es preparacion.</p>
+              <p class="kanm-input-help">Aplica solo cuando el modo es preparación.</p>
             </div>
             <div class="kanm-input-group">
               <label class="kanm-input-toggle" for="cocina-multipedidos">
@@ -709,7 +709,7 @@
             </div>
             <div class="admin-form-actions">
               <button type="button" class="kanm-button" id="inventario-guardar">
-                Guardar configuracion
+                Guardar configuración
               </button>
             </div>
             <div id="inventario-mensaje" class="kanm-message"></div>
@@ -874,7 +874,7 @@
                   <th>Usuario</th>
                   <th>Rol</th>
                   <th>Activo</th>
-                  <th>En linea</th>
+                  <th>En línea</th>
                   <th>Conectado</th>
                   <th>Desconectado</th>
                   <th>Acciones</th>
@@ -913,7 +913,7 @@
                     class="password-toggle"
                     data-password-toggle
                     aria-pressed="false"
-                    aria-label="Mostrar contrasena"
+                    aria-label="Mostrar contraseña"
                   >
                     Mostrar
                   </button>
@@ -1023,8 +1023,8 @@
     <!-- Menu publico -->
     <section class="admin-panel hidden" data-admin-section="menuPublico" id="admin-section-menu-publico">
       <div class="kanm-card-header">
-        <h2>Menu QR</h2>
-        <p class="kanm-subtitle">Gestiona los accesos publicos por mesa y abre la hoja lista para imprimir.</p>
+        <h2>Menú QR</h2>
+        <p class="kanm-subtitle">Gestiona los accesos públicos por mesa y abre la hoja lista para imprimir.</p>
       </div>
 
       <div class="admin-seccion-grid">
@@ -1061,7 +1061,7 @@
           </div>
 
           <p class="kanm-subtitle admin-menu-publico-mensaje" id="menu-publico-mensaje">
-            Cargando accesos del menu publico...
+            Cargando accesos del menú público...
           </p>
 
           <div class="kanm-table-wrapper">
@@ -1087,20 +1087,20 @@
         <section class="kanm-card admin-card admin-menu-publico-panel">
           <header class="kanm-card-header">
             <div>
-              <h3>Enlaces rapidos</h3>
-              <p class="kanm-subtitle">Abre el menu de una mesa o descarga su QR individual.</p>
+              <h3>Enlaces rápidos</h3>
+              <p class="kanm-subtitle">Abre el menú de una mesa o descarga su QR individual.</p>
             </div>
           </header>
 
           <div class="admin-menu-publico-links" id="menu-publico-links">
             <article class="admin-menu-publico-link-card">
               <strong>Preparando accesos...</strong>
-              <p class="kanm-subtitle">Cuando cargue la lista veras cada mesa con sus enlaces directos.</p>
+              <p class="kanm-subtitle">Cuando cargue la lista verás cada mesa con sus enlaces directos.</p>
             </article>
           </div>
 
           <div class="admin-menu-publico-note">
-            Si al abrir la hoja QR o un menu te sale 404, reinicia `server.js`. La pestaña puede aparecer antes de que el proceso viejo cargue las rutas nuevas.
+            Si al abrir la hoja QR o un menú te sale 404, reinicia `server.js`. La pestaña puede aparecer antes de que el proceso viejo cargue las rutas nuevas.
           </div>
         </section>
       </div>
@@ -1111,7 +1111,7 @@
       <section class="kanm-card admin-clientes-hero">
         <div class="admin-clientes-hero-row">
           <div>
-            <h2>Clientes &amp; facturacion</h2>
+            <h2>Clientes &amp; facturación</h2>
             <p class="kanm-subtitle">Gestiona clientes, facturas y cuentas por cobrar en un mismo flujo.</p>
           </div>
           <div class="admin-clientes-hero-actions">
@@ -1144,7 +1144,7 @@
             <div class="admin-clientes-filtros-scroll">
               <div class="kanm-input-group">
                 <label for="clientes-buscar">Buscar</label>
-                <input type="text" id="clientes-buscar" placeholder="Nombre, documento o telefono" />
+                <input type="text" id="clientes-buscar" placeholder="Nombre, documento o teléfono" />
               </div>
               <div class="kanm-input-group">
                 <label for="clientes-estado">Estado</label>
@@ -1174,7 +1174,7 @@
             <header class="kanm-card-header admin-clientes-lista-header">
               <div>
                 <h3>Listado de clientes</h3>
-                <p class="kanm-subtitle">Selecciona un cliente para ver su facturacion.</p>
+                <p class="kanm-subtitle">Selecciona un cliente para ver su facturación.</p>
               </div>
             </header>
             <div class="kanm-table-wrapper admin-clientes-table-scroll">
@@ -1183,7 +1183,7 @@
                   <tr>
                     <th>Nombre</th>
                     <th>Documento</th>
-                    <th>Telefono</th>
+                    <th>Teléfono</th>
                     <th>Email</th>
                     <th>Saldo pendiente</th>
                     <th>Estado</th>
@@ -1216,7 +1216,7 @@
                 <strong id="admin-cliente-resumen-documento">--</strong>
               </div>
               <div class="admin-clientes-resumen-item">
-                <span>Telefono</span>
+                <span>Teléfono</span>
                 <strong id="admin-cliente-resumen-telefono">--</strong>
               </div>
               <div class="admin-clientes-resumen-item">
@@ -1230,23 +1230,23 @@
               <div class="kanm-form-grid clientes-grid">
                 <div class="kanm-input-group">
                   <label for="cliente-nombre">Nombre del cliente *</label>
-                  <input type="text" id="cliente-nombre" required placeholder="Ej. Juan Perez" />
+                  <input type="text" id="cliente-nombre" required placeholder="Ej. Juan Pérez" />
                 </div>
                 <div class="kanm-input-group">
                   <label for="cliente-documento">Documento</label>
-                  <input type="text" id="cliente-documento" placeholder="RNC o cedula" />
+                  <input type="text" id="cliente-documento" placeholder="RNC o cédula" />
                 </div>
                 <div class="kanm-input-group">
                   <label for="cliente-tipo-documento">Tipo de documento</label>
                   <select id="cliente-tipo-documento">
                     <option value="">Selecciona</option>
-                    <option value="cedula">Cedula</option>
+                    <option value="cedula">Cédula</option>
                     <option value="rnc">RNC</option>
                     <option value="pasaporte">Pasaporte</option>
                   </select>
                 </div>
                 <div class="kanm-input-group">
-                  <label for="cliente-telefono">Telefono</label>
+                  <label for="cliente-telefono">Teléfono</label>
                   <input type="text" id="cliente-telefono" placeholder="809..." />
                 </div>
                 <div class="kanm-input-group">
@@ -1257,8 +1257,8 @@
 
               <div class="kanm-form-grid clientes-grid">
                 <div class="kanm-input-group">
-                  <label for="cliente-direccion">Direccion</label>
-                  <textarea id="cliente-direccion" rows="2" placeholder="Calle, numero, sector"></textarea>
+                  <label for="cliente-direccion">Dirección</label>
+                  <textarea id="cliente-direccion" rows="2" placeholder="Calle, número, sector"></textarea>
                 </div>
                 <div class="kanm-input-group">
                   <label for="cliente-notas">Notas internas</label>
@@ -1282,7 +1282,7 @@
         <section class="kanm-card admin-clientes-facturas" id="clientes-deudas-card">
           <header class="kanm-card-header admin-clientes-facturas-header">
             <div>
-              <h3>Facturacion y CxC</h3>
+              <h3>Facturación y CxC</h3>
               <p class="kanm-subtitle">Registra facturas, abonos y consulta historial.</p>
             </div>
             <div class="admin-clientes-facturas-actions">
@@ -1364,7 +1364,7 @@
                     </table>
                   </div>
                   <span class="kanm-input-help">
-                    El monto se calcula automaticamente con los productos agregados.
+                    El monto se calcula automáticamente con los productos agregados.
                   </span>
                 </div>
                 <div class="kanm-input-group">
@@ -1373,7 +1373,7 @@
                 </div>
                 <div class="kanm-input-group">
                   <label for="deuda-descripcion">Referencia</label>
-                  <input type="text" id="deuda-descripcion" placeholder="Ej. Credito fiado" />
+                  <input type="text" id="deuda-descripcion" placeholder="Ej. Crédito fiado" />
                 </div>
                 <div class="kanm-input-group">
                   <label for="deuda-tipo-comprobante">Comprobante</label>
@@ -1388,7 +1388,7 @@
                   <input
                     type="text"
                     id="deuda-ncf"
-                    placeholder="Se genera automaticamente al guardar"
+                    placeholder="Se genera automáticamente al guardar"
                     readonly
                   />
                 </div>
@@ -1437,7 +1437,7 @@
                   <input type="text" id="abono-monto" inputmode="decimal" data-money placeholder="0.00" required />
                 </div>
                 <div class="kanm-input-group">
-                  <label for="abono-metodo">Metodo de pago</label>
+                  <label for="abono-metodo">Método de pago</label>
                   <select id="abono-metodo">
                     <option value="">Selecciona</option>
                     <option value="efectivo">Efectivo</option>
@@ -1463,7 +1463,7 @@
                   <tr>
                     <th>Fecha</th>
                     <th>Monto</th>
-                    <th>Metodo</th>
+                    <th>Método</th>
                     <th>Notas</th>
                   </tr>
                 </thead>
@@ -1689,7 +1689,7 @@
                 <option value="B11">B11 - Comprobante de Compras</option>
                 <option value="B15">B15 - Gubernamental</option>
                 <option value="B16">B16 - Exportaciones</option>
-                <option value="E41">E41 - Compras Electrónica (e-CF, sin RNC)</option>
+                <option value="E41">E41 - Compras Electrónicas (e-CF, sin RNC)</option>
                 <option value="E47">E47 - Pagos al Exterior (e-CF)</option>
               </select>
               <p class="kanm-input-help">E41/E47 emiten un e-CF a la DGII al guardar la compra. Para E47 (Pagos al Exterior) ingrese el identificador extranjero del proveedor en el campo RNC.</p>
@@ -1728,7 +1728,7 @@
             <h4 class="kanm-subheading">Detalle de compra</h4>
             <div class="compra-detalle-actions">
               <button type="button" class="kanm-button secondary" id="compra-agregar-detalle">
-                Agregar linea
+                Agregar línea
               </button>
               <button type="button" class="kanm-button ghost" id="compra-recalcular">Recalcular</button>
             </div>
@@ -1821,15 +1821,15 @@
       <div class="kanm-card-header">
         <h2>Abastecimiento</h2>
         <p class="kanm-subtitle">
-          Registra compras de mercancia para reventa, actualiza el inventario y define el origen de fondos.
+          Registra compras de mercancía para reventa, actualiza el inventario y define el origen de fondos.
         </p>
       </div>
 
       <div class="admin-seccion-grid">
         <section class="kanm-card admin-card admin-seccion-panel">
           <header class="kanm-card-header">
-            <h3>Registro de mercancia</h3>
-            <p class="kanm-subtitle">Agrega productos y ajusta el stock automaticamente.</p>
+            <h3>Registro de mercancía</h3>
+            <p class="kanm-subtitle">Agrega productos y ajusta el stock automáticamente.</p>
           </header>
 
           <form id="abastecimiento-form" class="kanm-form" novalidate>
@@ -1851,13 +1851,13 @@
                 </select>
               </div>
               <div class="kanm-input-group">
-                <label for="abastecimiento-metodo">Metodo de pago</label>
+                <label for="abastecimiento-metodo">Método de pago</label>
                 <select id="abastecimiento-metodo">
                   <option value="">Selecciona</option>
                   <option value="efectivo">Efectivo</option>
                   <option value="transferencia">Transferencia</option>
                   <option value="tarjeta">Tarjeta</option>
-                  <option value="credito">Credito</option>
+                  <option value="credito">Crédito</option>
                   <option value="otro">Otro</option>
                 </select>
               </div>
@@ -1871,7 +1871,7 @@
                 placeholder="Notas o condiciones de la compra"
               ></textarea>
               <span class="kanm-input-help">
-                Si eliges Caja, se registrara automaticamente una salida de caja.
+                Si eliges Caja, se registrará automáticamente una salida de caja.
               </span>
             </div>
             <div class="kanm-input-group kanm-input-group--inline kanm-input-toggle">
@@ -1893,7 +1893,7 @@
               <h4 class="kanm-subheading">Detalle de productos</h4>
               <div class="compra-detalle-actions">
                 <button type="button" class="kanm-button secondary" id="abastecimiento-agregar-detalle">
-                  Agregar linea
+                  Agregar línea
                 </button>
               </div>
             </div>
@@ -1917,7 +1917,7 @@
 
             <div class="admin-form-actions">
               <button type="button" class="kanm-button secondary" id="abastecimiento-cancelar" hidden>
-                Cancelar edicion
+                Cancelar edición
               </button>
               <button type="submit" class="kanm-button" id="abastecimiento-submit">Registrar compra</button>
             </div>
@@ -1980,8 +1980,8 @@
 
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
-          <h3>Resumen del periodo</h3>
-          <p class="kanm-subtitle">Totales y categorias principales.</p>
+          <h3>Resumen del período</h3>
+          <p class="kanm-subtitle">Totales y categorías principales.</p>
         </header>
         <div class="admin-resumen-grid gastos-resumen-grid">
           <div class="resumen-metric">
@@ -1993,7 +1993,7 @@
             <span class="resumen-value" id="gastos-resumen-promedio">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Top categorias</span>
+            <span class="resumen-label">Top categorías</span>
             <div class="gastos-top-categorias" id="gastos-resumen-top"></div>
           </div>
         </div>
@@ -2025,7 +2025,7 @@
                 </select>
               </div>
               <div class="kanm-input-group">
-                <label for="gasto-categoria">Categoria</label>
+                <label for="gasto-categoria">Categoría</label>
                 <input type="text" id="gasto-categoria" list="gastos-categorias" placeholder="Ej. Alquiler" />
               </div>
               <div class="kanm-input-group">
@@ -2037,13 +2037,13 @@
                 </select>
               </div>
               <div class="kanm-input-group">
-                <label for="gasto-metodo">Metodo de pago</label>
+                <label for="gasto-metodo">Método de pago</label>
                 <select id="gasto-metodo">
                   <option value="">Selecciona</option>
                   <option value="efectivo">Efectivo</option>
                   <option value="transferencia">Transferencia</option>
                   <option value="tarjeta">Tarjeta</option>
-                  <option value="credito">Credito</option>
+                  <option value="credito">Crédito</option>
                   <option value="otro">Otro</option>
                 </select>
               </div>
@@ -2070,7 +2070,7 @@
             </div>
 
             <div class="kanm-input-group">
-              <label for="gasto-descripcion">Descripcion</label>
+              <label for="gasto-descripcion">Descripción</label>
               <textarea id="gasto-descripcion" rows="2" placeholder="Notas o detalle del gasto"></textarea>
             </div>
 
@@ -2108,7 +2108,7 @@
         <section class="kanm-card admin-card">
           <header class="kanm-card-header">
             <h3>Listado de gastos</h3>
-            <p class="kanm-subtitle">Filtra por fecha, categoria o texto.</p>
+            <p class="kanm-subtitle">Filtra por fecha, categoría o texto.</p>
           </header>
           <div class="admin-report-controls gastos-filtros">
             <div class="kanm-input-group">
@@ -2120,7 +2120,7 @@
               <input type="date" id="gastos-hasta" />
             </div>
             <div class="kanm-input-group">
-              <label for="gastos-categoria-filtro">Categoria</label>
+              <label for="gastos-categoria-filtro">Categoría</label>
               <input type="text" id="gastos-categoria-filtro" list="gastos-categorias" placeholder="Todas" />
             </div>
             <div class="kanm-input-group">
@@ -2133,19 +2133,19 @@
               </select>
             </div>
             <div class="kanm-input-group">
-              <label for="gastos-metodo-filtro">Metodo pago</label>
+              <label for="gastos-metodo-filtro">Método pago</label>
               <select id="gastos-metodo-filtro">
                 <option value="">Todos</option>
                 <option value="efectivo">Efectivo</option>
                 <option value="transferencia">Transferencia</option>
                 <option value="tarjeta">Tarjeta</option>
-                <option value="credito">Credito</option>
+                <option value="credito">Crédito</option>
                 <option value="otro">Otro</option>
               </select>
             </div>
             <div class="kanm-input-group">
               <label for="gastos-buscar">Buscar</label>
-              <input type="text" id="gastos-buscar" placeholder="Proveedor, descripcion o NCF" />
+              <input type="text" id="gastos-buscar" placeholder="Proveedor, descripción o NCF" />
             </div>
             <div class="admin-report-actions">
               <button type="button" class="kanm-button secondary" id="gastos-consultar">Buscar</button>
@@ -2158,9 +2158,9 @@
               <thead>
                 <tr>
                   <th>Fecha</th>
-                  <th>Categoria</th>
+                  <th>Categoría</th>
                   <th>Tipo</th>
-                  <th>Metodo</th>
+                  <th>Método</th>
                   <th>Proveedor</th>
                   <th>Monto</th>
                   <th>NCF</th>
@@ -2176,7 +2176,7 @@
         <section class="kanm-card admin-card">
           <header class="kanm-card-header">
             <h3>Cuentas por pagar (abastecimiento)</h3>
-            <p class="kanm-subtitle">Compras a credito y sus abonos parciales.</p>
+            <p class="kanm-subtitle">Compras a crédito y sus abonos parciales.</p>
             <div class="admin-report-actions">
               <button type="button" class="kanm-button secondary" id="cxp-exportar-pdf">
                 Descargar PDF
@@ -2217,7 +2217,7 @@
                 <input type="text" id="cxp-pago-monto" inputmode="decimal" data-money placeholder="0.00" />
               </div>
               <div class="kanm-input-group">
-                <label for="cxp-pago-metodo">Metodo de pago</label>
+                <label for="cxp-pago-metodo">Método de pago</label>
                 <select id="cxp-pago-metodo">
                   <option value="efectivo">Efectivo</option>
                   <option value="transferencia">Transferencia</option>
@@ -2254,7 +2254,7 @@
                 <tr>
                   <th>Fecha</th>
                   <th>Monto</th>
-                  <th>Metodo</th>
+                  <th>Método</th>
                   <th>Referencia</th>
                   <th>Notas</th>
                 </tr>
@@ -2762,48 +2762,48 @@
     <!-- Certificacion DGII / Configuracion FE -->
     <section class="admin-panel hidden" data-admin-section="dgiiPaso2" id="admin-section-dgii-paso2">
       <div class="kanm-card-header">
-        <h2>Certificacion DGII</h2>
-        <p class="kanm-subtitle">Credenciales DGII, certificado P12, secuencias e-CF y activacion del negocio como facturador electronico.</p>
+        <h2>Certificación DGII</h2>
+        <p class="kanm-subtitle">Credenciales DGII, certificado P12, secuencias e-CF y activación del negocio como facturador electrónico.</p>
       </div>
 
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
-          <h3>Configuracion certificacion</h3>
+          <h3>Configuración certificación</h3>
           <p class="kanm-subtitle">Credenciales DGII y certificado digital del emisor.</p>
         </header>
         <div class="kanm-grid-3">
           <div class="kanm-input-group">
-            <label for="dgii-config-usuario">Usuario certificacion</label>
+            <label for="dgii-config-usuario">Usuario certificación</label>
             <input type="text" id="dgii-config-usuario" placeholder="usuario portal DGII" />
           </div>
           <div class="kanm-input-group">
-            <label for="dgii-config-clave">Clave certificacion</label>
+            <label for="dgii-config-clave">Clave certificación</label>
             <input type="password" id="dgii-config-clave" placeholder="Clave DGII" />
           </div>
           <div class="kanm-input-group">
             <label for="dgii-config-rnc">RNC emisor</label>
             <input type="text" id="dgii-config-rnc" placeholder="101000000" />
-            <span class="kanm-input-help">Solo digitos. 9 = empresa, 11 = persona fisica.</span>
+            <span class="kanm-input-help">Solo dígitos. 9 = empresa, 11 = persona física.</span>
           </div>
         </div>
         <div class="kanm-grid-2">
           <div class="kanm-input-group">
-            <label for="dgii-config-razon-social">Razon Social oficial DGII *</label>
+            <label for="dgii-config-razon-social">Razón Social oficial DGII *</label>
             <input type="text" id="dgii-config-razon-social" placeholder="Ej. POSIUM SRL" />
-            <span class="kanm-input-help">DEBE coincidir EXACTAMENTE con el nombre registrado en DGII para este RNC. Si no coincide la DGII rechaza con "RNC no guarda relacion con razon social".</span>
+            <span class="kanm-input-help">DEBE coincidir EXACTAMENTE con el nombre registrado en DGII para este RNC. Si no coincide la DGII rechaza con "RNC no guarda relación con razón social".</span>
           </div>
           <div class="kanm-input-group">
             <label for="dgii-config-nombre-comercial">Nombre comercial</label>
             <input type="text" id="dgii-config-nombre-comercial" placeholder="Ej. POSIUM" />
-            <span class="kanm-input-help">Opcional. Si difiere de la razon social, se incluye en el e-CF.</span>
+            <span class="kanm-input-help">Opcional. Si difiere de la razón social, se incluye en el e-CF.</span>
           </div>
         </div>
         <div class="admin-report-actions" style="margin-bottom:8px">
-          <button type="button" class="kanm-button ghost" id="dgii-config-buscar-razon">Buscar razon social en cache DGII por RNC</button>
+          <button type="button" class="kanm-button ghost" id="dgii-config-buscar-razon">Buscar razón social en cache DGII por RNC</button>
         </div>
         <div class="kanm-grid-3">
           <div class="kanm-input-group">
-            <label for="dgii-config-modo">Modo autenticacion</label>
+            <label for="dgii-config-modo">Modo autenticación</label>
             <select id="dgii-config-modo">
               <option value="AUTO">Auto</option>
               <option value="CREDENCIALES">Credenciales</option>
@@ -2826,9 +2826,9 @@
           </div>
         </div>
         <div class="admin-report-actions">
-          <button type="button" class="kanm-button" id="dgii-config-guardar">Guardar configuracion</button>
+          <button type="button" class="kanm-button" id="dgii-config-guardar">Guardar configuración</button>
           <button type="button" class="kanm-button ghost" id="dgii-semilla-descargar">Descargar semilla</button>
-          <button type="button" class="kanm-button secondary" id="dgii-config-test">Probar autenticacion</button>
+          <button type="button" class="kanm-button secondary" id="dgii-config-test">Probar autenticación</button>
           <button type="button" class="kanm-button ghost" id="dgii-semilla-validar">Validar semilla firmada</button>
         </div>
         <div id="dgii-config-mensaje" class="kanm-message"></div>
@@ -2836,8 +2836,8 @@
 
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
-          <h3>Activacion facturacion electronica</h3>
-          <p class="kanm-subtitle">Cuando se activa, el negocio emite e-CF (E31/E32/etc.) y se desactivan automaticamente B01, B02 y B14.</p>
+          <h3>Activación facturación electrónica</h3>
+          <p class="kanm-subtitle">Cuando se activa, el negocio emite e-CF (E31/E32/etc.) y se desactivan automáticamente B01, B02 y B14.</p>
         </header>
         <div class="dgii-fe-activacion">
           <div class="dgii-fe-estado" id="dgii-fe-estado">
@@ -2845,7 +2845,7 @@
             <span class="kanm-subtitle" id="dgii-fe-estado-detalle">Consultando estado actual...</span>
           </div>
           <label class="kanm-input-toggle" for="dgii-fe-toggle">
-            <span>Activar negocio como facturador electronico</span>
+            <span>Activar negocio como facturador electrónico</span>
             <input type="checkbox" id="dgii-fe-toggle" />
           </label>
         </div>
@@ -2855,7 +2855,7 @@
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
           <h3>Secuencias e-CF</h3>
-          <p class="kanm-subtitle">Define el rango (inicio / fin) y vencimiento de cada tipo electronico autorizado por la DGII para este negocio. Al agotar el rango, debes solicitar otro a la DGII.</p>
+          <p class="kanm-subtitle">Define el rango (inicio / fin) y vencimiento de cada tipo electrónico autorizado por la DGII para este negocio. Al agotar el rango, debes solicitar otro a la DGII.</p>
         </header>
         <div class="kanm-table-wrapper">
           <table class="kanm-table" id="dgii-ecf-secuencias-tabla-editable">
@@ -2887,19 +2887,19 @@
     <!-- Analisis -->
     <section class="admin-panel hidden" data-admin-section="analisis" id="admin-section-analisis">
       <div class="kanm-card-header">
-        <h2>Analisis del negocio</h2>
+        <h2>Análisis del negocio</h2>
         <p class="kanm-subtitle">KPIs, tendencias y recomendaciones basadas en ventas y gastos.</p>
       </div>
 
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
-          <h3>Periodo de analisis</h3>
-          <p class="kanm-subtitle">Selecciona un rango o un periodo rapido.</p>
+          <h3>Período de análisis</h3>
+          <p class="kanm-subtitle">Selecciona un rango o un período rápido.</p>
         </header>
         <div class="analisis-periodo-actions">
           <button type="button" class="kanm-button ghost" data-analisis-range="hoy">Hoy</button>
-          <button type="button" class="kanm-button ghost" data-analisis-range="7d">7 dias</button>
-          <button type="button" class="kanm-button ghost" data-analisis-range="30d">30 dias</button>
+          <button type="button" class="kanm-button ghost" data-analisis-range="7d">7 días</button>
+          <button type="button" class="kanm-button ghost" data-analisis-range="30d">30 días</button>
           <button type="button" class="kanm-button ghost" data-analisis-range="mes">Mes actual</button>
           <button type="button" class="kanm-button ghost" data-analisis-range="mes-anterior">Mes anterior</button>
         </div>
@@ -3079,11 +3079,11 @@
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
           <h3>Patrones y horarios</h3>
-          <p class="kanm-subtitle">Dias fuertes, horas pico y metodos de pago.</p>
+          <p class="kanm-subtitle">Días fuertes, horas pico y métodos de pago.</p>
         </header>
         <div class="analisis-insights-grid">
           <div>
-            <h4>Top dias de semana</h4>
+            <h4>Top días de semana</h4>
             <div class="analisis-ranking-list" id="analisis-top-dias"></div>
           </div>
           <div>
@@ -3091,11 +3091,11 @@
             <div class="analisis-ranking-list" id="analisis-top-horas"></div>
           </div>
           <div>
-            <h4>Top dias del mes</h4>
+            <h4>Top días del mes</h4>
             <div class="analisis-ranking-list" id="analisis-top-dias-mes"></div>
           </div>
           <div>
-            <h4>Metodos de pago</h4>
+            <h4>Métodos de pago</h4>
             <div class="analisis-ranking-list" id="analisis-metodos-pago"></div>
           </div>
         </div>
@@ -3103,12 +3103,12 @@
 
       <section class="kanm-card admin-card">
         <header class="kanm-card-header">
-          <h3>Gastos por categoria</h3>
-          <p class="kanm-subtitle">Categorias principales y gastos recurrentes.</p>
+          <h3>Gastos por categoría</h3>
+          <p class="kanm-subtitle">Categorías principales y gastos recurrentes.</p>
         </header>
         <div class="analisis-insights-grid">
           <div>
-            <h4>Top categorias</h4>
+            <h4>Top categorías</h4>
             <div class="analisis-ranking-list" id="analisis-top-categorias"></div>
           </div>
           <div>
@@ -3132,11 +3132,11 @@
       <section class="kanm-card admin-card" id="analisis-alertas-acc-card">
         <header class="kanm-card-header">
           <h3>Inbox de alertas accionables</h3>
-          <p class="kanm-subtitle">Senales priorizadas con accion sugerida.</p>
+          <p class="kanm-subtitle">Señales priorizadas con acción sugerida.</p>
         </header>
         <div class="admin-resumen-grid analisis-kpi-grid">
           <div class="resumen-metric">
-            <span class="resumen-label">Criticas</span>
+            <span class="resumen-label">Críticas</span>
             <span class="resumen-value" id="alertas-acc-criticas" style="color:#c73e3e">0</span>
           </div>
           <div class="resumen-metric">
@@ -3181,11 +3181,11 @@
             <span class="resumen-value" id="rest-kpi-items-ticket">0</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Margen contribucion</span>
+            <span class="resumen-label">Margen contribución</span>
             <span class="resumen-value" id="rest-kpi-margen-contribucion">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Rotacion mesas</span>
+            <span class="resumen-label">Rotación mesas</span>
             <span class="resumen-value" id="rest-kpi-rotacion-mesas">0</span>
           </div>
           <div class="resumen-metric">
@@ -3198,7 +3198,7 @@
           </div>
         </div>
         <div id="rest-diagnosticos" class="analisis-alertas"></div>
-        <h4>Composicion del Prime Cost</h4>
+        <h4>Composición del Prime Cost</h4>
         <div class="analisis-chart-wrap" style="position:relative;height:260px;margin-top:12px;">
           <canvas id="rest-chart-breakdown"></canvas>
         </div>
@@ -3210,7 +3210,7 @@
       <section class="kanm-card admin-card" id="analisis-productos-rent-card">
         <header class="kanm-card-header">
           <h3>Rentabilidad por producto</h3>
-          <p class="kanm-subtitle">Margenes calculados con costo persistido al momento de venta.</p>
+          <p class="kanm-subtitle">Márgenes calculados con costo persistido al momento de venta.</p>
         </header>
         <div class="analisis-rankings-grid">
           <div>
@@ -3237,8 +3237,8 @@
       <!-- ============================================================== -->
       <section class="kanm-card admin-card" id="analisis-inventario-card">
         <header class="kanm-card-header">
-          <h3>Inventario y rotacion</h3>
-          <p class="kanm-subtitle">Valor, dias de cobertura, mermas y stock bajo.</p>
+          <h3>Inventario y rotación</h3>
+          <p class="kanm-subtitle">Valor, días de cobertura, mermas y stock bajo.</p>
         </header>
         <div class="admin-resumen-grid analisis-kpi-grid">
           <div class="resumen-metric">
@@ -3246,15 +3246,15 @@
             <span class="resumen-value" id="inv-kpi-valor">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Rotacion anual</span>
+            <span class="resumen-label">Rotación anual</span>
             <span class="resumen-value" id="inv-kpi-rotacion">0</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Dias inventario</span>
+            <span class="resumen-label">Días inventario</span>
             <span class="resumen-value" id="inv-kpi-dias">0</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Compras periodo</span>
+            <span class="resumen-label">Compras período</span>
             <span class="resumen-value" id="inv-kpi-compras">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
@@ -3272,7 +3272,7 @@
             <div class="analisis-ranking-list" id="inv-stock-bajo-list"></div>
           </div>
           <div>
-            <h4>Sin movimiento en periodo</h4>
+            <h4>Sin movimiento en período</h4>
             <div class="analisis-ranking-list" id="inv-sin-movimiento-list"></div>
           </div>
         </div>
@@ -3318,11 +3318,11 @@
       <section class="kanm-card admin-card" id="analisis-clientes-card">
         <header class="kanm-card-header">
           <h3>Clientes</h3>
-          <p class="kanm-subtitle">Top, recurrencia y antiguedad de cuentas por cobrar.</p>
+          <p class="kanm-subtitle">Top, recurrencia y antigüedad de cuentas por cobrar.</p>
         </header>
         <div class="admin-resumen-grid analisis-kpi-grid">
           <div class="resumen-metric">
-            <span class="resumen-label">Clientes unicos</span>
+            <span class="resumen-label">Clientes únicos</span>
             <span class="resumen-value" id="cli-kpi-unicos">0</span>
           </div>
           <div class="resumen-metric">
@@ -3340,19 +3340,19 @@
         </div>
         <div class="admin-resumen-grid analisis-kpi-grid">
           <div class="resumen-metric">
-            <span class="resumen-label">0-30 dias</span>
+            <span class="resumen-label">0-30 días</span>
             <span class="resumen-value" id="cli-aging-0-30">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">31-60 dias</span>
+            <span class="resumen-label">31-60 días</span>
             <span class="resumen-value" id="cli-aging-31-60">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">61-90 dias</span>
+            <span class="resumen-label">61-90 días</span>
             <span class="resumen-value" id="cli-aging-61-90">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">+90 dias (riesgo)</span>
+            <span class="resumen-label">+90 días (riesgo)</span>
             <span class="resumen-value" id="cli-aging-90-plus">DOP&nbsp;0.00</span>
           </div>
         </div>
@@ -3402,7 +3402,7 @@
         </div>
         <div class="analisis-rankings-grid">
           <div>
-            <h4>Distribucion por tipo comprobante</h4>
+            <h4>Distribución por tipo comprobante</h4>
             <div class="analisis-ranking-list" id="fis-tipos-comprobante"></div>
             <div class="analisis-chart-wrap" style="position:relative;height:240px;margin-top:8px;">
               <canvas id="fis-chart-comprobantes"></canvas>
@@ -3432,7 +3432,7 @@
             <div class="analisis-ranking-list" id="gas-top-proveedores"></div>
           </div>
           <div>
-            <h4>Categorias del periodo</h4>
+            <h4>Categorías del período</h4>
             <div class="analisis-ranking-list" id="gas-top-categorias"></div>
           </div>
           <div>
@@ -3440,7 +3440,7 @@
             <div class="analisis-ranking-list" id="gas-presupuestos"></div>
           </div>
         </div>
-        <h4>Posibles duplicados (mismo monto y proveedor en 7 dias)</h4>
+        <h4>Posibles duplicados (mismo monto y proveedor en 7 días)</h4>
         <div class="kanm-table-wrapper">
           <table class="kanm-table">
             <thead>
@@ -3448,7 +3448,7 @@
                 <th>Fecha</th>
                 <th>Monto</th>
                 <th>Proveedor</th>
-                <th>Descripcion</th>
+                <th>Descripción</th>
                 <th>Diferencia</th>
               </tr>
             </thead>
@@ -3463,19 +3463,19 @@
       <section class="kanm-card admin-card" id="analisis-tendencias-card">
         <header class="kanm-card-header">
           <h3>Tendencias y proyecciones</h3>
-          <p class="kanm-subtitle">Comparativos MoM, YoY, YTD y forecast del periodo.</p>
+          <p class="kanm-subtitle">Comparativos MoM, YoY, YTD y forecast del período.</p>
         </header>
         <div class="admin-resumen-grid analisis-kpi-grid">
           <div class="resumen-metric">
-            <span class="resumen-label">YTD (anio en curso)</span>
+            <span class="resumen-label">YTD (año en curso)</span>
             <span class="resumen-value" id="tend-kpi-ytd">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">YoY (mismo periodo)</span>
+            <span class="resumen-label">YoY (mismo período)</span>
             <span class="resumen-value" id="tend-kpi-yoy">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Variacion YoY</span>
+            <span class="resumen-label">Variación YoY</span>
             <span class="resumen-value" id="tend-kpi-yoy-var">0%</span>
           </div>
           <div class="resumen-metric">
@@ -3483,7 +3483,7 @@
             <span class="resumen-value" id="tend-kpi-mom">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Variacion MoM</span>
+            <span class="resumen-label">Variación MoM</span>
             <span class="resumen-value" id="tend-kpi-mom-var">0%</span>
           </div>
           <div class="resumen-metric">
@@ -3491,11 +3491,11 @@
             <span class="resumen-value" id="tend-kpi-promedio">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Proyeccion 30 dias</span>
+            <span class="resumen-label">Proyección 30 días</span>
             <span class="resumen-value" id="tend-kpi-proy-30">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
-            <span class="resumen-label">Proyeccion anual</span>
+            <span class="resumen-label">Proyección anual</span>
             <span class="resumen-value" id="tend-kpi-proy-anio">DOP&nbsp;0.00</span>
           </div>
           <div class="resumen-metric">
@@ -3509,7 +3509,7 @@
         </div>
         <div id="tend-forecast-aviso" class="kanm-message" data-type="warning" hidden></div>
 
-        <h4>Serie diaria + proyeccion</h4>
+        <h4>Serie diaria + proyección</h4>
         <div class="analisis-chart-wrap" style="position:relative;height:320px;margin-top:12px;">
           <canvas id="tend-chart-serie"></canvas>
         </div>
@@ -3519,7 +3519,7 @@
           <canvas id="tend-chart-comparativo"></canvas>
         </div>
 
-        <h4>Heatmap dia/hora (top 10 franjas)</h4>
+        <h4>Heatmap día/hora (top 10 franjas)</h4>
         <div class="analisis-ranking-list" id="tend-heatmap-list"></div>
 
         <h4>Heatmap semanal completo</h4>
@@ -3582,7 +3582,7 @@
                 <th>ID</th>
                 <th>Mesa/Cliente</th>
                 <th>Total</th>
-                <th>Metodo de pago</th>
+                <th>Método de pago</th>
                 <th>Fecha de cobro</th>
                 <th>Factura</th>
               </tr>
@@ -3597,7 +3597,7 @@
     <section class="admin-panel hidden" data-admin-section="historial" id="admin-section-historial">
       <div class="kanm-card-header">
         <h2>Historial de preparación</h2>
-        <p class="kanm-subtitle">Consulta los items finalizados agrupados por dia y area (Cocina/Bar).</p>
+        <p class="kanm-subtitle">Consulta los items finalizados agrupados por día y área (Cocina/Bar).</p>
       </div>
       <section class="kanm-card admin-card">
         <div class="admin-report-controls">
@@ -3709,6 +3709,7 @@
                 <th>Slug</th>
                 <th>Empresa</th>
                 <th>RNC</th>
+                <th>Plan</th>
                 <th>Estado</th>
                 <th>Tema</th>
                 <th>Acciones</th>
@@ -3716,7 +3717,7 @@
             </thead>
             <tbody id="kanm-negocios-tbody">
               <tr>
-                <td colspan="7">Cargando...</td>
+                <td colspan="8">Cargando...</td>
               </tr>
             </tbody>
           </table>
@@ -3746,9 +3747,9 @@
             <button type="button" class="kanm-button ghost" id="kanm-negocios-suspender-cerrar">Cerrar</button>
           </div>
           <div class="kanm-modal-body">
-            <p class="kanm-subtitle">El negocio quedara bloqueado para todos sus usuarios. Puedes reactivarlo en cualquier momento.</p>
+            <p class="kanm-subtitle">El negocio quedará bloqueado para todos sus usuarios. Puedes reactivarlo en cualquier momento.</p>
             <div class="kanm-input-group">
-              <label for="kanm-negocios-suspender-motivo">Motivo (se mostrara al admin del negocio)</label>
+              <label for="kanm-negocios-suspender-motivo">Motivo (se mostrará al admin del negocio)</label>
               <textarea
                 id="kanm-negocios-suspender-motivo"
                 rows="3"
@@ -3759,6 +3760,51 @@
           <div class="kanm-modal-footer">
             <button type="button" class="kanm-button ghost" id="kanm-negocios-suspender-cancelar">Cancelar</button>
             <button type="button" class="kanm-button danger" id="kanm-negocios-suspender-confirmar">Suspender</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Editar plan del negocio (super admin) -->
+      <div class="kanm-modal oculto" id="kanm-negocios-plan-modal">
+        <div class="kanm-modal-backdrop"></div>
+        <div class="kanm-modal-panel">
+          <div class="kanm-modal-header">
+            <h3>Editar plan del negocio</h3>
+            <button type="button" class="kanm-button ghost" id="kanm-negocios-plan-cerrar">Cerrar</button>
+          </div>
+          <div class="kanm-modal-body">
+            <p class="kanm-subtitle" id="kanm-negocios-plan-nombre">Negocio: --</p>
+            <div class="kanm-input-group">
+              <label for="kanm-negocios-plan-select">Plan</label>
+              <select id="kanm-negocios-plan-select">
+                <option value="starter">Starter - POP (RD$1,200/mes)</option>
+                <option value="pro">Pro - Negocio (RD$1,500/mes)</option>
+                <option value="full">Full - Pro + KDS (RD$2,000/mes)</option>
+              </select>
+              <span class="kanm-input-help">Al cambiar de plan, los límites se reinician al default. Puedes ajustarlos abajo.</span>
+            </div>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-plan-limusuarios">Límite de usuarios activos</label>
+                <input type="number" id="kanm-negocios-plan-limusuarios" min="1" placeholder="Vacío = ilimitado" />
+                <span class="kanm-input-help">Default: Starter 3, Pro 10, Full ilimitado.</span>
+              </div>
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-plan-limqr">Límite de Menús QR activos</label>
+                <input type="number" id="kanm-negocios-plan-limqr" min="0" placeholder="Vacío = ilimitado" />
+                <span class="kanm-input-help">Default: Starter 1, Pro 3, Full ilimitado.</span>
+              </div>
+            </div>
+            <div class="kanm-input-group">
+              <label for="kanm-negocios-plan-vence">Fecha de vencimiento (opcional)</label>
+              <input type="date" id="kanm-negocios-plan-vence" />
+              <span class="kanm-input-help">Solo informativo. Vacío = sin vencimiento programado.</span>
+            </div>
+            <div id="kanm-negocios-plan-info" class="kanm-message"></div>
+          </div>
+          <div class="kanm-modal-footer">
+            <button type="button" class="kanm-button ghost" id="kanm-negocios-plan-cancelar">Cancelar</button>
+            <button type="button" class="kanm-button" id="kanm-negocios-plan-guardar">Guardar</button>
           </div>
         </div>
       </div>
@@ -3774,14 +3820,14 @@
               <input
                 type="search"
                 id="kanm-registros-buscar"
-                placeholder="Buscar por codigo, negocio o admin..."
+                placeholder="Buscar por código, negocio o admin..."
               />
             </div>
             <div class="kanm-input-group">
               <select id="kanm-registros-estado">
                 <option value="">Todos los estados</option>
                 <option value="pendiente_pago">Pendiente pago</option>
-                <option value="en_revision">En revision</option>
+                <option value="en_revision">En revisión</option>
                 <option value="pago_recibido">Pago recibido</option>
                 <option value="aprobado">Aprobado</option>
                 <option value="rechazado">Rechazado</option>
@@ -3796,14 +3842,14 @@
             <thead>
               <tr>
                 <th>Fecha</th>
-                <th>Codigo</th>
+                <th>Código</th>
                 <th>Negocio</th>
                 <th>Admin</th>
                 <th>Contacto</th>
-                <th>Modulos</th>
+                <th>Módulos</th>
                 <th>Correo</th>
                 <th>Estado</th>
-                <th>Accion</th>
+                <th>Acción</th>
               </tr>
             </thead>
             <tbody id="kanm-registros-tbody">
@@ -3843,7 +3889,7 @@
               <tr>
                 <th>#</th>
                 <th>Producto</th>
-                <th>Categoria</th>
+                <th>Categoría</th>
                 <th style="text-align:right">Cantidad</th>
                 <th style="text-align:right">Ingresos</th>
               </tr>
@@ -3860,7 +3906,7 @@
   <div class="kanm-modal-overlay" id="modal-ventas-metodo" hidden>
     <div class="kanm-modal kanm-modal--wide" role="dialog" aria-modal="true" aria-labelledby="modal-ventas-metodo-titulo">
       <div class="kanm-modal-header">
-        <h3 id="modal-ventas-metodo-titulo">Ventas por metodo de pago</h3>
+        <h3 id="modal-ventas-metodo-titulo">Ventas por método de pago</h3>
         <button type="button" class="kanm-button ghost" id="modal-ventas-metodo-cerrar">Cerrar</button>
       </div>
       <div class="kanm-modal-body">
@@ -3876,7 +3922,7 @@
                   <th>Pedido #</th>
                   <th>Cliente</th>
                   <th>NCF</th>
-                  <th style="text-align:right">Monto del metodo</th>
+                  <th style="text-align:right">Monto del método</th>
                   <th style="text-align:right">Total pedido</th>
                 </tr>
               </thead>
@@ -3990,17 +4036,17 @@
 
           <!-- Datos basicos -->
           <section class="kanm-modal-section" data-tone="basicos">
-            <h4>Datos basicos</h4>
+            <h4>Datos básicos</h4>
             <p class="kanm-section-desc">Identifica el negocio dentro de la plataforma. El slug se usa en URLs y no se puede cambiar luego.</p>
             <div class="kanm-grid-2">
               <div class="kanm-input-group">
-                <label for="kanm-negocios-nombre">Titulo / Nombre publico *</label>
-                <input type="text" id="kanm-negocios-nombre" placeholder="Ej. Mi Cafeteria" required />
+                <label for="kanm-negocios-nombre">Título / Nombre público *</label>
+                <input type="text" id="kanm-negocios-nombre" placeholder="Ej. Mi Cafetería" required />
               </div>
               <div class="kanm-input-group" id="kanm-negocios-slug-group">
                 <label for="kanm-negocios-slug">Slug *</label>
                 <input type="text" id="kanm-negocios-slug" placeholder="mi-cafeteria" required />
-                <span class="kanm-input-help">Solo letras, numeros y guiones. Se bloquea al editar.</span>
+                <span class="kanm-input-help">Solo letras, números y guiones. Se bloquea al editar.</span>
               </div>
             </div>
             <div class="kanm-grid-2">
@@ -4035,10 +4081,10 @@
           <!-- Datos fiscales -->
           <section class="kanm-modal-section" data-tone="fiscal">
             <h4>Datos fiscales y de contacto</h4>
-            <p class="kanm-section-desc">Estos datos se imprimen en la factura y se usan para la facturacion electronica DGII.</p>
+            <p class="kanm-section-desc">Estos datos se imprimen en la factura y se usan para la facturación electrónica DGII.</p>
             <div class="kanm-grid-2">
               <div class="kanm-input-group">
-                <label for="kanm-negocios-rnc">RNC / Cedula</label>
+                <label for="kanm-negocios-rnc">RNC / Cédula</label>
                 <input
                   type="text"
                   id="kanm-negocios-rnc"
@@ -4049,12 +4095,12 @@
                 <span class="kanm-input-help">Requerido para emitir comprobantes fiscales (NCF / e-CF).</span>
               </div>
               <div class="kanm-input-group">
-                <label for="kanm-negocios-telefono">Telefono</label>
+                <label for="kanm-negocios-telefono">Teléfono</label>
                 <input type="tel" id="kanm-negocios-telefono" placeholder="809-000-0000" maxlength="30" />
               </div>
             </div>
             <div class="kanm-input-group">
-              <label for="kanm-negocios-direccion">Direccion</label>
+              <label for="kanm-negocios-direccion">Dirección</label>
               <input
                 type="text"
                 id="kanm-negocios-direccion"
@@ -4066,8 +4112,8 @@
 
           <!-- Configuracion fiscal y operativa -->
           <section class="kanm-modal-section" data-tone="config">
-            <h4>Configuracion fiscal y operativa</h4>
-            <p class="kanm-section-desc">Valores por defecto al crear el negocio. Solo aplican en creacion. Pueden ajustarse luego desde la pestana Configuracion del propio negocio.</p>
+            <h4>Configuración fiscal y operativa</h4>
+            <p class="kanm-section-desc">Valores por defecto al crear el negocio. Solo aplican en creación. Pueden ajustarse luego desde la pestaña Configuración del propio negocio.</p>
             <div class="kanm-grid-3">
               <div class="kanm-input-group">
                 <label for="kanm-negocios-itbis">ITBIS (%)</label>
@@ -4084,12 +4130,12 @@
                 <label for="kanm-negocios-moneda-codigo">Moneda</label>
                 <select id="kanm-negocios-moneda-codigo">
                   <option value="DOP" selected>DOP - Peso dominicano</option>
-                  <option value="USD">USD - Dolar</option>
+                  <option value="USD">USD - Dólar</option>
                   <option value="EUR">EUR - Euro</option>
                 </select>
               </div>
               <div class="kanm-input-group">
-                <label for="kanm-negocios-moneda-simbolo">Simbolo</label>
+                <label for="kanm-negocios-moneda-simbolo">Símbolo</label>
                 <input type="text" id="kanm-negocios-moneda-simbolo" maxlength="6" value="RD$" />
               </div>
             </div>
@@ -4099,20 +4145,92 @@
                 <span>Inicializar datos por defecto al crear</span>
               </label>
               <span class="kanm-input-help">
-                Crea automaticamente las secuencias NCF (B01, B02, B14, B15), los valores de configuracion inicial (RNC, telefono, direccion, ITBIS, moneda, comportamiento de cocina e inventario) y una categoria "General".
+                Crea automáticamente las secuencias NCF (B01, B02, B14, B15), los valores de configuración inicial (RNC, teléfono, dirección, ITBIS, moneda, comportamiento de cocina e inventario) y una categoría "General".
               </span>
             </div>
           </section>
 
+          <!-- Plan POSIUM -->
+          <section class="kanm-modal-section" data-tone="plan" id="kanm-negocios-plan-section" hidden>
+            <h4>Plan POSIUM</h4>
+            <p class="kanm-section-desc">Plan contratado por el cliente y límites cuantitativos. Solo aplica para negocios existentes.</p>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-plan-id">Plan</label>
+                <select id="kanm-negocios-plan-id">
+                  <option value="starter">Starter — POP (RD$1,200/mes)</option>
+                  <option value="pro">Pro — Negocio (RD$1,500/mes)</option>
+                  <option value="full">Full — Pro + KDS (RD$2,000/mes)</option>
+                </select>
+                <span class="kanm-input-help">Al cambiar el plan, los límites se ajustan al default. Edita los campos abajo si quieres valores personalizados.</span>
+              </div>
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-plan-vence">Vencimiento del plan (opcional)</label>
+                <input type="date" id="kanm-negocios-plan-vence" />
+                <span class="kanm-input-help">Solo informativo. Vacío = sin vencimiento programado.</span>
+              </div>
+            </div>
+            <div class="kanm-grid-2">
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-limite-usuarios">Límite de usuarios activos</label>
+                <input type="number" id="kanm-negocios-limite-usuarios" min="1" placeholder="Vacío = ilimitado" />
+                <span class="kanm-input-help">Default: Starter 3, Pro 10, Full ilimitado.</span>
+              </div>
+              <div class="kanm-input-group">
+                <label for="kanm-negocios-limite-menu-qr">Límite de Menús QR activos</label>
+                <input type="number" id="kanm-negocios-limite-menu-qr" min="0" placeholder="Vacío = ilimitado" />
+                <span class="kanm-input-help">Default: Starter 1, Pro 3, Full ilimitado.</span>
+              </div>
+            </div>
+            <div class="kanm-input-group" id="kanm-negocios-plan-info">
+              <span class="kanm-input-help" id="kanm-negocios-plan-info-texto"></span>
+            </div>
+          </section>
+
+          <!-- Secuencias fiscales NCF -->
+          <section class="kanm-modal-section" data-tone="fiscal" id="kanm-negocios-secuencias-section" hidden>
+            <h4>Secuencias fiscales NCF (legacy)</h4>
+            <p class="kanm-section-desc">
+              Controla qué tipos de comprobante legacy puede emitir el negocio. Si el plan incluye Facturación Electrónica (Full), las secuencias B01/B02/B14 quedan desactivadas automáticamente y se usan e-CF E31/E32.
+            </p>
+            <div class="kanm-grid-3">
+              <label class="kanm-checkbox" for="kanm-negocios-permitir-b01">
+                <input type="checkbox" id="kanm-negocios-permitir-b01" checked />
+                <span>Permitir B01 (crédito fiscal)</span>
+              </label>
+              <label class="kanm-checkbox" for="kanm-negocios-permitir-b02">
+                <input type="checkbox" id="kanm-negocios-permitir-b02" checked />
+                <span>Permitir B02 (consumidor final)</span>
+              </label>
+              <label class="kanm-checkbox" for="kanm-negocios-permitir-b14">
+                <input type="checkbox" id="kanm-negocios-permitir-b14" checked />
+                <span>Permitir B14 (régimen especial)</span>
+              </label>
+            </div>
+            <p class="kanm-section-desc" style="margin-top:8px;">
+              Para configurar el certificado P12, los rangos e-CF y demás opciones de Facturación Electrónica, el negocio debe entrar a su panel administrativo y abrir el módulo "Certificación DGII".
+            </p>
+          </section>
+
           <!-- Modulos habilitados -->
           <section class="kanm-modal-section" data-tone="modulos">
-            <h4>Modulos habilitados</h4>
-            <p class="kanm-section-desc">Activa solo los modulos que el negocio va a utilizar. Los desactivados no apareceran en el menu lateral.</p>
+            <h4>Módulos habilitados</h4>
+            <p class="kanm-section-desc">Activa solo los módulos que el negocio va a utilizar. <strong>Admin</strong> y <strong>Mostrador</strong> vienen activos por defecto. Los grupos KDS solo aplican si el plan permite KDS (Pro o Full).</p>
+
+            <h5 style="margin:14px 0 6px 0;font-size:0.85rem;color:var(--posium-ink-soft, #555);text-transform:uppercase;letter-spacing:0.08em;">Base</h5>
             <div class="kanm-modulos-grid">
               <label class="kanm-modulo-card">
                 <input type="checkbox" id="kanm-modulo-admin" checked />
                 <span>Admin</span>
               </label>
+              <label class="kanm-modulo-card">
+                <input type="checkbox" id="kanm-modulo-mostrador" checked />
+                <span>Mostrador</span>
+              </label>
+            </div>
+
+            <h5 style="margin:14px 0 6px 0;font-size:0.85rem;color:var(--posium-ink-soft, #555);text-transform:uppercase;letter-spacing:0.08em;">KDS (cocina sincronizada, requiere Plan Pro o Full)</h5>
+            <div class="kanm-modulos-grid">
               <label class="kanm-modulo-card">
                 <input type="checkbox" id="kanm-modulo-mesera" checked />
                 <span>Mesera</span>
@@ -4130,16 +4248,16 @@
                 <span>Caja</span>
               </label>
               <label class="kanm-modulo-card">
-                <input type="checkbox" id="kanm-modulo-mostrador" checked />
-                <span>Mostrador</span>
+                <input type="checkbox" id="kanm-modulo-historial" checked />
+                <span>Historial cocina</span>
               </label>
+            </div>
+
+            <h5 style="margin:14px 0 6px 0;font-size:0.85rem;color:var(--posium-ink-soft, #555);text-transform:uppercase;letter-spacing:0.08em;">Adicionales</h5>
+            <div class="kanm-modulos-grid">
               <label class="kanm-modulo-card">
                 <input type="checkbox" id="kanm-modulo-delivery" checked />
                 <span>Delivery</span>
-              </label>
-              <label class="kanm-modulo-card">
-                <input type="checkbox" id="kanm-modulo-historial" checked />
-                <span>Historial cocina</span>
               </label>
               <label class="kanm-modulo-card">
                 <input type="checkbox" id="kanm-modulo-menu-qr" />
@@ -4154,7 +4272,7 @@
           <!-- Tema visual -->
           <section class="kanm-modal-section" data-tone="tema">
             <h4>Tema visual</h4>
-            <p class="kanm-section-desc">Personaliza los colores que veran los usuarios del negocio. Si elegiste una empresa existente, estos valores ya vienen pre-cargados.</p>
+            <p class="kanm-section-desc">Personaliza los colores que verán los usuarios del negocio. Si elegiste una empresa existente, estos valores ya vienen pre-cargados.</p>
             <div class="kanm-grid-4">
               <div class="kanm-input-group kanm-color-field">
                 <label for="kanm-negocios-color-primario">Primario</label>
@@ -4175,15 +4293,15 @@
             </div>
             <div class="kanm-grid-3">
               <div class="kanm-input-group kanm-color-field">
-                <label for="kanm-negocios-color-boton-primario">Boton primario</label>
+                <label for="kanm-negocios-color-boton-primario">Botón primario</label>
                 <input type="color" id="kanm-negocios-color-boton-primario" value="#255bc7" />
               </div>
               <div class="kanm-input-group kanm-color-field">
-                <label for="kanm-negocios-color-boton-secundario">Boton secundario</label>
+                <label for="kanm-negocios-color-boton-secundario">Botón secundario</label>
                 <input type="color" id="kanm-negocios-color-boton-secundario" value="#7b8fb8" />
               </div>
               <div class="kanm-input-group kanm-color-field">
-                <label for="kanm-negocios-color-boton-peligro">Boton peligro</label>
+                <label for="kanm-negocios-color-boton-peligro">Botón peligro</label>
                 <input type="color" id="kanm-negocios-color-boton-peligro" value="#ff4b4b" />
               </div>
             </div>
@@ -4192,7 +4310,7 @@
           <!-- Admin principal -->
           <section class="kanm-modal-section" data-tone="admin">
             <h4 id="kanm-negocios-admin-titulo">Admin principal</h4>
-            <p class="kanm-section-desc">Sera el primer usuario del negocio con permisos completos. Si no defines password, se generara una temporal.</p>
+            <p class="kanm-section-desc">Será el primer usuario del negocio con permisos completos. Si no defines contraseña, se generará una temporal.</p>
             <div class="kanm-input-group">
               <label for="kanm-negocios-admin-correo" id="kanm-negocios-admin-correo-label">Correo del admin principal</label>
               <input type="email" id="kanm-negocios-admin-correo" placeholder="admin@negocio.com" />
@@ -4202,39 +4320,39 @@
                 <label for="kanm-negocios-admin-usuario" id="kanm-negocios-admin-usuario-label">Usuario admin (opcional)</label>
                 <input type="text" id="kanm-negocios-admin-usuario" placeholder="admin.negocio" />
                 <span class="kanm-input-help" id="kanm-negocios-admin-usuario-help">
-                  Este usuario sera el admin principal del negocio.
+                  Este usuario será el admin principal del negocio.
                 </span>
               </div>
               <div class="kanm-input-group">
                 <label class="kanm-checkbox" for="kanm-negocios-cambiar-password">
                   <input type="checkbox" id="kanm-negocios-cambiar-password" />
-                  <span>Actualizar contrasena</span>
+                  <span>Actualizar contraseña</span>
                 </label>
-                <span class="kanm-input-help">Activa para definir una nueva contrasena.</span>
+                <span class="kanm-input-help">Activa para definir una nueva contraseña.</span>
               </div>
             </div>
             <div class="kanm-input-group">
               <label for="kanm-negocios-admin-password" id="kanm-negocios-admin-password-label">
-                Contrasena admin (opcional)
+                Contraseña admin (opcional)
               </label>
               <div class="password-field">
                 <input
                   type="password"
                   id="kanm-negocios-admin-password"
-                  placeholder="Deja vacio para mantener la actual"
+                  placeholder="Deja vacío para mantener la actual"
                 />
                 <button
                   type="button"
                   class="password-toggle"
                   data-password-toggle
                   aria-pressed="false"
-                  aria-label="Mostrar contrasena"
+                  aria-label="Mostrar contraseña"
                 >
                   Mostrar
                 </button>
               </div>
               <span class="kanm-input-help" id="kanm-negocios-admin-password-help">
-                Solo se aplica si activas "Actualizar contrasena".
+                Solo se aplica si activas "Actualizar contraseña".
               </span>
             </div>
           </section>
@@ -4308,8 +4426,8 @@
           <div class="product-form-sections">
             <section class="product-form-section">
               <div class="product-form-section-header">
-                <h4>Datos basicos</h4>
-                <p class="kanm-subtitle">Identifica el producto y su categoria.</p>
+                <h4>Datos básicos</h4>
+                <p class="kanm-subtitle">Identifica el producto y su categoría.</p>
               </div>
               <div class="product-form-grid">
                 <div class="kanm-input-group">
@@ -4360,7 +4478,7 @@
             <section class="product-form-section">
               <div class="product-form-section-header">
                 <h4>Imagen y vista previa</h4>
-                <p class="kanm-subtitle">Usa una URL publica para mostrar el producto en el menu digital.</p>
+                <p class="kanm-subtitle">Usa una URL pública para mostrar el producto en el menú digital.</p>
               </div>
               <div class="product-form-grid">
                 <div class="kanm-input-group product-form-span">
@@ -4402,17 +4520,17 @@
                       <div class="product-menu-preview-media">
                         <img id="prod-menu-preview-img" alt="Vista previa del producto" hidden />
                         <div id="prod-menu-preview-fallback" class="product-menu-preview-fallback">Sin imagen</div>
-                        <span class="product-menu-preview-badge">Menu</span>
+                        <span class="product-menu-preview-badge">Menú</span>
                         <button type="button" class="product-menu-preview-plus" disabled>+</button>
                       </div>
                       <div class="product-menu-preview-body">
-                        <div class="product-menu-preview-category" id="prod-menu-preview-category">Categoria</div>
+                        <div class="product-menu-preview-category" id="prod-menu-preview-category">Categoría</div>
                         <h5 id="prod-menu-preview-title">Nombre del producto</h5>
                         <div class="product-menu-preview-price-row">
                           <strong id="prod-menu-preview-price">RD$0.00</strong>
                           <span id="prod-menu-preview-old-price" hidden></span>
                         </div>
-                        <p id="prod-menu-preview-note">Asi se mostraria en el menu digital.</p>
+                        <p id="prod-menu-preview-note">Así se mostraría en el menú digital.</p>
                       </div>
                     </div>
                   </div>
@@ -4474,7 +4592,7 @@
                   />
                 </div>
                 <div class="kanm-input-group modo-preparacion-only">
-                  <label for="prod-ultimo-costo">Ultimo costo (sin ITBIS)</label>
+                  <label for="prod-ultimo-costo">Último costo (sin ITBIS)</label>
                   <input
                     type="text"
                     id="prod-ultimo-costo"
@@ -4489,7 +4607,7 @@
                     <span>Actualizar costo con compras</span>
                     <input type="checkbox" id="prod-actualiza-costo" checked />
                   </label>
-                  <p class="kanm-input-help">Si esta activo, las compras ajustan el costo promedio.</p>
+                  <p class="kanm-input-help">Si está activo, las compras ajustan el costo promedio.</p>
                 </div>
               </div>
             </section>
@@ -4509,7 +4627,7 @@
                     <span>Stock indefinido</span>
                     <input type="checkbox" id="prod-stock-indefinido" />
                   </label>
-                  <p class="kanm-input-help">Si esta activo, el sistema no controla cantidad.</p>
+                  <p class="kanm-input-help">Si está activo, el sistema no controla cantidad.</p>
                 </div>
                 <div class="kanm-input-group modo-preparacion-only">
                   <label for="prod-unidad-base">Unidad base</label>
@@ -4539,7 +4657,7 @@
                     <span>Es insumo</span>
                     <input type="checkbox" id="prod-es-insumo" />
                   </label>
-                  <p class="kanm-input-help">Activalo si este producto se consume en recetas.</p>
+                  <p class="kanm-input-help">Actívalo si este producto se consume en recetas.</p>
                 </div>
                 <div class="kanm-input-group modo-preparacion-only insumo-vendible-group product-form-span">
                   <label class="kanm-input-toggle" for="prod-insumo-vendible">
@@ -4574,7 +4692,7 @@
           <div class="admin-form-actions producto-form-actions">
             <button type="button" class="kanm-button ghost" id="admin-inventario-cancelar">Cerrar</button>
             <button type="button" class="kanm-button secondary" id="prod-cancelar" hidden>
-              Cancelar edicion
+              Cancelar edición
             </button>
             <button type="submit" class="kanm-button" id="prod-guardar">Guardar producto</button>
           </div>
@@ -4614,7 +4732,7 @@
                 <input type="text" id="productos-vista-buscar" placeholder="Buscar producto..." />
               </div>
               <div class="kanm-input-group">
-                <label for="productos-vista-categoria">Categoria</label>
+                <label for="productos-vista-categoria">Categoría</label>
                 <select id="productos-vista-categoria">
                   <option value="">Todas las categorías</option>
                 </select>
@@ -4652,7 +4770,7 @@
     <div class="kanm-modal-backdrop"></div>
     <div class="kanm-modal-panel kanm-modal-panel--wide">
       <div class="kanm-modal-header">
-        <h3 id="kanm-facturacion-modal-titulo">Facturacion POSIUM</h3>
+        <h3 id="kanm-facturacion-modal-titulo">Facturación POSIUM</h3>
         <button type="button" class="kanm-button ghost" id="kanm-facturacion-btn-cerrar">Cerrar</button>
       </div>
       <div class="kanm-modal-body">
@@ -4664,22 +4782,22 @@
             <h4>Cliente</h4>
             <div class="kanm-grid-2">
               <div class="kanm-input-group">
-                <label for="facturacion-cliente-nombre">Razon social / Nombre comercial</label>
+                <label for="facturacion-cliente-nombre">Razón social / Nombre comercial</label>
                 <input type="text" id="facturacion-cliente-nombre" placeholder="Cliente" />
               </div>
               <div class="kanm-input-group">
-                <label for="facturacion-cliente-rnc">RNC o Cedula</label>
-                <input type="text" id="facturacion-cliente-rnc" placeholder="RNC/Cedula" />
+                <label for="facturacion-cliente-rnc">RNC o Cédula</label>
+                <input type="text" id="facturacion-cliente-rnc" placeholder="RNC/Cédula" />
               </div>
             </div>
             <div class="kanm-grid-2">
               <div class="kanm-input-group">
-                <label for="facturacion-cliente-direccion">Direccion</label>
-                <input type="text" id="facturacion-cliente-direccion" placeholder="Direccion del cliente" />
+                <label for="facturacion-cliente-direccion">Dirección</label>
+                <input type="text" id="facturacion-cliente-direccion" placeholder="Dirección del cliente" />
               </div>
               <div class="kanm-input-group">
-                <label for="facturacion-cliente-telefono">Telefono</label>
-                <input type="text" id="facturacion-cliente-telefono" placeholder="Telefono" />
+                <label for="facturacion-cliente-telefono">Teléfono</label>
+                <input type="text" id="facturacion-cliente-telefono" placeholder="Teléfono" />
               </div>
             </div>
             <div class="kanm-grid-2">
@@ -4708,12 +4826,12 @@
             </div>
             <div class="kanm-grid-2">
               <div class="kanm-input-group">
-                <label for="facturacion-emisor-direccion">Direccion</label>
-                <input type="text" id="facturacion-emisor-direccion" placeholder="Direccion" />
+                <label for="facturacion-emisor-direccion">Dirección</label>
+                <input type="text" id="facturacion-emisor-direccion" placeholder="Dirección" />
               </div>
               <div class="kanm-input-group">
-                <label for="facturacion-emisor-telefono">Telefono</label>
-                <input type="text" id="facturacion-emisor-telefono" placeholder="Telefono" />
+                <label for="facturacion-emisor-telefono">Teléfono</label>
+                <input type="text" id="facturacion-emisor-telefono" placeholder="Teléfono" />
               </div>
             </div>
             <div class="kanm-grid-2">
@@ -4733,11 +4851,11 @@
           </section>
 
           <section class="kanm-modal-section">
-            <h4>Plan y configuracion</h4>
+            <h4>Plan y configuración</h4>
             <div class="kanm-grid-3">
               <div class="kanm-input-group">
                 <label for="facturacion-plan-nombre">Plan/paquete</label>
-                <input type="text" id="facturacion-plan-nombre" placeholder="Suscripcion POSIUM mensual" />
+                <input type="text" id="facturacion-plan-nombre" placeholder="Suscripción POSIUM mensual" />
               </div>
               <div class="kanm-input-group">
                 <label for="facturacion-precio-base">Precio base</label>
@@ -4770,17 +4888,17 @@
                 />
               </div>
               <div class="kanm-input-group">
-                <label for="facturacion-periodo-default">Periodo por defecto</label>
+                <label for="facturacion-periodo-default">Período por defecto</label>
                 <input type="text" id="facturacion-periodo-default" placeholder="Enero 2026" />
               </div>
             </div>
             <div class="kanm-grid-2">
               <div class="kanm-input-group">
-                <label for="facturacion-terminos">Terminos de pago</label>
+                <label for="facturacion-terminos">Términos de pago</label>
                 <input type="text" id="facturacion-terminos" placeholder="Pago inmediato" />
               </div>
               <div class="kanm-input-group">
-                <label for="facturacion-metodo">Metodo de pago</label>
+                <label for="facturacion-metodo">Método de pago</label>
                 <select id="facturacion-metodo">
                   <option value="Transferencia">Transferencia</option>
                   <option value="Efectivo">Efectivo</option>
@@ -4798,11 +4916,11 @@
             <h4>Factura</h4>
             <div class="kanm-grid-3">
               <div class="kanm-input-group">
-                <label for="factura-fecha-emision">Fecha de emision</label>
+                <label for="factura-fecha-emision">Fecha de emisión</label>
                 <input type="date" id="factura-fecha-emision" />
               </div>
               <div class="kanm-input-group">
-                <label for="factura-periodo">Periodo facturado</label>
+                <label for="factura-periodo">Período facturado</label>
                 <input type="text" id="factura-periodo" placeholder="Enero 2026" />
               </div>
               <div class="kanm-input-group">
@@ -4815,8 +4933,8 @@
               </div>
             </div>
             <div class="kanm-input-group">
-              <label for="factura-descripcion">Descripcion</label>
-              <input type="text" id="factura-descripcion" placeholder="Suscripcion POSIUM" />
+              <label for="factura-descripcion">Descripción</label>
+              <input type="text" id="factura-descripcion" placeholder="Suscripción POSIUM" />
             </div>
             <div class="kanm-grid-3">
               <div class="kanm-input-group">
@@ -4865,7 +4983,7 @@
           <div class="kanm-modal-footer">
             <div id="facturacion-mensaje" class="kanm-message"></div>
             <div class="kanm-modal-actions">
-              <button type="button" class="kanm-button secondary" id="facturacion-guardar-config">Guardar configuracion</button>
+              <button type="button" class="kanm-button secondary" id="facturacion-guardar-config">Guardar configuración</button>
               <button type="button" class="kanm-button" id="facturacion-generar">Generar factura</button>
             </div>
           </div>
@@ -4894,7 +5012,7 @@
               <tr>
                 <th>#</th>
                 <th>Fecha</th>
-                <th>Periodo</th>
+                <th>Período</th>
                 <th>Total</th>
                 <th>Estado</th>
                 <th>Acciones</th>
@@ -4916,11 +5034,11 @@
       <div class="kanm-modal-body">
         <div class="analisis-capital-grid">
           <div class="kanm-input-group">
-            <label for="analisis-capital-desde">Periodo inicio</label>
+            <label for="analisis-capital-desde">Período inicio</label>
             <input type="date" id="analisis-capital-desde" />
           </div>
           <div class="kanm-input-group">
-            <label for="analisis-capital-hasta">Periodo fin</label>
+            <label for="analisis-capital-hasta">Período fin</label>
             <input type="date" id="analisis-capital-hasta" />
           </div>
           <div class="kanm-input-group">
@@ -4972,7 +5090,7 @@
             class="password-toggle"
             data-password-toggle
             aria-pressed="false"
-            aria-label="Mostrar contrasena"
+            aria-label="Mostrar contraseña"
           >
             Mostrar
           </button>

@@ -15,7 +15,8 @@ const btnFocusPreparar = document.getElementById('focus-preparar');
 const btnFocusListo = document.getElementById('focus-listo');
 const btnFocusCancelar = document.getElementById('focus-cancelar');
 
-const REFRESH_INTERVAL = 5000;
+// Polling: 12s (antes 5s). Reduce carga sin afectar UX.
+const REFRESH_INTERVAL = 12000;
 let refreshTimer = null;
 let cargando = false;
 let cuentasActivas = [];
@@ -902,8 +903,20 @@ const cambiarEstado = async (pedidoId, estado, boton) => {
 
 const iniciarAutoRefresco = () => {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => cargarPedidos(false), REFRESH_INTERVAL);
+  refreshTimer = setInterval(() => {
+    // Pausar polling cuando la pestaña esté oculta.
+    if (typeof document !== 'undefined' && document.hidden) return;
+    cargarPedidos(false);
+  }, REFRESH_INTERVAL);
 };
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && typeof cargarPedidos === 'function') {
+      try { cargarPedidos(false); } catch (_) {}
+    }
+  });
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   tabs.forEach((btn) =>

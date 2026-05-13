@@ -51,6 +51,10 @@
         box-sizing: border-box;
       }
 
+      html {
+        scroll-behavior: smooth;
+      }
+
       body {
         margin: 0;
         min-height: 100vh;
@@ -421,8 +425,121 @@
         font-size: 0.95rem;
       }
 
+      .plan-list strong {
+        color: var(--posium-ink);
+        font-weight: 700;
+      }
+
+      .plan-section-title {
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--posium-ink);
+        margin-top: 6px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+      }
+
+      .plan-section-title--soft {
+        color: var(--posium-ink-soft);
+        font-weight: 600;
+      }
+
+      .plan-list--soft {
+        opacity: 0.92;
+        font-size: 0.9rem;
+      }
+
+      .plan-card--featured {
+        position: relative;
+        border-color: rgba(37, 91, 199, 0.32);
+        box-shadow: 0 14px 32px rgba(37, 91, 199, 0.12);
+      }
+
+      .plan-card--featured::before {
+        content: 'Recomendado';
+        position: absolute;
+        top: -10px;
+        right: 16px;
+        background: var(--posium-ink);
+        color: #fff;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .plan-card--premium {
+        position: relative;
+        border-color: rgba(212, 161, 51, 0.4);
+        background: linear-gradient(160deg, rgba(255, 252, 244, 0.96), rgba(255, 246, 224, 0.92));
+        box-shadow: 0 14px 32px rgba(212, 161, 51, 0.14);
+      }
+
+      .plan-card--premium::before {
+        content: 'Premium';
+        position: absolute;
+        top: -10px;
+        right: 16px;
+        background: linear-gradient(135deg, #d4a133, #f0c453);
+        color: #2b1f00;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .plan-card--qr {
+        background: linear-gradient(150deg, rgba(247, 250, 255, 0.98), rgba(238, 244, 255, 0.95));
+      }
+
       .plan-activation {
         margin-top: 18px;
+      }
+
+      .legal-section {
+        scroll-margin-top: 80px;
+      }
+
+      .legal-card {
+        display: grid;
+        gap: 14px;
+        text-align: left;
+      }
+
+      .legal-card p {
+        margin: 0;
+        color: var(--posium-ink-soft);
+        font-size: 0.95rem;
+        line-height: 1.55;
+      }
+
+      .legal-heading {
+        margin: 18px 0 4px;
+        font-size: 1.05rem;
+        color: var(--posium-ink);
+        font-weight: 700;
+        padding-bottom: 6px;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      }
+
+      .legal-heading:first-of-type {
+        margin-top: 0;
+      }
+
+      .legal-list {
+        margin: 0;
+        padding-left: 22px;
+        display: grid;
+        gap: 6px;
+        color: var(--posium-ink-soft);
+        font-size: 0.94rem;
+        line-height: 1.5;
       }
 
       .plan-footnote {
@@ -790,6 +907,63 @@
           width: 100%;
           text-align: center;
         }
+
+        .plan-card--featured::before,
+        .plan-card--premium::before {
+          right: 12px;
+          font-size: 0.66rem;
+          padding: 3px 8px;
+        }
+
+        .plan-section-title {
+          font-size: 0.74rem;
+        }
+
+        .legal-heading {
+          font-size: 1rem;
+        }
+
+        .legal-card p,
+        .legal-list {
+          font-size: 0.9rem;
+        }
+
+        .section-title {
+          font-size: 1.4rem;
+        }
+
+        .section-subtitle {
+          font-size: 0.95rem;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .section {
+          padding: 22px 0;
+        }
+
+        .info-card {
+          padding: 16px 14px;
+          border-radius: 16px;
+        }
+
+        .plan-price {
+          font-size: 1.5rem;
+        }
+
+        .plan-tag {
+          font-size: 0.78rem;
+        }
+
+        .plan-list,
+        .plan-list--soft {
+          font-size: 0.88rem;
+        }
+
+        .plan-footnote {
+          font-size: 0.88rem;
+          gap: 10px 16px;
+        }
       }
     </style>
   </head>
@@ -815,6 +989,7 @@
           >
         </div>
         <button class="nav-toggle" type="button" aria-label="Abrir menú" id="nav-toggle">☰</button>
+
       </header>
 
       <section class="hero" id="soluciones">
@@ -884,62 +1059,116 @@
       <section class="section" id="planes">
         <h2 class="section-title">Planes de POSIUM</h2>
         <p class="section-subtitle">
-          Todos con ITBIS incluido y precios competitivos para capturar mercado. e-CF DGII como beneficio exclusivo en Pro y Full. KDS activable segun plan.
+          Todos los precios incluyen ITBIS. Sistema adaptable para colmados, cafeterías, restaurantes, foodtrucks y negocios formales en República Dominicana.
         </p>
         <div class="cards-grid plans-grid">
           <div class="info-card plan-card">
             <div class="plan-tag">Plan Starter - POP</div>
             <div class="plan-price">RD$1,200 <span>/mes</span></div>
-            <div class="plan-setup">Ideal para colmados, cafeterias, puestos y foodtrucks.</div>
+            <div class="plan-setup">Ideal para pequeños negocios que necesitan control de ventas simple y rápido.</div>
+            <div class="plan-section-title">Incluye</div>
             <ul class="plan-list">
-              <li>POS clasico</li>
-              <li>Productos e inventario basicos</li>
-              <li>Reportes de ventas diarios</li>
-              <li>Soporte WhatsApp</li>
-              <li>e-CF DGII opcional como upgrade</li>
-              <li>KDS opcional (activable)</li>
+              <li>Admin + Mostrador (por defecto)</li>
+              <li>POS clásico y registro de productos</li>
+              <li>Inventario básico</li>
+              <li>Reportes diarios de ventas</li>
+              <li>Soporte por WhatsApp</li>
+            </ul>
+            <div class="plan-section-title plan-section-title--soft">Opcionales</div>
+            <ul class="plan-list plan-list--soft">
+              <li>Delivery: <strong>+ RD$150/mes</strong></li>
+              <li>Facturación Electrónica e-CF DGII: + RD$700/mes</li>
+              <li>Menú QR</li>
+            </ul>
+            <div class="plan-section-title plan-section-title--soft">No incluye</div>
+            <ul class="plan-list plan-list--soft">
+              <li>KDS (cocina, mesera, bar y caja sincronizados)</li>
             </ul>
           </div>
-          <div class="info-card plan-card">
-            <div class="plan-tag">Plan Pro - e-CF Integrado</div>
+          <div class="info-card plan-card plan-card--featured">
+            <div class="plan-tag">Plan Pro - Negocio</div>
             <div class="plan-price">RD$1,500 <span>/mes</span></div>
-            <div class="plan-setup">Ideal para negocios formales que necesitan cumplir DGII.</div>
+            <div class="plan-setup">Ideal para negocios que necesitan mayor control operativo y crecimiento administrativo.</div>
+            <div class="plan-section-title">Incluye</div>
             <ul class="plan-list">
-              <li>POS completo</li>
-              <li>Facturacion Electronica NCF / e-CF DGII incluido</li>
-              <li>Reportes avanzados por turno</li>
-              <li>Soporte tecnico basico</li>
-              <li>KDS incluido y activable</li>
+              <li>Admin + Mostrador (por defecto)</li>
+              <li>POS completo, inventario avanzado</li>
+              <li>Control por turnos</li>
+              <li>Reportes avanzados</li>
+              <li>Multiusuarios, roles y permisos</li>
+              <li><strong>KDS incluido</strong> (cocina + mesera + bar + caja sincronizados)</li>
+              <li><strong>Delivery incluido</strong></li>
+              <li>Soporte técnico prioritario básico</li>
+            </ul>
+            <div class="plan-section-title plan-section-title--soft">Opcionales</div>
+            <ul class="plan-list plan-list--soft">
+              <li>Activación e-CF DGII: + RD$700/mes</li>
+              <li>Menú QR</li>
             </ul>
           </div>
-          <div class="info-card plan-card">
+          <div class="info-card plan-card plan-card--premium">
             <div class="plan-tag">Plan Full - Pro + KDS</div>
-            <div class="plan-price">RD$1,900 <span>/mes</span></div>
-            <div class="plan-setup">Ideal para restaurantes con cocina y multiples salidas.</div>
+            <div class="plan-price">RD$2,000 <span>/mes</span></div>
+            <div class="plan-setup">Ideal para restaurantes, negocios con cocina y operaciones múltiples.</div>
+            <div class="plan-section-title">Incluye</div>
             <ul class="plan-list">
+              <li>Admin + Mostrador (por defecto)</li>
               <li>POS completo</li>
-              <li>e-CF DGII incluido</li>
-              <li>KDS incluido y activable</li>
-              <li>Multiusuarios</li>
-              <li>Reportes avanzados y alertas</li>
+              <li><strong>Facturación Electrónica e-CF DGII incluida</strong></li>
+              <li><strong>KDS incluido</strong> (cocina, mesera, bar y caja sincronizados)</li>
+              <li><strong>Chat interno entre equipo</strong> (exclusivo Full)</li>
+              <li><strong>Delivery incluido</strong></li>
+              <li>Multiusuarios avanzados</li>
+              <li>Reportes, alertas y control por estaciones</li>
               <li>Soporte prioritario</li>
+              <li>1 Menú QR incluido opcionalmente</li>
+            </ul>
+            <div class="plan-section-title plan-section-title--soft">Beneficios</div>
+            <ul class="plan-list plan-list--soft">
+              <li>Preparado para restaurantes con cocina</li>
+              <li>Mejor flujo operativo</li>
+              <li>Automatización completa de pedidos</li>
             </ul>
           </div>
         </div>
-        <div class="info-card plan-card plan-activation">
-          <div class="plan-tag">Pago inicial para activacion del programa</div>
-          <div class="plan-price">RD$1,800 <span>unica vez</span></div>
-          <div class="plan-setup">Incluye:</div>
+
+        <div class="info-card plan-card plan-activation plan-card--qr">
+          <div class="plan-tag">Activación Menú QR</div>
+          <div class="plan-setup">POSIUM permite habilitar menús digitales QR para restaurantes y negocios gastronómicos.</div>
+          <div class="plan-section-title">Costos</div>
           <ul class="plan-list">
-            <li>Configuracion inicial</li>
-            <li>Migracion de inventario</li>
-            <li>Capacitacion al usuario</li>
-            <li>Conexion con impresoras y cajones</li>
+            <li>1 QR: <strong>RD$100</strong></li>
+            <li>2 QR: <strong>RD$100 c/u</strong></li>
+            <li>Desde 3 QR en adelante: <strong>RD$50 por cada QR</strong></li>
+          </ul>
+          <div class="plan-section-title plan-section-title--soft">Los QR pueden utilizarse para</div>
+          <ul class="plan-list plan-list--soft">
+            <li>Menús digitales</li>
+            <li>Acceso rápido a pedidos</li>
+            <li>Visualización desde mesas</li>
+            <li>Promociones y catálogos</li>
           </ul>
         </div>
+
+        <div class="info-card plan-card plan-activation">
+          <div class="plan-tag">Pago inicial de activación</div>
+          <div class="plan-price">RD$1,800 <span>único pago</span></div>
+          <div class="plan-section-title">Incluye</div>
+          <ul class="plan-list">
+            <li>Instalación inicial</li>
+            <li>Configuración del sistema</li>
+            <li>Creación del negocio</li>
+            <li>Capacitación básica</li>
+            <li>Activación de módulos contratados</li>
+          </ul>
+        </div>
+
         <div class="plan-footnote">
-          <div>e-CF DGII es exclusivo de los planes Pro y Full.</div>
-          <div>KDS es opcional en Starter. En Pro y Full viene incluido y activable segun la operacion.</div>
+          <div>Todos los planes traen <strong>Admin</strong> y <strong>Mostrador</strong> por defecto.</div>
+          <div><strong>KDS</strong> (cocina + mesera + bar + caja sincronizados) incluido en Pro y Full. No disponible en Starter.</div>
+          <div><strong>Delivery</strong> incluido en Pro y Full. En Starter es opcional con +RD$150/mes.</div>
+          <div><strong>e-CF DGII</strong> incluida en Full. En Starter y Pro es activable con +RD$700/mes.</div>
+          <div><strong>Chat interno</strong> exclusivo del Plan Full.</div>
           <a
             class="btn primary"
             href="https://wa.me/18099672501?text=Hola%2C%20quiero%20informaci%C3%B3n%20para%20obtener%20POSIUM%20para%20mi%20negocio.%20%C2%BFMe%20apoyas%20con%20planes%20y%20configuraci%C3%B3n%3F"
@@ -984,7 +1213,7 @@
           </div>
           <div class="info-card">
             <h3>Facturación electrónica</h3>
-            <span>No disponible por el momento.</span>
+            <span>e-CF DGII certificado. Incluido en Plan Full y disponible como upgrade en Pro.</span>
           </div>
         </div>
       </section>
@@ -1033,6 +1262,120 @@
         </div>
       </section>
 
+      <section class="section legal-section" id="terminos">
+        <h2 class="section-title">Términos y Condiciones</h2>
+        <p class="section-subtitle">
+          Documento que regula el uso del servicio POSIUM. Aplica a todos los clientes y usuarios.
+        </p>
+        <div class="info-card legal-card">
+          <h3 class="legal-heading">1. Uso del Servicio</h3>
+          <p>POSIUM ofrece servicios de software administrativo y punto de venta bajo modalidad de suscripción mensual.</p>
+          <p>El cliente acepta utilizar el sistema únicamente para actividades legales y comerciales autorizadas en República Dominicana.</p>
+
+          <h3 class="legal-heading">2. Pagos y Renovación</h3>
+          <ul class="legal-list">
+            <li>Las mensualidades deben pagarse en la fecha acordada.</li>
+            <li>El retraso en pagos puede generar suspensión temporal del servicio.</li>
+            <li>POSIUM se reserva el derecho de limitar funciones por falta de pago.</li>
+          </ul>
+
+          <h3 class="legal-heading">3. Facturación Electrónica e-CF</h3>
+          <ul class="legal-list">
+            <li>La emisión de e-CF depende de la aprobación y autorización de la DGII.</li>
+            <li>El cliente es responsable de mantener vigente su certificado digital.</li>
+            <li>POSIUM actúa como plataforma tecnológica de emisión.</li>
+          </ul>
+
+          <h3 class="legal-heading">4. Soporte Técnico</h3>
+          <p><strong>El soporte incluye:</strong></p>
+          <ul class="legal-list">
+            <li>Asistencia básica vía WhatsApp</li>
+            <li>Corrección de errores del sistema</li>
+            <li>Ayuda operativa básica</li>
+          </ul>
+          <p><strong>No incluye:</strong></p>
+          <ul class="legal-list">
+            <li>Reparación de equipos físicos</li>
+            <li>Problemas de internet</li>
+            <li>Daños causados por terceros o manipulación indebida</li>
+          </ul>
+
+          <h3 class="legal-heading">5. Disponibilidad del Servicio</h3>
+          <p>POSIUM trabaja para mantener estabilidad continua, pero no garantiza disponibilidad absoluta debido a:</p>
+          <ul class="legal-list">
+            <li>Fallos eléctricos</li>
+            <li>Problemas de internet</li>
+            <li>Mantenimiento</li>
+            <li>Servicios externos</li>
+          </ul>
+
+          <h3 class="legal-heading">6. Cancelación</h3>
+          <p>El cliente puede cancelar el servicio en cualquier momento.</p>
+          <p>No se realizan devoluciones de pagos ya procesados correspondientes al período activo.</p>
+
+          <h3 class="legal-heading">7. Responsabilidad del Cliente</h3>
+          <p>El cliente es responsable de:</p>
+          <ul class="legal-list">
+            <li>Mantener seguras sus credenciales</li>
+            <li>Registrar información válida</li>
+            <li>Realizar uso adecuado del sistema</li>
+            <li>Cumplir obligaciones fiscales ante DGII</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section legal-section" id="privacidad">
+        <h2 class="section-title">Política de Privacidad</h2>
+        <p class="section-subtitle">
+          Cómo recopilamos, usamos y protegemos la información de nuestros clientes.
+        </p>
+        <div class="info-card legal-card">
+          <h3 class="legal-heading">1. Información Recopilada</h3>
+          <p>POSIUM puede recopilar:</p>
+          <ul class="legal-list">
+            <li>Nombre del negocio</li>
+            <li>Información fiscal</li>
+            <li>Correos electrónicos</li>
+            <li>Datos de ventas</li>
+            <li>Productos e inventario</li>
+            <li>Información operativa</li>
+          </ul>
+
+          <h3 class="legal-heading">2. Uso de la Información</h3>
+          <p>La información recopilada se utiliza para:</p>
+          <ul class="legal-list">
+            <li>Operación del sistema</li>
+            <li>Facturación</li>
+            <li>Soporte técnico</li>
+            <li>Mejoras de la plataforma</li>
+            <li>Cumplimiento legal y fiscal</li>
+          </ul>
+
+          <h3 class="legal-heading">3. Protección de Datos</h3>
+          <p>POSIUM implementa medidas de seguridad razonables para proteger la información almacenada.</p>
+
+          <h3 class="legal-heading">4. Compartición de Información</h3>
+          <p>POSIUM no vende información de clientes.</p>
+          <p>Los datos solo podrán compartirse:</p>
+          <ul class="legal-list">
+            <li>Cuando sea requerido por ley</li>
+            <li>Para integración con servicios autorizados</li>
+            <li>Para cumplimiento fiscal con DGII</li>
+          </ul>
+
+          <h3 class="legal-heading">5. Acceso y Eliminación</h3>
+          <p>El cliente puede solicitar:</p>
+          <ul class="legal-list">
+            <li>Actualización de datos</li>
+            <li>Corrección de información</li>
+            <li>Eliminación de cuenta (según obligaciones legales vigentes)</li>
+          </ul>
+
+          <h3 class="legal-heading">6. Cambios en las Políticas</h3>
+          <p>POSIUM podrá actualizar estos términos y políticas cuando sea necesario. Los cambios serán notificados dentro de la plataforma o canales oficiales.</p>
+        </div>
+      </section>
+
       <footer>
         <div>POSIUM © <span id="footer-year"></span></div>
         <div class="footer-links">
@@ -1063,7 +1406,7 @@
                 <input type="text" id="usuario" name="usuario" autocomplete="username" />
               </div>
               <div class="form-group">
-                <label for="password">Contrasena</label>
+                <label for="password">Contraseña</label>
                 <div class="password-field">
                   <input type="password" id="password" name="password" autocomplete="current-password" />
                   <button
@@ -1071,7 +1414,7 @@
                     class="password-toggle"
                     data-password-toggle
                     aria-pressed="false"
-                    aria-label="Mostrar contrasena"
+                    aria-label="Mostrar contraseña"
                   >
                     Mostrar
                   </button>

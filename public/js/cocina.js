@@ -15,7 +15,9 @@ const btnFocusPreparar = document.getElementById('focus-preparar');
 const btnFocusListo = document.getElementById('focus-listo');
 const btnFocusCancelar = document.getElementById('focus-cancelar');
 
-const REFRESH_INTERVAL = 5000;
+// Polling: 12s. Antes 5s. La cocina no necesita actualización instantánea
+// — el chef se entera al primer refresh siguiente y la alarma sonará igual.
+const REFRESH_INTERVAL = 12000;
 const COCINA_ALARMA_TONO_MS = 1400;
 const COCINA_ALARMA_TITULO_MS = 900;
 const COCINA_ALARMA_FRECUENCIA = 920;
@@ -1417,8 +1419,23 @@ const cambiarEstado = async (pedidoId, estado, boton) => {
 
 const iniciarAutoRefresco = () => {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => cargarPedidos(false), REFRESH_INTERVAL);
+  refreshTimer = setInterval(() => {
+    // No correr polling cuando la pestaña está oculta (ahorra requests al
+    // servidor cuando el dispositivo está bloqueado o en otra pestaña).
+    if (typeof document !== 'undefined' && document.hidden) return;
+    cargarPedidos(false);
+  }, REFRESH_INTERVAL);
 };
+
+// Cuando la pestaña vuelve a ser visible, refrescar inmediatamente para que
+// el chef vea pedidos nuevos sin esperar el próximo tick.
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && typeof cargarPedidos === 'function') {
+      try { cargarPedidos(false); } catch (_) {}
+    }
+  });
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   crearBannerAlarma();

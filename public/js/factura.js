@@ -252,7 +252,7 @@
 
   const aplicarConfigFactura = (config) => {
     configuracionFactura = config || null;
-    const direccion = configuracionFactura?.direccion || 'Republica Dominicana - ITBIS incluido';
+    const direccion = configuracionFactura?.direccion || 'República Dominicana - ITBIS incluido';
     const rnc = limpiarTextoFactura(configuracionFactura?.rnc || '');
     const telefono =
       configuracionFactura?.telefono ||
@@ -272,8 +272,8 @@
   };
 
   const TIPO_ECF_NOMBRE = {
-    E31: 'Factura de Credito Fiscal Electronica',
-    E32: 'Factura de Consumo Electronica',
+    E31: 'Factura de Crédito Fiscal Electrónica',
+    E32: 'Factura de Consumo Electrónica',
   };
 
   const renderEcfBlock = (pedido) => {
@@ -294,7 +294,7 @@
 
     ecfBlock.hidden = false;
     if (ecfTituloSpan) {
-      const nombreTipo = TIPO_ECF_NOMBRE[tipo] || 'Comprobante Fiscal Electronico';
+      const nombreTipo = TIPO_ECF_NOMBRE[tipo] || 'Comprobante Fiscal Electrónico';
       ecfTituloSpan.textContent = nombreTipo;
     }
     if (ecfEncfSpan) ecfEncfSpan.textContent = encf || '-';
@@ -388,7 +388,7 @@
         const fila = document.createElement('tr');
         const celda = document.createElement('td');
         celda.colSpan = 4;
-        celda.textContent = 'No hay articulos registrados en esta factura.';
+        celda.textContent = 'No hay artículos registrados en esta factura.';
         fila.appendChild(celda);
         itemsBody.appendChild(fila);
         return;
@@ -477,7 +477,7 @@
 
   const cargarFactura = async () => {
     if (!pedidoId) {
-      alert('No se encontro el identificador de la factura.');
+      alert('No se encontró el identificador de la factura.');
       return;
     }
 
@@ -514,7 +514,7 @@
       }
     } catch (error) {
       console.error('Error al cargar la factura:', error);
-      alert('Ocurrio un error al cargar la factura. Intenta nuevamente.');
+      alert('Ocurrió un error al cargar la factura. Intenta nuevamente.');
     }
   };
 
