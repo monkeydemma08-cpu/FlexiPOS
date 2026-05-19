@@ -19109,6 +19109,328 @@ app.put('/api/clientes/:id/estado', (req, res) => {
   });
 });
 
+// ===========================================================================
+// HISTORIAL DE FACTURAS POR CLIENTE
+// Devuelve las facturas (pedidos cerrados) asociadas a un cliente por su
+// documento (RNC/c\u00e9dula). Paginado para no traer todas las filas.
+// ===========================================================================
+app.get('/api/clientes/:id/facturas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!id || Number.isNaN(id)) {
+      return res.status(400).json({ ok: false, error: 'ID de cliente inv\u00e1lido' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    // Paginaci\u00f3n: limit 50, offset opcional. Sin filtros agresivos para mantener simple.
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const desde = req.query.desde || null; // YYYY-MM-DD
+    const hasta = req.query.hasta || null;
+
+    try {
+      const cliente = await db.get(
+        'SELECT id, nombre, documento FROM clientes WHERE id = ? AND negocio_id = ? LIMIT 1',
+        [id, negocioId]
+      );
+      if (!cliente) {
+        return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
+      }
+      // Si el cliente no tiene documento registrado, intentar por nombre exacto
+      // (caso legacy: clientes creados sin RNC).
+      const where = ['p.negocio_id = ?', "p.estado IN ('cerrado','cobrado','facturado')"];
+      const params = [negocioId];
+      if (cliente.documento) {
+        where.push('p.cliente_documento = ?');
+        params.push(cliente.documento);
+      } else {
+        where.push('p.cliente = ?');
+        params.push(cliente.nombre);
+      }
+      if (desde) {
+        where.push('p.fecha_cierre >= ?');
+        params.push(desde + ' 00:00:00');
+      }
+      if (hasta) {
+        where.push('p.fecha_cierre <= ?');
+        params.push(hasta + ' 23:59:59');
+      }
+      // LIMIT y OFFSET no se parametrizan con mysql2 prepared (causa
+      // "Incorrect arguments to mysqld_stmt_execute"). Se inyectan validados.
+      const limitSafe = Number.isFinite(limit) ? Math.floor(limit) : 50;
+      const offsetSafe = Number.isFinite(offset) ? Math.floor(offset) : 0;
+      const sql = `
+        SELECT p.id, p.numero_cuenta_negocio, p.cliente, p.cliente_documento,
+               p.tipo_comprobante, p.ncf, p.ecf_tipo, p.ecf_encf, p.ecf_estado,
+               p.subtotal, p.impuesto, p.descuento_monto, p.propina_monto, p.total,
+               p.pago_efectivo, p.pago_tarjeta, p.pago_transferencia,
+               p.fecha_cierre, p.fecha_factura
+        FROM pedidos p
+        WHERE ${where.join(' AND ')}
+        ORDER BY p.fecha_cierre DESC, p.id DESC
+        LIMIT ${limitSafe} OFFSET ${offsetSafe}
+      `;
+      const facturas = await db.all(sql, params);
+      const totalRow = await db.get(
+        `SELECT COUNT(*) AS total FROM pedidos p WHERE ${where.join(' AND ')}`,
+        params
+      );
+      res.json({
+        ok: true,
+        cliente: { id: cliente.id, nombre: cliente.nombre, documento: cliente.documento },
+        facturas: facturas || [],
+        total: Number(totalRow?.total || 0),
+        limit: limitSafe,
+        offset: offsetSafe,
+      });
+    } catch (error) {
+      console.error('Error obteniendo facturas del cliente:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el historial de facturas' });
+    }
+  });
+});
+
+// ===========================================================================
+// ESTADO DE CUENTA DEL CLIENTE
+// Resumen agregado: total facturado, pagado por m\u00e9todo, saldo pendiente
+// (cuentas por cobrar), \u00faltima compra, conteos.
+// Cache 30s para no recalcular en cada visita a la pantalla.
+// ===========================================================================
+const _estadoCuentaClienteCache = new Map(); // key: negocioId-clienteId, val: { data, expiresAt }
+const ESTADO_CUENTA_TTL_MS = 30_000;
+const ESTADO_CUENTA_CACHE_MAX = 300;
+
+function invalidarEstadoCuentaCache(negocioId, clienteId) {
+  if (negocioId == null || clienteId == null) {
+    _estadoCuentaClienteCache.clear();
+    return;
+  }
+  _estadoCuentaClienteCache.delete(`${negocioId}-${clienteId}`);
+}
+
+app.get('/api/clientes/:id/estado-cuenta', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    if (!id || Number.isNaN(id)) {
+      return res.status(400).json({ ok: false, error: 'ID de cliente inv\u00e1lido' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const cacheKey = `${negocioId}-${id}`;
+    const ahora = Date.now();
+    const cached = _estadoCuentaClienteCache.get(cacheKey);
+    if (cached && cached.expiresAt > ahora) {
+      return res.json(cached.data);
+    }
+
+    try {
+      const cliente = await db.get(
+        'SELECT id, nombre, documento, email, telefono FROM clientes WHERE id = ? AND negocio_id = ? LIMIT 1',
+        [id, negocioId]
+      );
+      if (!cliente) {
+        return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
+      }
+      // Filtros para asociar facturas: por documento o por nombre si no hay documento.
+      const wherePedidos = ['negocio_id = ?', "estado IN ('cerrado','cobrado','facturado')"];
+      const params = [negocioId];
+      if (cliente.documento) {
+        wherePedidos.push('cliente_documento = ?');
+        params.push(cliente.documento);
+      } else {
+        wherePedidos.push('cliente = ?');
+        params.push(cliente.nombre);
+      }
+      // Agregado en UNA query (m\u00e1s eficiente que m\u00faltiples).
+      const resumen = await db.get(
+        `SELECT
+           COUNT(*) AS total_facturas,
+           COALESCE(SUM(total), 0) AS total_facturado,
+           COALESCE(SUM(pago_efectivo), 0) AS pagado_efectivo,
+           COALESCE(SUM(pago_tarjeta), 0) AS pagado_tarjeta,
+           COALESCE(SUM(pago_transferencia), 0) AS pagado_transferencia,
+           MAX(fecha_cierre) AS ultima_compra,
+           MIN(fecha_cierre) AS primera_compra
+         FROM pedidos
+         WHERE ${wherePedidos.join(' AND ')}`,
+        params
+      );
+      // Saldo pendiente: si hay tabla de CxC con cliente_id
+      let saldoPendiente = 0;
+      try {
+        const cxc = await db.get(
+          `SELECT COALESCE(SUM(saldo_pendiente), 0) AS saldo
+           FROM cuentas_por_cobrar
+           WHERE negocio_id = ? AND cliente_id = ? AND estado IN ('pendiente','parcial')`,
+          [negocioId, id]
+        );
+        saldoPendiente = Number(cxc?.saldo || 0);
+      } catch (_) {
+        // Tabla cuentas_por_cobrar puede no existir o tener otro nombre \u2014 no es bloqueante.
+      }
+      const totalPagado =
+        Number(resumen?.pagado_efectivo || 0) +
+        Number(resumen?.pagado_tarjeta || 0) +
+        Number(resumen?.pagado_transferencia || 0);
+      const data = {
+        ok: true,
+        cliente: {
+          id: cliente.id,
+          nombre: cliente.nombre,
+          documento: cliente.documento || null,
+          email: cliente.email || null,
+          telefono: cliente.telefono || null,
+        },
+        resumen: {
+          total_facturas: Number(resumen?.total_facturas || 0),
+          total_facturado: Number(resumen?.total_facturado || 0),
+          pagado_efectivo: Number(resumen?.pagado_efectivo || 0),
+          pagado_tarjeta: Number(resumen?.pagado_tarjeta || 0),
+          pagado_transferencia: Number(resumen?.pagado_transferencia || 0),
+          total_pagado: totalPagado,
+          saldo_pendiente: saldoPendiente,
+          ultima_compra: resumen?.ultima_compra || null,
+          primera_compra: resumen?.primera_compra || null,
+        },
+      };
+      // GC defensivo del cache
+      if (_estadoCuentaClienteCache.size >= ESTADO_CUENTA_CACHE_MAX) {
+        const aRemover = _estadoCuentaClienteCache.size - Math.floor(ESTADO_CUENTA_CACHE_MAX * 0.7);
+        let n = 0;
+        for (const k of _estadoCuentaClienteCache.keys()) {
+          if (n++ >= aRemover) break;
+          _estadoCuentaClienteCache.delete(k);
+        }
+      }
+      _estadoCuentaClienteCache.set(cacheKey, { data, expiresAt: ahora + ESTADO_CUENTA_TTL_MS });
+      res.json(data);
+    } catch (error) {
+      console.error('Error calculando estado de cuenta del cliente:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el estado de cuenta' });
+    }
+  });
+});
+
+// ===========================================================================
+// TOP CLIENTES (por monto facturado en el per\u00edodo)
+// Cache 5min porque agrega muchas filas \u2014 no necesita ser tiempo real.
+// ===========================================================================
+const _topClientesCache = new Map(); // key: negocioId-mes, val: { data, expiresAt }
+const TOP_CLIENTES_TTL_MS = 5 * 60 * 1000; // 5 minutos
+
+app.get('/api/admin/clientes/top', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
+    const periodo = (req.query.periodo || 'mes').toLowerCase(); // mes / 30d / 90d / ano / todo
+    const cacheKey = `${negocioId}-${periodo}-${limit}`;
+    const ahora = Date.now();
+    const cached = _topClientesCache.get(cacheKey);
+    if (cached && cached.expiresAt > ahora) {
+      return res.json(cached.data);
+    }
+
+    let condicionFecha = '1=1';
+    if (periodo === 'mes') {
+      condicionFecha = "p.fecha_cierre >= DATE_FORMAT(NOW(), '%Y-%m-01')";
+    } else if (periodo === '30d') {
+      condicionFecha = 'p.fecha_cierre >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
+    } else if (periodo === '90d') {
+      condicionFecha = 'p.fecha_cierre >= DATE_SUB(NOW(), INTERVAL 90 DAY)';
+    } else if (periodo === 'ano' || periodo === 'a\u00f1o') {
+      condicionFecha = 'p.fecha_cierre >= DATE_FORMAT(NOW(), \'%Y-01-01\')';
+    }
+
+    const limitSafe = Math.floor(limit);
+    try {
+      const top = await db.all(
+        `SELECT
+           COALESCE(NULLIF(p.cliente_documento, ''), 'sin-doc') AS documento,
+           MAX(p.cliente) AS nombre,
+           COUNT(*) AS num_facturas,
+           SUM(p.total) AS total_facturado,
+           MAX(p.fecha_cierre) AS ultima_compra,
+           (SELECT c.id FROM clientes c
+              WHERE c.negocio_id = ? AND c.documento = p.cliente_documento
+              LIMIT 1) AS cliente_id
+         FROM pedidos p
+         WHERE p.negocio_id = ?
+           AND p.estado IN ('cerrado','cobrado','facturado')
+           AND ${condicionFecha}
+           AND (p.cliente_documento IS NOT NULL OR p.cliente IS NOT NULL)
+         GROUP BY documento
+         ORDER BY total_facturado DESC
+         LIMIT ${limitSafe}`,
+        [negocioId, negocioId]
+      );
+      const data = {
+        ok: true,
+        periodo,
+        clientes: (top || []).map((r) => ({
+          cliente_id: r.cliente_id || null,
+          documento: r.documento === 'sin-doc' ? null : r.documento,
+          nombre: r.nombre || '\u2014',
+          num_facturas: Number(r.num_facturas || 0),
+          total_facturado: Number(r.total_facturado || 0),
+          ultima_compra: r.ultima_compra || null,
+        })),
+      };
+      _topClientesCache.set(cacheKey, { data, expiresAt: ahora + TOP_CLIENTES_TTL_MS });
+      // GC simple del cache (mantener tope 50 entradas)
+      if (_topClientesCache.size > 50) {
+        const k = _topClientesCache.keys().next().value;
+        _topClientesCache.delete(k);
+      }
+      res.json(data);
+    } catch (error) {
+      console.error('Error obteniendo top clientes:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el top de clientes' });
+    }
+  });
+});
+
+// ===========================================================================
+// B\u00daSQUEDA DE FACTURA POR NCF / e-NCF
+// Permite ubicar una factura sin tener que recordar el id de pedido.
+// ===========================================================================
+app.get('/api/admin/facturas/buscar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const q = String(req.query.q || '').trim();
+    if (!q || q.length < 3) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Ingresa al menos 3 caracteres del NCF / e-NCF para buscar.',
+      });
+    }
+    // Limit peque\u00f1o porque el NCF es \u00fanico por negocio; raramente devuelve >5.
+    const limitSafe = 20;
+    try {
+      // Busca por NCF exacto o e-NCF exacto. Si quieres LIKE parcial, agregar wildcard.
+      // Aprovecha los \u00edndices idx_pedidos_ncf y idx_pedidos_ecf_encf.
+      const filas = await db.all(
+        `SELECT id, numero_cuenta_negocio, cliente, cliente_documento,
+                tipo_comprobante, ncf, ecf_tipo, ecf_encf, ecf_estado, total,
+                fecha_cierre, fecha_factura
+         FROM pedidos
+         WHERE negocio_id = ?
+           AND (ncf = ? OR ecf_encf = ? OR ncf LIKE ? OR ecf_encf LIKE ?)
+         ORDER BY fecha_cierre DESC, id DESC
+         LIMIT ${limitSafe}`,
+        [negocioId, q, q, `%${q}%`, `%${q}%`]
+      );
+      res.json({ ok: true, busqueda: q, resultados: filas || [] });
+    } catch (error) {
+      console.error('Error buscando factura por NCF:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'Error al buscar la factura' });
+    }
+  });
+});
+
 // --- Empresa: gestion de sucursales ---
 app.get('/api/empresa/negocios', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
@@ -32217,6 +32539,45 @@ app.get('/api/cotizaciones/:id', (req, res) => {
         });
       }
     );
+  });
+});
+
+// ===========================================================================
+// GET /api/cotizaciones/codigo/:codigo — buscar cotización por su código
+// (usado por caja para cargar una cotización por código en vez de id numérico).
+// ===========================================================================
+app.get('/api/cotizaciones/codigo/:codigo', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const codigo = String(req.params.codigo || '').trim().toUpperCase();
+    if (!codigo) {
+      return res.status(400).json({ ok: false, error: 'Código requerido' });
+    }
+    try {
+      const cotizacion = await db.get(
+        `SELECT id, codigo, estado, cliente_nombre, cliente_documento, cliente_contacto,
+                fecha_validez, subtotal, impuesto, descuento_porcentaje, descuento_monto, total,
+                notas_internas, notas_cliente, pedido_id, creada_en
+         FROM cotizaciones
+         WHERE negocio_id = ? AND codigo = ?
+         LIMIT 1`,
+        [negocioId, codigo]
+      );
+      if (!cotizacion) {
+        return res.status(404).json({ ok: false, error: 'Cotización no encontrada con ese código' });
+      }
+      const items = await db.all(
+        `SELECT id, producto_id, descripcion, cantidad, precio_unitario,
+                descuento_porcentaje, descuento_monto, subtotal_linea, impuesto_linea, total_linea
+         FROM cotizacion_items
+         WHERE cotizacion_id = ? AND negocio_id = ?`,
+        [cotizacion.id, negocioId]
+      );
+      res.json({ ok: true, cotizacion, items: items || [] });
+    } catch (error) {
+      console.error('Error buscando cotización por código:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo cargar la cotización' });
+    }
   });
 });
 

@@ -19,9 +19,6 @@
   const resumenClienteTelefono = document.getElementById('admin-cliente-resumen-telefono');
   const resumenClienteEmail = document.getElementById('admin-cliente-resumen-email');
   const resumenClienteEstado = document.getElementById('admin-cliente-estado-badge');
-  const resumenClienteBloque = document.getElementById('admin-cliente-resumen-bloque');
-  const perfilTitulo = document.getElementById('admin-cliente-perfil-titulo');
-  const perfilSub = document.getElementById('admin-cliente-perfil-sub');
 
   const form = document.getElementById('cliente-form');
   const inputId = document.getElementById('cliente-id');
@@ -122,33 +119,19 @@
   };
 
   const actualizarResumenCliente = (cliente = null) => {
-    // Mostrar/ocultar el bloque de resumen segun haya cliente seleccionado
-    if (resumenClienteBloque) resumenClienteBloque.hidden = !cliente;
-
     if (resumenClienteNombre) resumenClienteNombre.textContent = cliente?.nombre || '--';
     if (resumenClienteDocumento) resumenClienteDocumento.textContent = cliente?.documento || '--';
     if (resumenClienteTelefono) resumenClienteTelefono.textContent = cliente?.telefono || '--';
     if (resumenClienteEmail) resumenClienteEmail.textContent = cliente?.email || '--';
-
     if (resumenClienteEstado) {
       if (!cliente) {
-        resumenClienteEstado.textContent = 'Sin seleccion';
+        resumenClienteEstado.textContent = 'Sin selección';
         resumenClienteEstado.dataset.status = 'none';
       } else {
         const activo = Number(cliente?.activo ?? 1) !== 0;
         resumenClienteEstado.textContent = activo ? 'Activo' : 'Inactivo';
         resumenClienteEstado.dataset.status = activo ? 'activo' : 'inactivo';
       }
-    }
-
-    // Actualizar el header del perfil con contexto util
-    if (perfilTitulo) {
-      perfilTitulo.textContent = cliente?.nombre ? cliente.nombre : 'Perfil del cliente';
-    }
-    if (perfilSub) {
-      perfilSub.textContent = cliente
-        ? 'Edita los datos o registra una factura.'
-        : 'Selecciona un cliente o crea uno nuevo.';
     }
   };
 
@@ -778,6 +761,11 @@
     limpiarDeudaForm();
     limpiarAbonoForm();
     cargarDeudas();
+    // Cargar historial POS + estado de cuenta del cliente seleccionado.
+    // Estas funciones son no-op si los elementos del DOM no existen.
+    if (typeof cargarHistorialPosCliente === 'function') {
+      cargarHistorialPosCliente(cli.id, true);
+    }
   };
 
   const obtenerPayload = () => ({
@@ -1159,6 +1147,259 @@
     e.preventDefault();
     guardarAbono();
   });
+
+  // ===========================================================================
+  // HISTORIAL DE FACTURAS POS + ESTADO DE CUENTA del cliente
+  // ===========================================================================
+  const posCard = document.getElementById('cliente-historial-pos-card');
+  const posTotalFacturado = document.getElementById('cliente-pos-total-facturado');
+  const posTotalPagado = document.getElementById('cliente-pos-total-pagado');
+  const posSaldoPendiente = document.getElementById('cliente-pos-saldo-pendiente');
+  const posNumFacturas = document.getElementById('cliente-pos-num-facturas');
+  const posUltimaCompra = document.getElementById('cliente-pos-ultima-compra');
+  const posMensaje = document.getElementById('cliente-pos-mensaje');
+  const posTabla = document.getElementById('cliente-pos-facturas-tabla');
+  const posBtnMas = document.getElementById('cliente-pos-mas');
+  const posPaginacionInfo = document.getElementById('cliente-pos-paginacion-info');
+
+  let posClienteIdActual = null;
+  let posOffset = 0;
+  let posTotal = 0;
+  const POS_PAGE_SIZE = 25;
+
+  const fmtFechaCorta = (valor) => {
+    if (!valor) return '—';
+    try {
+      const d = new Date(valor);
+      if (Number.isNaN(d.getTime())) return '—';
+      return d.toLocaleDateString('es-DO', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        timeZone: 'America/Santo_Domingo',
+      });
+    } catch (_) {
+      return '—';
+    }
+  };
+
+  const obtenerMetodoPagoTexto = (factura) => {
+    const efectivo = Number(factura.pago_efectivo) || 0;
+    const tarjeta = Number(factura.pago_tarjeta) || 0;
+    const transferencia = Number(factura.pago_transferencia) || 0;
+    const metodos = [];
+    if (efectivo > 0) metodos.push('Efectivo');
+    if (tarjeta > 0) metodos.push('Tarjeta');
+    if (transferencia > 0) metodos.push('Transf.');
+    return metodos.join(' + ') || '—';
+  };
+
+  async function cargarEstadoCuentaPosCliente(clienteId) {
+    if (!clienteId) return;
+    try {
+      const resp = await fetchAutorizado(`/api/clientes/${clienteId}/estado-cuenta`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.ok === false) {
+        throw new Error(data?.error || 'No se pudo cargar el estado de cuenta');
+      }
+      const r = data?.resumen || {};
+      if (posTotalFacturado) posTotalFacturado.textContent = formatCurrency(r.total_facturado || 0);
+      if (posTotalPagado) posTotalPagado.textContent = formatCurrency(r.total_pagado || 0);
+      if (posSaldoPendiente) posSaldoPendiente.textContent = formatCurrency(r.saldo_pendiente || 0);
+      if (posNumFacturas) posNumFacturas.textContent = String(r.total_facturas || 0);
+      if (posUltimaCompra) posUltimaCompra.textContent = fmtFechaCorta(r.ultima_compra);
+    } catch (error) {
+      console.warn('Error cargando estado de cuenta POS:', error);
+    }
+  }
+
+  async function cargarHistorialPosCliente(clienteId, reset = false) {
+    if (!posCard || !posTabla) return;
+    if (!clienteId) {
+      posCard.hidden = true;
+      return;
+    }
+    posCard.hidden = false;
+    if (reset) {
+      posClienteIdActual = clienteId;
+      posOffset = 0;
+      posTotal = 0;
+      posTabla.innerHTML = '<tr><td colspan="7" class="kanm-subtitle">Cargando...</td></tr>';
+      if (posMensaje) posMensaje.textContent = '';
+      cargarEstadoCuentaPosCliente(clienteId);
+    }
+    try {
+      const url = `/api/clientes/${clienteId}/facturas?limit=${POS_PAGE_SIZE}&offset=${posOffset}`;
+      const resp = await fetchAutorizado(url);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.ok === false) {
+        throw new Error(data?.error || 'No se pudo cargar el historial');
+      }
+      const facturas = data?.facturas || [];
+      posTotal = data?.total || 0;
+      if (reset) posTabla.innerHTML = '';
+      if (!facturas.length && posOffset === 0) {
+        posTabla.innerHTML =
+          '<tr><td colspan="7" class="kanm-subtitle">Este cliente no tiene facturas POSIUM aún.</td></tr>';
+        if (posPaginacionInfo) posPaginacionInfo.textContent = '';
+        if (posBtnMas) posBtnMas.hidden = true;
+        return;
+      }
+      const html = facturas.map((f) => {
+        const ncf = f.ecf_encf || f.ncf || '—';
+        const tipo = f.ecf_tipo || f.tipo_comprobante || '—';
+        const total = formatCurrency(f.total || 0);
+        const fecha = fmtFechaCorta(f.fecha_cierre || f.fecha_factura);
+        const metodo = obtenerMetodoPagoTexto(f);
+        const ecfEstado = f.ecf_estado || (f.ecf_encf ? 'PENDIENTE' : '—');
+        const ecfClass = ecfEstado === 'ACEPTADO'
+          ? 'estado-pagado'
+          : ecfEstado === 'RECHAZADO'
+          ? 'estado-pendiente'
+          : ecfEstado === '—'
+          ? ''
+          : 'estado-parcial';
+        return `
+          <tr>
+            <td>${fecha}</td>
+            <td><code>${ncf}</code></td>
+            <td>${tipo}</td>
+            <td><strong>${total}</strong></td>
+            <td>${metodo}</td>
+            <td>${ecfEstado !== '—' ? `<span class="kanm-badge ${ecfClass}">${ecfEstado}</span>` : '—'}</td>
+            <td>
+              <a class="kanm-button ghost kanm-button--sm" href="/factura.html?id=${f.id}" target="_blank">Ver factura</a>
+            </td>
+          </tr>
+        `;
+      }).join('');
+      posTabla.insertAdjacentHTML('beforeend', html);
+      posOffset += facturas.length;
+      if (posPaginacionInfo) {
+        posPaginacionInfo.textContent = `Mostrando ${posOffset} de ${posTotal} facturas`;
+      }
+      if (posBtnMas) {
+        posBtnMas.hidden = posOffset >= posTotal;
+      }
+    } catch (error) {
+      console.error('Error cargando historial POS:', error);
+      if (posMensaje) {
+        posMensaje.textContent = error.message || 'No se pudo cargar el historial.';
+        posMensaje.className = 'kanm-message error';
+      }
+    }
+  }
+
+  posBtnMas?.addEventListener('click', () => {
+    if (posClienteIdActual) cargarHistorialPosCliente(posClienteIdActual, false);
+  });
+
+  // ===========================================================================
+  // BÚSQUEDA RÁPIDA DE FACTURA POR NCF / e-NCF
+  // ===========================================================================
+  const buscarFacturaInput = document.getElementById('buscar-factura-ncf');
+  const buscarFacturaBtn = document.getElementById('buscar-factura-btn');
+  const buscarFacturaResultados = document.getElementById('buscar-factura-resultados');
+
+  async function buscarFacturaPorNcf() {
+    if (!buscarFacturaInput || !buscarFacturaResultados) return;
+    const q = (buscarFacturaInput.value || '').trim();
+    if (q.length < 3) {
+      buscarFacturaResultados.textContent = 'Ingresa al menos 3 caracteres del NCF / e-NCF.';
+      buscarFacturaResultados.className = 'kanm-message error';
+      return;
+    }
+    buscarFacturaResultados.textContent = 'Buscando...';
+    buscarFacturaResultados.className = 'kanm-message';
+    try {
+      const resp = await fetchAutorizado(`/api/admin/facturas/buscar?q=${encodeURIComponent(q)}`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Error al buscar');
+      }
+      const filas = data?.resultados || [];
+      if (!filas.length) {
+        buscarFacturaResultados.innerHTML = '<em>No se encontraron facturas con ese NCF.</em>';
+        return;
+      }
+      const html = filas
+        .map((f) => {
+          const ncf = f.ecf_encf || f.ncf || '—';
+          const fecha = fmtFechaCorta(f.fecha_cierre || f.fecha_factura);
+          const total = formatCurrency(f.total || 0);
+          const cliente = f.cliente || '—';
+          return `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed rgba(0,0,0,0.1);">
+              <div>
+                <strong>${ncf}</strong> · ${fecha} · ${cliente} · ${total}
+              </div>
+              <a class="kanm-button ghost kanm-button--sm" href="/factura.html?id=${f.id}" target="_blank">Ver</a>
+            </div>
+          `;
+        })
+        .join('');
+      buscarFacturaResultados.innerHTML = `<div><strong>${filas.length} resultado(s):</strong></div>${html}`;
+    } catch (error) {
+      buscarFacturaResultados.textContent = error.message || 'No se pudo buscar.';
+      buscarFacturaResultados.className = 'kanm-message error';
+    }
+  }
+  buscarFacturaBtn?.addEventListener('click', buscarFacturaPorNcf);
+  buscarFacturaInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      buscarFacturaPorNcf();
+    }
+  });
+
+  // ===========================================================================
+  // TOP CLIENTES
+  // ===========================================================================
+  const topClientesSelect = document.getElementById('top-clientes-periodo');
+  const topClientesBtn = document.getElementById('top-clientes-refrescar');
+  const topClientesTabla = document.getElementById('top-clientes-tabla');
+
+  async function cargarTopClientes() {
+    if (!topClientesTabla) return;
+    const periodo = topClientesSelect?.value || 'mes';
+    topClientesTabla.innerHTML =
+      '<tr><td colspan="6" class="kanm-subtitle">Calculando...</td></tr>';
+    try {
+      const resp = await fetchAutorizado(
+        `/api/admin/clientes/top?periodo=${encodeURIComponent(periodo)}&limit=10`
+      );
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.ok === false) {
+        throw new Error(data?.error || 'No se pudo obtener el top');
+      }
+      const lista = data?.clientes || [];
+      if (!lista.length) {
+        topClientesTabla.innerHTML =
+          '<tr><td colspan="6" class="kanm-subtitle">No hay datos para el período seleccionado.</td></tr>';
+        return;
+      }
+      topClientesTabla.innerHTML = lista
+        .map((c, i) => {
+          const linkCliente = c.cliente_id
+            ? `<a href="#" data-editar-cliente="${c.cliente_id}">${c.nombre}</a>`
+            : (c.nombre || '—');
+          return `
+            <tr>
+              <td><strong>#${i + 1}</strong></td>
+              <td>${linkCliente}</td>
+              <td><code>${c.documento || '—'}</code></td>
+              <td>${c.num_facturas}</td>
+              <td><strong>${formatCurrency(c.total_facturado || 0)}</strong></td>
+              <td>${fmtFechaCorta(c.ultima_compra)}</td>
+            </tr>
+          `;
+        })
+        .join('');
+    } catch (error) {
+      topClientesTabla.innerHTML = `<tr><td colspan="6" class="kanm-message error">${error.message || 'Error al cargar.'}</td></tr>`;
+    }
+  }
+  topClientesBtn?.addEventListener('click', cargarTopClientes);
 
   resetDeudasUI();
   actualizarResumenCliente(null);

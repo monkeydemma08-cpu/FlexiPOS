@@ -157,6 +157,8 @@ const panelCobros = document.getElementById('panel-cobros');
 
 const panelCuadre = document.getElementById('panel-cuadre');
 
+const panelCotizaciones = document.getElementById('panel-cotizaciones');
+
 let secuenciasConfig = {
   permitir_b01: 1,
   permitir_b02: 1,
@@ -1046,6 +1048,12 @@ const mostrarTab = (tab) => {
   if (panelCuadre) {
 
     panelCuadre.classList.toggle('hidden', tab !== 'cuadre');
+
+  }
+
+  if (panelCotizaciones) {
+
+    panelCotizaciones.classList.toggle('hidden', tab !== 'cotizaciones');
 
   }
 
@@ -5765,6 +5773,10 @@ const inicializarEventos = () => {
     abrirFacturaCuentaSeleccionada('Selecciona una cuenta para imprimir la factura.');
 
   });
+
+  // Nota: el módulo completo de Cotizaciones se carga vía /js/admin-cotizaciones.js
+  // que se activa automáticamente cuando detecta [data-cotizaciones-module]
+  // en el panel "Cotizaciones" de caja.
 
 
 

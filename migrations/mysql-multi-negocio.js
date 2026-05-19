@@ -2048,6 +2048,17 @@ async function ensurePedidosEcfColumns() {
   await ensureColumn('pedidos', 'ecf_qr_url TEXT NULL');
   await ensureColumn('pedidos', 'ecf_intentos INT DEFAULT 0');
   await ensureColumn('pedidos', 'ecf_ultimo_intento_at DATETIME NULL');
+
+  // Índices para búsquedas frecuentes (historial por cliente, búsqueda por NCF/e-NCF).
+  // Sin estos, una búsqueda por documento o NCF haría full-table scan, lo cual
+  // se vuelve lento cuando la tabla pedidos crece.
+  await ensureIndexByName(
+    'pedidos',
+    'idx_pedidos_cliente_documento',
+    '(negocio_id, cliente_documento, fecha_cierre)'
+  );
+  await ensureIndexByName('pedidos', 'idx_pedidos_ncf', '(negocio_id, ncf)');
+  await ensureIndexByName('pedidos', 'idx_pedidos_ecf_encf', '(negocio_id, ecf_encf)');
 }
 
 async function ensureTableEcfDocumentosExternos() {

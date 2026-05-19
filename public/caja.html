@@ -14,6 +14,8 @@
     <link rel="stylesheet" href="css/caja-shell.css?v=20260424a" />
     <script src="js/auth.js" defer></script>
     <script src="js/caja.js" defer></script>
+    <!-- Módulo de cotizaciones (reusado de admin). Se activa al ver el panel "Cotizaciones". -->
+    <script src="/js/admin-cotizaciones.js" defer></script>
   </head>
   <body class="caja-shell-body" data-role="caja">
     <!-- Header viejo (oculto, se mantiene para compatibilidad con scripts) -->
@@ -73,6 +75,10 @@
           <button class="kanm-tab" data-tab="cuadre" id="tab-cuadre" type="button">
             <span class="caja-tab-icon" aria-hidden="true">📊</span>
             <span class="caja-tab-label">Cuadre de caja</span>
+          </button>
+          <button class="kanm-tab" data-tab="cotizaciones" id="tab-cotizaciones" type="button">
+            <span class="caja-tab-icon" aria-hidden="true">📋</span>
+            <span class="caja-tab-label">Cotizaciones</span>
           </button>
         </div>
       </nav>
@@ -594,6 +600,185 @@
                 </table>
               </div>
             </div>
+          </div>
+        </section>
+
+        <!-- Panel: Cotizaciones (reutiliza la UI completa del módulo de admin) -->
+        <section class="caja-panel hidden" id="panel-cotizaciones" data-cotizaciones-module>
+          <div class="kanm-card-header">
+            <h2>Cotizaciones</h2>
+            <p class="kanm-subtitle">Crea, gestiona y factura cotizaciones directamente desde caja.</p>
+          </div>
+          <div class="cotizaciones-layout">
+            <section class="kanm-card admin-card cotizaciones-card cotizaciones-card--lista">
+              <header class="kanm-card-header">
+                <div>
+                  <h3>Listado de cotizaciones</h3>
+                  <p class="kanm-subtitle">Filtra por fecha, estado o cliente.</p>
+                </div>
+              </header>
+
+              <form class="cotizaciones-filtros" novalidate>
+                <div class="kanm-input-group">
+                  <label for="cotizaciones-desde">Fecha desde</label>
+                  <input type="date" id="cotizaciones-desde" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="cotizaciones-hasta">Fecha hasta</label>
+                  <input type="date" id="cotizaciones-hasta" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="cotizaciones-estado">Estado</label>
+                  <select id="cotizaciones-estado">
+                    <option value="">Todos</option>
+                    <option value="borrador">Borrador</option>
+                    <option value="enviada">Enviada</option>
+                    <option value="aceptada">Aceptada</option>
+                    <option value="rechazada">Rechazada</option>
+                    <option value="vencida">Vencida</option>
+                    <option value="facturada">Facturada</option>
+                  </select>
+                </div>
+                <div class="kanm-input-group">
+                  <label for="cotizaciones-buscar">Búsqueda</label>
+                  <input type="text" id="cotizaciones-buscar" placeholder="Cliente o código" />
+                </div>
+                <div class="cotizaciones-filtros-actions">
+                  <button type="button" class="kanm-button secondary" id="cotizaciones-filtrar">Filtrar</button>
+                  <button type="button" class="kanm-button" id="cotizaciones-nueva">Nueva cotización</button>
+                </div>
+              </form>
+
+              <div id="cotizaciones-lista-mensaje" class="kanm-message"></div>
+              <div id="cotizaciones-lista" class="cotizacion-list"></div>
+            </section>
+
+            <section class="kanm-card admin-card cotizaciones-card cotizaciones-card--editor">
+              <header class="kanm-card-header">
+                <h3>Editor de cotización</h3>
+                <p class="kanm-subtitle">Completa los datos y guarda como borrador o envía al cliente.</p>
+              </header>
+              <form id="cotizacion-form" class="kanm-form" novalidate>
+                <input type="hidden" id="cotizacion-id" />
+                <div class="cotizacion-meta-grid">
+                  <div class="cotizacion-meta-block">
+                    <p class="kanm-subtitle">Código</p>
+                    <div class="cotizacion-codigo" id="cotizacion-codigo">Nueva</div>
+                  </div>
+                  <div class="cotizacion-meta-block">
+                    <p class="kanm-subtitle">Estado</p>
+                    <span id="cotizacion-estado" class="cotizacion-estado-badge" data-estado="borrador">Borrador</span>
+                  </div>
+                  <div class="cotizacion-meta-block">
+                    <p class="kanm-subtitle">Creada</p>
+                    <div id="cotizacion-fecha" class="cotizacion-meta-value">--</div>
+                  </div>
+                  <div class="kanm-input-group">
+                    <label for="cotizacion-validez">Válida hasta</label>
+                    <input type="date" id="cotizacion-validez" />
+                  </div>
+                </div>
+
+                <div class="cotizacion-section">
+                  <div class="cotizacion-section-header">
+                    <h4>Datos del cliente</h4>
+                    <p class="kanm-subtitle">Identifica a quién se envía la propuesta.</p>
+                  </div>
+                  <div class="cotizacion-grid">
+                    <div class="kanm-input-group">
+                      <label for="cotizacion-cliente-buscar">Buscar cliente</label>
+                      <input type="text" id="cotizacion-cliente-buscar" list="cotizacion-clientes" placeholder="Nombre o documento" />
+                      <datalist id="cotizacion-clientes"></datalist>
+                    </div>
+                    <div class="kanm-input-group">
+                      <label for="cotizacion-cliente-nombre">Nombre del cliente</label>
+                      <input type="text" id="cotizacion-cliente-nombre" placeholder="Consumidor final" />
+                    </div>
+                    <div class="kanm-input-group">
+                      <label for="cotizacion-cliente-documento">Documento</label>
+                      <input type="text" id="cotizacion-cliente-documento" placeholder="RNC o cédula" />
+                    </div>
+                    <div class="kanm-input-group">
+                      <label for="cotizacion-cliente-contacto">Contacto</label>
+                      <input type="text" id="cotizacion-cliente-contacto" placeholder="Teléfono o correo" />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="cotizacion-section">
+                  <div class="cotizacion-section-header">
+                    <h4>Notas</h4>
+                    <p class="kanm-subtitle">Información visible y recordatorios internos.</p>
+                  </div>
+                  <div class="cotizacion-grid">
+                    <div class="kanm-input-group">
+                      <label for="cotizacion-notas-cliente">Notas para el cliente</label>
+                      <textarea id="cotizacion-notas-cliente" rows="3" placeholder="Condiciones, entregas, etc."></textarea>
+                    </div>
+                    <div class="kanm-input-group">
+                      <label for="cotizacion-notas-internas">Notas internas</label>
+                      <textarea id="cotizacion-notas-internas" rows="3" placeholder="Recordatorios para el equipo"></textarea>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="cotizacion-section">
+                  <div class="cotizacion-section-header">
+                    <h4>Ítems de cotización</h4>
+                    <p class="kanm-subtitle">Agrega productos y ajustes por línea.</p>
+                  </div>
+                  <div class="cotizacion-items-wrapper kanm-table-wrapper">
+                    <table class="kanm-table cotizacion-items-table">
+                      <thead>
+                        <tr>
+                          <th>Producto</th>
+                          <th>Descripción</th>
+                          <th>Cantidad</th>
+                          <th>Precio</th>
+                          <th>Desc %</th>
+                          <th>Desc $</th>
+                          <th>Total línea</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody id="cotizacion-items-body"></tbody>
+                    </table>
+                  </div>
+
+                  <div class="cotizacion-items-actions">
+                    <button type="button" class="kanm-button secondary" id="cotizacion-item-agregar">Agregar ítem</button>
+                  </div>
+                </div>
+
+                <div class="cotizacion-section cotizacion-totales">
+                  <div class="cotizacion-totales-grid">
+                    <div class="kanm-input-group">
+                      <label for="cotizacion-descuento-porcentaje">Descuento global (%)</label>
+                      <input type="number" id="cotizacion-descuento-porcentaje" min="0" step="0.01" />
+                    </div>
+                    <div class="kanm-input-group">
+                      <label for="cotizacion-descuento-monto">Descuento global (monto)</label>
+                      <input type="text" id="cotizacion-descuento-monto" inputmode="decimal" data-money />
+                    </div>
+                  </div>
+                  <div class="cotizacion-totales-display">
+                    <div class="cotizacion-total-row"><span>Subtotal</span><span id="cotizacion-subtotal">DOP&nbsp;0.00</span></div>
+                    <div class="cotizacion-total-row"><span>Descuento</span><span id="cotizacion-descuento-total">DOP&nbsp;0.00</span></div>
+                    <div class="cotizacion-total-row"><span>Impuesto</span><span id="cotizacion-impuesto">DOP&nbsp;0.00</span></div>
+                    <div class="cotizacion-total-row cotizacion-total-final"><span>Total</span><span id="cotizacion-total">DOP&nbsp;0.00</span></div>
+                  </div>
+                </div>
+
+                <div class="admin-form-actions cotizacion-actions">
+                  <button type="button" class="kanm-button secondary" id="cotizacion-guardar">Guardar borrador</button>
+                  <button type="button" class="kanm-button ghost" id="cotizacion-enviar">Marcar enviada</button>
+                  <button type="button" class="kanm-button" id="cotizacion-aceptar">Aceptar</button>
+                  <button type="button" class="kanm-button ghost" id="cotizacion-imprimir">Imprimir</button>
+                  <button type="button" class="kanm-button" id="cotizacion-facturar">Facturar cotización</button>
+                </div>
+                <div id="cotizacion-mensaje" class="kanm-message"></div>
+              </form>
+            </section>
           </div>
         </section>
       </main>

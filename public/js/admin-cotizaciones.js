@@ -1,5 +1,10 @@
 ﻿(() => {
-  const seccionCotizaciones = document.getElementById('admin-section-cotizaciones');
+  // Acepta tanto el panel de admin (#admin-section-cotizaciones) como el de
+  // caja (#panel-cotizaciones con data-cotizaciones-module). Ambos comparten
+  // los mismos IDs internos para reusar todo el código.
+  const seccionCotizaciones =
+    document.getElementById('admin-section-cotizaciones') ||
+    document.querySelector('[data-cotizaciones-module]');
   if (!seccionCotizaciones) return;
 
   const filtroDesde = document.getElementById('cotizaciones-desde');
