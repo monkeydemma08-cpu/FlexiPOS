@@ -1,6 +1,43 @@
-﻿const { query, pool } = require('./db-mysql');
+﻿const { query, pool, poolStats } = require('./db-mysql');
 
 let activeTransaction = null;
+let activeTransactionStartedAt = 0; // timestamp para watchdog
+
+// SAFETY NET: si una transaccion lleva mas de TX_WATCHDOG_MS sin commit/rollback,
+// la liberamos automaticamente. Esto evita que un error inesperado deje la
+// conexion pegada y todo el sistema esperando esa connection del pool.
+// La transaccion se aborta con rollback (no se confirma data inconsistente).
+const TX_WATCHDOG_MS = 30_000; // 30 segundos es mas que suficiente para cualquier tx normal
+
+const _liberarTxColgada = async (motivo = 'watchdog') => {
+  const tx = activeTransaction;
+  if (!tx) return;
+  console.warn(
+    `[db.js] Transaccion colgada detectada (${motivo}). Liberando connection para no bloquear el pool. PoolStats:`,
+    poolStats?.() || 'n/a'
+  );
+  activeTransaction = null;
+  activeTransactionStartedAt = 0;
+  try {
+    await tx.rollback();
+  } catch (e) {
+    // ignore — la connection esta corrupta
+  }
+  try {
+    tx.release();
+  } catch (e) {
+    // ignore
+  }
+};
+
+// Cada 10 segundos verifica si activeTransaction lleva demasiado.
+setInterval(() => {
+  if (!activeTransaction) return;
+  const edad = Date.now() - activeTransactionStartedAt;
+  if (edad > TX_WATCHDOG_MS) {
+    _liberarTxColgada(`edad=${edad}ms`);
+  }
+}, 10_000).unref?.();
 
 const normalizeParamsAndCallback = (args) => {
   const clone = [...args];
@@ -85,8 +122,14 @@ async function run(sql, ...args) {
 
   try {
     if (normalized.startsWith('BEGIN')) {
+      // Si ya hay una tx activa muy vieja, liberarla antes de empezar otra
+      // (defensive: nunca debería pasar en flujo normal, pero por si acaso).
+      if (activeTransaction && Date.now() - activeTransactionStartedAt > TX_WATCHDOG_MS) {
+        await _liberarTxColgada('BEGIN sobre tx vieja');
+      }
       if (!activeTransaction) {
         activeTransaction = await pool.getConnection();
+        activeTransactionStartedAt = Date.now();
         await activeTransaction.beginTransaction();
       }
       return finish(null);
@@ -97,6 +140,7 @@ async function run(sql, ...args) {
         await activeTransaction.commit();
         activeTransaction.release();
         activeTransaction = null;
+        activeTransactionStartedAt = 0;
       }
       return finish(null);
     }
@@ -106,6 +150,7 @@ async function run(sql, ...args) {
         await activeTransaction.rollback();
         activeTransaction.release();
         activeTransaction = null;
+        activeTransactionStartedAt = 0;
       }
       return finish(null);
     }
@@ -124,8 +169,9 @@ async function run(sql, ...args) {
   } catch (err) {
     if (normalized.startsWith('COMMIT') || normalized.startsWith('ROLLBACK')) {
       if (activeTransaction) {
-        activeTransaction.release();
+        try { activeTransaction.release(); } catch (_) {}
         activeTransaction = null;
+        activeTransactionStartedAt = 0;
       }
     }
     return finish(err);

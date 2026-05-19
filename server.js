@@ -44,6 +44,24 @@ const {
 const { signXmlForDgii } = require('./dgii-core');
 console.log('server.js carga correctamente');
 
+// ---------------------------------------------------------------------------
+// Manejo de errores asincronos no capturados.
+// SIN estos handlers, un rejection en un setInterval o setImmediate puede
+// tumbar el proceso (o peor, dejarlo en estado zombie donde acepta requests
+// pero ya no procesa nada). Con estos handlers logueamos pero no terminamos:
+// el server sigue sirviendo y un cliente puede recargar.
+// En producción real con PM2/systemd, estos handlers + un health endpoint
+// permiten que el orquestador detecte y reinicie si la cosa esta muy mal.
+// ---------------------------------------------------------------------------
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException] ', err?.message || err);
+  if (err?.stack) console.error(err.stack);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[unhandledRejection] ', reason?.message || reason);
+  if (reason?.stack) console.error(reason.stack);
+});
+
 const ENABLE_DGII_PASO2 = /^(1|true|yes|on)$/i.test(String(process.env.ENABLE_DGII_PASO2 || ''));
 
 const app = express();
@@ -2337,12 +2355,42 @@ const obtenerAdminPrincipalNegocio = async (negocioId, adminPrincipalId = null) 
   return usuariosRepo.findById(row.id);
 };
 
+// Cache del estado del negocio. TTL 60s: si super admin suspende/activa, tarda
+// hasta 60s en propagar a los requests. Aceptable para no hacer 1 query por request.
+const _estadoNegocioCache = new Map(); // negocioId -> { estado, expiresAt }
+const ESTADO_NEGOCIO_CACHE_TTL_MS = 60_000;
+const ESTADO_NEGOCIO_CACHE_MAX = 200;
+
+function invalidarEstadoNegocioCache(negocioId) {
+  if (negocioId == null) {
+    _estadoNegocioCache.clear();
+    return;
+  }
+  _estadoNegocioCache.delete(Number(negocioId));
+}
+
 const obtenerEstadoNegocio = async (negocioId) => {
   if (!negocioId) return null;
-  return db.get(
+  const id = Number(negocioId);
+  const ahora = Date.now();
+  const cached = _estadoNegocioCache.get(id);
+  if (cached && cached.expiresAt > ahora) return cached.estado;
+
+  const estado = await db.get(
     'SELECT id, activo, suspendido, deleted_at, motivo_suspension FROM negocios WHERE id = ? LIMIT 1',
-    [negocioId]
+    [id]
   );
+  // GC defensivo
+  if (_estadoNegocioCache.size >= ESTADO_NEGOCIO_CACHE_MAX) {
+    const aRemover = _estadoNegocioCache.size - Math.floor(ESTADO_NEGOCIO_CACHE_MAX * 0.7);
+    let n = 0;
+    for (const k of _estadoNegocioCache.keys()) {
+      if (n++ >= aRemover) break;
+      _estadoNegocioCache.delete(k);
+    }
+  }
+  _estadoNegocioCache.set(id, { estado, expiresAt: ahora + ESTADO_NEGOCIO_CACHE_TTL_MS });
+  return estado;
 };
 
 const validarEstadoNegocio = async (negocioId) => {
@@ -17116,6 +17164,8 @@ app.patch('/api/negocios/:id/estado', (req, res) => {
       if (this.changes === 0) {
         return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
       }
+      // Invalidar cache para que el cambio surta efecto inmediato.
+      invalidarEstadoNegocioCache(id);
       res.json({ ok: true, activo: valor });
     });
   });
@@ -17408,6 +17458,7 @@ app.put('/api/admin/negocios/:id/activar', (req, res) => {
       }
 
       await db.run('UPDATE negocios SET activo = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+      invalidarEstadoNegocioCache(id);
       await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'activar' });
       res.json({ ok: true, activo: 1 });
     } catch (error) {
@@ -17434,6 +17485,7 @@ app.put('/api/admin/negocios/:id/desactivar', (req, res) => {
       }
 
       await db.run('UPDATE negocios SET activo = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+      invalidarEstadoNegocioCache(id);
       await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'desactivar' });
       res.json({ ok: true, activo: 0 });
     } catch (error) {
@@ -17468,6 +17520,7 @@ app.put('/api/admin/negocios/:id/suspender', (req, res) => {
           WHERE id = ?`,
         [motivo, id]
       );
+      invalidarEstadoNegocioCache(id);
       await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'suspender' });
       res.json({ ok: true, suspendido: 1, motivo_suspension: motivo });
     } catch (error) {
@@ -17501,6 +17554,7 @@ app.put('/api/admin/negocios/:id/reactivar', (req, res) => {
           WHERE id = ?`,
         [id]
       );
+      invalidarEstadoNegocioCache(id);
       await registrarAccionAdmin({ adminId: usuarioSesion.id, negocioId: id, accion: 'reactivar' });
       res.json({ ok: true, suspendido: 0 });
     } catch (error) {
@@ -33777,6 +33831,51 @@ app.post('/api/logout', (req, res) => {
 
     finalizar();
   });
+});
+
+// Health endpoint: verifica que MySQL responde rapido y muestra el estado del
+// pool. Util para monitoreo externo (UptimeRobot, mobaxterm cron) y para
+// debugging cuando el server se pone lento. NO requiere autenticacion.
+//   GET /api/health -> 200 { ok: true, mysql: 'ok', pool: {...}, uptime, memory }
+//   503 si MySQL no responde en 3s o si el pool esta saturado.
+app.get('/api/health', async (req, res) => {
+  const inicio = Date.now();
+  let mysqlOk = false;
+  let mysqlError = null;
+  try {
+    // Query ultra-liviana con timeout corto.
+    const ping = Promise.race([
+      db.get('SELECT 1 AS ok'),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('mysql timeout 3s')), 3000)),
+    ]);
+    await ping;
+    mysqlOk = true;
+  } catch (err) {
+    mysqlError = err?.message || String(err);
+  }
+  const latenciaMs = Date.now() - inicio;
+  let pool = null;
+  try {
+    const { poolStats } = require('./db-mysql');
+    pool = poolStats?.() || null;
+  } catch (_) {}
+  const mem = process.memoryUsage();
+  const payload = {
+    ok: mysqlOk,
+    mysql: mysqlOk ? 'ok' : 'fail',
+    mysql_error: mysqlError,
+    mysql_latency_ms: latenciaMs,
+    pool,
+    uptime_seconds: Math.round(process.uptime()),
+    memory_mb: {
+      rss: Math.round(mem.rss / 1024 / 1024),
+      heap_used: Math.round(mem.heapUsed / 1024 / 1024),
+      heap_total: Math.round(mem.heapTotal / 1024 / 1024),
+    },
+    node_version: process.version,
+    timestamp: new Date().toISOString(),
+  };
+  res.status(mysqlOk ? 200 : 503).json(payload);
 });
 
 app.use('/api', (req, res) => {
