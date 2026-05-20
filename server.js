@@ -16157,6 +16157,233 @@ app.patch('/api/pedidos/:id/factura', (req, res) => {
   });
 });
 
+// ===========================================================================
+// POST /api/caja/facturas/:id/editar-con-admin
+//
+// Permite EDITAR una factura ya emitida (encabezado + items + tipo comprobante)
+// desde el detalle de cuadre de caja. Es una operación administrativa que
+// REQUIERE el password de un admin del negocio.
+//
+// LÍMITES DURÍSIMOS (no negociable):
+//   - Si el negocio tiene facturación electrónica activa (habilitada=1) → 403.
+//   - Si la factura es e-CF (ecf_tipo no null o tipo_comprobante E31/E32/etc) → 403.
+//   - Si no se valida password admin → 403.
+//
+// Lo que permite cambiar:
+//   - cliente, cliente_documento (RNC/cédula)
+//   - tipo_comprobante (solo entre B01/B02/B14)
+//   - items (cantidad y precio); NO toca inventario (corrección administrativa)
+//
+// El NCF NO se cambia (la secuencia ya emitida; cambiarla complica auditoría).
+// Si necesitas un NCF diferente, anula y vuelve a emitir.
+// ===========================================================================
+app.post('/api/caja/facturas/:id/editar-con-admin', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const pedidoId = Number(req.params.id);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Pedido no valido.' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const body = req.body || {};
+    const adminPassword = (body.admin_password || body.adminPassword || '').toString();
+
+    if (!adminPassword) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Se requiere la contraseña del administrador para editar la factura.',
+      });
+    }
+
+    try {
+      // 1. Rechazar si el negocio tiene FE activa (no permitir editar B0X cuando
+      //    el flujo legal del negocio es e-CF).
+      const configFE = await obtenerResumenFacturacionElectronicaNegocio(negocioId).catch(
+        () => ({ habilitada: 0 })
+      );
+      if (Number(configFE?.habilitada) === 1) {
+        return res.status(403).json({
+          ok: false,
+          error:
+            'Este negocio emite Facturación Electrónica. Las facturas e-CF no se pueden editar — debes emitir una Nota de Crédito.',
+        });
+      }
+
+      // 2. Validar password admin del negocio.
+      const auth = await validarPasswordAdminNegocio(negocioId, adminPassword);
+      if (!auth?.ok) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Contraseña de administrador incorrecta.',
+        });
+      }
+
+      // 3. Leer el pedido. Rechazar si es e-CF o no existe.
+      const pedido = await db.get(
+        `SELECT id, estado, ecf_tipo, ecf_encf, tipo_comprobante, ncf,
+                subtotal, impuesto, descuento_monto, propina_monto, total
+         FROM pedidos
+         WHERE id = ? AND negocio_id = ? LIMIT 1`,
+        [pedidoId, negocioId]
+      );
+      if (!pedido) {
+        return res.status(404).json({ ok: false, error: 'Factura no encontrada.' });
+      }
+      const tipoActual = String(pedido.tipo_comprobante || '').toUpperCase();
+      const esEcf =
+        !!pedido.ecf_tipo ||
+        /^E\d{2}$/.test(tipoActual) ||
+        !!pedido.ecf_encf;
+      if (esEcf) {
+        return res.status(403).json({
+          ok: false,
+          error:
+            'Esta factura es electrónica (e-CF). Para corregirla emite una Nota de Crédito desde el módulo correspondiente.',
+        });
+      }
+
+      // 4. Recoger cambios del body con normalización conservadora.
+      const cliente = body.cliente !== undefined ? normalizarCampoTexto(body.cliente) : undefined;
+      const clienteDocumento =
+        body.cliente_documento !== undefined
+          ? normalizarCampoTexto(body.cliente_documento)
+          : undefined;
+      let tipoNuevo =
+        body.tipo_comprobante !== undefined
+          ? String(body.tipo_comprobante || '').toUpperCase().trim()
+          : undefined;
+      // Validar que el tipo nuevo SEA legacy (B0X o "Sin comprobante"), nunca e-CF.
+      if (tipoNuevo !== undefined) {
+        if (tipoNuevo === '' || tipoNuevo === 'SIN COMPROBANTE') {
+          tipoNuevo = 'Sin comprobante';
+        } else if (!['B01', 'B02', 'B14'].includes(tipoNuevo)) {
+          return res.status(400).json({
+            ok: false,
+            error: 'El tipo de comprobante solo puede cambiarse a B01, B02, B14 o "Sin comprobante".',
+          });
+        }
+      }
+      const items = Array.isArray(body.items) ? body.items : null;
+
+      // Validación de items si vienen.
+      if (items && items.length > 0) {
+        for (const it of items) {
+          const cantidad = Number(it.cantidad);
+          const precio = Number(it.precio_unitario);
+          if (!Number.isFinite(cantidad) || cantidad <= 0) {
+            return res.status(400).json({
+              ok: false,
+              error: 'Todas las cantidades deben ser mayores a cero.',
+            });
+          }
+          if (!Number.isFinite(precio) || precio < 0) {
+            return res.status(400).json({
+              ok: false,
+              error: 'Los precios no pueden ser negativos.',
+            });
+          }
+        }
+      }
+
+      // 5. Aplicar cambios en transacción.
+      await db.run('BEGIN');
+      try {
+        // 5a. Items (solo si se enviaron).
+        if (items && items.length > 0) {
+          const subtotalBruto = items.reduce(
+            (acc, it) => acc + Number(it.cantidad) * Number(it.precio_unitario),
+            0
+          );
+          const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+          const totales = calcularTotalesConImpuestoConfigurado(subtotalBruto, configImpuesto);
+          const descuentoMonto = Number(pedido.descuento_monto) || 0;
+          const propinaMonto = Number(pedido.propina_monto) || 0;
+          const totalFinal = Number(
+            Math.max(totales.subtotal + totales.impuesto - descuentoMonto + propinaMonto, 0).toFixed(2)
+          );
+
+          await db.run(
+            'DELETE FROM detalle_pedido WHERE pedido_id = ? AND negocio_id = ?',
+            [pedidoId, negocioId]
+          );
+          for (const it of items) {
+            const productoId = Number(it.producto_id) || null;
+            await db.run(
+              'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id) VALUES (?, ?, ?, ?, ?)',
+              [pedidoId, productoId, Number(it.cantidad), Number(it.precio_unitario), negocioId]
+            );
+          }
+          await db.run(
+            `UPDATE pedidos SET subtotal = ?, impuesto = ?, total = ?
+             WHERE id = ? AND negocio_id = ?`,
+            [totales.subtotal, totales.impuesto, totalFinal, pedidoId, negocioId]
+          );
+        }
+
+        // 5b. Encabezado (cliente, RNC, tipo).
+        const sets = [];
+        const params = [];
+        if (cliente !== undefined) {
+          sets.push('cliente = ?');
+          params.push(cliente);
+        }
+        if (clienteDocumento !== undefined) {
+          sets.push('cliente_documento = ?');
+          params.push(clienteDocumento);
+        }
+        if (tipoNuevo !== undefined && tipoNuevo !== tipoActual) {
+          sets.push('tipo_comprobante = ?');
+          params.push(tipoNuevo);
+        }
+        if (sets.length) {
+          params.push(pedidoId, negocioId);
+          await db.run(
+            `UPDATE pedidos SET ${sets.join(', ')} WHERE id = ? AND negocio_id = ?`,
+            params
+          );
+        }
+
+        await db.run('COMMIT');
+      } catch (txErr) {
+        await db.run('ROLLBACK').catch(() => {});
+        throw txErr;
+      }
+
+      // 6. Auditoría: registrar quién editó qué (best-effort).
+      try {
+        if (typeof registrarAccionAdmin === 'function') {
+          await registrarAccionAdmin({
+            adminId: auth.admin_id,
+            negocioId,
+            accion: 'editar_factura_caja',
+            detalle: JSON.stringify({
+              pedido_id: pedidoId,
+              cambios: {
+                cliente: cliente !== undefined ? true : false,
+                cliente_documento: clienteDocumento !== undefined ? true : false,
+                tipo_comprobante: tipoNuevo !== undefined ? tipoNuevo : null,
+                items: items ? items.length : null,
+              },
+              autorizo_admin_id: auth.admin_id,
+              ejecuto_usuario_id: usuarioSesion.id,
+            }),
+          });
+        }
+      } catch (auditErr) {
+        console.warn('No se pudo registrar auditoria de editar factura:', auditErr?.message || auditErr);
+      }
+
+      res.json({
+        ok: true,
+        autorizado_por: auth.admin_usuario || auth.admin_nombre || 'admin',
+        pedido_id: pedidoId,
+      });
+    } catch (error) {
+      console.error('Error en editar-con-admin:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo editar la factura.' });
+    }
+  });
+});
+
 app.get('/api/cocina/pedidos-activos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     if (!esUsuarioCocina(usuarioSesion) && !esUsuarioAdmin(usuarioSesion)) {

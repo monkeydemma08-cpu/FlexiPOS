@@ -4033,7 +4033,24 @@ const renderDetalleCuadreActual = () => {
         : Number(pedido.id);
     const facturaDisponible = Number.isFinite(facturaId) && facturaId > 0;
 
+    // === Detectar si la factura puede editarse desde este flujo ===
+    // No se permite si:
+    //   1. El negocio tiene Facturacion Electronica activa, O
+    //   2. El pedido es e-CF (tiene ecf_tipo, ecf_encf, o tipo_comprobante E3X).
+    const pedidoRelacionado = pedido.pedidos?.find((p) => Number(p?.id) === facturaId) || pedido.pedidos?.[0] || pedido;
+    const tipoComp = String(pedidoRelacionado?.tipo_comprobante || pedido.tipo_comprobante || '').toUpperCase();
+    const esPedidoEcf =
+      !!pedidoRelacionado?.ecf_tipo ||
+      !!pedidoRelacionado?.ecf_encf ||
+      /^E\d{2}$/.test(tipoComp);
+    const feActivaNegocio = typeof esFacturacionElectronicaActiva === 'function'
+      ? esFacturacionElectronicaActiva()
+      : Number(secuenciasConfig?.facturacion_electronica_habilitada) === 1;
+    const puedeEditarFactura = facturaDisponible && !esPedidoEcf && !feActivaNegocio;
 
+    const botonEditarHtml = puedeEditarFactura
+      ? `<button type="button" class="kanm-button ghost" data-editar-factura="1" data-pedido-id="${facturaId}" style="margin-left:6px;" title="Editar cliente, RNC, tipo o items (requiere password admin)">Editar factura</button>`
+      : '';
 
     fila.dataset.cuadreId = pedido.id;
     fila.style.cursor = 'pointer';
@@ -4060,6 +4077,7 @@ const renderDetalleCuadreActual = () => {
         >
           Ver factura
         </button>
+        ${botonEditarHtml}
       </td>
 
     `;
@@ -6093,6 +6111,25 @@ const inicializarCuadre = () => {
       return;
     }
 
+    const botonEditarFactura = event.target.closest('[data-editar-factura]');
+    if (botonEditarFactura) {
+      event.preventDefault();
+      event.stopPropagation();
+      const pedidoId = Number(botonEditarFactura.dataset.pedidoId);
+      console.log('[caja] Click en Editar factura, pedido:', pedidoId);
+      if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+        setCuadreMensaje('Pedido invalido para editar.', 'error');
+        return;
+      }
+      if (typeof window.__cajaAbrirModalEditarFactura !== 'function') {
+        console.error('[caja] __cajaAbrirModalEditarFactura no esta definida. Modal no inicializado.');
+        setCuadreMensaje('Editar factura no esta disponible. Recarga la pagina con Ctrl+Shift+R.', 'error');
+        return;
+      }
+      window.__cajaAbrirModalEditarFactura(pedidoId);
+      return;
+    }
+
     const botonVerFactura = event.target.closest('[data-ver-factura]');
     if (botonVerFactura) {
       event.preventDefault();
@@ -6126,6 +6163,239 @@ const inicializarCuadre = () => {
 
   actualizarDiferenciaCuadre();
 
+  // === Wiring del modal "Editar factura" ===
+  const editFacturaModal = document.getElementById('caja-editar-factura-modal');
+  const editFacturaPedidoIdInput = document.getElementById('caja-editar-factura-pedido-id');
+  const editFacturaClienteInput = document.getElementById('caja-editar-factura-cliente');
+  const editFacturaDocumentoInput = document.getElementById('caja-editar-factura-documento');
+  const editFacturaTipoSelect = document.getElementById('caja-editar-factura-tipo');
+  const editFacturaItemsBody = document.getElementById('caja-editar-factura-items-body');
+  const editFacturaPasswordInput = document.getElementById('caja-editar-factura-admin-password');
+  const editFacturaMensaje = document.getElementById('caja-editar-factura-mensaje');
+  const editFacturaCerrarBtn = document.getElementById('caja-editar-factura-cerrar');
+  const editFacturaCancelarBtn = document.getElementById('caja-editar-factura-cancelar');
+  const editFacturaGuardarBtn = document.getElementById('caja-editar-factura-guardar');
+
+  // Diagnostico: avisar si el modal no esta en el DOM (caja.html viejo en cache).
+  if (!editFacturaModal) {
+    console.warn(
+      '[caja] Modal "Editar factura" no encontrado en el DOM. ' +
+        'Probablemente el navegador esta usando caja.html cacheado. ' +
+        'Recarga con Ctrl+Shift+R.'
+    );
+  } else {
+    console.log('[caja] Modal Editar factura listo.');
+  }
+
+  const setEditFacturaMensaje = (texto, tipo = 'info') => {
+    if (!editFacturaMensaje) return;
+    editFacturaMensaje.textContent = texto || '';
+    editFacturaMensaje.classList.remove('kanm-message-error', 'kanm-message-success');
+    if (tipo === 'error') editFacturaMensaje.classList.add('kanm-message-error');
+    if (tipo === 'success') editFacturaMensaje.classList.add('kanm-message-success');
+  };
+
+  const cerrarModalEditarFactura = () => {
+    // Usa el helper de caja (hide animado con clase is-visible).
+    if (editFacturaModal) {
+      if (typeof ocultarModal === 'function') ocultarModal(editFacturaModal);
+      else editFacturaModal.hidden = true;
+    }
+    if (editFacturaPasswordInput) editFacturaPasswordInput.value = '';
+    setEditFacturaMensaje('');
+  };
+
+  const renderEditFacturaItems = (items = []) => {
+    if (!editFacturaItemsBody) return;
+    if (!items.length) {
+      editFacturaItemsBody.innerHTML =
+        '<tr><td colspan="5" class="kanm-subtitle">Sin productos en la factura.</td></tr>';
+      return;
+    }
+    editFacturaItemsBody.innerHTML = items
+      .map((it, idx) => {
+        const nombre = it.nombre || it.descripcion || `Producto ${it.producto_id || ''}`;
+        const cantidad = Number(it.cantidad) || 0;
+        const precio = Number(it.precio_unitario) || 0;
+        const subtotal = (cantidad * precio).toFixed(2);
+        return `
+          <tr data-edit-item-row="${idx}" data-producto-id="${it.producto_id || ''}">
+            <td>${nombre}</td>
+            <td>
+              <input type="number" class="kanm-input" data-edit-cantidad min="0.01" step="0.01" value="${cantidad}" />
+            </td>
+            <td>
+              <input type="number" class="kanm-input" data-edit-precio min="0" step="0.01" value="${precio.toFixed(2)}" />
+            </td>
+            <td><span data-edit-subtotal>RD$${subtotal}</span></td>
+            <td>
+              <button type="button" class="kanm-button ghost" data-edit-eliminar="${idx}" title="Eliminar línea">✕</button>
+            </td>
+          </tr>
+        `;
+      })
+      .join('');
+  };
+
+  const recalcularSubtotalesEditFactura = () => {
+    if (!editFacturaItemsBody) return;
+    editFacturaItemsBody.querySelectorAll('tr[data-edit-item-row]').forEach((tr) => {
+      const cant = Number(tr.querySelector('[data-edit-cantidad]')?.value) || 0;
+      const precio = Number(tr.querySelector('[data-edit-precio]')?.value) || 0;
+      const sub = (cant * precio).toFixed(2);
+      const out = tr.querySelector('[data-edit-subtotal]');
+      if (out) out.textContent = `RD$${sub}`;
+    });
+  };
+
+  // Función expuesta al closure superior (llamada desde el handler del botón).
+  window.__cajaAbrirModalEditarFactura = async (pedidoId) => {
+    if (!editFacturaModal) {
+      console.error('[caja] editFacturaModal no esta en el DOM');
+      return;
+    }
+    setEditFacturaMensaje('Cargando factura…');
+    // Usa el helper de caja (hidden=false + clase is-visible animada).
+    if (typeof mostrarModal === 'function') {
+      mostrarModal(editFacturaModal);
+    } else {
+      editFacturaModal.hidden = false;
+    }
+    if (editFacturaPedidoIdInput) editFacturaPedidoIdInput.value = String(pedidoId);
+    if (editFacturaPasswordInput) editFacturaPasswordInput.value = '';
+    if (editFacturaItemsBody) {
+      editFacturaItemsBody.innerHTML = '<tr><td colspan="5" class="kanm-subtitle">Cargando…</td></tr>';
+    }
+    try {
+      const resp = await fetchAutorizadoCaja(`/api/pedidos/${pedidoId}/factura`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.error) {
+        throw new Error(data?.error || 'No se pudo cargar la factura');
+      }
+      const pedido = data?.pedido || {};
+      // Defensa final: si por alguna razón llega un e-CF aquí, cancelar.
+      const tipoAct = String(pedido.tipo_comprobante || '').toUpperCase();
+      if (pedido.ecf_tipo || pedido.ecf_encf || /^E\d{2}$/.test(tipoAct)) {
+        setEditFacturaMensaje('Esta factura es electrónica (e-CF) y no puede editarse. Emite una Nota de Crédito.', 'error');
+        return;
+      }
+      if (editFacturaClienteInput) editFacturaClienteInput.value = pedido.cliente || '';
+      if (editFacturaDocumentoInput) editFacturaDocumentoInput.value = pedido.cliente_documento || '';
+      if (editFacturaTipoSelect) {
+        const opciones = ['B01', 'B02', 'B14', 'Sin comprobante'];
+        const tipoActual = opciones.includes(pedido.tipo_comprobante) ? pedido.tipo_comprobante : 'B02';
+        editFacturaTipoSelect.value = tipoActual;
+      }
+      renderEditFacturaItems(Array.isArray(data?.items) ? data.items : []);
+      setEditFacturaMensaje('');
+    } catch (error) {
+      setEditFacturaMensaje(error.message || 'No se pudo cargar la factura.', 'error');
+    }
+  };
+
+  // Re-cálculo de subtotales cuando cambia cantidad/precio
+  editFacturaItemsBody?.addEventListener('input', (event) => {
+    if (
+      event.target.matches('[data-edit-cantidad]') ||
+      event.target.matches('[data-edit-precio]')
+    ) {
+      recalcularSubtotalesEditFactura();
+    }
+  });
+
+  // Eliminar línea
+  editFacturaItemsBody?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-edit-eliminar]');
+    if (!btn) return;
+    const tr = btn.closest('tr[data-edit-item-row]');
+    if (tr) tr.remove();
+    recalcularSubtotalesEditFactura();
+  });
+
+  // Cerrar / Cancelar
+  editFacturaCerrarBtn?.addEventListener('click', cerrarModalEditarFactura);
+  editFacturaCancelarBtn?.addEventListener('click', cerrarModalEditarFactura);
+  editFacturaModal?.addEventListener('click', (event) => {
+    if (event.target === editFacturaModal) cerrarModalEditarFactura();
+  });
+
+  // Guardar
+  editFacturaGuardarBtn?.addEventListener('click', async () => {
+    const pedidoId = Number(editFacturaPedidoIdInput?.value);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+      setEditFacturaMensaje('Pedido inválido.', 'error');
+      return;
+    }
+    const password = (editFacturaPasswordInput?.value || '').trim();
+    if (!password) {
+      setEditFacturaMensaje('Ingresa la contraseña del administrador.', 'error');
+      return;
+    }
+    // Recolectar items actuales del DOM
+    const items = [];
+    editFacturaItemsBody?.querySelectorAll('tr[data-edit-item-row]').forEach((tr) => {
+      const cantidad = Number(tr.querySelector('[data-edit-cantidad]')?.value);
+      const precio = Number(tr.querySelector('[data-edit-precio]')?.value);
+      const productoId = Number(tr.dataset.productoId) || null;
+      if (Number.isFinite(cantidad) && cantidad > 0 && Number.isFinite(precio) && precio >= 0) {
+        items.push({
+          producto_id: productoId,
+          cantidad,
+          precio_unitario: precio,
+        });
+      }
+    });
+    if (!items.length) {
+      setEditFacturaMensaje('La factura debe tener al menos un ítem válido.', 'error');
+      return;
+    }
+
+    const payload = {
+      admin_password: password,
+      cliente: editFacturaClienteInput?.value?.trim() || '',
+      cliente_documento: editFacturaDocumentoInput?.value?.trim() || '',
+      tipo_comprobante: editFacturaTipoSelect?.value || 'B02',
+      items,
+    };
+
+    if (editFacturaGuardarBtn) {
+      editFacturaGuardarBtn.disabled = true;
+      editFacturaGuardarBtn.textContent = 'Guardando…';
+    }
+    setEditFacturaMensaje('Guardando cambios…');
+    try {
+      const resp = await fetchAutorizadoCaja(`/api/caja/facturas/${pedidoId}/editar-con-admin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.ok === false) {
+        throw new Error(data?.error || 'No se pudo guardar.');
+      }
+      setEditFacturaMensaje('Factura actualizada correctamente.', 'success');
+      // Recargar el cuadre para que reflejen los cambios.
+      if (typeof cargarCuadre === 'function') {
+        try { await cargarCuadre(); } catch (_) {}
+      }
+      setTimeout(cerrarModalEditarFactura, 900);
+    } catch (error) {
+      setEditFacturaMensaje(error.message || 'No se pudo actualizar la factura.', 'error');
+    } finally {
+      if (editFacturaGuardarBtn) {
+        editFacturaGuardarBtn.disabled = false;
+        editFacturaGuardarBtn.textContent = 'Guardar cambios';
+      }
+    }
+  });
+
+};
+
+// Helper expuesto al click handler del cuadre detalle
+const abrirModalEditarFactura = (pedidoId) => {
+  if (typeof window.__cajaAbrirModalEditarFactura === 'function') {
+    window.__cajaAbrirModalEditarFactura(pedidoId);
+  }
 };
 
 
