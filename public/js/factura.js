@@ -484,6 +484,8 @@
     try {
       const [facturaResp, configResp] = await Promise.all([
         fetch(`/api/pedidos/${pedidoId}/factura`, {
+          // Nunca leer de caché: si el admin edita la factura, debe verse al instante.
+          cache: 'no-store',
           headers: {
             ...obtenerAuthHeadersFactura(),
           },

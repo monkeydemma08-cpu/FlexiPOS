@@ -16027,6 +16027,11 @@ app.get('/api/pedidos/:id/factura', (req, res) => {
       if (!factura) {
         return res.status(404).json({ error: 'Pedido no encontrado.' });
       }
+      // Nunca cachear la factura. Si el admin la edito desde caja, el siguiente
+      // request debe devolver los datos actualizados, no la version cacheada.
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
       res.json({ ok: true, ...factura });
     } catch (error) {
       console.error('Error al obtener la factura:', error);

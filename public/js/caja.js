@@ -6140,7 +6140,11 @@ const inicializarCuadre = () => {
         return;
       }
       setCuadreMensaje('');
-      window.open(`/factura.html?id=${pedidoId}`, '_blank');
+      // Agregar timestamp para forzar pestana/contenido fresco si el admin
+      // edito la factura recien (evita ver version cacheada de una pestana
+      // abierta previamente con el mismo id).
+      const ts = Date.now();
+      window.open(`/factura.html?id=${pedidoId}&_=${ts}`, `factura_${pedidoId}_${ts}`);
       return;
     }
 
