@@ -4183,8 +4183,63 @@
             </div>
             <div class="kanm-grid-2">
               <div class="kanm-input-group">
-                <label for="kanm-negocios-logo-url">Logo URL</label>
-                <input type="text" id="kanm-negocios-logo-url" placeholder="https://..." />
+                <label for="kanm-negocios-logo-file">Logo del negocio</label>
+                <div
+                  id="kanm-negocios-logo-dropzone"
+                  style="
+                    border: 2px dashed rgba(37, 91, 199, 0.35);
+                    border-radius: 12px;
+                    padding: 14px;
+                    text-align: center;
+                    background: rgba(247, 250, 255, 0.6);
+                    cursor: pointer;
+                    transition: border-color 0.15s, background 0.15s;
+                  "
+                >
+                  <div id="kanm-negocios-logo-preview-wrap" style="margin-bottom: 8px; display:none;">
+                    <img
+                      id="kanm-negocios-logo-preview"
+                      alt="Vista previa del logo"
+                      style="
+                        max-width: 120px;
+                        max-height: 120px;
+                        border-radius: 8px;
+                        background: #fff;
+                        padding: 6px;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                      "
+                    />
+                    <div style="margin-top:6px;">
+                      <button
+                        type="button"
+                        class="kanm-button ghost kanm-button--sm"
+                        id="kanm-negocios-logo-quitar"
+                      >
+                        Quitar logo
+                      </button>
+                    </div>
+                  </div>
+                  <div id="kanm-negocios-logo-placeholder">
+                    <p style="margin:0 0 6px;font-weight:600;">📷 Arrastra una imagen aquí</p>
+                    <p class="kanm-subtitle" style="margin:0 0 8px;font-size:0.85rem;">
+                      o haz clic para seleccionar
+                    </p>
+                    <p class="kanm-subtitle" style="margin:0;font-size:0.75rem;">
+                      PNG, JPG, WebP — se comprime automáticamente
+                    </p>
+                  </div>
+                  <input
+                    type="file"
+                    id="kanm-negocios-logo-file"
+                    accept="image/png,image/jpeg,image/jpg,image/webp"
+                    style="display: none;"
+                  />
+                </div>
+                <span class="kanm-input-help" id="kanm-negocios-logo-info">
+                  Tamaño recomendado: 200×200 a 800×800 px. Se redimensiona automáticamente.
+                </span>
+                <!-- Campo oculto donde se almacena el data URI o URL del logo -->
+                <input type="hidden" id="kanm-negocios-logo-url" />
               </div>
               <div class="kanm-input-group" style="justify-content: flex-end;">
                 <label class="kanm-checkbox" for="kanm-negocios-tiene-sucursales" style="padding-top: 22px;">

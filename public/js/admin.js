@@ -599,17 +599,32 @@ const leerRespuestaApi = async (response) => {
   };
 };
 
+const LOGO_DATA_URI_MAX_BYTES = 600 * 1024; // ~450 KB binario despues de base64
+
 const validarLogoUrlNegocio = (valorEntrada) => {
   const valor = String(valorEntrada || '').trim();
   if (!valor) {
     return { ok: true, valor: null };
   }
-  if (/^data:/i.test(valor)) {
-    return {
-      ok: false,
-      error: 'El logo debe ser una URL (http/https). No pegues imagen en base64/data URI.',
-    };
+  // Aceptar data URI de imagen (logo subido desde el upload del modal).
+  // Solo image/png, image/jpeg, image/jpg, image/webp con tamaño razonable.
+  if (/^data:image\//i.test(valor)) {
+    if (!/^data:image\/(png|jpe?g|webp);base64,/i.test(valor)) {
+      return {
+        ok: false,
+        error: 'Formato de imagen no soportado. Usa PNG, JPG o WebP.',
+      };
+    }
+    if (valor.length > LOGO_DATA_URI_MAX_BYTES) {
+      const limiteKb = Math.round(LOGO_DATA_URI_MAX_BYTES / 1024);
+      return {
+        ok: false,
+        error: `La imagen del logo excede ${limiteKb} KB. Intenta una imagen mas pequeña.`,
+      };
+    }
+    return { ok: true, valor };
   }
+  // Si no es data URI, debe ser URL http/https valida.
   if (valor.length > 2048) {
     return {
       ok: false,
@@ -10126,6 +10141,196 @@ const iniciarSesionImpersonada = (data = {}) => {
   window.location.href = '/admin.html';
 };
 
+// ===========================================================================
+// Upload de logo del negocio: drag-drop + compresion en el navegador.
+// Reusa el patrón de comprimirImagenProducto pero con dimensiones más chicas
+// (300px max) porque los logos no necesitan ser tan grandes.
+// ===========================================================================
+const LOGO_NEGOCIO_MAX_DIM = 400;
+const LOGO_NEGOCIO_CALIDAD = 0.85;
+const LOGO_NEGOCIO_INLINE_MAX_BYTES = 600 * 1024; // ~450 KB binario
+
+const comprimirImagenLogoNegocio = (file) =>
+  new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error('No se seleccionó archivo.'));
+      return;
+    }
+    if (!/^image\/(jpeg|jpg|png|webp)$/i.test(file.type || '')) {
+      reject(new Error('Formato no soportado. Usa JPG, PNG o WebP.'));
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      reject(new Error('El archivo es muy grande (max 10 MB).'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Imagen inválida o corrupta.'));
+      img.onload = () => {
+        const ratio = Math.min(
+          1,
+          LOGO_NEGOCIO_MAX_DIM / img.width,
+          LOGO_NEGOCIO_MAX_DIM / img.height
+        );
+        const targetW = Math.max(1, Math.round(img.width * ratio));
+        const targetH = Math.max(1, Math.round(img.height * ratio));
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Tu navegador no soporta compresión de imágenes.'));
+          return;
+        }
+        // Para logos preservamos transparencia → usar PNG si la imagen era PNG.
+        const esPng = /^image\/png$/i.test(file.type);
+        if (!esPng) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, targetW, targetH);
+        }
+        ctx.drawImage(img, 0, 0, targetW, targetH);
+        let dataUri;
+        if (esPng) {
+          dataUri = canvas.toDataURL('image/png');
+          // PNG no tiene calidad ajustable; si excede, lo convertimos a JPG.
+          if (dataUri.length > LOGO_NEGOCIO_INLINE_MAX_BYTES) {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, targetW, targetH);
+            ctx.drawImage(img, 0, 0, targetW, targetH);
+            let calidad = LOGO_NEGOCIO_CALIDAD;
+            dataUri = canvas.toDataURL('image/jpeg', calidad);
+            while (dataUri.length > LOGO_NEGOCIO_INLINE_MAX_BYTES && calidad > 0.4) {
+              calidad = Math.max(0.4, calidad - 0.1);
+              dataUri = canvas.toDataURL('image/jpeg', calidad);
+            }
+          }
+        } else {
+          let calidad = LOGO_NEGOCIO_CALIDAD;
+          dataUri = canvas.toDataURL('image/jpeg', calidad);
+          while (dataUri.length > LOGO_NEGOCIO_INLINE_MAX_BYTES && calidad > 0.4) {
+            calidad = Math.max(0.4, calidad - 0.1);
+            dataUri = canvas.toDataURL('image/jpeg', calidad);
+          }
+        }
+        resolve({ dataUri, ancho: targetW, alto: targetH, bytes: dataUri.length });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+// Renderiza el preview del logo dentro del dropzone, o muestra el placeholder.
+function renderLogoNegocioPreview(valor) {
+  const wrap = document.getElementById('kanm-negocios-logo-preview-wrap');
+  const img = document.getElementById('kanm-negocios-logo-preview');
+  const placeholder = document.getElementById('kanm-negocios-logo-placeholder');
+  const hidden = document.getElementById('kanm-negocios-logo-url');
+  if (!wrap || !img || !placeholder || !hidden) return;
+  const v = String(valor || '').trim();
+  hidden.value = v;
+  if (v) {
+    img.src = v;
+    wrap.style.display = 'block';
+    placeholder.style.display = 'none';
+  } else {
+    img.removeAttribute('src');
+    wrap.style.display = 'none';
+    placeholder.style.display = 'block';
+  }
+}
+
+// Procesa un archivo soltado o seleccionado: lo comprime y lo pone en el preview.
+async function procesarArchivoLogoNegocio(file) {
+  const info = document.getElementById('kanm-negocios-logo-info');
+  if (!file) return;
+  if (info) {
+    info.textContent = 'Procesando imagen...';
+    info.style.color = '';
+  }
+  try {
+    const resultado = await comprimirImagenLogoNegocio(file);
+    renderLogoNegocioPreview(resultado.dataUri);
+    if (info) {
+      const kb = Math.round(resultado.bytes / 1024);
+      info.textContent = `Logo cargado: ${resultado.ancho}×${resultado.alto}px · ${kb} KB`;
+      info.style.color = '#1d7748';
+    }
+  } catch (error) {
+    console.error('Error procesando logo:', error);
+    if (info) {
+      info.textContent = error.message || 'No se pudo procesar la imagen.';
+      info.style.color = '#b4233b';
+    }
+  }
+}
+
+// Wiring del dropzone (se hace una vez al cargar admin.js).
+// Se ejecuta diferido para asegurar que el DOM esté listo.
+function initLogoDropzoneNegocio() {
+  const dropzone = document.getElementById('kanm-negocios-logo-dropzone');
+  const fileInput = document.getElementById('kanm-negocios-logo-file');
+  const btnQuitar = document.getElementById('kanm-negocios-logo-quitar');
+  if (!dropzone || !fileInput) return;
+
+  // Click en el dropzone → abre el selector de archivo
+  dropzone.addEventListener('click', (event) => {
+    // Evitar abrir el selector si el click fue en el botón quitar.
+    if (event.target.closest('#kanm-negocios-logo-quitar')) return;
+    fileInput.click();
+  });
+
+  // Selección de archivo
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (file) procesarArchivoLogoNegocio(file);
+    // Limpiar el input para permitir re-subir el mismo archivo
+    fileInput.value = '';
+  });
+
+  // Drag & drop
+  ['dragenter', 'dragover'].forEach((ev) => {
+    dropzone.addEventListener(ev, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropzone.style.borderColor = 'rgba(37, 91, 199, 0.8)';
+      dropzone.style.background = 'rgba(220, 235, 255, 0.8)';
+    });
+  });
+  ['dragleave', 'drop'].forEach((ev) => {
+    dropzone.addEventListener(ev, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropzone.style.borderColor = 'rgba(37, 91, 199, 0.35)';
+      dropzone.style.background = 'rgba(247, 250, 255, 0.6)';
+    });
+  });
+  dropzone.addEventListener('drop', (event) => {
+    const file = event.dataTransfer?.files?.[0];
+    if (file) procesarArchivoLogoNegocio(file);
+  });
+
+  // Botón "Quitar logo"
+  btnQuitar?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    renderLogoNegocioPreview('');
+    const info = document.getElementById('kanm-negocios-logo-info');
+    if (info) {
+      info.textContent = 'Logo quitado.';
+      info.style.color = '';
+    }
+  });
+}
+
+// Inicializar al cargar el DOM (sin esperar a que se abra el modal).
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initLogoDropzoneNegocio);
+} else {
+  initLogoDropzoneNegocio();
+}
+
 // Estado en memoria del modal de suspension (id del negocio sobre el que se actua)
 let negocioSuspenderId = null;
 
@@ -10524,6 +10729,10 @@ const abrirModalNegocio = async (id = null) => {
   }
   if (dom.inputLogoUrl) {
     dom.inputLogoUrl.value = negocioSeleccionado?.logo_url || '';
+  }
+  // Sincronizar preview del dropzone del logo con el valor actual.
+  if (typeof renderLogoNegocioPreview === 'function') {
+    renderLogoNegocioPreview(negocioSeleccionado?.logo_url || '');
   }
   if (dom.inputRnc) {
     dom.inputRnc.value = negocioSeleccionado?.rnc || '';
