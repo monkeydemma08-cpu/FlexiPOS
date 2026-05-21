@@ -10322,6 +10322,47 @@ function initLogoDropzoneNegocio() {
       info.style.color = '';
     }
   });
+
+  // Botón "Usar URL" (alternativa: logo desde URL pública)
+  const btnUsarUrl = document.getElementById('kanm-negocios-logo-url-aplicar');
+  const inputUrlTexto = document.getElementById('kanm-negocios-logo-url-text');
+  if (btnUsarUrl && inputUrlTexto) {
+    btnUsarUrl.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const url = (inputUrlTexto.value || '').trim();
+      const info = document.getElementById('kanm-negocios-logo-info');
+      if (!url) {
+        if (info) {
+          info.textContent = 'Pega una URL antes de aplicar.';
+          info.style.color = '#b4233b';
+        }
+        return;
+      }
+      const validacion = (typeof validarLogoUrlNegocio === 'function')
+        ? validarLogoUrlNegocio(url)
+        : { ok: true, valor: url };
+      if (!validacion.ok) {
+        if (info) {
+          info.textContent = validacion.error || 'URL no válida.';
+          info.style.color = '#b4233b';
+        }
+        return;
+      }
+      renderLogoNegocioPreview(validacion.valor || url);
+      if (info) {
+        info.textContent = 'Logo cargado desde URL.';
+        info.style.color = '#1d7748';
+      }
+    });
+    // Enter en el input también aplica.
+    inputUrlTexto.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        btnUsarUrl.click();
+      }
+    });
+  }
 }
 
 // Inicializar al cargar el DOM (sin esperar a que se abra el modal).

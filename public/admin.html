@@ -4238,7 +4238,33 @@
                 <span class="kanm-input-help" id="kanm-negocios-logo-info">
                   Tamaño recomendado: 200×200 a 800×800 px. Se redimensiona automáticamente.
                 </span>
-                <!-- Campo oculto donde se almacena el data URI o URL del logo -->
+
+                <!-- Alternativa: pegar URL pública del logo (para quien la tenga ya en internet) -->
+                <details style="margin-top:10px;">
+                  <summary style="cursor:pointer;font-size:0.85rem;color:var(--posium-ink-soft,#555);">
+                    O pegar URL pública del logo (avanzado)
+                  </summary>
+                  <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+                    <input
+                      type="text"
+                      id="kanm-negocios-logo-url-text"
+                      placeholder="https://ejemplo.com/logo.png"
+                      style="flex:1;"
+                    />
+                    <button
+                      type="button"
+                      class="kanm-button ghost kanm-button--sm"
+                      id="kanm-negocios-logo-url-aplicar"
+                    >
+                      Usar URL
+                    </button>
+                  </div>
+                  <span class="kanm-input-help" style="font-size:0.78rem;">
+                    Si tienes el logo alojado en internet, pega el enlace (http:// o https://).
+                  </span>
+                </details>
+
+                <!-- Campo oculto donde se almacena el data URI o URL del logo final -->
                 <input type="hidden" id="kanm-negocios-logo-url" />
               </div>
               <div class="kanm-input-group" style="justify-content: flex-end;">
@@ -5443,11 +5469,11 @@
       }
     })();
   </script>
-  <script src="/js/admin.js?v=20260430b"></script>
-  <script src="/js/admin-facturacion-posium.js"></script>
-  <script src="/js/admin-cotizaciones.js"></script>
-  <script src="/js/admin-clientes.js"></script>
-  <script src="/js/admin-categorias.js"></script>
+  <script src="/js/admin.js?v=20260519e"></script>
+  <script src="/js/admin-facturacion-posium.js?v=20260519e"></script>
+  <script src="/js/admin-cotizaciones.js?v=20260519e"></script>
+  <script src="/js/admin-clientes.js?v=20260519e"></script>
+  <script src="/js/admin-categorias.js?v=20260519e"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/notifications.js" defer></script>
 </body>

@@ -6,3 +6,4 @@ DGII Paso 2 montado (configuracion certificacion). Set ENABLE_DGII_PASO2=true pa
 Preparando para escuchar en el puerto... { HOST: '0.0.0.0', PORT: 3000 }
 Servidor iniciado en http://0.0.0.0:3000
 [analytics/inventario] sin compras_inventario: Unknown column 'estado' in 'where clause'
+[mysql-pool] Pool agotado, request en cola. Considera subir MYSQL_POOL_LIMIT o reducir polling.
