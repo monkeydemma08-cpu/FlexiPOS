@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/styles.css" />
     <link rel="stylesheet" href="css/factura-ticket.css" />
     <script src="js/auth.js" defer></script>
-    <script src="js/factura.js?v=20260519d" defer></script>
+    <script src="js/factura.js?v=20260520a" defer></script>
   </head>
   <body class="factura-body" data-role="caja,admin,vendedor">
     <main class="factura-container">
@@ -38,7 +38,7 @@
       <section class="kanm-card factura-datos" id="factura-datos">
         <div class="factura-col">
           <h2>Datos de la factura</h2>
-          <p><strong>NCF:</strong> <span id="factura-ncf">-</span></p>
+          <p id="factura-ncf-row"><strong>NCF:</strong> <span id="factura-ncf">-</span></p>
           <p><strong>Fecha:</strong> <span id="factura-fecha">-</span></p>
           <p><strong>Pedido:</strong> <span id="factura-pedido">-</span></p>
         </div>
@@ -72,8 +72,8 @@
           <span>Subtotal</span>
           <span id="factura-subtotal">DOP&nbsp;0.00</span>
         </div>
-        <div class="factura-resumen-linea">
-          <span>ITBIS(18%)</span>
+        <div class="factura-resumen-linea" id="factura-impuesto-row">
+          <span id="factura-impuesto-label">ITBIS(18%)</span>
           <span id="factura-impuesto">DOP&nbsp;0.00</span>
         </div>
         <div class="factura-resumen-linea">

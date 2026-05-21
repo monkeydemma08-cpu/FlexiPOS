@@ -2972,8 +2972,15 @@ const actualizarResumenInventario = () => {
       if (estadoStock === 'critico') acc.critico += 1;
       if (estadoStock === 'bajo') acc.bajo += 1;
       if (estadoStock !== 'indef') {
-        const stock = Number(item?.stock || 0);
-        acc.valor += stock * obtenerCostoProducto(item);
+        // Preferimos el valor real desde los lotes FIFO (Fase 5). Si no esta
+        // disponible (data legacy sin lotes), caemos al calculo stock * costo.
+        const valorLotes = Number(item?.valor_inventario_lotes);
+        if (Number.isFinite(valorLotes) && valorLotes > 0) {
+          acc.valor += valorLotes;
+        } else {
+          const stock = Number(item?.stock || 0);
+          acc.valor += stock * obtenerCostoProducto(item);
+        }
       }
       return acc;
     },
@@ -3535,6 +3542,15 @@ const renderProductos = (lista = []) => {
           : estadoStock === 'ok'
           ? 'inventario-stock-badge stock-ok'
           : 'inventario-stock-badge stock-indef';
+      // El boton "Lotes" solo tiene sentido para productos con stock fisico
+      // (INSUMO o FINAL de reventa). Para productos finales preparados (stock_indefinido)
+      // no aplica: su "stock" se calcula desde la receta.
+      const tieneStockFisico = !esProductoStockIndefinido(producto);
+      const botonLotesHtml = tieneStockFisico
+        ? `<button type="button" class="kanm-button ghost sm" data-admin-inventario-action="ver-lotes" data-id="${producto.id}" title="Ver lotes FIFO de este producto">
+              Lotes
+            </button>`
+        : '';
       return `
         <tr>
           <td><input type="checkbox" class="admin-inventario-select" data-id="${producto.id}" /></td>
@@ -3554,6 +3570,7 @@ const renderProductos = (lista = []) => {
               <button type="button" class="kanm-button ghost sm" data-admin-inventario-action="editar" data-id="${producto.id}">
                 Editar
               </button>
+              ${botonLotesHtml}
             </div>
           </td>
         </tr>
@@ -3858,15 +3875,253 @@ productosLista?.addEventListener('change', (event) => {
   }
 });
 productosLista?.addEventListener('click', (event) => {
-  const boton = event.target.closest('[data-admin-inventario-action="editar"]');
-  if (!boton) return;
-  const id = Number(boton.dataset.id || 0);
-  const producto = (Array.isArray(productos) ? productos : []).find((item) => Number(item.id) === id);
-  if (producto) {
-    seleccionarProductoEdicion(producto);
-    abrirInventarioModal({ limpiar: false });
+  const botonEditar = event.target.closest('[data-admin-inventario-action="editar"]');
+  if (botonEditar) {
+    const id = Number(botonEditar.dataset.id || 0);
+    const producto = (Array.isArray(productos) ? productos : []).find((item) => Number(item.id) === id);
+    if (producto) {
+      seleccionarProductoEdicion(producto);
+      abrirInventarioModal({ limpiar: false });
+    }
+    return;
+  }
+
+  const botonLotes = event.target.closest('[data-admin-inventario-action="ver-lotes"]');
+  if (botonLotes) {
+    const id = Number(botonLotes.dataset.id || 0);
+    if (id > 0) abrirModalLotesProducto(id);
   }
 });
+
+// ===========================================================================
+// Auditoria de consistencia: stock declarado vs stock en lotes (Bug D fix)
+// ===========================================================================
+const adminInventarioAuditarBtn = document.getElementById('admin-inventario-auditar');
+
+adminInventarioAuditarBtn?.addEventListener('click', async () => {
+  if (!adminInventarioAuditarBtn) return;
+  const labelOriginal = adminInventarioAuditarBtn.textContent;
+  adminInventarioAuditarBtn.disabled = true;
+  adminInventarioAuditarBtn.textContent = 'Auditando...';
+  try {
+    const resp = await fetch('/api/admin/inventario/auditar-consistencia', {
+      cache: 'no-store',
+      headers: {
+        ...(window.kanmAuth?.getAuthHeaders?.() || {}),
+      },
+    });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok || !data?.ok) {
+      throw new Error(data?.error || 'No se pudo ejecutar la auditoría.');
+    }
+    const r = data.resumen || {};
+    const discrepancias = Array.isArray(data.discrepancias) ? data.discrepancias : [];
+
+    if (discrepancias.length === 0) {
+      alert(
+        `✅ Auditoría OK\n\n` +
+        `Productos revisados: ${r.total_revisados || 0}\n` +
+        `Sin discrepancias. El stock de cada producto coincide con la suma de sus lotes FIFO.`
+      );
+      return;
+    }
+
+    const top = discrepancias.slice(0, 10).map((d) => {
+      const u = d.unidad_base || 'UND';
+      return `• ${d.nombre} (${d.tipo_producto}): stock=${d.stock_declarado} ${u}, lotes=${d.stock_en_lotes} ${u} (dif: ${d.diferencia > 0 ? '+' : ''}${d.diferencia})`;
+    }).join('\n');
+    const masTexto = discrepancias.length > 10 ? `\n\n...y ${discrepancias.length - 10} más.` : '';
+    alert(
+      `⚠️ Auditoría con discrepancias\n\n` +
+      `Productos revisados: ${r.total_revisados || 0}\n` +
+      `Con discrepancia: ${r.con_discrepancia || 0}\n` +
+      `OK: ${r.ok || 0}\n\n` +
+      `Detalle (top 10 por diferencia):\n${top}${masTexto}\n\n` +
+      `Esto puede indicar movimientos de stock que no pasaron por el sistema FIFO ` +
+      `(ej: ajustes manuales antiguos, o data previa al backfill). Las ventas nuevas ` +
+      `siguen registrándose correctamente.`
+    );
+  } catch (error) {
+    console.error('Error en auditoría:', error);
+    alert(`Error al auditar: ${error?.message || error}`);
+  } finally {
+    adminInventarioAuditarBtn.disabled = false;
+    adminInventarioAuditarBtn.textContent = labelOriginal;
+  }
+});
+
+// ===========================================================================
+// Modal: Stock por lotes FIFO (Fase 4.C)
+// ===========================================================================
+const adminLotesModal = document.getElementById('admin-lotes-modal');
+const adminLotesCerrarBtn = document.getElementById('admin-lotes-cerrar');
+const adminLotesTitulo = document.getElementById('admin-lotes-titulo');
+const adminLotesSubtitulo = document.getElementById('admin-lotes-subtitulo');
+const adminLotesActivosSpan = document.getElementById('admin-lotes-activos');
+const adminLotesStockTotalSpan = document.getElementById('admin-lotes-stock-total');
+const adminLotesCostoPromedioSpan = document.getElementById('admin-lotes-costo-promedio');
+const adminLotesValorSpan = document.getElementById('admin-lotes-valor');
+const adminLotesTablaBody = document.getElementById('admin-lotes-tabla');
+const adminLotesMensajeEl = document.getElementById('admin-lotes-mensaje');
+
+const mostrarModalLotes = () => {
+  if (!adminLotesModal) return;
+  adminLotesModal.hidden = false;
+  // Forzar reflow para que la transicion de opacity arranque, igual que los
+  // demas modales del admin (.kanm-modal-overlay usa opacity:0 sin .is-visible).
+  void adminLotesModal.offsetWidth;
+  adminLotesModal.classList.add('is-visible');
+};
+
+const cerrarModalLotes = () => {
+  if (!adminLotesModal) return;
+  adminLotesModal.classList.remove('is-visible');
+  // El overlay tiene transition opacity 0.2s; ocultamos despues para mantener la animacion.
+  setTimeout(() => {
+    if (!adminLotesModal.classList.contains('is-visible')) {
+      adminLotesModal.hidden = true;
+    }
+  }, 220);
+};
+
+adminLotesCerrarBtn?.addEventListener('click', cerrarModalLotes);
+adminLotesModal?.addEventListener('click', (event) => {
+  // Cerrar al clickear fuera del modal (en el overlay).
+  if (event.target === adminLotesModal) cerrarModalLotes();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && adminLotesModal && !adminLotesModal.hidden) {
+    cerrarModalLotes();
+  }
+});
+
+const formatearFechaLote = (valor) => {
+  if (!valor) return '--';
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return String(valor);
+  return fecha.toLocaleDateString('es-DO', { year: 'numeric', month: '2-digit', day: '2-digit' });
+};
+
+const etiquetaOrigenLote = (lote) => {
+  const origen = String(lote?.origen || 'compra').toLowerCase();
+  if (origen === 'compra') {
+    const proveedor = lote?.compra_proveedor ? ` · ${lote.compra_proveedor}` : '';
+    return `Compra #${lote?.compra_id || '?'}${proveedor}`;
+  }
+  if (origen === 'inicial') return 'Lote inicial (migración)';
+  if (origen === 'ajuste') return 'Ajuste manual';
+  if (origen === 'devolucion') return 'Devolución';
+  return origen.charAt(0).toUpperCase() + origen.slice(1);
+};
+
+async function abrirModalLotesProducto(productoId) {
+  if (!adminLotesModal) return;
+  // Reset visual del modal mientras carga
+  mostrarModalLotes();
+  if (adminLotesTitulo) adminLotesTitulo.textContent = 'Stock por lotes';
+  if (adminLotesSubtitulo) adminLotesSubtitulo.textContent = 'Cargando...';
+  if (adminLotesActivosSpan) adminLotesActivosSpan.textContent = '0';
+  if (adminLotesStockTotalSpan) adminLotesStockTotalSpan.textContent = '0';
+  if (adminLotesCostoPromedioSpan) adminLotesCostoPromedioSpan.textContent = 'DOP 0.00';
+  if (adminLotesValorSpan) adminLotesValorSpan.textContent = 'DOP 0.00';
+  if (adminLotesTablaBody) {
+    adminLotesTablaBody.innerHTML = '<tr><td colspan="7">Cargando lotes...</td></tr>';
+  }
+  if (adminLotesMensajeEl) {
+    adminLotesMensajeEl.textContent = '';
+    adminLotesMensajeEl.className = 'kanm-message';
+  }
+
+  try {
+    const resp = await fetch(`/api/inventario/productos/${productoId}/lotes`, {
+      cache: 'no-store',
+      headers: {
+        ...(window.kanmAuth?.getAuthHeaders?.() || {}),
+      },
+    });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok || !data?.ok) {
+      throw new Error(data?.error || 'No se pudieron obtener los lotes.');
+    }
+
+    const producto = data.producto || {};
+    const resumen = data.resumen || {};
+    const lotes = Array.isArray(data.lotes) ? data.lotes : [];
+
+    const unidad = String(producto.unidad_base || 'UND').toLowerCase();
+    const tipoLabel =
+      String(producto.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO' ? 'Insumo' : 'Reventa';
+
+    if (adminLotesTitulo) {
+      adminLotesTitulo.textContent = `Lotes · ${producto.nombre || 'Producto'}`;
+    }
+    if (adminLotesSubtitulo) {
+      adminLotesSubtitulo.textContent = `${tipoLabel} · Unidad base: ${unidad}`;
+    }
+    if (adminLotesActivosSpan) {
+      adminLotesActivosSpan.textContent = String(resumen.lotes_activos || 0);
+    }
+    if (adminLotesStockTotalSpan) {
+      adminLotesStockTotalSpan.textContent = `${formatNumber(Number(resumen.stock_por_lotes) || 0)} ${unidad}`;
+    }
+    if (adminLotesCostoPromedioSpan) {
+      const costoProm = Number(resumen.costo_promedio_fifo) || 0;
+      adminLotesCostoPromedioSpan.textContent = `${formatCurrency(costoProm)} / ${unidad}`;
+    }
+    if (adminLotesValorSpan) {
+      adminLotesValorSpan.textContent = formatCurrency(Number(resumen.valor_total) || 0);
+    }
+
+    if (adminLotesTablaBody) {
+      if (lotes.length === 0) {
+        adminLotesTablaBody.innerHTML =
+          '<tr><td colspan="7" class="tabla-vacia">No hay lotes activos para este producto.</td></tr>';
+      } else {
+        adminLotesTablaBody.innerHTML = lotes
+          .map((lote, idx) => {
+            const restante = Number(lote.cantidad_restante) || 0;
+            const inicial = Number(lote.cantidad_inicial) || 0;
+            const costo = Number(lote.costo_unitario) || 0;
+            const valor = restante * costo;
+            const incluyeItbisBadge = Number(lote.costo_unitario_incluye_itbis) === 1
+              ? ' <span class="admin-lotes-badge-itbis" title="Costo incluye ITBIS">+ITBIS</span>'
+              : '';
+            const consumido = inicial > 0 ? ((inicial - restante) / inicial) * 100 : 0;
+            const progresoHtml = inicial > 0
+              ? `<div class="admin-lotes-progress" title="${formatNumber(inicial - restante)} ${unidad} consumido (${consumido.toFixed(0)}%)">
+                   <span style="width:${Math.min(consumido, 100).toFixed(0)}%"></span>
+                 </div>`
+              : '';
+            return `
+              <tr>
+                <td><span class="admin-lotes-numero">#${idx + 1}</span></td>
+                <td>${formatearFechaLote(lote.fecha)}</td>
+                <td>${etiquetaOrigenLote(lote)}</td>
+                <td class="text-right">${formatNumber(inicial)} ${unidad}</td>
+                <td class="text-right">
+                  <strong>${formatNumber(restante)} ${unidad}</strong>
+                  ${progresoHtml}
+                </td>
+                <td class="text-right">${formatCurrency(costo)}${incluyeItbisBadge}</td>
+                <td class="text-right"><strong>${formatCurrency(valor)}</strong></td>
+              </tr>
+            `;
+          })
+          .join('');
+      }
+    }
+  } catch (error) {
+    console.error('Error al cargar lotes:', error);
+    if (adminLotesTablaBody) {
+      adminLotesTablaBody.innerHTML =
+        '<tr><td colspan="7" class="tabla-vacia">No se pudieron cargar los lotes.</td></tr>';
+    }
+    if (adminLotesMensajeEl) {
+      adminLotesMensajeEl.textContent = error?.message || 'No se pudieron cargar los lotes.';
+      adminLotesMensajeEl.className = 'kanm-message kanm-message--error';
+    }
+  }
+}
 if (inventarioMetodoSelect) {
   inventarioMetodoSelect.value = 'PROMEDIO';
   inventarioMetodoSelect.disabled = true;
@@ -5605,9 +5860,26 @@ const detectarItbisCapitalizableCompra = (compra) => {
   if (bandera === true || bandera === 1 || bandera === '1') return true;
   return false;
 };
+// Decide si un producto puede aparecer en el dropdown de abastecimiento.
+// Reglas:
+//   - INSUMO: siempre comprable (se compra como materia prima).
+//   - FINAL sin receta activa: comprable (se compra para revender).
+//   - FINAL con receta activa: NO comprable (se prepara desde insumos, no se compra).
+const esProductoComprableAbastecimiento = (producto) => {
+  if (!producto) return false;
+  const tipo = String(producto.tipo_producto || 'FINAL').toUpperCase();
+  if (tipo === 'INSUMO') return true;
+  if (tipo === 'FINAL') {
+    return !Number(producto.tiene_receta);
+  }
+  // Tipos desconocidos: por defecto los dejamos pasar para no esconder data.
+  return true;
+};
+
 const construirOpcionesProductos = (select, seleccionado = null) => {
   if (!select) return;
   const valorActual = seleccionado ?? select.value;
+  const valorActualStr = valorActual ? String(valorActual) : '';
   select.innerHTML = '';
 
   const placeholder = document.createElement('option');
@@ -5616,14 +5888,21 @@ const construirOpcionesProductos = (select, seleccionado = null) => {
   select.appendChild(placeholder);
 
   (productos || []).forEach((producto) => {
+    const idStr = String(producto.id);
+    const esSeleccionActual = valorActualStr && idStr === valorActualStr;
+    // Si el producto no es comprable pero ya estaba elegido (ej: una compra antigua de un
+    // producto al que despues se le agrego receta), igual lo incluimos para no perder el dato.
+    if (!esProductoComprableAbastecimiento(producto) && !esSeleccionActual) {
+      return;
+    }
     const option = document.createElement('option');
     option.value = producto.id;
     option.textContent = producto.nombre;
     select.appendChild(option);
   });
 
-  if (valorActual) {
-    select.value = String(valorActual);
+  if (valorActualStr) {
+    select.value = valorActualStr;
   }
 };
 
@@ -5648,51 +5927,231 @@ const resolverCostoProductoAbastecimiento = (productoId) => {
   return 0;
 };
 
-const crearFilaAbastecimientoDetalle = (detalle = {}) => {
-  const fila = document.createElement('div');
-  fila.className = 'compra-detalle-row abastecimiento-detalle-row';
+// Helper: formato corto de moneda para hints (DOP X.XX)
+const formatearMonedaCorta = (valor) => {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) return 'DOP 0.00';
+  try {
+    return new Intl.NumberFormat('es-DO', {
+      style: 'currency',
+      currency: 'DOP',
+      minimumFractionDigits: 2,
+    }).format(numero);
+  } catch (_) {
+    return `DOP ${numero.toFixed(2)}`;
+  }
+};
 
+const crearFilaAbastecimientoDetalle = (detalle = {}) => {
+  // Cada linea es una mini-card con header (numero + tipo + boton Quitar),
+  // un grid de inputs CON labels y una sub-seccion destacada para insumos.
+  // Mantenemos las clases originales para que las consultas en otros lugares sigan funcionando.
+  const fila = document.createElement('div');
+  fila.className = 'compra-detalle-row abastecimiento-detalle-row abast-line';
+
+  // --- Header de la fila ---
+  const header = document.createElement('div');
+  header.className = 'abast-line__header';
+
+  const numeroBadge = document.createElement('span');
+  numeroBadge.className = 'abast-line__num';
+  numeroBadge.textContent = '#';
+
+  const tipoBadge = document.createElement('span');
+  tipoBadge.className = 'abast-line__tipo';
+  tipoBadge.textContent = 'Sin producto';
+  tipoBadge.dataset.tipo = '';
+
+  const headerSpacer = document.createElement('span');
+  headerSpacer.style.flex = '1';
+
+  const remover = document.createElement('button');
+  remover.type = 'button';
+  remover.className = 'kanm-button ghost abast-line__remove';
+  remover.innerHTML = '&times; Quitar';
+  remover.title = 'Quitar esta línea';
+
+  header.appendChild(numeroBadge);
+  header.appendChild(tipoBadge);
+  header.appendChild(headerSpacer);
+  header.appendChild(remover);
+
+  // --- Grid principal: Producto / Cantidad / Costo / Total ---
+  const grid = document.createElement('div');
+  grid.className = 'abast-line__grid';
+
+  // Producto (ocupa todo el ancho en mobile, 2 columnas en desktop)
+  const productoGroup = document.createElement('div');
+  productoGroup.className = 'abast-line__field abast-line__field--producto';
+  const productoLabel = document.createElement('label');
+  productoLabel.textContent = 'Producto';
   const producto = document.createElement('select');
   producto.className = 'abastecimiento-detalle-producto';
   construirOpcionesProductos(producto, detalle.producto_id);
+  productoGroup.appendChild(productoLabel);
+  productoGroup.appendChild(producto);
 
+  // Cantidad comprada
+  const cantidadGroup = document.createElement('div');
+  cantidadGroup.className = 'abast-line__field';
+  const cantidadLabel = document.createElement('label');
+  cantidadLabel.textContent = 'Cantidad comprada';
   const cantidad = document.createElement('input');
   cantidad.type = 'number';
   cantidad.min = '0';
   cantidad.step = '0.01';
-  cantidad.placeholder = 'Cantidad';
+  cantidad.placeholder = 'Ej: 2';
   cantidad.className = 'abastecimiento-detalle-cantidad';
   cantidad.value = detalle.cantidad ?? '';
+  cantidadGroup.appendChild(cantidadLabel);
+  cantidadGroup.appendChild(cantidad);
 
+  // Costo unitario (de lo comprado, ej: $400 por caja)
+  const costoGroup = document.createElement('div');
+  costoGroup.className = 'abast-line__field';
+  const costoLabel = document.createElement('label');
+  costoLabel.textContent = 'Costo unitario';
   const costo = document.createElement('input');
   costo.type = 'text';
   costo.inputMode = 'decimal';
   costo.dataset.money = 'true';
-  costo.placeholder = 'Costo unitario';
+  costo.placeholder = 'DOP 0.00';
   costo.className = 'abastecimiento-detalle-costo';
   if (detalle.costo_unitario !== undefined && detalle.costo_unitario !== null) {
     setMoneyInputValueAdmin(costo, detalle.costo_unitario);
   }
+  costoGroup.appendChild(costoLabel);
+  costoGroup.appendChild(costo);
 
+  // Total línea (readonly, destacado)
+  const totalGroup = document.createElement('div');
+  totalGroup.className = 'abast-line__field abast-line__field--total';
+  const totalLabel = document.createElement('label');
+  totalLabel.textContent = 'Total línea';
   const total = document.createElement('input');
   total.type = 'text';
   total.inputMode = 'decimal';
   total.dataset.money = 'true';
-  total.placeholder = 'Total linea';
+  total.placeholder = 'DOP 0.00';
   total.className = 'abastecimiento-detalle-total';
   total.readOnly = true;
   if (detalle.total_linea !== undefined && detalle.total_linea !== null) {
     setMoneyInputValueAdmin(total, detalle.total_linea);
   }
+  totalGroup.appendChild(totalLabel);
+  totalGroup.appendChild(total);
 
-  const remover = document.createElement('button');
-  remover.type = 'button';
-  remover.className = 'kanm-button ghost';
-  remover.textContent = 'Quitar';
+  grid.appendChild(productoGroup);
+  grid.appendChild(cantidadGroup);
+  grid.appendChild(costoGroup);
+  grid.appendChild(totalGroup);
+
+  // --- Sub-seccion destacada: cantidad real del insumo (solo visible si producto es INSUMO) ---
+  const insumoBox = document.createElement('div');
+  insumoBox.className = 'abast-line__insumo';
+  insumoBox.hidden = true;
+
+  const insumoHeader = document.createElement('div');
+  insumoHeader.className = 'abast-line__insumo-header';
+  insumoHeader.innerHTML =
+    '<span class="abast-line__insumo-ico">📦</span>' +
+    '<strong>Cantidad real recibida</strong>' +
+    '<span class="abast-line__insumo-help">El insumo se acumula al stock en su unidad base.</span>';
+
+  const insumoFields = document.createElement('div');
+  insumoFields.className = 'abast-line__insumo-fields';
+
+  const cantidadInsumoGroup = document.createElement('div');
+  cantidadInsumoGroup.className = 'abast-line__field';
+  const cantidadInsumoLabel = document.createElement('label');
+  cantidadInsumoLabel.innerHTML =
+    'Cantidad en <span class="abast-line__insumo-unidad-inline" data-unidad-inline>und</span>';
+  const cantidadInsumo = document.createElement('input');
+  cantidadInsumo.type = 'number';
+  cantidadInsumo.min = '0';
+  cantidadInsumo.step = '0.0001';
+  cantidadInsumo.placeholder = 'Ej: 100';
+  cantidadInsumo.className = 'abastecimiento-detalle-cantidad-insumo';
+  cantidadInsumo.title = 'Cantidad real del insumo en su unidad base (ej: 100 onzas en 2 cajas).';
+  if (detalle.cantidad_insumo !== undefined && detalle.cantidad_insumo !== null) {
+    cantidadInsumo.value = detalle.cantidad_insumo;
+  }
+  cantidadInsumoGroup.appendChild(cantidadInsumoLabel);
+  cantidadInsumoGroup.appendChild(cantidadInsumo);
+
+  // Display del costo unitario real calculado en vivo
+  const costoRealDisplay = document.createElement('div');
+  costoRealDisplay.className = 'abast-line__costo-real';
+  costoRealDisplay.innerHTML =
+    '<span class="abast-line__costo-real-label">Costo real por unidad</span>' +
+    '<span class="abast-line__costo-real-value" data-costo-real>—</span>';
+
+  insumoFields.appendChild(cantidadInsumoGroup);
+  insumoFields.appendChild(costoRealDisplay);
+
+  insumoBox.appendChild(insumoHeader);
+  insumoBox.appendChild(insumoFields);
+
+  // --- Listeners ---
   remover.addEventListener('click', () => {
     fila.remove();
+    renumerarLineasAbastecimiento();
     recalcularAbastecimientoTotales();
   });
+
+  // Recalcula el costo real por unidad base del insumo en vivo: total_linea / cantidad_insumo
+  const actualizarCostoRealInsumo = () => {
+    if (insumoBox.hidden) return;
+    const cantidadVal = Number(cantidad.value);
+    const costoVal = parseMoneyValueAdmin(costo, { allowEmpty: false });
+    const cantInsumoVal = Number(cantidadInsumo.value);
+    const display = costoRealDisplay.querySelector('[data-costo-real]');
+    if (
+      !Number.isFinite(cantidadVal) || cantidadVal <= 0 ||
+      !Number.isFinite(costoVal) || costoVal < 0 ||
+      !Number.isFinite(cantInsumoVal) || cantInsumoVal <= 0
+    ) {
+      if (display) display.textContent = '—';
+      return;
+    }
+    const costoReal = (cantidadVal * costoVal) / cantInsumoVal;
+    const unidad = cantidadInsumoLabel.querySelector('[data-unidad-inline]')?.textContent || 'und';
+    if (display) display.textContent = `${formatearMonedaCorta(costoReal)} / ${unidad}`;
+  };
+
+  // Sincroniza la visibilidad y la unidad mostrada del input "cantidad_insumo"
+  // segun el tipo del producto seleccionado.
+  const sincronizarCantidadInsumo = () => {
+    const productoId = Number(producto.value);
+    const productoData = (productos || []).find((p) => Number(p.id) === productoId);
+    const tipo = String(productoData?.tipo_producto || 'FINAL').toUpperCase();
+    const esInsumo = !!productoData && tipo === 'INSUMO';
+
+    // Actualizar badge de tipo en el header
+    if (!productoData) {
+      tipoBadge.textContent = 'Sin producto';
+      tipoBadge.dataset.tipo = '';
+    } else if (esInsumo) {
+      tipoBadge.textContent = 'Insumo';
+      tipoBadge.dataset.tipo = 'insumo';
+    } else {
+      tipoBadge.textContent = 'Reventa';
+      tipoBadge.dataset.tipo = 'reventa';
+    }
+
+    if (esInsumo) {
+      insumoBox.hidden = false;
+      const unidad = String(productoData?.unidad_base || 'und').toLowerCase();
+      const unidadInline = cantidadInsumoLabel.querySelector('[data-unidad-inline]');
+      if (unidadInline) unidadInline.textContent = unidad;
+      cantidadInsumo.dataset.esInsumo = '1';
+      actualizarCostoRealInsumo();
+    } else {
+      insumoBox.hidden = true;
+      cantidadInsumo.dataset.esInsumo = '0';
+      cantidadInsumo.value = '';
+    }
+  };
 
   producto.addEventListener('change', () => {
     const productoId = Number(producto.value);
@@ -5700,16 +6159,34 @@ const crearFilaAbastecimientoDetalle = (detalle = {}) => {
     if (costoPreferido !== null) {
       setMoneyInputValueAdmin(costo, costoPreferido > 0 ? costoPreferido : '');
     }
+    sincronizarCantidadInsumo();
     recalcularAbastecimientoTotales();
   });
 
-  fila.appendChild(producto);
-  fila.appendChild(cantidad);
-  fila.appendChild(costo);
-  fila.appendChild(total);
-  fila.appendChild(remover);
+  // Recalculo del costo real cuando cambian cantidad / costo / cantidad_insumo
+  cantidad.addEventListener('input', actualizarCostoRealInsumo);
+  costo.addEventListener('input', actualizarCostoRealInsumo);
+  cantidadInsumo.addEventListener('input', actualizarCostoRealInsumo);
+
+  // Ensamblamos la card
+  fila.appendChild(header);
+  fila.appendChild(grid);
+  fila.appendChild(insumoBox);
+
+  // Inicializamos el estado segun el producto cargado (modo edicion).
+  sincronizarCantidadInsumo();
 
   return fila;
+};
+
+// Renumera el badge "#N" de cada fila tras agregar/quitar una linea.
+const renumerarLineasAbastecimiento = () => {
+  if (!abastecimientoDetallesContainer) return;
+  const filas = abastecimientoDetallesContainer.querySelectorAll('.abast-line');
+  filas.forEach((fila, idx) => {
+    const num = fila.querySelector('.abast-line__num');
+    if (num) num.textContent = `#${idx + 1}`;
+  });
 };
 
 const recalcularAbastecimientoTotales = () => {
@@ -5753,6 +6230,7 @@ const obtenerDetallesAbastecimiento = () => {
   filas.forEach((fila) => {
     const productoInput = fila.querySelector('.abastecimiento-detalle-producto');
     const cantidadInput = fila.querySelector('.abastecimiento-detalle-cantidad');
+    const cantidadInsumoInput = fila.querySelector('.abastecimiento-detalle-cantidad-insumo');
     const costoInput = fila.querySelector('.abastecimiento-detalle-costo');
 
     const productoId = Number(productoInput?.value ?? '');
@@ -5779,11 +6257,28 @@ const obtenerDetallesAbastecimiento = () => {
       return;
     }
 
+    // Si el producto es INSUMO, cantidad_insumo es obligatoria (> 0). Para FINAL
+    // de reventa, el campo no se muestra y se envia null para que el backend ignore.
+    const productoData = (productos || []).find((p) => Number(p.id) === productoId);
+    const esInsumo =
+      productoData && String(productoData.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
+
+    let cantidadInsumoFinal = null;
+    if (esInsumo) {
+      const cantidadInsumoVal = Number(cantidadInsumoInput?.value ?? '');
+      if (!Number.isFinite(cantidadInsumoVal) || cantidadInsumoVal <= 0) {
+        invalido = true;
+        return;
+      }
+      cantidadInsumoFinal = Number(cantidadInsumoVal.toFixed(4));
+    }
+
     const totalLinea = Number((cantidad * costo).toFixed(2));
     subtotal += totalLinea;
     detalles.push({
       producto_id: productoId,
       cantidad,
+      cantidad_insumo: cantidadInsumoFinal,
       costo_unitario: Number(costo.toFixed(2)),
       total_linea: totalLinea,
     });
@@ -5806,6 +6301,7 @@ const limpiarFormularioAbastecimiento = () => {
   if (abastecimientoDetallesContainer) {
     abastecimientoDetallesContainer.innerHTML = '';
     abastecimientoDetallesContainer.appendChild(crearFilaAbastecimientoDetalle());
+    renumerarLineasAbastecimiento();
   }
   actualizarResumenAbastecimiento(0);
   establecerModoEdicionAbastecimiento(null);
@@ -6001,6 +6497,7 @@ const prepararEdicionAbastecimiento = (compra, detalles) => {
           crearFilaAbastecimientoDetalle({
             producto_id: detalle.producto_id,
             cantidad: detalle.cantidad,
+            cantidad_insumo: detalle.cantidad_insumo,
             costo_unitario: costoMostrar,
             total_linea: detalle.total_linea,
           })
@@ -6009,6 +6506,7 @@ const prepararEdicionAbastecimiento = (compra, detalles) => {
     } else {
       abastecimientoDetallesContainer.appendChild(crearFilaAbastecimientoDetalle());
     }
+    renumerarLineasAbastecimiento();
   }
 
   establecerModoEdicionAbastecimiento(compra.id);
@@ -11959,6 +12457,7 @@ abastecimientoAgregarDetalleBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   if (!abastecimientoDetallesContainer) return;
   abastecimientoDetallesContainer.appendChild(crearFilaAbastecimientoDetalle());
+  renumerarLineasAbastecimiento();
 });
 
 abastecimientoDetallesContainer?.addEventListener('input', (event) => {
@@ -13067,6 +13566,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   if (abastecimientoDetallesContainer) {
     abastecimientoDetallesContainer.appendChild(crearFilaAbastecimientoDetalle());
+    renumerarLineasAbastecimiento();
     recalcularAbastecimientoTotales();
     establecerItbisCapitalizableDefault();
     actualizarEstadoItbisCapitalizable();

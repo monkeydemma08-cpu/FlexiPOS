@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/styles.css?v=20260425c" />
+  <link rel="stylesheet" href="/css/styles.css?v=20260521e" />
   <link rel="stylesheet" href="/css/admin-shell.css?v=20260424a" />
   <style>
     /* ================================================================
@@ -500,6 +500,9 @@
             </div>
             <button type="button" class="kanm-button ghost" id="admin-inventario-movimiento-nuevo">
               Registrar movimiento
+            </button>
+            <button type="button" class="kanm-button ghost" id="admin-inventario-auditar" title="Verifica que el stock de cada producto coincide con la suma de sus lotes FIFO">
+              Auditar consistencia
             </button>
             <button type="button" class="kanm-button primary" id="admin-inventario-nuevo">Nuevo item</button>
           </div>
@@ -1936,108 +1939,139 @@
 
     <!-- Abastecimiento -->
     <section class="admin-panel hidden" data-admin-section="abastecimiento" id="admin-section-abastecimiento">
-      <div class="kanm-card-header">
-        <h2>Abastecimiento</h2>
-        <p class="kanm-subtitle">
-          Registra compras de mercancía para reventa, actualiza el inventario y define el origen de fondos.
-        </p>
+      <div class="kanm-card-header abast-page-header">
+        <div>
+          <h2>Abastecimiento</h2>
+          <p class="kanm-subtitle">
+            Registra compras de mercancía para reventa o insumos, actualiza el inventario y define el origen de fondos.
+          </p>
+        </div>
       </div>
 
-      <div class="admin-seccion-grid">
-        <section class="kanm-card admin-card admin-seccion-panel">
-          <header class="kanm-card-header">
+      <div class="admin-seccion-grid abast-layout">
+        <section class="kanm-card admin-card admin-seccion-panel abast-card abast-card--form">
+          <header class="kanm-card-header abast-card-header">
             <h3>Registro de mercancía</h3>
             <p class="kanm-subtitle">Agrega productos y ajusta el stock automáticamente.</p>
           </header>
 
-          <form id="abastecimiento-form" class="kanm-form" novalidate>
-            <div class="kanm-form-grid">
-              <div class="kanm-input-group">
-                <label for="abastecimiento-proveedor">Proveedor</label>
-                <input type="text" id="abastecimiento-proveedor" placeholder="Nombre del proveedor" />
+          <form id="abastecimiento-form" class="kanm-form abast-form" novalidate>
+            <!-- Bloque 1: Datos generales -->
+            <fieldset class="abast-fieldset">
+              <legend class="abast-fieldset__legend">
+                <span class="abast-fieldset__num">1</span>
+                <span>Datos generales</span>
+              </legend>
+              <div class="kanm-form-grid abast-form-grid">
+                <div class="kanm-input-group">
+                  <label for="abastecimiento-proveedor">Proveedor</label>
+                  <input type="text" id="abastecimiento-proveedor" placeholder="Nombre del proveedor" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="abastecimiento-fecha">Fecha</label>
+                  <input type="date" id="abastecimiento-fecha" />
+                </div>
+                <div class="kanm-input-group">
+                  <label for="abastecimiento-origen">Origen de fondos</label>
+                  <select id="abastecimiento-origen">
+                    <option value="negocio">Negocio</option>
+                    <option value="caja">Caja</option>
+                    <option value="aporte_externo">Empresa</option>
+                  </select>
+                </div>
+                <div class="kanm-input-group">
+                  <label for="abastecimiento-metodo">Método de pago</label>
+                  <select id="abastecimiento-metodo">
+                    <option value="">Selecciona</option>
+                    <option value="efectivo">Efectivo</option>
+                    <option value="transferencia">Transferencia</option>
+                    <option value="tarjeta">Tarjeta</option>
+                    <option value="credito">Crédito</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </div>
               </div>
-              <div class="kanm-input-group">
-                <label for="abastecimiento-fecha">Fecha</label>
-                <input type="date" id="abastecimiento-fecha" />
-              </div>
-              <div class="kanm-input-group">
-                <label for="abastecimiento-origen">Origen de fondos</label>
-                <select id="abastecimiento-origen">
-                  <option value="negocio">Negocio</option>
-                  <option value="caja">Caja</option>
-                  <option value="aporte_externo">Empresa</option>
-                </select>
-              </div>
-              <div class="kanm-input-group">
-                <label for="abastecimiento-metodo">Método de pago</label>
-                <select id="abastecimiento-metodo">
-                  <option value="">Selecciona</option>
-                  <option value="efectivo">Efectivo</option>
-                  <option value="transferencia">Transferencia</option>
-                  <option value="tarjeta">Tarjeta</option>
-                  <option value="credito">Crédito</option>
-                  <option value="otro">Otro</option>
-                </select>
-              </div>
-            </div>
 
-            <div class="kanm-input-group">
-              <label for="abastecimiento-observaciones">Observaciones</label>
-              <textarea
-                id="abastecimiento-observaciones"
-                rows="2"
-                placeholder="Notas o condiciones de la compra"
-              ></textarea>
-              <span class="kanm-input-help">
-                Si eliges Caja, se registrará automáticamente una salida de caja.
-              </span>
-            </div>
-            <div class="kanm-input-group kanm-input-group--inline kanm-input-toggle">
-              <label class="kanm-checkbox" for="abastecimiento-aplica-itbis">
-                <input type="checkbox" id="abastecimiento-aplica-itbis" checked />
-                <span>Aplicar ITBIS (18%)</span>
-              </label>
-              <span class="kanm-input-help">Aplica el ITBIS al total de la compra.</span>
-            </div>
-            <div class="kanm-input-group kanm-input-group--inline kanm-input-toggle">
-              <label class="kanm-checkbox" for="abastecimiento-itbis-capitalizable">
-                <input type="checkbox" id="abastecimiento-itbis-capitalizable" />
-                <span>ITBIS capitalizable en el costo</span>
-              </label>
-              <span class="kanm-input-help">Usa el ITBIS como parte del costo unitario.</span>
-            </div>
+              <div class="kanm-input-group">
+                <label for="abastecimiento-observaciones">Observaciones</label>
+                <textarea
+                  id="abastecimiento-observaciones"
+                  rows="2"
+                  placeholder="Notas o condiciones de la compra"
+                ></textarea>
+                <span class="kanm-input-help">
+                  Si eliges Caja, se registrará automáticamente una salida de caja.
+                </span>
+              </div>
+            </fieldset>
 
-            <div class="compra-detalle-header">
-              <h4 class="kanm-subheading">Detalle de productos</h4>
-              <div class="compra-detalle-actions">
-                <button type="button" class="kanm-button secondary" id="abastecimiento-agregar-detalle">
-                  Agregar línea
+            <!-- Bloque 2: Configuración fiscal (toggles) -->
+            <fieldset class="abast-fieldset abast-fieldset--fiscal">
+              <legend class="abast-fieldset__legend">
+                <span class="abast-fieldset__num">2</span>
+                <span>Configuración fiscal</span>
+              </legend>
+              <div class="abast-toggle-grid">
+                <label class="abast-toggle" for="abastecimiento-aplica-itbis">
+                  <input type="checkbox" id="abastecimiento-aplica-itbis" checked />
+                  <span class="abast-toggle__body">
+                    <span class="abast-toggle__title">Aplicar ITBIS (18%)</span>
+                    <span class="abast-toggle__hint">Aplica el ITBIS al total de la compra.</span>
+                  </span>
+                </label>
+                <label class="abast-toggle" for="abastecimiento-itbis-capitalizable">
+                  <input type="checkbox" id="abastecimiento-itbis-capitalizable" />
+                  <span class="abast-toggle__body">
+                    <span class="abast-toggle__title">ITBIS capitalizable en el costo</span>
+                    <span class="abast-toggle__hint">Usa el ITBIS como parte del costo unitario.</span>
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+
+            <!-- Bloque 3: Productos a registrar -->
+            <fieldset class="abast-fieldset abast-fieldset--items">
+              <legend class="abast-fieldset__legend">
+                <span class="abast-fieldset__num">3</span>
+                <span>Productos a registrar</span>
+              </legend>
+              <div class="compra-detalle-header abast-items-toolbar">
+                <p class="kanm-subtitle abast-items-toolbar__hint">
+                  Para insumos, se te pedirá la cantidad real en su unidad base (ej: 100&nbsp;onz en 2 cajas).
+                </p>
+                <div class="compra-detalle-actions">
+                  <button type="button" class="kanm-button secondary" id="abastecimiento-agregar-detalle">
+                    + Agregar producto
+                  </button>
+                </div>
+              </div>
+
+              <div class="compra-detalles abastecimiento-detalles" id="abastecimiento-detalles"></div>
+            </fieldset>
+
+            <!-- Bloque 4: Resumen y acciones (sticky en desktop) -->
+            <div class="abast-footer">
+              <div class="abastecimiento-resumen abast-resumen">
+                <div class="abastecimiento-resumen-linea">
+                  <span>Subtotal</span>
+                  <strong id="abastecimiento-subtotal">DOP&nbsp;0.00</strong>
+                </div>
+                <div class="abastecimiento-resumen-linea" id="abastecimiento-itbis-row">
+                  <span>ITBIS (18%)</span>
+                  <strong id="abastecimiento-itbis">DOP&nbsp;0.00</strong>
+                </div>
+                <div class="abastecimiento-resumen-linea total">
+                  <span id="abastecimiento-total-label">Total con ITBIS</span>
+                  <strong id="abastecimiento-total">DOP&nbsp;0.00</strong>
+                </div>
+              </div>
+
+              <div class="admin-form-actions abast-actions">
+                <button type="button" class="kanm-button secondary" id="abastecimiento-cancelar" hidden>
+                  Cancelar edición
                 </button>
+                <button type="submit" class="kanm-button" id="abastecimiento-submit">Registrar compra</button>
               </div>
-            </div>
-
-            <div class="compra-detalles abastecimiento-detalles" id="abastecimiento-detalles"></div>
-
-            <div class="abastecimiento-resumen">
-              <div class="abastecimiento-resumen-linea">
-                <span>Subtotal</span>
-                <strong id="abastecimiento-subtotal">DOP&nbsp;0.00</strong>
-              </div>
-              <div class="abastecimiento-resumen-linea" id="abastecimiento-itbis-row">
-                <span>ITBIS (18%)</span>
-                <strong id="abastecimiento-itbis">DOP&nbsp;0.00</strong>
-              </div>
-              <div class="abastecimiento-resumen-linea total">
-                <span id="abastecimiento-total-label">Total con ITBIS</span>
-                <strong id="abastecimiento-total">DOP&nbsp;0.00</strong>
-              </div>
-            </div>
-
-            <div class="admin-form-actions">
-              <button type="button" class="kanm-button secondary" id="abastecimiento-cancelar" hidden>
-                Cancelar edición
-              </button>
-              <button type="submit" class="kanm-button" id="abastecimiento-submit">Registrar compra</button>
             </div>
 
             <div id="abastecimiento-mensaje" class="kanm-message"></div>
@@ -4838,6 +4872,7 @@
                     <option value="KG">Kilogramos (KG)</option>
                     <option value="OZ">Onzas (OZ)</option>
                     <option value="LB">Libras (LB)</option>
+                    <option value="TAZA">Tazas (TAZA)</option>
                   </select>
                 </div>
                 <div class="kanm-input-group modo-preparacion-only">
@@ -5269,6 +5304,63 @@
     </div>
   </div>
 
+  <!-- Modal: Stock por lotes FIFO (4.C) -->
+  <div class="kanm-modal-overlay" id="admin-lotes-modal" hidden>
+    <div class="kanm-modal admin-lotes-modal" role="dialog" aria-modal="true" aria-labelledby="admin-lotes-titulo">
+      <div class="admin-lotes-header">
+        <div>
+          <h3 id="admin-lotes-titulo">Stock por lotes</h3>
+          <p class="kanm-subtitle" id="admin-lotes-subtitulo">--</p>
+        </div>
+        <button type="button" class="kanm-button ghost" id="admin-lotes-cerrar" aria-label="Cerrar">
+          &times;
+        </button>
+      </div>
+
+      <div class="admin-lotes-resumen">
+        <div class="admin-lotes-kpi">
+          <span>Lotes activos</span>
+          <strong id="admin-lotes-activos">0</strong>
+        </div>
+        <div class="admin-lotes-kpi">
+          <span>Stock por lotes</span>
+          <strong id="admin-lotes-stock-total">0</strong>
+        </div>
+        <div class="admin-lotes-kpi">
+          <span>Costo promedio FIFO</span>
+          <strong id="admin-lotes-costo-promedio">DOP&nbsp;0.00</strong>
+        </div>
+        <div class="admin-lotes-kpi admin-lotes-kpi--accent">
+          <span>Valor inventario</span>
+          <strong id="admin-lotes-valor">DOP&nbsp;0.00</strong>
+        </div>
+      </div>
+
+      <div class="kanm-table-wrapper admin-lotes-table-wrap">
+        <table class="kanm-table admin-lotes-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Fecha</th>
+              <th>Origen</th>
+              <th class="text-right">Cantidad inicial</th>
+              <th class="text-right">Restante</th>
+              <th class="text-right">Costo unitario</th>
+              <th class="text-right">Valor restante</th>
+            </tr>
+          </thead>
+          <tbody id="admin-lotes-tabla">
+            <tr>
+              <td colspan="7">Cargando...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="admin-lotes-mensaje" class="kanm-message"></div>
+    </div>
+  </div>
+
   <div class="kanm-modal-overlay" id="admin-eliminar-modal" hidden>
     <div class="kanm-modal" role="dialog" aria-modal="true" aria-labelledby="admin-eliminar-titulo">
       <h3 id="admin-eliminar-titulo">Eliminar registro</h3>
@@ -5469,11 +5561,11 @@
       }
     })();
   </script>
-  <script src="/js/admin.js?v=20260519e"></script>
-  <script src="/js/admin-facturacion-posium.js?v=20260519e"></script>
-  <script src="/js/admin-cotizaciones.js?v=20260519e"></script>
-  <script src="/js/admin-clientes.js?v=20260519e"></script>
-  <script src="/js/admin-categorias.js?v=20260519e"></script>
+  <script src="/js/admin.js?v=20260521e"></script>
+  <script src="/js/admin-facturacion-posium.js?v=20260521e"></script>
+  <script src="/js/admin-cotizaciones.js?v=20260521e"></script>
+  <script src="/js/admin-clientes.js?v=20260521e"></script>
+  <script src="/js/admin-categorias.js?v=20260521e"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/notifications.js" defer></script>
 </body>

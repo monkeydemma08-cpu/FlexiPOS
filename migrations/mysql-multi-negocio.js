@@ -1053,6 +1053,115 @@ async function ensureTableComprasInventarioDetalle() {
   await ensureColumn('compras_inventario_detalle', 'costo_unitario_efectivo DECIMAL(12,2) NOT NULL DEFAULT 0');
   await ensureColumn('compras_inventario_detalle', 'itbis_aplica TINYINT(1) NOT NULL DEFAULT 0');
   await ensureColumn('compras_inventario_detalle', 'itbis_capitalizable TINYINT(1) NOT NULL DEFAULT 0');
+  // cantidad_insumo: cantidad real recibida del insumo en su unidad base (ej: 100 onzas
+  // contenidas en 2 cajas de queso). Nullable porque solo aplica cuando el producto es
+  // tipo INSUMO; para productos FINAL de reventa queda NULL y se usa "cantidad" como hoy.
+  await ensureColumn('compras_inventario_detalle', 'cantidad_insumo DECIMAL(14,4) NULL');
+}
+
+// =====================================================================
+// Lotes de inventario (FIFO).
+// Cada compra crea un lote por linea (cantidad_inicial = lo que se acredita
+// al stock, costo_unitario = costo real por unidad base). Las ventas y la
+// produccion de recetas descuentan FIFO de la tabla inventario_consumos.
+// =====================================================================
+async function ensureTableInventarioLotes() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS inventario_lotes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      producto_id INT NOT NULL,
+      compra_id INT NULL,
+      compra_detalle_id INT NULL,
+      cantidad_inicial DECIMAL(14,4) NOT NULL DEFAULT 0,
+      cantidad_restante DECIMAL(14,4) NOT NULL DEFAULT 0,
+      costo_unitario DECIMAL(14,4) NOT NULL DEFAULT 0,
+      costo_unitario_incluye_itbis TINYINT(1) NOT NULL DEFAULT 0,
+      fecha DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      origen VARCHAR(32) NOT NULL DEFAULT 'compra',
+      observaciones TEXT NULL,
+      creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_lotes_neg_prod_fecha (negocio_id, producto_id, fecha),
+      KEY idx_lotes_compra (compra_id),
+      KEY idx_lotes_compra_detalle (compra_detalle_id),
+      KEY idx_lotes_restante (producto_id, cantidad_restante)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureForeignKey('inventario_lotes', 'negocio_id');
+  await ensureForeignKey('inventario_lotes', 'producto_id', 'productos');
+}
+
+async function ensureTableInventarioConsumos() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS inventario_consumos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      lote_id INT NOT NULL,
+      producto_id INT NOT NULL,
+      cantidad DECIMAL(14,4) NOT NULL DEFAULT 0,
+      costo_unitario DECIMAL(14,4) NOT NULL DEFAULT 0,
+      costo_total DECIMAL(14,4) NOT NULL DEFAULT 0,
+      origen VARCHAR(32) NOT NULL,
+      origen_id INT NULL,
+      fecha DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_consumos_negocio (negocio_id),
+      KEY idx_consumos_lote (lote_id),
+      KEY idx_consumos_producto (producto_id),
+      KEY idx_consumos_origen (origen, origen_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await ensureForeignKey('inventario_consumos', 'negocio_id');
+  await ensureForeignKey('inventario_consumos', 'lote_id', 'inventario_lotes');
+  await ensureForeignKey('inventario_consumos', 'producto_id', 'productos');
+  // Reversion de consumos (al cancelar pedido, devolver, editar deuda, etc.):
+  // marcamos el consumo como revertido en vez de borrarlo, para preservar auditoria.
+  await ensureColumn('inventario_consumos', 'revertido TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('inventario_consumos', 'revertido_en DATETIME NULL');
+  await ensureIndexByName('inventario_consumos', 'idx_consumos_revertido', '(revertido)');
+}
+
+// Backfill idempotente: para cada producto con stock > 0 que NO tenga
+// un lote inicial, crear uno que represente el stock historico actual.
+// Asi el FIFO puede operar desde la proxima compra/venta sin que el
+// stock actual quede "sin lote".
+async function backfillInventarioLotesInicial() {
+  const productos = await query(
+    `SELECT p.id, p.negocio_id,
+            COALESCE(p.stock, 0) AS stock,
+            COALESCE(p.costo_promedio_actual, 0) AS costo_promedio_actual,
+            COALESCE(p.costo_base_sin_itbis, 0) AS costo_base_sin_itbis
+       FROM productos p
+      WHERE COALESCE(p.stock_indefinido, 0) = 0
+        AND COALESCE(p.stock, 0) > 0`
+  );
+
+  for (const p of productos) {
+    const existe = await query(
+      `SELECT id FROM inventario_lotes
+        WHERE producto_id = ? AND negocio_id = ? AND origen = 'inicial'
+        LIMIT 1`,
+      [p.id, p.negocio_id]
+    );
+    if (existe && existe.length > 0) continue;
+
+    const stock = Number(p.stock) || 0;
+    if (stock <= 0) continue;
+    const costo =
+      Number(p.costo_promedio_actual) > 0
+        ? Number(p.costo_promedio_actual)
+        : Number(p.costo_base_sin_itbis) || 0;
+
+    await query(
+      `INSERT INTO inventario_lotes
+        (negocio_id, producto_id, cantidad_inicial, cantidad_restante, costo_unitario,
+         costo_unitario_incluye_itbis, fecha, origen, observaciones)
+       VALUES (?, ?, ?, ?, ?, 0, NOW(), 'inicial', 'Lote inicial creado por migracion (stock previo)')`,
+      [p.negocio_id, p.id, stock, stock, costo]
+    );
+  }
 }
 
 async function ensureTableRecetas() {
@@ -2185,9 +2294,13 @@ async function runMigrations() {
   await ensureTableGastosAdjuntos();
   await ensureTableComprasInventario();
   await ensureTableComprasInventarioDetalle();
+  await ensureTableInventarioLotes();
+  await ensureTableInventarioConsumos();
   await ensureTableRecetas();
   await ensureTableRecetaDetalle();
   await ensureTableConsumoInsumos();
+  // Backfill se ejecuta despues de crear las tablas; idempotente (no duplica).
+  await backfillInventarioLotesInicial();
   await ensureTableMenuPublicoAccesos();
   await ensureTableAnalisisCapitalInicial();
   await ensureTableClientes();

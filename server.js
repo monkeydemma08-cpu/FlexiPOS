@@ -127,7 +127,7 @@ const DEFAULT_CONFIG_MODULOS = {
 const AREAS_PREPARACION = ['ninguna', 'cocina', 'bar'];
 const ESTADOS_PREPARACION_DETALLE = new Set(['pendiente', 'preparando', 'listo']);
 const TIPOS_PRODUCTO = new Set(['FINAL', 'INSUMO']);
-const UNIDADES_BASE = new Set(['UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB']);
+const UNIDADES_BASE = new Set(['UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA']);
 const MODOS_INVENTARIO_COSTOS = new Set(['REVENTA', 'PREPARACION']);
 const DEFAULT_COLOR_PRIMARIO = '#255bc7';
 const DEFAULT_COLOR_SECUNDARIO = '#7b8fb8';
@@ -8241,13 +8241,31 @@ const obtenerCostosRecetaPorProductos = async (productoIds, negocioId) => {
   }
 
   const placeholders = productoIds.map(() => '?').join(', ');
+  // El costo de un producto con receta se calcula con el costo del LOTE FIFO actual
+  // de cada insumo (el lote mas viejo con cantidad_restante > 0). Cuando ese lote se
+  // agota y entra el siguiente, el costo del producto se actualiza automaticamente.
+  //
+  // Ej (sandwich = pan + jamon + queso, c/u 1 unidad):
+  //   - Lote pan @ $10 activo → pan aporta $10. Costo sandwich = $30.
+  //   - Cuando se agota lote $10 y entra el de $11 → pan aporta $11. Costo = $31.
+  //
+  // Si un insumo no tiene lotes activos, caemos al costo historico del producto
+  // (compatibilidad con data vieja).
   const rows = await db.all(
     `
       SELECT r.producto_final_id,
              rd.cantidad,
+             rd.insumo_id,
              COALESCE(i.costo_unitario_real, 0) AS costo_unitario_real,
              COALESCE(i.costo_promedio_actual, 0) AS costo_promedio_actual,
-             COALESCE(i.contenido_por_unidad, 1) AS contenido_por_unidad
+             COALESCE(i.contenido_por_unidad, 1) AS contenido_por_unidad,
+             (SELECT il.costo_unitario
+                FROM inventario_lotes il
+               WHERE il.producto_id = rd.insumo_id
+                 AND il.negocio_id = r.negocio_id
+                 AND il.cantidad_restante > 0
+               ORDER BY il.fecha ASC, il.id ASC
+               LIMIT 1) AS costo_lote_actual
       FROM recetas r
       JOIN receta_detalle rd ON rd.receta_id = r.id
       JOIN productos i ON i.id = rd.insumo_id AND i.negocio_id = ?
@@ -8262,13 +8280,27 @@ const obtenerCostosRecetaPorProductos = async (productoIds, negocioId) => {
   (rows || []).forEach((row) => {
     const productoId = Number(row.producto_final_id);
     if (!Number.isFinite(productoId)) return;
-    const contenido = normalizarContenidoPorUnidad(row.contenido_por_unidad, 1);
-    let costoBase = Number(row.costo_unitario_real) || 0;
-    if (costoBase <= 0) {
-      costoBase = Number(row.costo_promedio_actual) || 0;
+    const cantidadReceta = Number(row.cantidad) || 0;
+
+    // 1) Preferimos el costo del lote FIFO actual del insumo.
+    //    El costo del lote esta en "por unidad base" (gracias al guardado en Fase 4),
+    //    y la cantidad de la receta tambien esta en unidad base, asi que multiplicamos directo.
+    const costoLote = Number(row.costo_lote_actual);
+    let costoInsumo;
+    if (Number.isFinite(costoLote) && costoLote > 0) {
+      costoInsumo = cantidadReceta * costoLote;
+    } else {
+      // 2) Fallback: costo historico del producto. Aqui si dividimos por contenido_por_unidad
+      //    porque puede venir en costo por unidad de compra (data legacy).
+      const contenido = normalizarContenidoPorUnidad(row.contenido_por_unidad, 1);
+      let costoBase = Number(row.costo_unitario_real) || 0;
+      if (costoBase <= 0) {
+        costoBase = Number(row.costo_promedio_actual) || 0;
+      }
+      const costoUnitario = contenido > 0 ? costoBase / contenido : costoBase;
+      costoInsumo = cantidadReceta * costoUnitario;
     }
-    const costoUnitario = contenido > 0 ? costoBase / contenido : costoBase;
-    const costoInsumo = Number(row.cantidad) * costoUnitario;
+
     const acumulado = costosMap.get(productoId) || 0;
     costosMap.set(productoId, Number((acumulado + costoInsumo).toFixed(4)));
   });
@@ -8340,6 +8372,9 @@ const actualizarCogsPedidos = async (pedidoIds, negocioId) => {
   const modoInventario = await obtenerModoInventarioCostos(negocioId);
   const esReventa = modoInventario === 'REVENTA';
   const placeholders = pedidoIds.map(() => '?').join(', ');
+  // Incluimos costo_lote_actual: costo del lote FIFO mas viejo del producto
+  // (con cantidad_restante > 0). Si existe, lo preferimos sobre el costo promedio
+  // para tener el costo real "del proximo a consumirse" en el COGS.
   const rows = await db.all(
     `
       SELECT dp.id AS detalle_id,
@@ -8347,7 +8382,14 @@ const actualizarCogsPedidos = async (pedidoIds, negocioId) => {
              dp.producto_id,
              dp.cantidad,
              COALESCE(p.costo_promedio_actual, 0) AS costo_promedio_actual,
-             COALESCE(p.costo_unitario_real, 0) AS costo_unitario_real
+             COALESCE(p.costo_unitario_real, 0) AS costo_unitario_real,
+             (SELECT il.costo_unitario
+                FROM inventario_lotes il
+               WHERE il.producto_id = dp.producto_id
+                 AND il.negocio_id = dp.negocio_id
+                 AND il.cantidad_restante > 0
+               ORDER BY il.fecha ASC, il.id ASC
+               LIMIT 1) AS costo_lote_actual
       FROM detalle_pedido dp
       JOIN productos p ON p.id = dp.producto_id
       WHERE dp.pedido_id IN (${placeholders}) AND dp.negocio_id = ?
@@ -8362,6 +8404,30 @@ const actualizarCogsPedidos = async (pedidoIds, negocioId) => {
     ? await obtenerCostosRecetaPorProductos(productoIds, negocioId)
     : new Map();
 
+  // Tambien leemos el COGS REAL ya consumido desde inventario_consumos (registrado
+  // por consumirStockFIFO al cerrar el pedido). Si hay consumos para un pedido,
+  // ESE es el costo exacto historico; lo usamos como cogs_total final del pedido.
+  // COGS real: suma de consumos NO revertidos asociados al pedido.
+  const consumosReales = await db.all(
+    `
+      SELECT origen_id AS pedido_id, SUM(costo_total) AS cogs_total
+        FROM inventario_consumos
+       WHERE negocio_id = ?
+         AND origen IN ('venta', 'produccion')
+         AND origen_id IN (${placeholders})
+         AND COALESCE(revertido, 0) = 0
+       GROUP BY origen_id
+    `,
+    [negocioId, ...pedidoIds]
+  );
+  const cogsRealPorPedido = new Map();
+  (consumosReales || []).forEach((row) => {
+    const pid = Number(row.pedido_id);
+    if (Number.isFinite(pid)) {
+      cogsRealPorPedido.set(pid, Number(row.cogs_total) || 0);
+    }
+  });
+
   const cogsPorPedido = new Map();
   const detalles = rows || [];
 
@@ -8370,11 +8436,18 @@ const actualizarCogsPedidos = async (pedidoIds, negocioId) => {
     const costoReceta = costosReceta.get(productoId);
     let costoUnitario = 0;
     if (costoReceta !== undefined) {
+      // Producto con receta: ya viene calculado con lote FIFO de cada insumo.
       costoUnitario = Number(costoReceta) || 0;
-    } else if (esReventa) {
-      costoUnitario = Number(row.costo_unitario_real) || 0;
     } else {
-      costoUnitario = Number(row.costo_promedio_actual) || 0;
+      // Producto sin receta: preferimos costo del lote FIFO activo.
+      const costoLote = Number(row.costo_lote_actual);
+      if (Number.isFinite(costoLote) && costoLote > 0) {
+        costoUnitario = costoLote;
+      } else if (esReventa) {
+        costoUnitario = Number(row.costo_unitario_real) || 0;
+      } else {
+        costoUnitario = Number(row.costo_promedio_actual) || 0;
+      }
     }
     const cantidad = Number(row.cantidad) || 0;
     const cogsLinea = Number((cantidad * costoUnitario).toFixed(2));
@@ -8386,6 +8459,12 @@ const actualizarCogsPedidos = async (pedidoIds, negocioId) => {
       'UPDATE detalle_pedido SET costo_unitario_snapshot = ?, cogs_linea = ? WHERE id = ? AND negocio_id = ?',
       [Number(costoUnitario.toFixed(2)), cogsLinea, row.detalle_id, negocioId]
     );
+  }
+
+  // Si para un pedido tenemos COGS REAL registrado en inventario_consumos,
+  // usamos ese valor (es el costo exacto que se descontó de los lotes en el momento).
+  for (const [pid, cogsReal] of cogsRealPorPedido.entries()) {
+    if (cogsReal > 0) cogsPorPedido.set(pid, Number(cogsReal.toFixed(2)));
   }
 
   for (const pedidoId of pedidoIds) {
@@ -12287,14 +12366,27 @@ app.get('/api/configuracion/factura', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
     try {
-      const [configuracion, facturacionElectronica] = await Promise.all([
+      const [configuracion, facturacionElectronica, configuracionImpuesto] = await Promise.all([
         obtenerConfiguracionFacturacion(negocioId),
         obtenerResumenFacturacionElectronicaNegocio(negocioId).catch(() => ({ habilitada: 0 })),
+        obtenerConfiguracionImpuestoNegocio(negocioId).catch(() => null),
       ]);
       const legacyBloqueada = normalizarFlag(facturacionElectronica?.habilitada, 0) === 1;
+      // Exponemos impuesto_porcentaje en la configuracion devuelta para que la factura
+      // pueda decidir si mostrar u ocultar la fila de ITBIS segun el negocio cobre o no impuestos.
+      const impuestoPorcentajeNumero = Math.max(Number(configuracionImpuesto?.valor) || 0, 0);
+      const productosConImpuestoFlag = normalizarFlag(
+        configuracionImpuesto?.productosConImpuesto ?? configuracionImpuesto?.productos_con_impuesto,
+        0
+      );
+      const configuracionConImpuesto = {
+        ...configuracion,
+        impuesto_porcentaje: impuestoPorcentajeNumero,
+        productos_con_impuesto: productosConImpuestoFlag,
+      };
       res.json({
         ok: true,
-        configuracion,
+        configuracion: configuracionConImpuesto,
         legacy_bloqueada: legacyBloqueada,
         facturacion_electronica: facturacionElectronica,
       });
@@ -12730,16 +12822,89 @@ app.get('/api/productos', (req, res) => {
         ? await obtenerCostosRecetaPorProductos(productosRecetaIds, negocioId)
         : new Map();
 
+      // Set de IDs de productos finales que tienen una receta activa con al menos
+      // un insumo. Lo usamos para que el modulo de abastecimiento pueda excluirlos
+      // del dropdown (esos productos no se compran, se preparan).
+      let productosConReceta;
+      try {
+        const recetasActivas = await db.all(
+          `SELECT DISTINCT r.producto_final_id
+             FROM recetas r
+             INNER JOIN receta_detalle rd ON rd.receta_id = r.id
+            WHERE r.negocio_id = ?
+              AND COALESCE(r.activo, 1) = 1
+              AND r.producto_final_id IS NOT NULL`,
+          [negocioId]
+        );
+        productosConReceta = new Set(
+          (recetasActivas || [])
+            .map((row) => Number(row.producto_final_id))
+            .filter((id) => Number.isFinite(id) && id > 0)
+        );
+      } catch (recetasErr) {
+        // Si por alguna razon la consulta falla (ej: tablas no existen en una migracion antigua),
+        // no romper el endpoint: simplemente dejamos el set vacio.
+        console.warn(
+          'No se pudo consultar recetas activas para tiene_receta:',
+          recetasErr?.message || recetasErr
+        );
+        productosConReceta = new Set();
+      }
+
+      // Valor de inventario REAL por producto, calculado desde los lotes activos.
+      // Esto es mas preciso que stock * costo_promedio porque cada lote puede tener
+      // su propio costo. Si un producto no tiene lotes activos, valor_inventario_lotes = 0
+      // y el frontend cae al calculo legacy (stock * costo_unitario_real).
+      let valorInventarioMap = new Map();
+      try {
+        const valoresLotes = await db.all(
+          `SELECT producto_id, SUM(cantidad_restante * costo_unitario) AS valor,
+                  SUM(cantidad_restante) AS stock_lotes
+             FROM inventario_lotes
+            WHERE negocio_id = ? AND cantidad_restante > 0
+            GROUP BY producto_id`,
+          [negocioId]
+        );
+        valorInventarioMap = new Map(
+          (valoresLotes || []).map((row) => [
+            Number(row.producto_id),
+            {
+              valor: Number(row.valor) || 0,
+              stock_lotes: Number(row.stock_lotes) || 0,
+            },
+          ])
+        );
+      } catch (valorErr) {
+        console.warn(
+          'No se pudo calcular valor_inventario_lotes:',
+          valorErr?.message || valorErr
+        );
+      }
+
       const productos = productosBase.map((row) => {
-        const costoReceta = costosReceta.get(Number(row.id));
+        const productoId = Number(row.id);
+        const tieneReceta = productosConReceta.has(productoId) ? 1 : 0;
+        const valorLote = valorInventarioMap.get(productoId);
+        const valorInventarioLotes = valorLote ? Number(valorLote.valor.toFixed(4)) : 0;
+        const stockEnLotes = valorLote ? Number(valorLote.stock_lotes.toFixed(4)) : 0;
+
+        const costoReceta = costosReceta.get(productoId);
         if (costoReceta !== undefined) {
           return {
             ...row,
+            tiene_receta: tieneReceta,
             costo_unitario_real: Number(costoReceta.toFixed(4)),
             costo_unitario_real_calculado: 1,
+            valor_inventario_lotes: valorInventarioLotes,
+            stock_en_lotes: stockEnLotes,
           };
         }
-        return row;
+        return {
+          ...row,
+          tiene_receta: tieneReceta,
+          valor_inventario_lotes: valorInventarioLotes,
+          stock_en_lotes: stockEnLotes,
+        };
       });
 
       res.json(productos);
@@ -13869,6 +14034,11 @@ app.put('/api/pedidos/:id', (req, res) => {
       // Restituimos la reserva actual para recalcular stock con el pedido editado.
       await ajustarStockPorPedido(pedidoId, negocioId, 1);
       await revertirConsumoInsumosPorPedido(pedidoId, negocioId);
+      // FIFO (Bug C): revertir consumos de lotes asociados al pedido (venta directa
+      // y consumo de insumos por receta). Asi los lotes vuelven al estado pre-pedido
+      // y al reconstruir el pedido se vuelven a consumir desde lotes vigentes.
+      await revertirConsumosFIFO({ negocioId, origen: 'venta', origenId: pedidoId });
+      await revertirConsumosFIFO({ negocioId, origen: 'produccion', origenId: pedidoId });
       await db.run('DELETE FROM detalle_pedido WHERE pedido_id = ? AND negocio_id = ?', [pedidoId, negocioId]);
 
       for (const item of itemsEntrada) {
@@ -14046,6 +14216,15 @@ app.put('/api/pedidos/:id', (req, res) => {
           if (stockResult.changes === 0) {
             throw errorEstado(400, `No se pudo actualizar el stock del producto ${item.producto_id}.`);
           }
+          // FIFO (Fase 4.D): tambien descontamos de los lotes para mantener
+          // trazabilidad de costo por lote. Si no hay lotes suficientes, solo se loguea.
+          await consumirStockFIFO({
+            productoId: item.producto_id,
+            cantidad: item.cantidad,
+            negocioId,
+            origen: 'venta',
+            origenId: pedidoId,
+          });
         }
       }
 
@@ -14063,6 +14242,15 @@ app.put('/api/pedidos/:id', (req, res) => {
           if (stockResult.changes === 0) {
             throw errorEstado(400, `No se pudo actualizar el stock del insumo ${insumoId}.`);
           }
+          // FIFO (Fase 4.E): descontamos del insumo en sus lotes para preservar
+          // el costo historico real de los componentes usados en producción.
+          await consumirStockFIFO({
+            productoId: insumoId,
+            cantidad: cantidadUnidades,
+            negocioId,
+            origen: 'produccion',
+            origenId: pedidoId,
+          });
         }
 
         for (const consumo of consumoRegistros) {
@@ -14240,6 +14428,9 @@ app.post('/api/cuentas/:id/eliminar', (req, res) => {
         );
         await ajustarStockPorPedido(pedidoId, negocioId, 1);
         await revertirConsumoInsumosPorPedido(pedidoId, negocioId);
+        // FIFO (Bug C): revertir consumos de lotes al cancelar masivamente.
+        await revertirConsumosFIFO({ negocioId, origen: 'venta', origenId: pedidoId });
+        await revertirConsumosFIFO({ negocioId, origen: 'produccion', origenId: pedidoId });
       }
       await db.run('COMMIT');
 
@@ -15674,6 +15865,14 @@ app.post('/api/pedidos', (req, res) => {
           if (stockResult.changes === 0) {
             throw new Error(`No se pudo actualizar el stock del producto ${item.producto_id}.`);
           }
+          // FIFO (Fase 4.D): descontamos de los lotes para mantener trazabilidad por costo.
+          await consumirStockFIFO({
+            productoId: item.producto_id,
+            cantidad: item.cantidad,
+            negocioId,
+            origen: 'venta',
+            origenId: pedidoId,
+          });
         }
       }
 
@@ -15691,6 +15890,14 @@ app.post('/api/pedidos', (req, res) => {
           if (stockResult.changes === 0) {
             throw new Error(`No se pudo actualizar el stock del insumo ${insumoId}.`);
           }
+          // FIFO (Fase 4.E): descontamos del insumo en sus lotes.
+          await consumirStockFIFO({
+            productoId: insumoId,
+            cantidad: cantidadUnidades,
+            negocioId,
+            origen: 'produccion',
+            origenId: pedidoId,
+          });
         }
         for (const consumo of consumoRegistros) {
           await db.run(
@@ -16004,6 +16211,9 @@ app.put('/api/pedidos/:pedidoId/detalles/:detalleId/estado', (req, res) => {
         );
       await ajustarStockPorPedido(pedidoId, negocioId, 1);
       await revertirConsumoInsumosPorPedido(pedidoId, negocioId);
+      // FIFO (Bug C): revertir consumos de lotes al cancelar pedido individual.
+      await revertirConsumosFIFO({ negocioId, origen: 'venta', origenId: pedidoId });
+      await revertirConsumosFIFO({ negocioId, origen: 'produccion', origenId: pedidoId });
       await db.run('COMMIT');
     } catch (error) {
       await db.run('ROLLBACK').catch(() => {});
@@ -26174,6 +26384,14 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
         if (stockResult.changes === 0) {
           throw crearErrorEstado(400, `No se pudo actualizar el stock del producto ${item.producto_id}.`);
         }
+        // FIFO: descontamos de los lotes para trazabilidad de costo (menu publico).
+        await consumirStockFIFO({
+          productoId: item.producto_id,
+          cantidad: item.cantidad,
+          negocioId,
+          origen: 'venta',
+          origenId: pedidoId,
+        });
       }
     }
 
@@ -26191,6 +26409,14 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
         if (stockResult.changes === 0) {
           throw crearErrorEstado(400, `No se pudo actualizar el stock del insumo ${insumoId}.`);
         }
+        // FIFO: descontamos del insumo en sus lotes (menu publico).
+        await consumirStockFIFO({
+          productoId: insumoId,
+          cantidad: cantidadUnidades,
+          negocioId,
+          origen: 'produccion',
+          origenId: pedidoId,
+        });
       }
 
       for (const consumo of consumoRegistros) {
@@ -26488,6 +26714,14 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
               error.status = 400;
               throw error;
             }
+            // FIFO (Bug A): descontamos de los lotes para deudas a credito.
+            await consumirStockFIFO({
+              productoId: item.producto_id,
+              cantidad: item.cantidad,
+              negocioId,
+              origen: 'venta_deuda',
+              origenId: deudaId,
+            });
           }
         }
 
@@ -26507,6 +26741,14 @@ app.post('/api/clientes/:id/deudas', (req, res) => {
               error.status = 400;
               throw error;
             }
+            // FIFO (Bug A): descontamos del insumo en sus lotes (deuda con receta).
+            await consumirStockFIFO({
+              productoId: insumoId,
+              cantidad: cantidadUnidades,
+              negocioId,
+              origen: 'produccion_deuda',
+              origenId: deudaId,
+            });
           }
         }
       }
@@ -26870,6 +27112,21 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
         );
       }
 
+      // FIFO (Bug A): para PUT de deuda, primero revertimos TODOS los consumos previos
+      // de esta deuda (volviendo el inventario al estado pre-deuda en cuanto a lotes),
+      // y luego reconsumimos los items nuevos. Asi nos aseguramos que los lotes
+      // reflejen exactamente el estado actual.
+      await revertirConsumosFIFO({
+        negocioId,
+        origen: 'venta_deuda',
+        origenId: deudaId,
+      });
+      await revertirConsumosFIFO({
+        negocioId,
+        origen: 'produccion_deuda',
+        origenId: deudaId,
+      });
+
       for (const productoId of idsUnion) {
         const producto = productosUnionMap.get(productoId);
         if (!producto || esStockIndefinido(producto)) continue;
@@ -26892,6 +27149,16 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
             'UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?',
             [Math.abs(delta), productoId, negocioId]
           );
+        }
+        // FIFO: consumimos la cantidad NUEVA total (porque ya revertimos la previa).
+        if (cantidadNueva > 0) {
+          await consumirStockFIFO({
+            productoId,
+            cantidad: cantidadNueva,
+            negocioId,
+            origen: 'venta_deuda',
+            origenId: deudaId,
+          });
         }
       }
 
@@ -26918,6 +27185,16 @@ app.put('/api/clientes/:id/deudas/:deudaId', (req, res) => {
               'UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?',
               [Math.abs(delta), insumoId, negocioId]
             );
+          }
+          // FIFO (Bug A): consumimos el TOTAL nuevo (ya revertimos previo al inicio).
+          if (nuevo > 0) {
+            await consumirStockFIFO({
+              productoId: insumoId,
+              cantidad: nuevo,
+              negocioId,
+              origen: 'produccion_deuda',
+              origenId: deudaId,
+            });
           }
         }
       }
@@ -28381,6 +28658,9 @@ app.get('/api/inventario/compras/:id', (req, res) => {
       const detalles = await db.all(
         `
         SELECT cid.id, cid.producto_id, p.nombre AS producto_nombre, cid.cantidad,
+               cid.cantidad_insumo,
+               COALESCE(p.tipo_producto, 'FINAL') AS producto_tipo,
+               p.unidad_base AS producto_unidad_base,
                cid.costo_unitario, cid.costo_unitario_sin_itbis, cid.costo_unitario_efectivo,
                cid.itbis_aplica, cid.itbis_capitalizable, cid.total_linea
           FROM compras_inventario_detalle cid
@@ -28452,7 +28732,8 @@ app.post('/api/inventario/compras', (req, res) => {
       const placeholders = productoIds.map(() => '?').join(',');
       const productos = await db.all(
         `SELECT id, nombre, stock, stock_indefinido, costo_promedio_actual, ultimo_costo_sin_itbis,
-                costo_base_sin_itbis, actualiza_costo_con_compras
+                costo_base_sin_itbis, actualiza_costo_con_compras,
+                COALESCE(tipo_producto, 'FINAL') AS tipo_producto, unidad_base
            FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
         [negocioId, ...productoIds]
       );
@@ -28468,7 +28749,14 @@ app.post('/api/inventario/compras', (req, res) => {
           return res.status(400).json({ error: 'Hay productos invalidos en la compra.' });
         }
 
+        const productoActual = productosMap.get(productoId);
+        const esInsumo = String(productoActual?.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
+
         const cantidad = normalizarNumero(item?.cantidad, null);
+        const cantidadInsumoEntrada = normalizarNumero(
+          item?.cantidad_insumo ?? item?.cantidadInsumo,
+          null
+        );
         const costoUnitario = normalizarNumero(
           item?.costo_unitario ?? item?.costoUnitario ?? item?.costo_unitario_sin_itbis ?? item?.costoUnitarioSinItbis,
           null
@@ -28481,6 +28769,20 @@ app.post('/api/inventario/compras', (req, res) => {
           return res.status(400).json({ error: 'El costo unitario debe ser mayor o igual a 0.' });
         }
 
+        // Para insumos exigimos "cantidad_insumo" (la cantidad real recibida en la unidad
+        // base del insumo, ej: 100 onzas dentro de 2 cajas de queso). Para productos FINAL
+        // que se compran para reventa, dejamos cantidad_insumo en null: el stock y el costo
+        // se calculan usando "cantidad" como hasta ahora.
+        let cantidadInsumoFinal = null;
+        if (esInsumo) {
+          if (cantidadInsumoEntrada === null || cantidadInsumoEntrada <= 0) {
+            return res.status(400).json({
+              error: `Indica la cantidad recibida del insumo "${productoActual?.nombre || productoId}" en su unidad base.`,
+            });
+          }
+          cantidadInsumoFinal = Number(cantidadInsumoEntrada.toFixed(4));
+        }
+
         const costoUnitarioSinItbis = Number(costoUnitario.toFixed(2));
         const costoUnitarioReal = resolverCostoUnitarioReal(costoUnitarioSinItbis, aplicaItbis);
         const costoUnitarioEfectivo = resolverCostoUnitarioEfectivo(
@@ -28490,15 +28792,36 @@ app.post('/api/inventario/compras', (req, res) => {
         );
         const totalLinea = Number((cantidad * costoUnitarioSinItbis).toFixed(2));
         subtotal += totalLinea;
+
+        // Cantidad y costo "por unidad de stock":
+        //   - INSUMO: cantidad_insumo (unidades reales) + costo real por unidad base
+        //   - FINAL:  cantidad         + costo unitario efectivo
+        const cantidadParaStock = esInsumo ? cantidadInsumoFinal : cantidad;
+        const costoEfectivoPorUnidadStock = esInsumo
+          ? Number(((cantidad * costoUnitarioEfectivo) / cantidadInsumoFinal).toFixed(4))
+          : costoUnitarioEfectivo;
+        const ultimoCostoStockSinItbis = esInsumo
+          ? Number(((cantidad * costoUnitarioSinItbis) / cantidadInsumoFinal).toFixed(4))
+          : costoUnitarioSinItbis;
+        const costoUnitarioRealStock = esInsumo
+          ? Number(((cantidad * costoUnitarioReal) / cantidadInsumoFinal).toFixed(4))
+          : costoUnitarioReal;
+
         detalles.push({
           producto_id: productoId,
           cantidad,
+          cantidad_insumo: cantidadInsumoFinal,
+          es_insumo: esInsumo,
           costo_unitario: costoUnitarioSinItbis,
           costo_unitario_sin_itbis: costoUnitarioSinItbis,
           costo_unitario_efectivo: costoUnitarioEfectivo,
           itbis_aplica: aplicaItbis ? 1 : 0,
           itbis_capitalizable: itbisCapitalizable ? 1 : 0,
           total_linea: totalLinea,
+          // Datos para crear el lote (Fase 4):
+          cantidad_para_stock: cantidadParaStock,
+          costo_unitario_lote: costoEfectivoPorUnidadStock,
+          costo_unitario_lote_incluye_itbis: aplicaItbis && itbisCapitalizable ? 1 : 0,
         });
 
         const acumulado = costosPorProducto.get(productoId) || {
@@ -28508,12 +28831,12 @@ app.post('/api/inventario/compras', (req, res) => {
           costo_unitario_real: 0,
           costo_unitario_real_incluye_itbis: 0,
         };
-        acumulado.cantidad = Number((acumulado.cantidad + cantidad).toFixed(2));
+        acumulado.cantidad = Number((acumulado.cantidad + cantidadParaStock).toFixed(4));
         acumulado.costo_total_efectivo = Number(
-          (acumulado.costo_total_efectivo + cantidad * costoUnitarioEfectivo).toFixed(2)
+          (acumulado.costo_total_efectivo + cantidadParaStock * costoEfectivoPorUnidadStock).toFixed(4)
         );
-        acumulado.ultimo_costo_sin_itbis = costoUnitarioSinItbis;
-        acumulado.costo_unitario_real = costoUnitarioReal;
+        acumulado.ultimo_costo_sin_itbis = ultimoCostoStockSinItbis;
+        acumulado.costo_unitario_real = costoUnitarioRealStock;
         acumulado.costo_unitario_real_incluye_itbis = aplicaItbis ? 1 : 0;
         costosPorProducto.set(productoId, acumulado);
       }
@@ -28559,17 +28882,18 @@ app.post('/api/inventario/compras', (req, res) => {
       }
 
       for (const detalle of detalles) {
-        await db.run(
+        const insertDetalle = await db.run(
           `
             INSERT INTO compras_inventario_detalle
-              (compra_id, producto_id, cantidad, costo_unitario, costo_unitario_sin_itbis, costo_unitario_efectivo,
-               itbis_aplica, itbis_capitalizable, total_linea, negocio_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (compra_id, producto_id, cantidad, cantidad_insumo, costo_unitario, costo_unitario_sin_itbis,
+               costo_unitario_efectivo, itbis_aplica, itbis_capitalizable, total_linea, negocio_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             compraId,
             detalle.producto_id,
             detalle.cantidad,
+            detalle.cantidad_insumo,
             detalle.costo_unitario,
             detalle.costo_unitario_sin_itbis,
             detalle.costo_unitario_efectivo,
@@ -28579,15 +28903,42 @@ app.post('/api/inventario/compras', (req, res) => {
             negocioId,
           ]
         );
+        const compraDetalleId = insertDetalle?.lastID || null;
 
         const producto = productosMap.get(detalle.producto_id);
         if (!esStockIndefinido(producto)) {
-          const updateResult = await db.run(
-            'UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?',
-            [detalle.cantidad, detalle.producto_id, negocioId]
-          );
-          if ((updateResult?.changes || 0) === 0) {
-            throw new Error(`No se pudo actualizar el stock del producto ${detalle.producto_id}.`);
+          const cantidadStockSumar = Number(detalle.cantidad_para_stock) || 0;
+          if (cantidadStockSumar > 0) {
+            const updateResult = await db.run(
+              'UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?',
+              [cantidadStockSumar, detalle.producto_id, negocioId]
+            );
+            if ((updateResult?.changes || 0) === 0) {
+              throw new Error(`No se pudo actualizar el stock del producto ${detalle.producto_id}.`);
+            }
+
+            // Crear lote FIFO: cada compra que aporta stock crea un lote nuevo.
+            // El consumo de este stock al vender/producir descontara de este lote
+            // (o de otros segun el orden FIFO).
+            await db.run(
+              `
+                INSERT INTO inventario_lotes
+                  (negocio_id, producto_id, compra_id, compra_detalle_id, cantidad_inicial,
+                   cantidad_restante, costo_unitario, costo_unitario_incluye_itbis, fecha, origen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'compra')
+              `,
+              [
+                negocioId,
+                detalle.producto_id,
+                compraId,
+                compraDetalleId,
+                cantidadStockSumar,
+                cantidadStockSumar,
+                Number(detalle.costo_unitario_lote) || 0,
+                detalle.costo_unitario_lote_incluye_itbis ? 1 : 0,
+                fecha,
+              ]
+            );
           }
         }
       }
@@ -28760,6 +29111,304 @@ app.post('/api/inventario/compras', (req, res) => {
       await db.run('ROLLBACK').catch(() => {});
       console.error('Error al registrar compra de inventario:', error?.message || error);
       res.status(500).json({ error: error?.message || 'No se pudo registrar la compra de inventario.' });
+    }
+  });
+});
+
+// Helper: consume stock FIFO de un producto, descontando de los lotes mas viejos
+// primero (ordenados por fecha ASC, id ASC). Devuelve cuanto se consumio,
+// cuanto quedo faltante (si los lotes no alcanzaban) y el detalle por lote.
+// IMPORTANTE: este helper se llama DENTRO de una transaccion ya abierta. NO hace
+// BEGIN ni COMMIT/ROLLBACK por su cuenta.
+async function consumirStockFIFO({
+  productoId,
+  cantidad,
+  negocioId,
+  origen,
+  origenId = null,
+  fechaConsumo = null,
+}) {
+  const cantidadNumerica = Number(cantidad);
+  if (!Number.isFinite(cantidadNumerica) || cantidadNumerica <= 0) {
+    return { consumido: 0, faltante: 0, lotes_usados: [], costo_total: 0 };
+  }
+  if (!Number.isFinite(Number(productoId)) || Number(productoId) <= 0) {
+    return { consumido: 0, faltante: cantidadNumerica, lotes_usados: [], costo_total: 0 };
+  }
+
+  // Lotes disponibles ordenados FIFO (mas viejo primero, desempate por id).
+  const lotes = await db.all(
+    `SELECT id, cantidad_restante, costo_unitario
+       FROM inventario_lotes
+      WHERE producto_id = ? AND negocio_id = ? AND cantidad_restante > 0
+      ORDER BY fecha ASC, id ASC`,
+    [Number(productoId), negocioId]
+  );
+
+  let porConsumir = Number(cantidadNumerica.toFixed(4));
+  let consumido = 0;
+  let costoTotal = 0;
+  const lotesUsados = [];
+  const fechaSql = fechaConsumo || new Date();
+
+  for (const lote of lotes || []) {
+    if (porConsumir <= 0.00001) break;
+    const disponible = Number(lote.cantidad_restante) || 0;
+    if (disponible <= 0) continue;
+    const aTomar = Math.min(disponible, porConsumir);
+    const aTomarRound = Number(aTomar.toFixed(4));
+    if (aTomarRound <= 0) continue;
+    const costoUnitario = Number(lote.costo_unitario) || 0;
+    const costoLinea = Number((aTomarRound * costoUnitario).toFixed(4));
+
+    await db.run(
+      `UPDATE inventario_lotes
+          SET cantidad_restante = GREATEST(cantidad_restante - ?, 0)
+        WHERE id = ?`,
+      [aTomarRound, lote.id]
+    );
+
+    await db.run(
+      `INSERT INTO inventario_consumos
+        (negocio_id, lote_id, producto_id, cantidad, costo_unitario, costo_total, origen, origen_id, fecha)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        negocioId,
+        lote.id,
+        Number(productoId),
+        aTomarRound,
+        costoUnitario,
+        costoLinea,
+        String(origen || 'venta'),
+        origenId ? Number(origenId) : null,
+        fechaSql,
+      ]
+    );
+
+    consumido += aTomarRound;
+    costoTotal += costoLinea;
+    porConsumir -= aTomarRound;
+    lotesUsados.push({
+      lote_id: lote.id,
+      cantidad: aTomarRound,
+      costo_unitario: costoUnitario,
+      costo_total: costoLinea,
+    });
+  }
+
+  const faltante = porConsumir > 0.00001 ? Number(porConsumir.toFixed(4)) : 0;
+  if (faltante > 0) {
+    // No bloqueamos la venta: el UPDATE de productos.stock ya valido que habia stock
+    // suficiente; el faltante aqui significa que la suma de lotes era menor al stock
+    // (data historica sin lote, o desincronia). Lo registramos en logs para auditoria.
+    console.warn(
+      `[FIFO] Producto ${productoId}: se pidio ${cantidadNumerica}, solo habia ${consumido} en lotes (faltante ${faltante}). Origen: ${origen}/${origenId}`
+    );
+  }
+
+  return {
+    consumido: Number(consumido.toFixed(4)),
+    faltante,
+    lotes_usados: lotesUsados,
+    costo_total: Number(costoTotal.toFixed(4)),
+  };
+}
+
+// Helper: revierte consumos FIFO previos asociados a un origen/origen_id.
+// Suma de vuelta las cantidades a los lotes correspondientes y marca los consumos
+// como revertidos (campo "revertido"). Usado al cancelar pedido, devolucion o
+// cuando se edita una deuda y baja la cantidad vendida.
+async function revertirConsumosFIFO({ negocioId, origen, origenId, productoId = null }) {
+  if (!origen || !origenId) {
+    return { revertidos: 0, cantidad_restaurada: 0 };
+  }
+  const filtros = ['ic.negocio_id = ?', 'ic.origen = ?', 'ic.origen_id = ?', 'COALESCE(ic.revertido, 0) = 0'];
+  const params = [negocioId, String(origen), Number(origenId)];
+  if (productoId) {
+    filtros.push('ic.producto_id = ?');
+    params.push(Number(productoId));
+  }
+
+  const consumos = await db.all(
+    `SELECT ic.id, ic.lote_id, ic.producto_id, ic.cantidad, ic.costo_unitario, ic.costo_total
+       FROM inventario_consumos ic
+      WHERE ${filtros.join(' AND ')}
+      ORDER BY ic.id ASC`,
+    params
+  );
+
+  let restauradosCount = 0;
+  let cantidadRestaurada = 0;
+  for (const consumo of consumos || []) {
+    const cantidad = Number(consumo.cantidad) || 0;
+    if (cantidad <= 0) continue;
+    // Sumamos de vuelta al lote.
+    await db.run(
+      `UPDATE inventario_lotes SET cantidad_restante = cantidad_restante + ? WHERE id = ?`,
+      [cantidad, consumo.lote_id]
+    );
+    // Marcamos el consumo como revertido (no lo borramos: queda auditoria).
+    await db.run(
+      `UPDATE inventario_consumos SET revertido = 1, revertido_en = NOW() WHERE id = ?`,
+      [consumo.id]
+    );
+    restauradosCount += 1;
+    cantidadRestaurada += cantidad;
+  }
+  return {
+    revertidos: restauradosCount,
+    cantidad_restaurada: Number(cantidadRestaurada.toFixed(4)),
+  };
+}
+
+// Endpoint de auditoria: detecta productos donde productos.stock difiere de
+// la suma de cantidad_restante en sus lotes. Util para verificar la integridad
+// del sistema FIFO antes de confiar al 100% en las metricas.
+app.get('/api/admin/inventario/auditar-consistencia', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      // Tolerancia: diferencias menores a 0.01 se consideran redondeo aceptable.
+      const TOLERANCIA = 0.01;
+
+      const productosBase = await db.all(
+        `SELECT p.id, p.nombre,
+                COALESCE(p.tipo_producto, 'FINAL') AS tipo_producto,
+                p.unidad_base,
+                COALESCE(p.stock, 0) AS stock,
+                COALESCE(p.stock_indefinido, 0) AS stock_indefinido
+           FROM productos p
+          WHERE p.negocio_id = ?
+            AND COALESCE(p.stock_indefinido, 0) = 0
+            AND COALESCE(p.activo, 1) = 1`,
+        [negocioId]
+      );
+
+      const lotesPorProducto = await db.all(
+        `SELECT producto_id, SUM(cantidad_restante) AS stock_lotes
+           FROM inventario_lotes
+          WHERE negocio_id = ? AND cantidad_restante > 0
+          GROUP BY producto_id`,
+        [negocioId]
+      );
+      const lotesMap = new Map(
+        (lotesPorProducto || []).map((row) => [Number(row.producto_id), Number(row.stock_lotes) || 0])
+      );
+
+      const discrepancias = [];
+      let totalRevisados = 0;
+      for (const producto of productosBase || []) {
+        totalRevisados += 1;
+        const stockDeclarado = Number(producto.stock) || 0;
+        const stockEnLotes = lotesMap.get(Number(producto.id)) || 0;
+        const diferencia = Number((stockDeclarado - stockEnLotes).toFixed(4));
+        if (Math.abs(diferencia) > TOLERANCIA) {
+          discrepancias.push({
+            producto_id: producto.id,
+            nombre: producto.nombre,
+            tipo_producto: producto.tipo_producto,
+            unidad_base: producto.unidad_base || 'UND',
+            stock_declarado: Number(stockDeclarado.toFixed(4)),
+            stock_en_lotes: Number(stockEnLotes.toFixed(4)),
+            diferencia,
+            sin_lotes: stockEnLotes === 0 && stockDeclarado > 0,
+          });
+        }
+      }
+
+      // Ordenar por diferencia absoluta descendente
+      discrepancias.sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia));
+
+      res.json({
+        ok: true,
+        resumen: {
+          total_revisados: totalRevisados,
+          con_discrepancia: discrepancias.length,
+          ok: totalRevisados - discrepancias.length,
+        },
+        discrepancias,
+      });
+    } catch (error) {
+      console.error('Error en auditoria de consistencia:', error?.message || error);
+      res.status(500).json({ error: 'No se pudo ejecutar la auditoria.' });
+    }
+  });
+});
+
+// Devuelve los lotes FIFO activos de un producto, con un resumen que permite
+// ver el "costo promedio FIFO real" (valor total / stock por lotes).
+// Solo se muestran lotes con cantidad_restante > 0; los consumidos por completo
+// quedan en la tabla pero no aparecen aqui (existen en inventario_consumos).
+app.get('/api/inventario/productos/:id/lotes', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const productoId = Number(req.params.id);
+    if (!Number.isFinite(productoId) || productoId <= 0) {
+      return res.status(400).json({ error: 'ID invalido.' });
+    }
+
+    try {
+      const producto = await db.get(
+        `SELECT id, nombre, unidad_base, COALESCE(tipo_producto, 'FINAL') AS tipo_producto,
+                stock, stock_indefinido, costo_promedio_actual
+           FROM productos
+          WHERE id = ? AND negocio_id = ?`,
+        [productoId, negocioId]
+      );
+      if (!producto) {
+        return res.status(404).json({ error: 'Producto no encontrado.' });
+      }
+
+      const lotesActivos = await db.all(
+        `SELECT il.id, il.cantidad_inicial, il.cantidad_restante, il.costo_unitario,
+                il.costo_unitario_incluye_itbis, il.fecha, il.origen, il.compra_id,
+                il.observaciones, il.creado_en,
+                ci.proveedor AS compra_proveedor, ci.fecha AS compra_fecha
+           FROM inventario_lotes il
+           LEFT JOIN compras_inventario ci ON ci.id = il.compra_id
+          WHERE il.producto_id = ? AND il.negocio_id = ? AND il.cantidad_restante > 0
+          ORDER BY il.fecha ASC, il.id ASC`,
+        [productoId, negocioId]
+      );
+
+      let stockTotal = 0;
+      let valorTotal = 0;
+      (lotesActivos || []).forEach((lote) => {
+        const restante = Number(lote.cantidad_restante) || 0;
+        const costo = Number(lote.costo_unitario) || 0;
+        stockTotal += restante;
+        valorTotal += restante * costo;
+      });
+      const costoPromedioFifo = stockTotal > 0 ? valorTotal / stockTotal : 0;
+
+      res.json({
+        ok: true,
+        producto: {
+          id: producto.id,
+          nombre: producto.nombre,
+          unidad_base: producto.unidad_base || 'UND',
+          tipo_producto: producto.tipo_producto,
+          stock_actual: Number(producto.stock) || 0,
+          stock_indefinido: Number(producto.stock_indefinido) === 1 ? 1 : 0,
+          costo_promedio_actual: Number(producto.costo_promedio_actual) || 0,
+        },
+        resumen: {
+          lotes_activos: (lotesActivos || []).length,
+          stock_por_lotes: Number(stockTotal.toFixed(4)),
+          valor_total: Number(valorTotal.toFixed(2)),
+          costo_promedio_fifo: Number(costoPromedioFifo.toFixed(4)),
+        },
+        lotes: lotesActivos || [],
+      });
+    } catch (error) {
+      console.error('Error al obtener lotes de inventario:', error?.message || error);
+      res.status(500).json({ error: 'No se pudieron obtener los lotes del producto.' });
     }
   });
 });
@@ -31618,12 +32267,32 @@ app.put('/api/inventario/compras/:id', (req, res) => {
 
       const detallesActuales = await db.all(
         `
-        SELECT producto_id, cantidad
+        SELECT producto_id, cantidad, cantidad_insumo
           FROM compras_inventario_detalle
          WHERE compra_id = ? AND negocio_id = ?
         `,
         [compraId, negocioId]
       );
+
+      // Lotes FIFO: si algun lote creado por esta compra ya fue consumido (parcial o
+      // total) por una venta o produccion, no podemos reescribir la compra sin
+      // desviar los costos historicos. Bloqueamos con mensaje claro.
+      const consumosPrevios = await db.get(
+        `
+        SELECT COUNT(1) AS total
+          FROM inventario_consumos ic
+          INNER JOIN inventario_lotes il ON il.id = ic.lote_id
+         WHERE il.compra_id = ? AND il.negocio_id = ?
+        `,
+        [compraId, negocioId]
+      );
+      if (Number(consumosPrevios?.total) > 0) {
+        return res.status(409).json({
+          error:
+            'No se puede editar esta compra porque ya se vendio o produjo a partir de su inventario. ' +
+            'Crea una nueva compra o registra un ajuste de stock.',
+        });
+      }
 
       const productoIdsUnion = Array.from(
         new Set([
@@ -31635,7 +32304,8 @@ app.put('/api/inventario/compras/:id', (req, res) => {
       const placeholders = productoIdsUnion.map(() => '?').join(',');
       const productos = await db.all(
         `SELECT id, nombre, stock, stock_indefinido, costo_promedio_actual, ultimo_costo_sin_itbis,
-                costo_base_sin_itbis, actualiza_costo_con_compras
+                costo_base_sin_itbis, actualiza_costo_con_compras,
+                COALESCE(tipo_producto, 'FINAL') AS tipo_producto, unidad_base
            FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
         [negocioId, ...productoIdsUnion]
       );
@@ -31651,7 +32321,14 @@ app.put('/api/inventario/compras/:id', (req, res) => {
           return res.status(400).json({ error: 'Hay productos invalidos en la compra.' });
         }
 
+        const productoActual = productosMap.get(productoId);
+        const esInsumo = String(productoActual?.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
+
         const cantidad = normalizarNumero(item?.cantidad, null);
+        const cantidadInsumoEntrada = normalizarNumero(
+          item?.cantidad_insumo ?? item?.cantidadInsumo,
+          null
+        );
         const costoUnitario = normalizarNumero(
           item?.costo_unitario ?? item?.costoUnitario ?? item?.costo_unitario_sin_itbis ?? item?.costoUnitarioSinItbis,
           null
@@ -31664,6 +32341,16 @@ app.put('/api/inventario/compras/:id', (req, res) => {
           return res.status(400).json({ error: 'El costo unitario debe ser mayor o igual a 0.' });
         }
 
+        let cantidadInsumoFinal = null;
+        if (esInsumo) {
+          if (cantidadInsumoEntrada === null || cantidadInsumoEntrada <= 0) {
+            return res.status(400).json({
+              error: `Indica la cantidad recibida del insumo "${productoActual?.nombre || productoId}" en su unidad base.`,
+            });
+          }
+          cantidadInsumoFinal = Number(cantidadInsumoEntrada.toFixed(4));
+        }
+
         const costoUnitarioSinItbis = Number(costoUnitario.toFixed(2));
         const costoUnitarioReal = resolverCostoUnitarioReal(costoUnitarioSinItbis, aplicaItbis);
         const costoUnitarioEfectivo = resolverCostoUnitarioEfectivo(
@@ -31673,15 +32360,34 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         );
         const totalLinea = Number((cantidad * costoUnitarioSinItbis).toFixed(2));
         subtotal += totalLinea;
+
+        // Mismas reglas que en POST: para INSUMO trabajamos sobre cantidad_insumo
+        // (en su unidad base); para FINAL seguimos usando cantidad.
+        const cantidadParaStock = esInsumo ? cantidadInsumoFinal : cantidad;
+        const costoEfectivoPorUnidadStock = esInsumo
+          ? Number(((cantidad * costoUnitarioEfectivo) / cantidadInsumoFinal).toFixed(4))
+          : costoUnitarioEfectivo;
+        const ultimoCostoStockSinItbis = esInsumo
+          ? Number(((cantidad * costoUnitarioSinItbis) / cantidadInsumoFinal).toFixed(4))
+          : costoUnitarioSinItbis;
+        const costoUnitarioRealStock = esInsumo
+          ? Number(((cantidad * costoUnitarioReal) / cantidadInsumoFinal).toFixed(4))
+          : costoUnitarioReal;
+
         detalles.push({
           producto_id: productoId,
           cantidad,
+          cantidad_insumo: cantidadInsumoFinal,
+          es_insumo: esInsumo,
           costo_unitario: costoUnitarioSinItbis,
           costo_unitario_sin_itbis: costoUnitarioSinItbis,
           costo_unitario_efectivo: costoUnitarioEfectivo,
           itbis_aplica: aplicaItbis ? 1 : 0,
           itbis_capitalizable: itbisCapitalizable ? 1 : 0,
           total_linea: totalLinea,
+          cantidad_para_stock: cantidadParaStock,
+          costo_unitario_lote: costoEfectivoPorUnidadStock,
+          costo_unitario_lote_incluye_itbis: aplicaItbis && itbisCapitalizable ? 1 : 0,
         });
 
         const acumulado = costosPorProducto.get(productoId) || {
@@ -31691,12 +32397,12 @@ app.put('/api/inventario/compras/:id', (req, res) => {
           costo_unitario_real: 0,
           costo_unitario_real_incluye_itbis: 0,
         };
-        acumulado.cantidad = Number((acumulado.cantidad + cantidad).toFixed(2));
+        acumulado.cantidad = Number((acumulado.cantidad + cantidadParaStock).toFixed(4));
         acumulado.costo_total_efectivo = Number(
-          (acumulado.costo_total_efectivo + cantidad * costoUnitarioEfectivo).toFixed(2)
+          (acumulado.costo_total_efectivo + cantidadParaStock * costoEfectivoPorUnidadStock).toFixed(4)
         );
-        acumulado.ultimo_costo_sin_itbis = costoUnitarioSinItbis;
-        acumulado.costo_unitario_real = costoUnitarioReal;
+        acumulado.ultimo_costo_sin_itbis = ultimoCostoStockSinItbis;
+        acumulado.costo_unitario_real = costoUnitarioRealStock;
         acumulado.costo_unitario_real_incluye_itbis = aplicaItbis ? 1 : 0;
         costosPorProducto.set(productoId, acumulado);
       }
@@ -31714,22 +32420,32 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         fechaPagoActual: compraActual?.gasto_fecha_pago ?? null,
       });
 
+      // Para el delta de stock usamos la cantidad efectiva que se acredito al stock:
+      //   - Si el detalle previo trae cantidad_insumo (> 0), ese era el monto que se sumo
+      //     al stock cuando se registro la compra de insumo.
+      //   - Caso contrario, se sumo la "cantidad" tal cual (FINAL para reventa o data vieja).
       const cantidadesPrevias = new Map();
       detallesActuales.forEach((detalle) => {
         const productoId = Number(detalle?.producto_id);
-        const cantidad = Number(detalle?.cantidad) || 0;
         if (!Number.isFinite(productoId) || productoId <= 0) return;
+        const cantidadInsumoPrev = Number(detalle?.cantidad_insumo);
+        const cantidadStock =
+          Number.isFinite(cantidadInsumoPrev) && cantidadInsumoPrev > 0
+            ? cantidadInsumoPrev
+            : Number(detalle?.cantidad) || 0;
         const acumulado = cantidadesPrevias.get(productoId) || 0;
-        cantidadesPrevias.set(productoId, Number((acumulado + cantidad).toFixed(2)));
+        cantidadesPrevias.set(productoId, Number((acumulado + cantidadStock).toFixed(4)));
       });
 
       const cantidadesNuevas = new Map();
       detalles.forEach((detalle) => {
         const productoId = Number(detalle?.producto_id);
-        const cantidad = Number(detalle?.cantidad) || 0;
         if (!Number.isFinite(productoId) || productoId <= 0) return;
+        const cantidadStock = detalle.es_insumo
+          ? Number(detalle?.cantidad_insumo) || 0
+          : Number(detalle?.cantidad) || 0;
         const acumulado = cantidadesNuevas.get(productoId) || 0;
-        cantidadesNuevas.set(productoId, Number((acumulado + cantidad).toFixed(2)));
+        cantidadesNuevas.set(productoId, Number((acumulado + cantidadStock).toFixed(4)));
       });
 
       const productosParaStock = new Set([...cantidadesPrevias.keys(), ...cantidadesNuevas.keys()]);
@@ -31739,7 +32455,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
       for (const productoId of productosParaStock) {
         const cantidadPrev = cantidadesPrevias.get(productoId) || 0;
         const cantidadNueva = cantidadesNuevas.get(productoId) || 0;
-        const diferencia = Number((cantidadNueva - cantidadPrev).toFixed(2));
+        const diferencia = Number((cantidadNueva - cantidadPrev).toFixed(4));
         if (diferencia === 0) {
           continue;
         }
@@ -31759,23 +32475,30 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         }
       }
 
+      // Borrar lotes generados por esta compra (ya validamos que no fueron consumidos).
+      await db.run(
+        'DELETE FROM inventario_lotes WHERE compra_id = ? AND negocio_id = ?',
+        [compraId, negocioId]
+      );
+
       await db.run(
         'DELETE FROM compras_inventario_detalle WHERE compra_id = ? AND negocio_id = ?',
         [compraId, negocioId]
       );
 
       for (const detalle of detalles) {
-        await db.run(
+        const insertDetalle = await db.run(
           `
             INSERT INTO compras_inventario_detalle
-              (compra_id, producto_id, cantidad, costo_unitario, costo_unitario_sin_itbis, costo_unitario_efectivo,
-               itbis_aplica, itbis_capitalizable, total_linea, negocio_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (compra_id, producto_id, cantidad, cantidad_insumo, costo_unitario, costo_unitario_sin_itbis,
+               costo_unitario_efectivo, itbis_aplica, itbis_capitalizable, total_linea, negocio_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             compraId,
             detalle.producto_id,
             detalle.cantidad,
+            detalle.cantidad_insumo,
             detalle.costo_unitario,
             detalle.costo_unitario_sin_itbis,
             detalle.costo_unitario_efectivo,
@@ -31785,6 +32508,34 @@ app.put('/api/inventario/compras/:id', (req, res) => {
             negocioId,
           ]
         );
+        const compraDetalleId = insertDetalle?.lastID || null;
+
+        // Crear lote nuevo (mismo criterio que en POST).
+        const producto = productosMap.get(detalle.producto_id);
+        if (!esStockIndefinido(producto)) {
+          const cantidadStockSumar = Number(detalle.cantidad_para_stock) || 0;
+          if (cantidadStockSumar > 0) {
+            await db.run(
+              `
+                INSERT INTO inventario_lotes
+                  (negocio_id, producto_id, compra_id, compra_detalle_id, cantidad_inicial,
+                   cantidad_restante, costo_unitario, costo_unitario_incluye_itbis, fecha, origen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'compra')
+              `,
+              [
+                negocioId,
+                detalle.producto_id,
+                compraId,
+                compraDetalleId,
+                cantidadStockSumar,
+                cantidadStockSumar,
+                Number(detalle.costo_unitario_lote) || 0,
+                detalle.costo_unitario_lote_incluye_itbis ? 1 : 0,
+                fecha,
+              ]
+            );
+          }
+        }
       }
 
       for (const [productoId, costoData] of costosPorProducto.entries()) {
@@ -33427,6 +34178,14 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
           if (stockResult.changes === 0) {
             throw new Error('Error al actualizar stock de productos');
           }
+          // FIFO (Bug B): descontamos del producto en sus lotes (cotizacion facturada).
+          await consumirStockFIFO({
+            productoId: item.producto_id,
+            cantidad: item.cantidad,
+            negocioId: negocioIdFactura,
+            origen: 'venta_cotizacion',
+            origenId: pedidoId,
+          });
         }
       }
 
@@ -33444,6 +34203,14 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
           if (stockResult.changes === 0) {
             throw new Error(`No se pudo actualizar stock del insumo ${insumoId}`);
           }
+          // FIFO (Bug B): descontamos del insumo en sus lotes (cotizacion con receta).
+          await consumirStockFIFO({
+            productoId: insumoId,
+            cantidad: cantidadUnidades,
+            negocioId: negocioIdFactura,
+            origen: 'produccion_cotizacion',
+            origenId: pedidoId,
+          });
         }
 
         for (const consumo of consumoRegistros) {

@@ -21,6 +21,7 @@
   };
 
   const ncfSpan = document.getElementById('factura-ncf');
+  const ncfRow = document.getElementById('factura-ncf-row');
   const fechaSpan = document.getElementById('factura-fecha');
   const pedidoSpan = document.getElementById('factura-pedido');
   const clienteSpan = document.getElementById('factura-cliente');
@@ -28,6 +29,8 @@
   const metodoPagoSpan = document.getElementById('factura-metodo-pago');
   const subtotalSpan = document.getElementById('factura-subtotal');
   const impuestoSpan = document.getElementById('factura-impuesto');
+  const impuestoRow = document.getElementById('factura-impuesto-row');
+  const impuestoLabel = document.getElementById('factura-impuesto-label');
   const descuentoSpan = document.getElementById('factura-descuento');
   const propinaSpan = document.getElementById('factura-propina');
   const totalSpan = document.getElementById('factura-total');
@@ -250,6 +253,28 @@
     aplicarIdentidadFactura();
   };
 
+  // Devuelve true si el negocio cobra ITBIS (porcentaje configurado > 0).
+  // Si la configuracion aun no se cargo, asumimos true para no ocultar de mas.
+  const negocioCobraImpuesto = () => {
+    if (!configuracionFactura) return true;
+    const porcentaje = Number(configuracionFactura.impuesto_porcentaje);
+    if (!Number.isFinite(porcentaje)) return true;
+    return porcentaje > 0;
+  };
+
+  // Texto a usar para la etiqueta de la fila de ITBIS, segun la configuracion del negocio.
+  const obtenerEtiquetaImpuesto = () => {
+    const porcentaje = Number(configuracionFactura?.impuesto_porcentaje);
+    if (Number.isFinite(porcentaje) && porcentaje > 0) {
+      // Mostrar el porcentaje sin decimales si es entero, con uno si no.
+      const porcentajeTexto = Number.isInteger(porcentaje)
+        ? String(porcentaje)
+        : porcentaje.toFixed(1);
+      return `ITBIS (${porcentajeTexto}%)`;
+    }
+    return 'ITBIS';
+  };
+
   const aplicarConfigFactura = (config) => {
     configuracionFactura = config || null;
     const direccion = configuracionFactura?.direccion || 'República Dominicana - ITBIS incluido';
@@ -267,6 +292,14 @@
     }
     if (telefonoSpan) telefonoSpan.textContent = telefono;
     if (pieSpan) pieSpan.textContent = pie;
+
+    // Etiqueta dinamica: si el negocio cobra ITBIS, mostramos "ITBIS (18%)"
+    // (o el porcentaje que sea); si no, dejamos un fallback neutro.
+    if (impuestoLabel) {
+      impuestoLabel.textContent = obtenerEtiquetaImpuesto();
+    }
+    // La decision final de ocultar la fila se toma en renderFactura, donde tambien
+    // sabemos si este pedido especifico trae impuesto > 0 (factura historica).
 
     aplicarIdentidadFactura();
   };
@@ -322,7 +355,16 @@
     if (!data || !data.pedido) return;
     const { pedido, items } = data;
 
-    if (ncfSpan) ncfSpan.textContent = pedido.ncf || '-';
+    // NCF: ocultar la fila completa cuando el pedido no tiene NCF asignado
+    // (negocios que no usan comprobante fiscal, o pedidos "Sin comprobante").
+    // Si hay e-CF (ecf_encf), el bloque eCF aparte ya cubre la informacion fiscal,
+    // y la fila NCF tradicional no aplica.
+    const ncfTexto = String(pedido.ncf || '').trim();
+    const tieneEcf = Boolean(String(pedido.ecf_encf || '').trim());
+    const mostrarFilaNcf = Boolean(ncfTexto) && !tieneEcf;
+    if (ncfSpan) ncfSpan.textContent = ncfTexto || '-';
+    if (ncfRow) ncfRow.hidden = !mostrarFilaNcf;
+
     if (fechaSpan) fechaSpan.textContent = formatDateTime(pedido.fecha_cierre || pedido.fecha_factura);
     if (pedidoSpan) {
       const numeroCuenta = pedido.numero_cuenta_negocio || pedido.cuenta_id || pedido.id;
@@ -366,6 +408,13 @@
 
     if (subtotalSpan) subtotalSpan.textContent = formatCurrency(subtotalMostrar);
     if (impuestoSpan) impuestoSpan.textContent = formatCurrency(impuestoMostrar);
+    // Ocultar la fila de ITBIS solo si el negocio NO cobra impuesto Y este pedido
+    // tampoco tiene impuesto registrado (cubre facturas historicas con ITBIS > 0).
+    if (impuestoRow) {
+      const pedidoTieneImpuesto = Math.abs(Number(impuestoMostrar) || 0) > 0.005;
+      const ocultar = !negocioCobraImpuesto() && !pedidoTieneImpuesto;
+      impuestoRow.hidden = ocultar;
+    }
     if (descuentoSpan) {
       if (descuentoGeneralMostrar > 0) {
         descuentoSpan.textContent = `- ${formatCurrency(descuentoGeneralMostrar)}`;
