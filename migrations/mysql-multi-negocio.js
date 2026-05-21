@@ -1189,7 +1189,7 @@ async function ensureTableRecetaDetalle() {
       receta_id INT NOT NULL,
       insumo_id INT NOT NULL,
       cantidad DECIMAL(12,4) NOT NULL,
-      unidad ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA') NOT NULL DEFAULT 'UND',
+      unidad ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA', 'CUCHARADA') NOT NULL DEFAULT 'UND',
       creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT fk_receta_detalle_receta FOREIGN KEY (receta_id) REFERENCES recetas(id),
       CONSTRAINT fk_receta_detalle_insumo FOREIGN KEY (insumo_id) REFERENCES productos(id)
@@ -1209,7 +1209,7 @@ async function ensureTableConsumoInsumos() {
       producto_final_id INT NOT NULL,
       insumo_id INT NOT NULL,
       cantidad_base DECIMAL(12,4) NOT NULL,
-      unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA') NOT NULL DEFAULT 'UND',
+      unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA', 'CUCHARADA') NOT NULL DEFAULT 'UND',
       revertido TINYINT(1) NOT NULL DEFAULT 0,
       creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
       negocio_id INT NOT NULL,
@@ -2335,10 +2335,10 @@ async function runMigrations() {
   await ensureColumn('productos', 'costo_unitario_real_incluye_itbis TINYINT(1) NOT NULL DEFAULT 0');
   await ensureColumn('productos', "tipo_producto ENUM('FINAL', 'INSUMO') NOT NULL DEFAULT 'FINAL'");
   await ensureColumn('productos', 'insumo_vendible TINYINT(1) NOT NULL DEFAULT 0');
-  await ensureColumn('productos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA') NOT NULL DEFAULT 'UND'");
-  await modifyColumn('productos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA') NOT NULL DEFAULT 'UND'");
-  await modifyColumn('receta_detalle', "unidad ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA') NOT NULL DEFAULT 'UND'");
-  await modifyColumn('consumo_insumos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA') NOT NULL DEFAULT 'UND'");
+  await ensureColumn('productos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA', 'CUCHARADA') NOT NULL DEFAULT 'UND'");
+  await modifyColumn('productos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA', 'CUCHARADA') NOT NULL DEFAULT 'UND'");
+  await modifyColumn('receta_detalle', "unidad ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA', 'CUCHARADA') NOT NULL DEFAULT 'UND'");
+  await modifyColumn('consumo_insumos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA', 'CUCHARADA') NOT NULL DEFAULT 'UND'");
   await ensureColumn('productos', 'contenido_por_unidad DECIMAL(12,4) NOT NULL DEFAULT 1');
   await ensureColumn('productos', 'visible_menu_qr TINYINT(1) NOT NULL DEFAULT 1');
   await ensureColumn('productos', 'sabores JSON NULL');
