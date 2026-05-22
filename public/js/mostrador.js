@@ -110,8 +110,8 @@ const selectMetodoPago = document.getElementById('mostrador-pago-metodo');
 const camposPago = Array.from(document.querySelectorAll('#mostrador-cobro-form [data-metodo]'));
 
 const SYNC_STORAGE_KEY = 'kanm:last-update';
-const PROPINA_STORAGE_KEY = 'kanm:propina-legal';
-const PROPINA_DEFAULT = 10;
+const PROPINA_STORAGE_KEY = 'kanm:mostrador:propina-legal';
+const PROPINA_DEFAULT = 0;
 
 const estado = {
   productos: [],
