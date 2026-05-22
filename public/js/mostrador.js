@@ -265,14 +265,28 @@ const resolverConfigSecuenciasMostrador = (tema = {}) => ({
   ),
 });
 
-const esProductoStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
+const usaStockReceta = (producto) =>
+  Number(producto?.stock_calculado_por_receta) === 1 &&
+  Number.isFinite(Number(producto?.stock_disponible_receta));
+
+const esProductoStockIndefinido = (producto) =>
+  !usaStockReceta(producto) && Number(producto?.stock_indefinido) === 1;
+
 const obtenerStockDisponible = (producto) => {
+  if (usaStockReceta(producto)) {
+    const valor = Number(producto?.stock_disponible_receta);
+    return Number.isFinite(valor) ? Math.max(0, valor) : 0;
+  }
   if (esProductoStockIndefinido(producto)) return Infinity;
   const valor = Number(producto?.stock);
   return Number.isFinite(valor) ? valor : 0;
 };
 const obtenerEtiquetaStock = (producto) =>
-  esProductoStockIndefinido(producto) ? 'Indefinido' : obtenerStockDisponible(producto);
+  usaStockReceta(producto)
+    ? `${obtenerStockDisponible(producto)} (receta)`
+    : esProductoStockIndefinido(producto)
+    ? 'Indefinido'
+    : obtenerStockDisponible(producto);
 
 const formatCurrency = (valor) => {
   const numero = Number(valor) || 0;

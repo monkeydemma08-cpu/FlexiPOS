@@ -8242,6 +8242,49 @@ const obtenerRecetasPorProductos = async (productoIds, negocioId) => {
   return recetasMap;
 };
 
+const calcularConsumoRecetaDetalle = (detalle = {}, cantidadProducto = 1) => {
+  const factorProducto = Number(cantidadProducto) || 0;
+  const cantidadDetalle = Number(detalle?.cantidad) || 0;
+  const unidadConsumo = normalizarUnidadBase(detalle?.unidad, detalle?.unidad_base || 'UND');
+  const unidadBaseInsumo = normalizarUnidadBase(detalle?.unidad_base, 'UND');
+  const cantidadBase = Number((factorProducto * cantidadDetalle).toFixed(4));
+  if (!cantidadBase) {
+    return {
+      cantidadBase: 0,
+      cantidadUnidades: 0,
+      unidadConsumo,
+      unidadBaseInsumo,
+    };
+  }
+
+  const contenido = normalizarContenidoPorUnidad(detalle?.contenido_por_unidad, 1);
+  const cantidadUnidades =
+    unidadConsumo === unidadBaseInsumo
+      ? cantidadBase
+      : (contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0);
+
+  return {
+    cantidadBase,
+    cantidadUnidades,
+    unidadConsumo,
+    unidadBaseInsumo,
+  };
+};
+
+const convertirConsumoRegistradoAUnidades = (consumo = {}, insumo = {}) => {
+  const cantidadBase = Number(consumo?.cantidad_base) || 0;
+  if (!cantidadBase) return 0;
+
+  const unidadConsumo = normalizarUnidadBase(consumo?.unidad_base, insumo?.unidad_base || 'UND');
+  const unidadBaseInsumo = normalizarUnidadBase(insumo?.unidad_base, 'UND');
+  if (unidadConsumo === unidadBaseInsumo) {
+    return Number(cantidadBase.toFixed(4));
+  }
+
+  const contenido = normalizarContenidoPorUnidad(insumo?.contenido_por_unidad, 1);
+  return contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
+};
+
 const obtenerCostosRecetaPorProductos = async (productoIds, negocioId) => {
   if (!Array.isArray(productoIds) || productoIds.length === 0) {
     return new Map();
@@ -8331,7 +8374,7 @@ const obtenerCostosRecetaPorProductos = async (productoIds, negocioId) => {
 const revertirConsumoInsumosPorPedido = async (pedidoId, negocioId) => {
   const consumos = await db.all(
     `
-      SELECT insumo_id, cantidad_base
+      SELECT insumo_id, cantidad_base, unidad_base
       FROM consumo_insumos
       WHERE pedido_id = ? AND negocio_id = ? AND COALESCE(revertido, 0) = 0
     `,
@@ -8351,7 +8394,9 @@ const revertirConsumoInsumosPorPedido = async (pedidoId, negocioId) => {
 
   const placeholders = insumoIds.map(() => '?').join(', ');
   const insumos = await db.all(
-    `SELECT id, stock_indefinido, contenido_por_unidad FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
+    `SELECT id, stock_indefinido, contenido_por_unidad, unidad_base
+       FROM productos
+      WHERE negocio_id = ? AND id IN (${placeholders})`,
     [negocioId, ...insumoIds]
   );
   const insumosMap = new Map((insumos || []).map((insumo) => [Number(insumo.id), insumo]));
@@ -8362,9 +8407,7 @@ const revertirConsumoInsumosPorPedido = async (pedidoId, negocioId) => {
     if (!Number.isFinite(insumoId)) return;
     const insumo = insumosMap.get(insumoId);
     if (!insumo || esStockIndefinido(insumo)) return;
-    const contenido = normalizarContenidoPorUnidad(insumo.contenido_por_unidad, 1);
-    const cantidadBase = Number(consumo.cantidad_base) || 0;
-    const cantidadUnidades = contenido > 0 ? cantidadBase / contenido : 0;
+    const cantidadUnidades = convertirConsumoRegistradoAUnidades(consumo, insumo);
     const acumulado = totals.get(insumoId) || 0;
     totals.set(insumoId, Number((acumulado + cantidadUnidades).toFixed(4)));
   });
@@ -14223,20 +14266,21 @@ app.put('/api/pedidos/:id', (req, res) => {
                 `La receta de ${item.nombre || item.producto_id} tiene insumos invalidos.`
               );
             }
-            const cantidadBase = Number((item.cantidad * (Number(detalle.cantidad) || 0)).toFixed(4));
-            if (!cantidadBase) {
+            const consumoCalculado = calcularConsumoRecetaDetalle(detalle, item.cantidad);
+            if (!consumoCalculado.cantidadBase) {
               continue;
             }
-            const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
-            const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
             item.consumos.push({
               insumo_id: Number(detalle.insumo_id),
-              cantidad_base: cantidadBase,
-              cantidad_unidades: cantidadUnidades,
-              unidad_base: detalle.unidad_base,
+              cantidad_base: consumoCalculado.cantidadBase,
+              cantidad_unidades: consumoCalculado.cantidadUnidades,
+              unidad_consumo: consumoCalculado.unidadConsumo,
             });
             const acumulado = consumoPorInsumo.get(detalle.insumo_id) || 0;
-            consumoPorInsumo.set(detalle.insumo_id, Number((acumulado + cantidadUnidades).toFixed(4)));
+            consumoPorInsumo.set(
+              detalle.insumo_id,
+              Number((acumulado + consumoCalculado.cantidadUnidades).toFixed(4))
+            );
             if (!insumosMap.has(detalle.insumo_id)) {
               insumosMap.set(detalle.insumo_id, detalle);
             }
@@ -14285,7 +14329,7 @@ app.put('/api/pedidos/:id', (req, res) => {
               producto_final_id: item.producto_id,
               insumo_id: consumo.insumo_id,
               cantidad_base: consumo.cantidad_base,
-              unidad_base: consumo.unidad_base,
+              unidad_base: consumo.unidad_consumo,
             });
           });
         }
@@ -14599,6 +14643,8 @@ app.post('/api/cuentas/:id/detalles/eliminar', (req, res) => {
       const tasaImpuestoFallback = impuestoConfig / 100;
       const tasaPorPedido = new Map();
       const pedidosAfectados = new Set();
+      const productosFifoPorPedido = new Map();
+      const insumosFifoPorPedido = new Map();
 
       for (const detalle of detalles) {
         const cuentaReferencia = Number(detalle.cuenta_id || detalle.pedido_id);
@@ -14638,6 +14684,9 @@ app.post('/api/cuentas/:id/detalles/eliminar', (req, res) => {
             productoId,
             negocioId,
           ]);
+          const productosPedido = productosFifoPorPedido.get(pedidoId) || new Set();
+          productosPedido.add(productoId);
+          productosFifoPorPedido.set(pedidoId, productosPedido);
         }
 
         const consumos = await db.all(
@@ -14645,8 +14694,10 @@ app.post('/api/cuentas/:id/detalles/eliminar', (req, res) => {
             SELECT ci.id,
                    ci.insumo_id,
                    ci.cantidad_base,
+                   ci.unidad_base,
                    COALESCE(pi.stock_indefinido, 0) AS stock_indefinido,
-                   COALESCE(pi.contenido_por_unidad, 1) AS contenido_por_unidad
+                   COALESCE(pi.contenido_por_unidad, 1) AS contenido_por_unidad,
+                   COALESCE(pi.unidad_base, 'UND') AS unidad_base_producto
               FROM consumo_insumos ci
               LEFT JOIN productos pi ON pi.id = ci.insumo_id AND pi.negocio_id = ci.negocio_id
              WHERE ci.detalle_pedido_id = ?
@@ -14662,9 +14713,10 @@ app.post('/api/cuentas/:id/detalles/eliminar', (req, res) => {
           if (!Number.isFinite(insumoId) || insumoId <= 0 || esStockIndefinido(consumo)) {
             return;
           }
-          const contenido = normalizarContenidoPorUnidad(consumo.contenido_por_unidad, 1);
-          const cantidadBase = Number(consumo.cantidad_base) || 0;
-          const cantidadUnidades = contenido > 0 ? cantidadBase / contenido : 0;
+          const cantidadUnidades = convertirConsumoRegistradoAUnidades(consumo, {
+            contenido_por_unidad: consumo.contenido_por_unidad,
+            unidad_base: consumo.unidad_base_producto,
+          });
           const acumulado = reposicionInsumos.get(insumoId) || 0;
           reposicionInsumos.set(insumoId, Number((acumulado + cantidadUnidades).toFixed(4)));
         });
@@ -14676,6 +14728,9 @@ app.post('/api/cuentas/:id/detalles/eliminar', (req, res) => {
             insumoId,
             negocioId,
           ]);
+          const insumosPedido = insumosFifoPorPedido.get(pedidoId) || new Set();
+          insumosPedido.add(insumoId);
+          insumosFifoPorPedido.set(pedidoId, insumosPedido);
         }
 
         await db.run('DELETE FROM consumo_insumos WHERE detalle_pedido_id = ? AND negocio_id = ?', [
@@ -14687,6 +14742,83 @@ app.post('/api/cuentas/:id/detalles/eliminar', (req, res) => {
       }
 
       for (const pedidoId of pedidosAfectados) {
+        const productosAReconsumir = Array.from(productosFifoPorPedido.get(pedidoId) || []);
+        for (const productoId of productosAReconsumir) {
+          await revertirConsumosFIFO({ negocioId, origen: 'venta', origenId: pedidoId, productoId });
+        }
+        if (productosAReconsumir.length) {
+          const placeholdersProductos = productosAReconsumir.map(() => '?').join(', ');
+          const detallesRestantes = await db.all(
+            `
+              SELECT producto_id, SUM(cantidad) AS cantidad_total
+                FROM detalle_pedido
+               WHERE pedido_id = ?
+                 AND negocio_id = ?
+                 AND producto_id IN (${placeholdersProductos})
+               GROUP BY producto_id
+            `,
+            [pedidoId, negocioId, ...productosAReconsumir]
+          );
+          for (const row of detallesRestantes || []) {
+            const productoId = Number(row.producto_id);
+            const cantidadTotal = Number(row.cantidad_total) || 0;
+            if (!Number.isFinite(productoId) || cantidadTotal <= 0) continue;
+            await consumirStockFIFO({
+              productoId,
+              cantidad: cantidadTotal,
+              negocioId,
+              origen: 'venta',
+              origenId: pedidoId,
+            });
+          }
+        }
+
+        const insumosAReconsumir = Array.from(insumosFifoPorPedido.get(pedidoId) || []);
+        for (const insumoId of insumosAReconsumir) {
+          await revertirConsumosFIFO({ negocioId, origen: 'produccion', origenId: pedidoId, productoId: insumoId });
+        }
+        if (insumosAReconsumir.length) {
+          const placeholdersInsumos = insumosAReconsumir.map(() => '?').join(', ');
+          const consumosRestantes = await db.all(
+            `
+              SELECT ci.insumo_id,
+                     ci.cantidad_base,
+                     ci.unidad_base,
+                     COALESCE(pi.contenido_por_unidad, 1) AS contenido_por_unidad,
+                     COALESCE(pi.unidad_base, 'UND') AS unidad_base_producto
+                FROM consumo_insumos ci
+                LEFT JOIN productos pi ON pi.id = ci.insumo_id AND pi.negocio_id = ci.negocio_id
+               WHERE ci.pedido_id = ?
+                 AND ci.negocio_id = ?
+                 AND COALESCE(ci.revertido, 0) = 0
+                 AND ci.insumo_id IN (${placeholdersInsumos})
+            `,
+            [pedidoId, negocioId, ...insumosAReconsumir]
+          );
+          const cantidadesRestantesPorInsumo = new Map();
+          for (const consumo of consumosRestantes || []) {
+            const insumoId = Number(consumo.insumo_id);
+            if (!Number.isFinite(insumoId) || insumoId <= 0) continue;
+            const cantidadUnidades = convertirConsumoRegistradoAUnidades(consumo, {
+              contenido_por_unidad: consumo.contenido_por_unidad,
+              unidad_base: consumo.unidad_base_producto,
+            });
+            if (!cantidadUnidades) continue;
+            const acumulado = cantidadesRestantesPorInsumo.get(insumoId) || 0;
+            cantidadesRestantesPorInsumo.set(insumoId, Number((acumulado + cantidadUnidades).toFixed(4)));
+          }
+          for (const [insumoId, cantidadTotal] of cantidadesRestantesPorInsumo.entries()) {
+            if (!cantidadTotal) continue;
+            await consumirStockFIFO({
+              productoId: insumoId,
+              cantidad: cantidadTotal,
+              negocioId,
+              origen: 'produccion',
+              origenId: pedidoId,
+            });
+          }
+        }
+
         const tasa = tasaPorPedido.get(pedidoId) ?? tasaImpuestoFallback;
         const resultado = await recalcularTotalesPedido(pedidoId, negocioId, {
           tasaImpuesto: tasa,
@@ -16033,20 +16165,21 @@ app.post('/api/pedidos', (req, res) => {
                 error: `La receta de ${item.nombre || item.producto_id} tiene insumos invalidos.`,
               });
             }
-            const cantidadBase = Number((item.cantidad * (Number(detalle.cantidad) || 0)).toFixed(4));
-            if (!cantidadBase) {
+            const consumoCalculado = calcularConsumoRecetaDetalle(detalle, item.cantidad);
+            if (!consumoCalculado.cantidadBase) {
               continue;
             }
-            const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
-            const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
             item.consumos.push({
               insumo_id: Number(detalle.insumo_id),
-              cantidad_base: cantidadBase,
-              cantidad_unidades: cantidadUnidades,
-              unidad_base: detalle.unidad_base,
+              cantidad_base: consumoCalculado.cantidadBase,
+              cantidad_unidades: consumoCalculado.cantidadUnidades,
+              unidad_consumo: consumoCalculado.unidadConsumo,
             });
             const acumulado = consumoPorInsumo.get(detalle.insumo_id) || 0;
-            consumoPorInsumo.set(detalle.insumo_id, Number((acumulado + cantidadUnidades).toFixed(4)));
+            consumoPorInsumo.set(
+              detalle.insumo_id,
+              Number((acumulado + consumoCalculado.cantidadUnidades).toFixed(4))
+            );
             if (!insumosMap.has(detalle.insumo_id)) {
               insumosMap.set(detalle.insumo_id, detalle);
             }
@@ -16185,7 +16318,7 @@ app.post('/api/pedidos', (req, res) => {
               producto_final_id: item.producto_id,
               insumo_id: consumo.insumo_id,
               cantidad_base: consumo.cantidad_base,
-              unidad_base: consumo.unidad_base,
+              unidad_base: consumo.unidad_consumo,
             });
           });
         }
@@ -25890,10 +26023,8 @@ const calcularConsumoInsumosPorProductos = async (itemsPorProducto, negocioId) =
       if (detalle.tipo_producto !== 'INSUMO') {
         return;
       }
-      const cantidadBase = Number((Number(cantidadProducto) * (Number(detalle.cantidad) || 0)).toFixed(4));
-      if (!cantidadBase) return;
-      const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
-      const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
+      const consumoCalculado = calcularConsumoRecetaDetalle(detalle, cantidadProducto);
+      const cantidadUnidades = consumoCalculado.cantidadUnidades;
       if (!cantidadUnidades) return;
       const acumulado = consumoPorInsumo.get(detalle.insumo_id) || 0;
       consumoPorInsumo.set(detalle.insumo_id, Number((acumulado + cantidadUnidades).toFixed(4)));
@@ -26347,9 +26478,7 @@ const obtenerCatalogoMenuPublico = async (negocioId) => {
           if (esStockIndefinido(detalle)) {
             continue;
           }
-          const cantidadBase = Number(detalle.cantidad) || 0;
-          const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
-          const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
+          const cantidadUnidades = calcularConsumoRecetaDetalle(detalle, 1).cantidadUnidades;
           const stockDisponible = Number(detalle.stock) || 0;
           if (cantidadUnidades > stockDisponible) {
             disponible = false;
@@ -26535,17 +26664,15 @@ const prepararItemsPedidoMenuPublico = async (
           if (detalle.tipo_producto !== 'INSUMO') {
             throw crearErrorEstado(400, `La receta de ${item.nombre || item.producto_id} tiene insumos invalidos.`);
           }
-          const cantidadBase = Number((item.cantidad * (Number(detalle.cantidad) || 0)).toFixed(4));
-          if (!cantidadBase) {
+          const consumoCalculado = calcularConsumoRecetaDetalle(detalle, item.cantidad);
+          if (!consumoCalculado.cantidadBase) {
             continue;
           }
-          const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
-          const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
           item.consumos.push({
             insumo_id: Number(detalle.insumo_id),
-            cantidad_base: cantidadBase,
-            cantidad_unidades: cantidadUnidades,
-            unidad_base: detalle.unidad_base,
+            cantidad_base: consumoCalculado.cantidadBase,
+            cantidad_unidades: consumoCalculado.cantidadUnidades,
+            unidad_consumo: consumoCalculado.unidadConsumo,
           });
         }
       }
@@ -26723,7 +26850,7 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
             producto_final_id: item.producto_id,
             insumo_id: consumo.insumo_id,
             cantidad_base: consumo.cantidad_base,
-            unidad_base: consumo.unidad_base,
+            unidad_base: consumo.unidad_consumo,
           });
         });
       }
@@ -27910,8 +28037,89 @@ app.put('/api/categorias/:id', (req, res) => {
   });
 });
 
+const resolverCostoUnitarioParaLote = (producto = {}) => {
+  const candidatos = [
+    producto?.costo_promedio_actual,
+    producto?.costo_unitario_real,
+    producto?.costo_base_sin_itbis,
+    producto?.ultimo_costo_sin_itbis,
+  ];
+  for (const valor of candidatos) {
+    const numero = Number(valor);
+    if (Number.isFinite(numero) && numero > 0) {
+      return Number(numero.toFixed(4));
+    }
+  }
+  return 0;
+};
+
+const registrarEntradaStockEnLotes = async ({
+  negocioId,
+  productoId,
+  cantidad,
+  producto = {},
+  origen = 'ajuste_manual',
+  observaciones = null,
+}) => {
+  const cantidadNumerica = Number(cantidad);
+  if (!Number.isFinite(cantidadNumerica) || cantidadNumerica <= 0) return;
+
+  await db.run(
+    `INSERT INTO inventario_lotes
+      (negocio_id, producto_id, cantidad_inicial, cantidad_restante, costo_unitario,
+       costo_unitario_incluye_itbis, fecha, origen, observaciones)
+     VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)`,
+    [
+      negocioId,
+      productoId,
+      Number(cantidadNumerica.toFixed(4)),
+      Number(cantidadNumerica.toFixed(4)),
+      resolverCostoUnitarioParaLote(producto),
+      normalizarFlag(producto?.costo_unitario_real_incluye_itbis, 0),
+      origen,
+      observaciones,
+    ]
+  );
+};
+
+const sincronizarDeltaStockConLotes = async ({
+  negocioId,
+  productoId,
+  delta,
+  producto = {},
+  origenConsumo = 'ajuste_manual',
+  origenConsumoId = null,
+  origenEntrada = 'ajuste_manual',
+  observacionesEntrada = null,
+}) => {
+  const deltaNumerico = Number(delta);
+  if (!Number.isFinite(deltaNumerico) || Math.abs(deltaNumerico) <= 0.00005) {
+    return;
+  }
+
+  if (deltaNumerico > 0) {
+    await registrarEntradaStockEnLotes({
+      negocioId,
+      productoId,
+      cantidad: deltaNumerico,
+      producto,
+      origen: origenEntrada,
+      observaciones: observacionesEntrada,
+    });
+    return;
+  }
+
+  await consumirStockFIFO({
+    productoId,
+    cantidad: Math.abs(deltaNumerico),
+    negocioId,
+    origen: origenConsumo,
+    origenId: origenConsumoId,
+  });
+};
+
 app.post('/api/productos', (req, res) => {
-  requireUsuarioSesion(req, res, (usuarioSesion) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const { nombre, precio, stock, categoria_id } = req.body;
     const imageUrlValidacion = validarUrlHttpPublica(req.body?.image_url ?? req.body?.imageUrl, 'La imagen del producto', { permitirImagenInline: true });
     const preciosEntrada = req.body.precios ?? req.body.preciosLista ?? req.body.precios_lista;
@@ -28020,14 +28228,34 @@ app.post('/api/productos', (req, res) => {
       usuarioSesion.negocio_id,
     ];
 
-    db.run(sql, params, function (err) {
-      if (err) {
-        console.error('Error al crear producto:', err.message);
-        return res.status(500).json({ error: 'Error al crear producto' });
+    try {
+      await db.run('BEGIN');
+      const insertResult = await db.run(sql, params);
+      const productoId = insertResult?.lastID;
+      if (!productoId) {
+        throw new Error('No se pudo crear el producto.');
       }
 
-      res.status(201).json({
-        id: this.lastID,
+      if (!stockIndefinido && Number(stockFinal) > 0) {
+        await registrarEntradaStockEnLotes({
+          negocioId: usuarioSesion.negocio_id,
+          productoId,
+          cantidad: Number(stockFinal),
+          producto: {
+            costo_promedio_actual: costoBaseValor,
+            costo_unitario_real: costoUnitarioRealValor,
+            costo_base_sin_itbis: costoBaseValor,
+            ultimo_costo_sin_itbis: costoBaseValor,
+            costo_unitario_real_incluye_itbis: costoUnitarioRealIncluyeItbis,
+          },
+          origen: 'creacion_producto',
+          observaciones: 'Lote inicial creado al registrar el producto.',
+        });
+      }
+
+      await db.run('COMMIT');
+      return res.status(201).json({
+        id: productoId,
         nombre,
         image_url: imageUrlValidacion.valor,
         precio: precioValor,
@@ -28050,7 +28278,11 @@ app.post('/api/productos', (req, res) => {
         categoria_id: categoriaId || null,
         activo: 1,
       });
-    });
+    } catch (error) {
+      await db.run('ROLLBACK').catch(() => {});
+      console.error('Error al crear producto:', error?.message || error);
+      return res.status(500).json({ error: 'Error al crear producto' });
+    }
   });
 });
 
@@ -28353,6 +28585,28 @@ app.put('/api/productos/:id', (req, res) => {
           params.push(stockValor);
         }
 
+        const costoBaseFinal = costoBaseProporcionado
+          ? Number(costoBaseValor.toFixed(2))
+          : Number(productoActual.costo_base_sin_itbis) || 0;
+        const costoPromedioFinal =
+          costoBaseProporcionado &&
+          Number((Number(productoActual.costo_promedio_actual) || 0).toFixed(2)) ===
+            Number((Number(productoActual.costo_base_sin_itbis) || 0).toFixed(2))
+            ? Number(costoBaseValor.toFixed(2))
+            : Number(productoActual.costo_promedio_actual) || 0;
+        const ultimoCostoFinal =
+          costoBaseProporcionado &&
+          Number((Number(productoActual.ultimo_costo_sin_itbis) || 0).toFixed(2)) === 0
+            ? Number(costoBaseValor.toFixed(2))
+            : Number(productoActual.ultimo_costo_sin_itbis) || 0;
+        const costoUnitarioRealFinal = costoUnitarioRealProporcionado
+          ? Number(costoUnitarioRealValor.toFixed(2))
+          : Number(productoActual.costo_unitario_real) || 0;
+        const costoUnitarioRealIncluyeItbisFinal =
+          costoUnitarioRealIncluyeItbis !== null
+            ? costoUnitarioRealIncluyeItbis
+            : Number(productoActual.costo_unitario_real_incluye_itbis) || 0;
+
         const sql = `
           UPDATE productos
           SET ${campos.join(', ')}
@@ -28361,17 +28615,38 @@ app.put('/api/productos/:id', (req, res) => {
 
         params.push(id, usuarioSesion.negocio_id);
 
-        db.run(sql, params, function (err) {
-          if (err) {
-            console.error('Error al actualizar producto:', err.message);
-            return res.status(500).json({ error: 'Error al actualizar producto' });
-          }
-
-          if (this.changes === 0) {
+        try {
+          await db.run('BEGIN');
+          const updateResult = await db.run(sql, params);
+          if ((updateResult?.changes || 0) === 0) {
+            await db.run('ROLLBACK').catch(() => {});
             return res.status(404).json({ error: 'Producto no encontrado' });
           }
 
-          res.json({
+          if (!stockIndefinido && stockProporcionado) {
+            const stockAnteriorNormalizado = Number(productoActual.stock) || 0;
+            const stockNuevoNormalizado = Number(stockValor) || 0;
+            const deltaStock = Number((stockNuevoNormalizado - stockAnteriorNormalizado).toFixed(4));
+            await sincronizarDeltaStockConLotes({
+              negocioId: usuarioSesion.negocio_id,
+              productoId: Number(id),
+              delta: deltaStock,
+              producto: {
+                costo_base_sin_itbis: costoBaseFinal,
+                costo_promedio_actual: costoPromedioFinal,
+                ultimo_costo_sin_itbis: ultimoCostoFinal,
+                costo_unitario_real: costoUnitarioRealFinal,
+                costo_unitario_real_incluye_itbis: costoUnitarioRealIncluyeItbisFinal,
+              },
+              origenConsumo: 'ajuste_manual',
+              origenConsumoId: Number(id),
+              origenEntrada: 'ajuste_manual',
+              observacionesEntrada: 'Lote creado por actualizacion manual del producto.',
+            });
+          }
+
+          await db.run('COMMIT');
+          return res.json({
             ok: true,
             message: 'Producto actualizado correctamente',
             stock_indefinido: stockIndefinido,
@@ -28379,7 +28654,11 @@ app.put('/api/productos/:id', (req, res) => {
             visible_menu_qr:
               visibleMenuQr !== null ? visibleMenuQr : Number(productoActual.visible_menu_qr ?? 1),
           });
-        });
+        } catch (errorActualizacion) {
+          await db.run('ROLLBACK').catch(() => {});
+          console.error('Error al actualizar producto:', errorActualizacion?.message || errorActualizacion);
+          return res.status(500).json({ error: 'Error al actualizar producto' });
+        }
       }
     );
   });
@@ -34522,20 +34801,21 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
             if (detalle.tipo_producto !== 'INSUMO') {
               return;
             }
-            const cantidadBase = Number((item.cantidad * (Number(detalle.cantidad) || 0)).toFixed(4));
-            if (!cantidadBase) {
+            const consumoCalculado = calcularConsumoRecetaDetalle(detalle, item.cantidad);
+            if (!consumoCalculado.cantidadBase) {
               return;
             }
-            const contenido = normalizarContenidoPorUnidad(detalle.contenido_por_unidad, 1);
-            const cantidadUnidades = contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
             consumos.push({
               insumo_id: Number(detalle.insumo_id),
-              cantidad_base: cantidadBase,
-              cantidad_unidades: cantidadUnidades,
-              unidad_base: detalle.unidad_base,
+              cantidad_base: consumoCalculado.cantidadBase,
+              cantidad_unidades: consumoCalculado.cantidadUnidades,
+              unidad_consumo: consumoCalculado.unidadConsumo,
             });
             const acumulado = consumoPorInsumo.get(detalle.insumo_id) || 0;
-            consumoPorInsumo.set(detalle.insumo_id, Number((acumulado + cantidadUnidades).toFixed(4)));
+            consumoPorInsumo.set(
+              detalle.insumo_id,
+              Number((acumulado + consumoCalculado.cantidadUnidades).toFixed(4))
+            );
             if (!insumosMap.has(detalle.insumo_id)) {
               insumosMap.set(detalle.insumo_id, detalle);
             }
@@ -34648,7 +34928,7 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
               producto_final_id: item.producto_id,
               insumo_id: consumo.insumo_id,
               cantidad_base: consumo.cantidad_base,
-              unidad_base: consumo.unidad_base,
+              unidad_base: consumo.unidad_consumo,
             });
           });
         }

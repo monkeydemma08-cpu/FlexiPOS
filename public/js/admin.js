@@ -2934,11 +2934,34 @@ const cerrarInventarioModal = () => {
 };
 
 const esProductoStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
+const usaStockReceta = (producto) =>
+  Number(producto?.stock_calculado_por_receta) === 1 &&
+  Number.isFinite(Number(producto?.stock_disponible_receta));
 const esProductoInsumo = (producto) =>
   String(producto?.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
 const esProductoVendible = (producto) => {
   if (!producto) return false;
   return !esProductoInsumo(producto) || Number(producto.insumo_vendible) === 1;
+};
+
+const obtenerStockDisponibleAdmin = (producto) => {
+  if (usaStockReceta(producto)) {
+    const valor = Number(producto?.stock_disponible_receta);
+    return Number.isFinite(valor) ? Math.max(0, valor) : 0;
+  }
+  if (esProductoStockIndefinido(producto)) return Infinity;
+  const valor = Number(producto?.stock);
+  return Number.isFinite(valor) ? valor : 0;
+};
+
+const obtenerTextoStockAdmin = (producto, { mayusculas = false } = {}) => {
+  if (usaStockReceta(producto)) {
+    return `${formatNumber(obtenerStockDisponibleAdmin(producto))} (receta)`;
+  }
+  if (esProductoStockIndefinido(producto)) {
+    return mayusculas ? 'SIN LIMITE' : 'Indefinido';
+  }
+  return formatNumber(obtenerStockDisponibleAdmin(producto));
 };
 
 const obtenerCostoProducto = (producto) => {
@@ -2957,8 +2980,14 @@ const obtenerCostoProducto = (producto) => {
 };
 
 const obtenerEstadoStockAdmin = (producto) => {
+  if (usaStockReceta(producto)) {
+    const stockReceta = obtenerStockDisponibleAdmin(producto);
+    if (stockReceta <= 0) return 'critico';
+    if (stockReceta <= ADMIN_STOCK_BAJO) return 'bajo';
+    return 'ok';
+  }
   if (esProductoStockIndefinido(producto)) return 'indef';
-  const stock = Number(producto?.stock || 0);
+  const stock = obtenerStockDisponibleAdmin(producto);
   if (stock <= 0) return 'critico';
   if (stock <= ADMIN_STOCK_BAJO) return 'bajo';
   return 'ok';
@@ -2971,14 +3000,14 @@ const actualizarResumenInventario = () => {
       const estadoStock = obtenerEstadoStockAdmin(item);
       if (estadoStock === 'critico') acc.critico += 1;
       if (estadoStock === 'bajo') acc.bajo += 1;
-      if (estadoStock !== 'indef') {
+      if (estadoStock !== 'indef' && !usaStockReceta(item)) {
         // Preferimos el valor real desde los lotes FIFO (Fase 5). Si no esta
         // disponible (data legacy sin lotes), caemos al calculo stock * costo.
         const valorLotes = Number(item?.valor_inventario_lotes);
         if (Number.isFinite(valorLotes) && valorLotes > 0) {
           acc.valor += valorLotes;
         } else {
-          const stock = Number(item?.stock || 0);
+          const stock = obtenerStockDisponibleAdmin(item);
           acc.valor += stock * obtenerCostoProducto(item);
         }
       }
@@ -3535,9 +3564,7 @@ const renderProductos = (lista = []) => {
       const estadoLabel = activo ? 'Activo' : 'Inactivo';
       const costo = formatCurrency(obtenerCostoProducto(producto));
       const precio = formatCurrency(producto.precio || 0);
-      const stockTexto = esProductoStockIndefinido(producto)
-        ? 'SIN LIMITE'
-        : formatNumber(Number.isFinite(Number(producto.stock)) ? Number(producto.stock) : 0);
+      const stockTexto = obtenerTextoStockAdmin(producto, { mayusculas: true });
       const badgeClass =
         estadoStock === 'critico'
           ? 'inventario-stock-badge stock-critico'
@@ -3549,7 +3576,7 @@ const renderProductos = (lista = []) => {
       // El boton "Lotes" solo tiene sentido para productos con stock fisico
       // (INSUMO o FINAL de reventa). Para productos finales preparados (stock_indefinido)
       // no aplica: su "stock" se calcula desde la receta.
-      const tieneStockFisico = !esProductoStockIndefinido(producto);
+      const tieneStockFisico = !esProductoStockIndefinido(producto) && !usaStockReceta(producto);
       const botonLotesHtml = tieneStockFisico
         ? `<button type="button" class="kanm-button ghost sm" data-admin-inventario-action="ver-lotes" data-id="${producto.id}" title="Ver lotes FIFO de este producto">
               Lotes
@@ -3599,11 +3626,7 @@ const renderProductosVistaCompleta = (lista) => {
     const activo = Number(producto.activo) === 1;
     const esInsumo = esProductoInsumo(producto);
     const esVendible = esProductoVendible(producto);
-    const stockEsIndefinido = esProductoStockIndefinido(producto);
-    const stockValor = Number(producto.stock ?? 0);
-    const stockTexto = stockEsIndefinido
-      ? 'Indefinido'
-      : formatNumber(Number.isFinite(stockValor) ? stockValor : 0);
+    const stockTexto = obtenerTextoStockAdmin(producto);
     const costo = obtenerCostoProducto(producto);
     const costoLabel = producto.costo_unitario_real_calculado ? 'Costo real (receta)' : 'Costo real';
     const categoriaNombre = producto.categoria_nombre ?? 'Sin asignar';
@@ -3801,7 +3824,10 @@ const filtrarProductos = () => {
   if (stockFiltro) {
     lista = lista.filter((p) => {
       if (stockFiltro === 'sin_stock') {
-        return !esProductoStockIndefinido(p) && Number(p.stock || 0) <= 0;
+        if (usaStockReceta(p)) {
+          return obtenerStockDisponibleAdmin(p) <= 0;
+        }
+        return !esProductoStockIndefinido(p) && obtenerStockDisponibleAdmin(p) <= 0;
       }
       return obtenerEstadoStockAdmin(p) === stockFiltro;
     });
