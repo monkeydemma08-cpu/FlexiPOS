@@ -12956,10 +12956,11 @@ app.get('/api/productos', (req, res) => {
         const stockEnLotes = valorLote ? Number(valorLote.stock_lotes.toFixed(4)) : 0;
 
         // Si el producto tiene receta y al menos un insumo con stock controlado,
-        // calculamos cuantas unidades pueden prepararse y exponemos:
-        //   - stock_disponible_receta: cuantas pueden prepararse hoy
-        //   - stock_calculado_por_receta: 1 (marca para que el frontend lo trate como
-        //     stock real en vez de "Sin limite").
+        // exponemos `stock_disponible_receta` (informativo). NO sobreescribimos
+        // `stock` ni `stock_indefinido`: la validacion real de stock al vender la
+        // hace el backend revisando insumo por insumo (con mensajes especificos).
+        // Si sobreescribieramos aqui, el frontend bloquearia con un mensaje generico
+        // y perderiamos la info de cual insumo falta.
         const stockRecetaCalc = stockReceta.get(productoId);
         const tieneStockReceta = tieneReceta === 1 && Number.isFinite(stockRecetaCalc);
 
@@ -12972,12 +12973,9 @@ app.get('/api/productos', (req, res) => {
         if (tieneStockReceta) {
           extras.stock_disponible_receta = stockRecetaCalc;
           extras.stock_calculado_por_receta = 1;
-          // Sobreescribimos stock para que el frontend (mostrador, caja, KDS) muestre
-          // el stock real disponible en lugar de "Sin limite" o el valor crudo de DB.
-          // El flag stock_indefinido pasa a 0 logicamente para este producto en la
-          // respuesta (su stock real es el calculado).
-          extras.stock = stockRecetaCalc;
-          extras.stock_indefinido = 0;
+          // NOTA: dejamos stock y stock_indefinido como vienen de DB. El frontend
+          // puede LEER stock_disponible_receta para mostrar info pero NO debe usarlo
+          // para bloquear ventas. El backend valida insumos exactos al cerrar pedido.
         }
 
         if (costoReceta !== undefined) {
