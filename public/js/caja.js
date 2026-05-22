@@ -502,10 +502,24 @@ const abrirOImprimirFactura = (url, options = {}) => {
         try {
           const doc = iframe.contentDocument || iframe.contentWindow?.document;
           if (doc?.body && options.duplicar !== false) {
-            // Duplicamos el contenido con page-break para imprimir 2 tickets de una.
+            // Duplicamos el contenido envolviendo cada copia en un wrapper con
+            // page-break-after para forzar nueva pagina/corte entre tickets.
+            // Importante: la 2da copia NO lleva page-break-after para no generar
+            // una pagina vacia adicional al final.
             const contenidoOriginal = doc.body.innerHTML;
-            const separador = '<div style="page-break-before:always;height:0;line-height:0;"></div>';
-            doc.body.innerHTML = contenidoOriginal + separador + contenidoOriginal;
+            const styleCopia1 =
+              'display:block;break-after:page;page-break-after:always;-webkit-column-break-after:always;';
+            const styleCopia2 = 'display:block;';
+            doc.body.innerHTML =
+              `<div style="${styleCopia1}">${contenidoOriginal}</div>` +
+              `<div style="${styleCopia2}">${contenidoOriginal}</div>`;
+            // Inyectar @media print con reglas defensivas para que los navegadores
+            // mas estrictos respeten el corte.
+            const styleEl = doc.createElement('style');
+            styleEl.textContent =
+              '@media print { html, body { margin:0 !important; padding:0 !important; } ' +
+              'body > div { break-inside: avoid; page-break-inside: avoid; } }';
+            doc.head.appendChild(styleEl);
           }
           iframe.contentWindow.focus();
           iframe.contentWindow.print();

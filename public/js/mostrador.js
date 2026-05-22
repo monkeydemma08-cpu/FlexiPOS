@@ -32,8 +32,15 @@ const abrirOImprimirFactura = (url, options = {}) => {
           const doc = iframe.contentDocument || iframe.contentWindow?.document;
           if (doc?.body && options.duplicar !== false) {
             const c = doc.body.innerHTML;
+            const styleCopia1 =
+              'display:block;break-after:page;page-break-after:always;-webkit-column-break-after:always;';
             doc.body.innerHTML =
-              c + '<div style="page-break-before:always;height:0;line-height:0;"></div>' + c;
+              `<div style="${styleCopia1}">${c}</div><div style="display:block;">${c}</div>`;
+            const styleEl = doc.createElement('style');
+            styleEl.textContent =
+              '@media print { html, body { margin:0 !important; padding:0 !important; } ' +
+              'body > div { break-inside: avoid; page-break-inside: avoid; } }';
+            doc.head.appendChild(styleEl);
           }
           iframe.contentWindow.focus();
           iframe.contentWindow.print();
