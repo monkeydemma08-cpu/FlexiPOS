@@ -3482,6 +3482,10 @@ const seleccionarProductoEdicion = (producto) => {
         ? ''
         : formatNumberInput(contenidoValor, 2);
   }
+  const selectContenidoUnidad = document.getElementById('prod-contenido-unidad-medida');
+  if (selectContenidoUnidad) {
+    selectContenidoUnidad.value = producto.contenido_unidad || '';
+  }
   if (inputProdActualizaCostoCompras) inputProdActualizaCostoCompras.checked = actualizaCostoCompras;
   if (inputProdVisibleMenuQr) {
     const visibleMenuQrValor = producto.visible_menu_qr ?? producto.visibleMenuQr;
@@ -4505,6 +4509,11 @@ const crearProducto = async ({
     insumo_vendible: insumoVendible ? 1 : 0,
     unidad_base: unidadBase,
     contenido_por_unidad: Number(contenidoPorUnidad.toFixed(4)),
+    contenido_unidad: (() => {
+      const sel = document.getElementById('prod-contenido-unidad-medida');
+      const v = sel?.value?.trim() || '';
+      return v || null;
+    })(),
     actualiza_costo_con_compras: actualizaCostoCompras ? 1 : 0,
     visible_menu_qr: visibleMenuQr === false ? 0 : 1,
     sabores: Array.isArray(sabores) ? sabores : [],
@@ -4566,6 +4575,11 @@ const actualizarProducto = async (
     insumo_vendible: insumoVendible ? 1 : 0,
     unidad_base: unidadBase,
     contenido_por_unidad: Number(contenidoPorUnidad.toFixed(4)),
+    contenido_unidad: (() => {
+      const sel = document.getElementById('prod-contenido-unidad-medida');
+      const v = sel?.value?.trim() || '';
+      return v || null;
+    })(),
     actualiza_costo_con_compras: actualizaCostoCompras ? 1 : 0,
     visible_menu_qr: visibleMenuQr === false ? 0 : 1,
     sabores: Array.isArray(sabores) ? sabores : [],

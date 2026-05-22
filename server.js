@@ -8262,7 +8262,10 @@ const obtenerCostosRecetaPorProductos = async (productoIds, negocioId) => {
     `
       SELECT r.producto_final_id,
              rd.cantidad,
+             rd.unidad AS unidad_receta,
              rd.insumo_id,
+             i.unidad_base,
+             i.contenido_unidad,
              COALESCE(i.costo_unitario_real, 0) AS costo_unitario_real,
              COALESCE(i.costo_promedio_actual, 0) AS costo_promedio_actual,
              COALESCE(i.contenido_por_unidad, 1) AS contenido_por_unidad,
@@ -8289,23 +8292,33 @@ const obtenerCostosRecetaPorProductos = async (productoIds, negocioId) => {
     if (!Number.isFinite(productoId)) return;
     const cantidadReceta = Number(row.cantidad) || 0;
 
-    // 1) Preferimos el costo del lote FIFO actual del insumo.
-    //    El costo del lote esta en "por unidad base" (gracias al guardado en Fase 4),
-    //    y la cantidad de la receta tambien esta en unidad base, asi que multiplicamos directo.
+    // Si la unidad de la receta NO coincide con la unidad_base del insumo,
+    // asumimos que la receta usa la "contenido_unidad" del insumo y necesitamos
+    // convertir el costo (que esta por unidad_base) al costo por contenido_unidad.
+    // Ej: chinola lote $50/UND, contenido=30 GR/UND. Receta "30 GR" → 30 * (50/30) = $50.
+    const contenido = normalizarContenidoPorUnidad(row.contenido_por_unidad, 1);
+    const unidadReceta = String(row.unidad_receta || '').toUpperCase();
+    const unidadBase = String(row.unidad_base || 'UND').toUpperCase();
+    const recetaEnUnidadBase = unidadReceta === unidadBase;
+
+    // 1) Preferimos el costo del lote FIFO actual del insumo (por unidad_base).
     const costoLote = Number(row.costo_lote_actual);
     let costoInsumo;
     if (Number.isFinite(costoLote) && costoLote > 0) {
-      costoInsumo = cantidadReceta * costoLote;
+      const costoPorUnidadDeReceta = recetaEnUnidadBase
+        ? costoLote
+        : (contenido > 0 ? costoLote / contenido : costoLote);
+      costoInsumo = cantidadReceta * costoPorUnidadDeReceta;
     } else {
-      // 2) Fallback: costo historico del producto. Aqui si dividimos por contenido_por_unidad
-      //    porque puede venir en costo por unidad de compra (data legacy).
-      const contenido = normalizarContenidoPorUnidad(row.contenido_por_unidad, 1);
+      // 2) Fallback: costo historico del producto.
       let costoBase = Number(row.costo_unitario_real) || 0;
       if (costoBase <= 0) {
         costoBase = Number(row.costo_promedio_actual) || 0;
       }
-      const costoUnitario = contenido > 0 ? costoBase / contenido : costoBase;
-      costoInsumo = cantidadReceta * costoUnitario;
+      const costoPorUnidadDeReceta = recetaEnUnidadBase
+        ? costoBase
+        : (contenido > 0 ? costoBase / contenido : costoBase);
+      costoInsumo = cantidadReceta * costoPorUnidadDeReceta;
     }
 
     const acumulado = costosMap.get(productoId) || 0;
@@ -12794,7 +12807,7 @@ app.get('/api/productos', (req, res) => {
         SELECT p.id, p.nombre, p.image_url, p.precio, p.precios, p.stock, p.stock_indefinido, p.activo, p.categoria_id,
                p.costo_base_sin_itbis, p.costo_promedio_actual, p.ultimo_costo_sin_itbis,
                p.actualiza_costo_con_compras, p.costo_unitario_real, p.costo_unitario_real_incluye_itbis,
-               p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad,
+               p.tipo_producto, p.insumo_vendible, p.unidad_base, p.contenido_por_unidad, p.contenido_unidad,
                COALESCE(p.visible_menu_qr, 1) AS visible_menu_qr,
                p.sabores,
                c.nombre AS categoria_nombre
@@ -12865,9 +12878,22 @@ app.get('/api/productos', (req, res) => {
       // Solo cuentan insumos con stock_indefinido = 0 (los infinitos no limitan).
       let stockReceta = new Map();
       try {
+        // Si la receta usa unidad_base del insumo (ej: "1 UND de chinola"),
+        // FLOOR(stock / cantidad) basta. Si usa contenido_unidad (ej: "30 GR de chinola"),
+        // multiplicamos el stock por contenido_por_unidad para llevarlo a la unidad
+        // de la receta antes de dividir.
         const filasStock = await db.all(
           `SELECT r.producto_final_id,
-                  MIN(FLOOR(COALESCE(i.stock, 0) / NULLIF(rd.cantidad, 0))) AS stock_calc
+                  MIN(
+                    FLOOR(
+                      CASE
+                        WHEN UPPER(rd.unidad) = UPPER(i.unidad_base)
+                          THEN COALESCE(i.stock, 0) / NULLIF(rd.cantidad, 0)
+                        ELSE (COALESCE(i.stock, 0) * COALESCE(i.contenido_por_unidad, 1))
+                             / NULLIF(rd.cantidad, 0)
+                      END
+                    )
+                  ) AS stock_calc
              FROM recetas r
              INNER JOIN receta_detalle rd ON rd.receta_id = r.id
              INNER JOIN productos i ON i.id = rd.insumo_id AND i.negocio_id = r.negocio_id
@@ -27913,6 +27939,13 @@ app.post('/api/productos', (req, res) => {
       req.body.contenido_por_unidad ?? req.body.contenidoPorUnidad,
       1
     );
+    // contenido_unidad: unidad en la que se expresa contenido_por_unidad. Permite
+    // que el insumo guarde "1 UND = 30 GR" (chinola). NULL si la receta usa unidad_base.
+    const contenidoUnidadInput = req.body.contenido_unidad ?? req.body.contenidoUnidad;
+    let contenidoUnidad = null;
+    if (contenidoUnidadInput !== undefined && contenidoUnidadInput !== null && String(contenidoUnidadInput).trim() !== '') {
+      contenidoUnidad = normalizarUnidadBase(contenidoUnidadInput, null);
+    }
     const actualizaCostoCompras = normalizarFlag(
       req.body.actualiza_costo_con_compras ?? req.body.actualizaCostoCompras,
       1
@@ -27960,10 +27993,10 @@ app.post('/api/productos', (req, res) => {
       INSERT INTO productos (
         nombre, image_url, precio, precios, costo_base_sin_itbis, costo_promedio_actual, ultimo_costo_sin_itbis,
         actualiza_costo_con_compras, costo_unitario_real, costo_unitario_real_incluye_itbis,
-        tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad,
+        tipo_producto, insumo_vendible, unidad_base, contenido_por_unidad, contenido_unidad,
         stock, stock_indefinido, visible_menu_qr, sabores, categoria_id, activo, negocio_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
     `;
     const params = [
       nombre,
@@ -27980,6 +28013,7 @@ app.post('/api/productos', (req, res) => {
       insumoVendible,
       unidadBase,
       Number(contenidoPorUnidad.toFixed(4)),
+      contenidoUnidad,
       stockFinal,
       stockIndefinido,
       visibleMenuQr,
@@ -28010,6 +28044,7 @@ app.post('/api/productos', (req, res) => {
         insumo_vendible: insumoVendible,
         unidad_base: unidadBase,
         contenido_por_unidad: Number(contenidoPorUnidad.toFixed(4)),
+        contenido_unidad: contenidoUnidad,
         stock: stockIndefinido ? null : stockFinal,
         stock_indefinido: stockIndefinido,
         visible_menu_qr: visibleMenuQr,
@@ -28183,6 +28218,20 @@ app.put('/api/productos/:id', (req, res) => {
           }
         }
 
+        // contenido_unidad: unidad en la que se expresa el contenido_por_unidad.
+        // Permite que la receta use esta unidad en vez de unidad_base.
+        const contenidoUnidadEntradaPut = req.body.contenido_unidad ?? req.body.contenidoUnidad;
+        let contenidoUnidad;
+        let contenidoUnidadProporcionado = false;
+        if (contenidoUnidadEntradaPut !== undefined) {
+          contenidoUnidadProporcionado = true;
+          if (contenidoUnidadEntradaPut === null || String(contenidoUnidadEntradaPut).trim() === '') {
+            contenidoUnidad = null;
+          } else {
+            contenidoUnidad = normalizarUnidadBase(contenidoUnidadEntradaPut, null);
+          }
+        }
+
         let actualizaCostoCompras = null;
         if (actualizaCostoComprasEntrada !== undefined) {
           actualizaCostoCompras = normalizarFlag(
@@ -28280,6 +28329,11 @@ app.put('/api/productos/:id', (req, res) => {
           params.push(Number(contenidoPorUnidad.toFixed(4)));
         }
 
+        if (contenidoUnidadProporcionado) {
+          campos.push('contenido_unidad = ?');
+          params.push(contenidoUnidad);
+        }
+
         if (actualizaCostoCompras !== null) {
           campos.push('actualiza_costo_con_compras = ?');
           params.push(actualizaCostoCompras);
@@ -28360,7 +28414,11 @@ app.get('/api/productos/:id/receta', (req, res) => {
       }
 
       const detalles = await db.all(
-        `SELECT rd.id, rd.insumo_id, rd.cantidad, rd.unidad, p.nombre AS insumo_nombre
+        `SELECT rd.id, rd.insumo_id, rd.cantidad, rd.unidad,
+                p.nombre AS insumo_nombre,
+                p.unidad_base AS insumo_unidad_base,
+                p.contenido_unidad AS insumo_contenido_unidad,
+                p.contenido_por_unidad AS insumo_contenido_por_unidad
            FROM receta_detalle rd
            LEFT JOIN productos p ON p.id = rd.insumo_id
           WHERE rd.receta_id = ?
@@ -28420,7 +28478,7 @@ app.put('/api/productos/:id/receta', (req, res) => {
       if (insumoIds.length) {
         const placeholders = insumoIds.map(() => '?').join(', ');
         const insumos = await db.all(
-          `SELECT id, nombre, tipo_producto, unidad_base
+          `SELECT id, nombre, tipo_producto, unidad_base, contenido_unidad
              FROM productos
             WHERE negocio_id = ? AND id IN (${placeholders})`,
           [negocioId, ...insumoIds]
@@ -28445,10 +28503,22 @@ app.put('/api/productos/:id/receta', (req, res) => {
         if (tipoInsumo !== 'INSUMO') {
           return res.status(400).json({ error: `El producto ${insumo.nombre || insumoId} no es un insumo.` });
         }
+        // La receta puede usar:
+        //   - La unidad_base del insumo (ej: chinola → UND)
+        //   - O su contenido_unidad si esta definida (ej: chinola → GR si "1 UND = 30 GR")
         const unidad = normalizarUnidadBase(detalle?.unidad ?? detalle?.unidadBase ?? insumo.unidad_base, 'UND');
-        if (unidad !== normalizarUnidadBase(insumo.unidad_base, 'UND')) {
+        const unidadBaseInsumo = normalizarUnidadBase(insumo.unidad_base, 'UND');
+        const contenidoUnidadInsumo = insumo.contenido_unidad
+          ? normalizarUnidadBase(insumo.contenido_unidad, null)
+          : null;
+        const unidadesPermitidas = [unidadBaseInsumo];
+        if (contenidoUnidadInsumo && contenidoUnidadInsumo !== unidadBaseInsumo) {
+          unidadesPermitidas.push(contenidoUnidadInsumo);
+        }
+        if (!unidadesPermitidas.includes(unidad)) {
+          const lista = unidadesPermitidas.join(' o ');
           return res.status(400).json({
-            error: `La unidad del insumo ${insumo.nombre || insumoId} debe ser ${insumo.unidad_base}.`,
+            error: `La unidad del insumo ${insumo.nombre || insumoId} debe ser ${lista}.`,
           });
         }
         detallesLimpios.push({

@@ -2347,6 +2347,15 @@ async function runMigrations() {
   await modifyColumn('receta_detalle', "unidad ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA', 'CUCHARADA') NOT NULL DEFAULT 'UND'");
   await modifyColumn('consumo_insumos', "unidad_base ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA', 'CUCHARADA') NOT NULL DEFAULT 'UND'");
   await ensureColumn('productos', 'contenido_por_unidad DECIMAL(12,4) NOT NULL DEFAULT 1');
+  // contenido_unidad: unidad en la que se expresa "contenido_por_unidad". Ej:
+  //   Chinola → unidad_base=UND, contenido_por_unidad=30, contenido_unidad=GR
+  //     significa que 1 chinola pesa ~30 gramos. Una receta que dice "30 GR de
+  //     chinola" consume 1 chinola (30/30=1) del stock.
+  // Si queda NULL, asumimos que es igual a unidad_base (compatibilidad legacy).
+  await ensureColumn(
+    'productos',
+    "contenido_unidad ENUM('UND', 'ML', 'LT', 'GR', 'KG', 'OZ', 'LB', 'TAZA', 'CUCHARADA') NULL"
+  );
   await ensureColumn('productos', 'visible_menu_qr TINYINT(1) NOT NULL DEFAULT 1');
   await ensureColumn('productos', 'sabores JSON NULL');
   await ensureColumn('detalle_pedido', 'sabor VARCHAR(120) NULL');
