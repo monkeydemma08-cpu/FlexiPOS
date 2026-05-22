@@ -1,60 +1,95 @@
 // =====================================================================
 // Helper: abrir factura o imprimirla directamente segun configuracion del negocio.
 // (Replicado en caja.js — si el negocio activa "impresion_directa" en super admin,
-//  imprime 2 tickets en un iframe oculto en lugar de abrir una pestana nueva.)
+//  imprime 2 tickets por separado en lugar de abrir una pestana nueva.)
 // =====================================================================
 const abrirOImprimirFactura = (url, options = {}) => {
   const target = options.target || '_blank';
   const tema = window.APP_TEMA_NEGOCIO || {};
   const impresionDirecta =
     Number(tema.impresionDirecta ?? tema.impresion_directa ?? 0) === 1;
+  const totalCopias = options.duplicar === false ? 1 : 2;
+  const delayEntreCopias = Math.max(Number(options.delayEntreCopias) || 700, 250);
 
   if (!impresionDirecta) {
     return window.open(url, target);
   }
 
-  try {
+  const construirUrlImpresion = (indiceCopia) => {
+    const separador = url.includes('?') ? '&' : '?';
+    return `${url}${separador}_print_job=${Date.now()}_${indiceCopia + 1}`;
+  };
+
+  const crearIframeImpresion = (src) => {
     const iframe = document.createElement('iframe');
     iframe.style.cssText =
       'position:fixed;right:-10000px;bottom:-10000px;width:0;height:0;border:0;visibility:hidden;';
     iframe.setAttribute('aria-hidden', 'true');
-    iframe.src = url;
+    iframe.src = src;
     document.body.appendChild(iframe);
+    return iframe;
+  };
 
-    const fallback = () => {
-      try { document.body.removeChild(iframe); } catch (_) {}
-      window.open(url, target);
+  const limpiarIframeImpresion = (iframe) => {
+    try { document.body.removeChild(iframe); } catch (_) {}
+  };
+
+  try {
+    const imprimirCopia = (indiceCopia = 0) => {
+      const iframe = crearIframeImpresion(construirUrlImpresion(indiceCopia));
+      let cerrado = false;
+
+      const finalizarCopia = () => {
+        if (cerrado) return;
+        cerrado = true;
+        limpiarIframeImpresion(iframe);
+        if (indiceCopia + 1 < totalCopias) {
+          setTimeout(() => imprimirCopia(indiceCopia + 1), delayEntreCopias);
+        }
+      };
+
+      const fallback = () => {
+        if (cerrado) return;
+        cerrado = true;
+        limpiarIframeImpresion(iframe);
+        window.open(url, target);
+      };
+
+      iframe.addEventListener('load', () => {
+        setTimeout(() => {
+          try {
+            const printWindow = iframe.contentWindow;
+            const doc = iframe.contentDocument || printWindow?.document;
+            if (!printWindow || !doc?.body) {
+              throw new Error('No se pudo acceder al documento de impresion.');
+            }
+
+            const onAfterPrint = () => {
+              try { printWindow.removeEventListener('afterprint', onAfterPrint); } catch (_) {}
+              setTimeout(finalizarCopia, 150);
+            };
+
+            try {
+              printWindow.addEventListener('afterprint', onAfterPrint, { once: true });
+            } catch (_) {}
+
+            printWindow.focus();
+            printWindow.print();
+
+            // Fallback defensivo por si el navegador no emite afterprint en iframes.
+            setTimeout(finalizarCopia, 10000);
+          } catch (err) {
+            console.error('Error al imprimir factura, fallback a ventana:', err);
+            fallback();
+          }
+        }, 450);
+      }, { once: true });
+
+      iframe.addEventListener('error', fallback, { once: true });
+      return iframe;
     };
 
-    iframe.addEventListener('load', () => {
-      setTimeout(() => {
-        try {
-          const doc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (doc?.body && options.duplicar !== false) {
-            const c = doc.body.innerHTML;
-            const styleCopia1 =
-              'display:block;break-after:page;page-break-after:always;-webkit-column-break-after:always;';
-            doc.body.innerHTML =
-              `<div style="${styleCopia1}">${c}</div><div style="display:block;">${c}</div>`;
-            const styleEl = doc.createElement('style');
-            styleEl.textContent =
-              '@media print { html, body { margin:0 !important; padding:0 !important; } ' +
-              'body > div { break-inside: avoid; page-break-inside: avoid; } }';
-            doc.head.appendChild(styleEl);
-          }
-          iframe.contentWindow.focus();
-          iframe.contentWindow.print();
-          setTimeout(() => {
-            try { document.body.removeChild(iframe); } catch (_) {}
-          }, 2500);
-        } catch (err) {
-          console.error('Error al imprimir factura, fallback a ventana:', err);
-          fallback();
-        }
-      }, 450);
-    });
-    iframe.addEventListener('error', fallback);
-    return iframe;
+    return imprimirCopia(0);
   } catch (err) {
     console.error('Error general impresion directa, fallback:', err);
     return window.open(url, target);

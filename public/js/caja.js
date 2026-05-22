@@ -463,22 +463,28 @@ const aplicarConfigSecuencias = (config = {}) => {
 // =====================================================================
 // Helper: abrir factura o imprimirla directamente segun configuracion del negocio.
 // Si el negocio tiene `impresion_directa = 1` (caracteristica activable en super
-// admin), carga la URL en un iframe oculto, duplica el contenido para imprimir 2
-// tickets y dispara window.print(). Si esta desactivada o si la impresion falla,
-// cae al comportamiento clasico: window.open en una nueva pestana.
+// admin), carga la URL en un iframe oculto y dispara 2 impresiones separadas.
+// Si esta desactivada o si la impresion falla, cae al comportamiento clasico:
+// window.open en una nueva pestana.
 // =====================================================================
 const abrirOImprimirFactura = (url, options = {}) => {
   const target = options.target || '_blank';
   const tema = window.APP_TEMA_NEGOCIO || {};
   const impresionDirecta =
     Number(tema.impresionDirecta ?? tema.impresion_directa ?? 0) === 1;
+  const totalCopias = options.duplicar === false ? 1 : 2;
+  const delayEntreCopias = Math.max(Number(options.delayEntreCopias) || 700, 250);
 
   if (!impresionDirecta) {
     return window.open(url, target);
   }
 
-  // Modo impresion directa: iframe oculto + print + duplicar contenido para 2 tickets.
-  try {
+  const construirUrlImpresion = (indiceCopia) => {
+    const separador = url.includes('?') ? '&' : '?';
+    return `${url}${separador}_print_job=${Date.now()}_${indiceCopia + 1}`;
+  };
+
+  const crearIframeImpresion = (src) => {
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
     iframe.style.right = '-10000px';
@@ -488,58 +494,76 @@ const abrirOImprimirFactura = (url, options = {}) => {
     iframe.style.border = '0';
     iframe.style.visibility = 'hidden';
     iframe.setAttribute('aria-hidden', 'true');
-    iframe.src = url;
+    iframe.src = src;
     document.body.appendChild(iframe);
+    return iframe;
+  };
 
-    const fallbackVentana = () => {
-      try { document.body.removeChild(iframe); } catch (_) {}
-      window.open(url, target);
+  const limpiarIframeImpresion = (iframe) => {
+    try { document.body.removeChild(iframe); } catch (_) {}
+  };
+
+  try {
+    const imprimirCopia = (indiceCopia = 0) => {
+      const iframe = crearIframeImpresion(construirUrlImpresion(indiceCopia));
+      let cerrado = false;
+
+      const finalizarCopia = () => {
+        if (cerrado) return;
+        cerrado = true;
+        limpiarIframeImpresion(iframe);
+        if (indiceCopia + 1 < totalCopias) {
+          setTimeout(() => imprimirCopia(indiceCopia + 1), delayEntreCopias);
+        }
+      };
+
+      const fallbackVentana = () => {
+        if (cerrado) return;
+        cerrado = true;
+        limpiarIframeImpresion(iframe);
+        window.open(url, target);
+      };
+
+      iframe.addEventListener('load', () => {
+        // Pequeno delay para que cargue logo, fuentes y QR antes de imprimir.
+        setTimeout(() => {
+          try {
+            const printWindow = iframe.contentWindow;
+            const doc = iframe.contentDocument || printWindow?.document;
+            if (!printWindow || !doc?.body) {
+              throw new Error('No se pudo acceder al documento de impresion.');
+            }
+
+            const onAfterPrint = () => {
+              try { printWindow.removeEventListener('afterprint', onAfterPrint); } catch (_) {}
+              setTimeout(finalizarCopia, 150);
+            };
+
+            try {
+              printWindow.addEventListener('afterprint', onAfterPrint, { once: true });
+            } catch (_) {}
+
+            printWindow.focus();
+            printWindow.print();
+
+            // Fallback defensivo por si el navegador no emite afterprint en iframes.
+            setTimeout(finalizarCopia, 10000);
+          } catch (printErr) {
+            console.error('Error al imprimir factura, fallback a ventana:', printErr);
+            fallbackVentana();
+          }
+        }, 450);
+      }, { once: true });
+
+      iframe.addEventListener('error', () => {
+        console.warn('No se pudo cargar el iframe de impresion, abriendo en ventana.');
+        fallbackVentana();
+      }, { once: true });
+
+      return iframe;
     };
 
-    iframe.addEventListener('load', () => {
-      // Pequeno delay para que cargue logo, fuentes y QR antes de imprimir.
-      setTimeout(() => {
-        try {
-          const doc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (doc?.body && options.duplicar !== false) {
-            // Duplicamos el contenido envolviendo cada copia en un wrapper con
-            // page-break-after para forzar nueva pagina/corte entre tickets.
-            // Importante: la 2da copia NO lleva page-break-after para no generar
-            // una pagina vacia adicional al final.
-            const contenidoOriginal = doc.body.innerHTML;
-            const styleCopia1 =
-              'display:block;break-after:page;page-break-after:always;-webkit-column-break-after:always;';
-            const styleCopia2 = 'display:block;';
-            doc.body.innerHTML =
-              `<div style="${styleCopia1}">${contenidoOriginal}</div>` +
-              `<div style="${styleCopia2}">${contenidoOriginal}</div>`;
-            // Inyectar @media print con reglas defensivas para que los navegadores
-            // mas estrictos respeten el corte.
-            const styleEl = doc.createElement('style');
-            styleEl.textContent =
-              '@media print { html, body { margin:0 !important; padding:0 !important; } ' +
-              'body > div { break-inside: avoid; page-break-inside: avoid; } }';
-            doc.head.appendChild(styleEl);
-          }
-          iframe.contentWindow.focus();
-          iframe.contentWindow.print();
-          // Limpiar iframe luego de un tiempo (la mayoria de navegadores ya pasaron del dialog).
-          setTimeout(() => {
-            try { document.body.removeChild(iframe); } catch (_) {}
-          }, 2500);
-        } catch (printErr) {
-          console.error('Error al imprimir factura, fallback a ventana:', printErr);
-          fallbackVentana();
-        }
-      }, 450);
-    });
-
-    iframe.addEventListener('error', () => {
-      console.warn('No se pudo cargar el iframe de impresion, abriendo en ventana.');
-      fallbackVentana();
-    });
-
-    return iframe;
+    return imprimirCopia(0);
   } catch (error) {
     console.error('Error general en impresion directa, fallback a ventana:', error);
     return window.open(url, target);
