@@ -1,3 +1,59 @@
+// =====================================================================
+// Helper: abrir factura o imprimirla directamente segun configuracion del negocio.
+// (Replicado en caja.js — si el negocio activa "impresion_directa" en super admin,
+//  imprime 2 tickets en un iframe oculto en lugar de abrir una pestana nueva.)
+// =====================================================================
+const abrirOImprimirFactura = (url, options = {}) => {
+  const target = options.target || '_blank';
+  const tema = window.APP_TEMA_NEGOCIO || {};
+  const impresionDirecta =
+    Number(tema.impresionDirecta ?? tema.impresion_directa ?? 0) === 1;
+
+  if (!impresionDirecta) {
+    return window.open(url, target);
+  }
+
+  try {
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText =
+      'position:fixed;right:-10000px;bottom:-10000px;width:0;height:0;border:0;visibility:hidden;';
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.src = url;
+    document.body.appendChild(iframe);
+
+    const fallback = () => {
+      try { document.body.removeChild(iframe); } catch (_) {}
+      window.open(url, target);
+    };
+
+    iframe.addEventListener('load', () => {
+      setTimeout(() => {
+        try {
+          const doc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (doc?.body && options.duplicar !== false) {
+            const c = doc.body.innerHTML;
+            doc.body.innerHTML =
+              c + '<div style="page-break-before:always;height:0;line-height:0;"></div>' + c;
+          }
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => {
+            try { document.body.removeChild(iframe); } catch (_) {}
+          }, 2500);
+        } catch (err) {
+          console.error('Error al imprimir factura, fallback a ventana:', err);
+          fallback();
+        }
+      }, 450);
+    });
+    iframe.addEventListener('error', fallback);
+    return iframe;
+  } catch (err) {
+    console.error('Error general impresion directa, fallback:', err);
+    return window.open(url, target);
+  }
+};
+
 const campoMesa = document.getElementById('mostrador-mesa');
 const selectServicio = document.getElementById('mostrador-servicio');
 const notaInput = document.getElementById('mostrador-nota');
@@ -2014,7 +2070,7 @@ const confirmarPago = async () => {
     const facturaIdFinal =
       Number(facturaGenerada?.id) || Number(estado.ventaActual?.id) || 0;
     if (facturaIdFinal) {
-      window.open(`/factura.html?id=${facturaIdFinal}`, '_blank');
+      abrirOImprimirFactura(`/factura.html?id=${facturaIdFinal}`);
       // Guardamos el ID en el botón para que "Ver / Imprimir" funcione
       // aunque el usuario cierre la ventana abierta.
       if (botonImprimir) {
@@ -2164,7 +2220,7 @@ const inicializarEventos = () => {
     event.preventDefault();
     const id = Number(botonImprimir.dataset.facturaId);
     if (Number.isFinite(id) && id > 0) {
-      window.open(`/factura.html?id=${id}`, '_blank');
+      abrirOImprimirFactura(`/factura.html?id=${id}`);
     }
   });
 
@@ -2346,3 +2402,283 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   });
 });
+
+// ===========================================================================
+// MOSTRADOR KDS — integracion con ciclo de cocina (#31)
+// Si el negocio tiene `mostrador_kds = 1`, mostrador puede:
+//   - Enviar pedidos a cocina (no cobrar inmediato).
+//   - Ver cuentas activas (pendientes / preparando / listos) en un tab nuevo.
+//   - Cobrar las cuentas marcadas como "listo" desde el panel KDS.
+// ===========================================================================
+(() => {
+  let kdsActivo = false;
+  let kdsPollingId = null;
+  let kdsTabActivo = false;
+
+  const tabCuentas = document.getElementById('tab-cuentas');
+  const panelCuentas = document.getElementById('panel-cuentas');
+  const kdsBadge = document.getElementById('mostrador-kds-badge');
+  const kdsMensaje = document.getElementById('mostrador-kds-mensaje');
+  const listas = {
+    pendiente: document.getElementById('kds-lista-pendiente'),
+    preparando: document.getElementById('kds-lista-preparando'),
+    listo: document.getElementById('kds-lista-listo'),
+  };
+  const counts = {
+    pendiente: document.getElementById('kds-count-pendiente'),
+    preparando: document.getElementById('kds-count-preparando'),
+    listo: document.getElementById('kds-count-listo'),
+  };
+  const botonEnviarCocina = document.getElementById('mostrador-enviar-cocina');
+
+  const detectarKdsActivo = () => {
+    const tema = window.APP_TEMA_NEGOCIO || {};
+    return Number(tema.mostradorKds ?? tema.mostrador_kds ?? 0) === 1;
+  };
+
+  const formatearTiempoTranscurrido = (fechaIso) => {
+    if (!fechaIso) return '—';
+    const ahora = new Date();
+    const t = new Date(fechaIso);
+    if (Number.isNaN(t.getTime())) return '—';
+    const diffMin = Math.max(0, Math.floor((ahora - t) / 60000));
+    if (diffMin < 1) return 'recién';
+    if (diffMin < 60) return `${diffMin} min`;
+    const h = Math.floor(diffMin / 60);
+    const m = diffMin % 60;
+    return `${h}h ${m}min`;
+  };
+
+  const formatearMonedaKds = (valor) => {
+    const n = Number(valor) || 0;
+    try {
+      return new Intl.NumberFormat('es-DO', {
+        style: 'currency',
+        currency: 'DOP',
+        minimumFractionDigits: 2,
+      }).format(n);
+    } catch (_) {
+      return `DOP ${n.toFixed(2)}`;
+    }
+  };
+
+  const renderItemKds = (pedido, estado) => {
+    const detalles = Array.isArray(pedido.detalles)
+      ? pedido.detalles.map((d) => `${d.cantidad}× ${d.producto_nombre || d.nombre || '—'}`).join(', ')
+      : '';
+    const total = Number(pedido.total ?? pedido.total_final ?? 0);
+    const mesa = pedido.mesa || pedido.cliente || `#${pedido.id}`;
+    const numero = pedido.numero_cuenta_negocio || pedido.cuenta_id || pedido.id;
+    const fecha = pedido.fecha_creacion || pedido.fecha_listo;
+    const esListo = estado === 'listo';
+    const acciones = esListo
+      ? `<button type="button" class="kanm-button primary" data-kds-cobrar="${pedido.id}">Cobrar ahora</button>`
+      : `<span style="font-size:0.78rem;color:var(--kanm-gray-600,#6b7280);font-style:italic;">Esperando cocina...</span>`;
+    return `
+      <div class="mostrador-kds-item ${esListo ? 'mostrador-kds-item--listo' : ''}" data-pedido-id="${pedido.id}">
+        <div class="mostrador-kds-item__header">
+          <span class="mostrador-kds-item__num">Cuenta #${numero}</span>
+          <span class="mostrador-kds-item__tiempo">${formatearTiempoTranscurrido(fecha)}</span>
+        </div>
+        <div class="mostrador-kds-item__cliente">${mesa}</div>
+        ${detalles ? `<div class="mostrador-kds-item__items">${detalles}</div>` : ''}
+        <div class="mostrador-kds-item__total">${formatearMonedaKds(total)}</div>
+        <div class="mostrador-kds-item__acciones">${acciones}</div>
+      </div>
+    `;
+  };
+
+  const renderCuentasKds = (porEstado) => {
+    let totalListos = 0;
+    ['pendiente', 'preparando', 'listo'].forEach((estado) => {
+      const lista = porEstado[estado] || [];
+      if (counts[estado]) counts[estado].textContent = String(lista.length);
+      if (estado === 'listo') totalListos = lista.length;
+      const container = listas[estado];
+      if (!container) return;
+      if (!lista.length) {
+        container.innerHTML = `<div class="mostrador-kds-vacio">${
+          estado === 'pendiente' ? 'Sin pedidos pendientes.' :
+          estado === 'preparando' ? 'Nada en preparación.' :
+          'Ninguno listo aún.'
+        }</div>`;
+        return;
+      }
+      container.innerHTML = lista.map((p) => renderItemKds(p, estado)).join('');
+    });
+    if (kdsBadge) {
+      if (totalListos > 0) {
+        kdsBadge.textContent = String(totalListos);
+        kdsBadge.hidden = false;
+      } else {
+        kdsBadge.hidden = true;
+      }
+    }
+  };
+
+  const cargarCuentasKds = async () => {
+    if (!kdsActivo) return;
+    try {
+      const [respPend, respPrep, respListo] = await Promise.all([
+        fetchAutorizado('/api/pedidos?estado=pendiente&origen=mostrador'),
+        fetchAutorizado('/api/pedidos?estado=preparando&origen=mostrador'),
+        fetchAutorizado('/api/pedidos?estado=listo&origen=mostrador'),
+      ]);
+      const dataPend = await respPend.json().catch(() => ({ pedidos: [] }));
+      const dataPrep = await respPrep.json().catch(() => ({ pedidos: [] }));
+      const dataListo = await respListo.json().catch(() => ({ pedidos: [] }));
+      renderCuentasKds({
+        pendiente: dataPend?.pedidos || dataPend?.data || (Array.isArray(dataPend) ? dataPend : []),
+        preparando: dataPrep?.pedidos || dataPrep?.data || (Array.isArray(dataPrep) ? dataPrep : []),
+        listo: dataListo?.pedidos || dataListo?.data || (Array.isArray(dataListo) ? dataListo : []),
+      });
+      if (kdsMensaje) {
+        kdsMensaje.textContent = '';
+      }
+    } catch (error) {
+      console.error('Error cargando cuentas KDS:', error);
+      if (kdsMensaje) {
+        kdsMensaje.textContent = 'No se pudieron cargar las cuentas activas. Reintenta.';
+        kdsMensaje.className = 'kanm-message error';
+      }
+    }
+  };
+
+  // Click en "Cobrar ahora" desde el panel KDS → cambia al tab venta y carga la cuenta.
+  document.addEventListener('click', async (event) => {
+    const btn = event.target?.closest?.('[data-kds-cobrar]');
+    if (!btn) return;
+    event.preventDefault();
+    const pedidoId = Number(btn.dataset.kdsCobrar);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) return;
+    try {
+      btn.disabled = true;
+      btn.textContent = 'Cargando...';
+      // Cambiar al tab venta. mostrador-cuadre.js es quien controla esto via clase.
+      const tabVenta = document.getElementById('tab-venta');
+      tabVenta?.click();
+      // Cargar el pedido en el panel de cobro (estado.ventaActual).
+      // El endpoint devuelve el pedido directo (no envuelto en { ok, ... }).
+      const resp = await fetchAutorizado(`/api/pedidos/${pedidoId}`);
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || !data) {
+        throw new Error(data?.error || 'No se pudo cargar el pedido.');
+      }
+      // Activar el panel de cobro con esta venta
+      estado.ventaActiva = true;
+      estado.ventaActual = data.pedido || data;
+      estado.detalleCuentaCargado = false;
+      estado.cargandoDetalleCuenta = false;
+      if (typeof setVentaActiva === 'function') setVentaActiva(true);
+      if (typeof mostrarDetalleVenta === 'function') mostrarDetalleVenta();
+      if (typeof mostrarMensajePedido === 'function') {
+        mostrarMensajePedido('Cuenta lista cargada. Completa el cobro a la derecha.', 'info');
+      }
+    } catch (error) {
+      console.error('Error al cargar cuenta KDS para cobrar:', error);
+      if (kdsMensaje) {
+        kdsMensaje.textContent = error.message || 'No se pudo cargar la cuenta.';
+        kdsMensaje.className = 'kanm-message error';
+      }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Cobrar ahora';
+    }
+  });
+
+  // Listener del tab "Cuentas activas": inicia/detiene polling.
+  tabCuentas?.addEventListener('click', () => {
+    kdsTabActivo = true;
+    cargarCuentasKds();
+  });
+  // Cuando el usuario va a otros tabs, paramos refrescos visibles pero seguimos
+  // contando listos para el badge cada 30s.
+  document.getElementById('tab-venta')?.addEventListener('click', () => {
+    kdsTabActivo = false;
+  });
+  document.getElementById('tab-cuadre')?.addEventListener('click', () => {
+    kdsTabActivo = false;
+  });
+
+  // Botón "Enviar a cocina": crea pedido con destino cocina (no cobrar al instante).
+  botonEnviarCocina?.addEventListener('click', async () => {
+    if (estado.cargando || estado.ventaActiva) return;
+    if (typeof limpiarMensajePedido === 'function') limpiarMensajePedido();
+    if (typeof validarPedido === 'function' && !validarPedido()) return;
+
+    const payload = construirPayloadPedido();
+    payload.destino = 'cocina';  // Va al KDS en vez de directo a caja.
+
+    try {
+      estado.cargando = true;
+      botonEnviarCocina.disabled = true;
+      botonEnviarCocina.classList.add('is-loading');
+
+      const respuesta = await fetchAutorizado('/api/pedidos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await respuesta.json().catch(() => ({}));
+
+      if (!respuesta.ok || !data?.ok) {
+        if (typeof mostrarMensajePedido === 'function') {
+          mostrarMensajePedido(data?.error || 'No se pudo enviar el pedido a cocina.', 'error');
+        }
+        return;
+      }
+
+      // Limpiar carrito tras enviar (no entramos al panel de cobro).
+      if (typeof limpiarVenta === 'function') limpiarVenta();
+      if (typeof cargarProductos === 'function') await cargarProductos(false);
+
+      if (typeof mostrarMensajePedido === 'function') {
+        const numCuenta = data.pedido?.numero_cuenta_negocio || data.pedido?.id || '';
+        mostrarMensajePedido(
+          `Pedido enviado a cocina (Cuenta #${numCuenta}). Lo verás en "Cuentas activas" cuando esté listo.`,
+          'info'
+        );
+      }
+
+      // Refrescar panel KDS si estamos en él.
+      cargarCuentasKds();
+    } catch (error) {
+      console.error('Error al enviar a cocina:', error);
+      if (typeof mostrarMensajePedido === 'function') {
+        mostrarMensajePedido('Ocurrió un error al enviar el pedido a cocina.', 'error');
+      }
+    } finally {
+      estado.cargando = false;
+      botonEnviarCocina.disabled = false;
+      botonEnviarCocina.classList.remove('is-loading');
+    }
+  });
+
+  // Inicialización: leer flag del tema cuando esté disponible.
+  const inicializarKds = () => {
+    kdsActivo = detectarKdsActivo();
+    if (!kdsActivo) return;
+    if (tabCuentas) tabCuentas.hidden = false;
+    if (botonEnviarCocina) botonEnviarCocina.hidden = false;
+    cargarCuentasKds();
+    // Polling: cada 10 segundos refresca el panel KDS.
+    if (kdsPollingId) clearInterval(kdsPollingId);
+    kdsPollingId = setInterval(() => {
+      cargarCuentasKds();
+    }, 10000);
+  };
+
+  // Esperamos a que cargue el tema (caja.js / mostrador.js lo carga al inicio).
+  // Reintentamos cada 500ms hasta 10s.
+  let intentos = 0;
+  const reintentarInicio = setInterval(() => {
+    intentos += 1;
+    if (window.APP_TEMA_NEGOCIO) {
+      clearInterval(reintentarInicio);
+      inicializarKds();
+    } else if (intentos >= 20) {
+      clearInterval(reintentarInicio);
+      // Sin tema: dejamos los toggles ocultos como están.
+    }
+  }, 500);
+})();

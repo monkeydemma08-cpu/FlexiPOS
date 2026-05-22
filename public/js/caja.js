@@ -460,6 +460,78 @@ const aplicarConfigSecuencias = (config = {}) => {
   seleccionarTipoComprobantePermitido(selectTipoComprobante.value || obtenerTipoComprobantePredeterminado());
 };
 
+// =====================================================================
+// Helper: abrir factura o imprimirla directamente segun configuracion del negocio.
+// Si el negocio tiene `impresion_directa = 1` (caracteristica activable en super
+// admin), carga la URL en un iframe oculto, duplica el contenido para imprimir 2
+// tickets y dispara window.print(). Si esta desactivada o si la impresion falla,
+// cae al comportamiento clasico: window.open en una nueva pestana.
+// =====================================================================
+const abrirOImprimirFactura = (url, options = {}) => {
+  const target = options.target || '_blank';
+  const tema = window.APP_TEMA_NEGOCIO || {};
+  const impresionDirecta =
+    Number(tema.impresionDirecta ?? tema.impresion_directa ?? 0) === 1;
+
+  if (!impresionDirecta) {
+    return window.open(url, target);
+  }
+
+  // Modo impresion directa: iframe oculto + print + duplicar contenido para 2 tickets.
+  try {
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '-10000px';
+    iframe.style.bottom = '-10000px';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.style.visibility = 'hidden';
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.src = url;
+    document.body.appendChild(iframe);
+
+    const fallbackVentana = () => {
+      try { document.body.removeChild(iframe); } catch (_) {}
+      window.open(url, target);
+    };
+
+    iframe.addEventListener('load', () => {
+      // Pequeno delay para que cargue logo, fuentes y QR antes de imprimir.
+      setTimeout(() => {
+        try {
+          const doc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (doc?.body && options.duplicar !== false) {
+            // Duplicamos el contenido con page-break para imprimir 2 tickets de una.
+            const contenidoOriginal = doc.body.innerHTML;
+            const separador = '<div style="page-break-before:always;height:0;line-height:0;"></div>';
+            doc.body.innerHTML = contenidoOriginal + separador + contenidoOriginal;
+          }
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          // Limpiar iframe luego de un tiempo (la mayoria de navegadores ya pasaron del dialog).
+          setTimeout(() => {
+            try { document.body.removeChild(iframe); } catch (_) {}
+          }, 2500);
+        } catch (printErr) {
+          console.error('Error al imprimir factura, fallback a ventana:', printErr);
+          fallbackVentana();
+        }
+      }, 450);
+    });
+
+    iframe.addEventListener('error', () => {
+      console.warn('No se pudo cargar el iframe de impresion, abriendo en ventana.');
+      fallbackVentana();
+    });
+
+    return iframe;
+  } catch (error) {
+    console.error('Error general en impresion directa, fallback a ventana:', error);
+    return window.open(url, target);
+  }
+};
+
 const cargarConfigSecuencias = async () => {
   if (!selectTipoComprobante) return;
 
@@ -3848,6 +3920,15 @@ const toggleCamposPago = () => {
 
       if (inputPagoTarjeta) setMoneyInputValueCaja(inputPagoTarjeta, 0);
 
+    } else if (metodo === 'credito') {
+
+      // Credito: limpiamos montos de pago (no hay ingreso de dinero al cobrar).
+      if (inputPagoEfectivoEntregado) setMoneyInputValueCaja(inputPagoEfectivoEntregado, 0);
+
+      if (inputPagoTarjeta) setMoneyInputValueCaja(inputPagoTarjeta, 0);
+
+      if (inputPagoTransferencia) setMoneyInputValueCaja(inputPagoTransferencia, 0);
+
     }
 
   } else if (metodo !== 'combinado') {
@@ -4927,6 +5008,17 @@ const cerrarCuenta = async () => {
 
 
 
+  // Detectamos cobro a credito ANTES de las validaciones de monto: el credito no
+  // requiere efectivo/tarjeta/transferencia y va por un endpoint distinto.
+  const esCredito = pagos.metodo === 'credito';
+  const inputCreditoCliente = document.getElementById('pago-credito-cliente');
+  const clienteCreditoNombre = (inputCreditoCliente?.value || inputClienteNombre?.value || '').trim();
+  if (esCredito && !clienteCreditoNombre) {
+    setMensajeDetalle('Para cobrar a credito debes indicar el nombre del cliente.', 'error');
+    inputCreditoCliente?.focus();
+    return;
+  }
+
   try {
 
     setMensajeDetalle('Procesando pago...', 'info');
@@ -4937,19 +5029,38 @@ const cerrarCuenta = async () => {
 
 
 
-    const respuesta = await fetchAutorizadoCaja(`/api/cuentas/${cuentaSeleccionada.cuenta_id}/cerrar`, {
+    let respuesta;
+    if (esCredito) {
+      // Endpoint dedicado para credito: busca/crea cliente, crea deuda y cierra la cuenta.
+      const payloadBase = construirPayloadCobroCuenta(pagos, { generarFactura: true });
+      respuesta = await fetchAutorizadoCaja(`/api/caja/cobrar-credito`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cuenta_id: cuentaSeleccionada.cuenta_id,
+          cliente_nombre: clienteCreditoNombre,
+          tipo_comprobante: payloadBase.tipo_comprobante,
+          descuento_porcentaje: payloadBase.descuento_porcentaje,
+          propina_porcentaje: payloadBase.propina_porcentaje,
+          comentarios: payloadBase.comentarios,
+          ncf: payloadBase.ncf || null,
+        }),
+      });
+    } else {
+      respuesta = await fetchAutorizadoCaja(`/api/cuentas/${cuentaSeleccionada.cuenta_id}/cerrar`, {
 
-      method: 'PUT',
+        method: 'PUT',
 
-      headers: {
+        headers: {
 
-        'Content-Type': 'application/json',
+          'Content-Type': 'application/json',
 
-      },
+        },
 
-      body: JSON.stringify(construirPayloadCobroCuenta(pagos, { generarFactura: true })),
+        body: JSON.stringify(construirPayloadCobroCuenta(pagos, { generarFactura: true })),
 
-    });
+      });
+    }
 
 
 
@@ -4985,13 +5096,13 @@ const cerrarCuenta = async () => {
 
       if (Number.isFinite(facturaId)) {
 
-        window.open(`/factura.html?id=${facturaId}`, '_blank');
+        abrirOImprimirFactura(`/factura.html?id=${facturaId}`);
 
       }
 
     } else if (cuentaSeleccionada?.pedidos?.[0]?.id) {
 
-      window.open(`/factura.html?id=${cuentaSeleccionada.pedidos[0].id}`, '_blank');
+      abrirOImprimirFactura(`/factura.html?id=${cuentaSeleccionada.pedidos[0].id}`);
 
     }
 
@@ -5131,7 +5242,7 @@ const registrarCobroAdelantado = async () => {
 
     const facturaId = Number(cuentaSeleccionada?.pedidos?.[0]?.id);
     if (Number.isFinite(facturaId)) {
-      window.open(`/factura.html?id=${facturaId}`, '_blank');
+      abrirOImprimirFactura(`/factura.html?id=${facturaId}`);
     }
 
     const cuentaId = cuentaSeleccionada.cuenta_id;
@@ -5189,7 +5300,7 @@ const abrirFacturaCuentaSeleccionada = (mensajeSinCuenta, { vistaPrevia = false 
     url.searchParams.set('preview_total', String(Number(calculo.total || 0).toFixed(2)));
   }
 
-  window.open(url.toString(), '_blank');
+  abrirOImprimirFactura(url.toString());
 };
 
 const obtenerDetalleIdsItemCuenta = (item) =>
@@ -6144,7 +6255,7 @@ const inicializarCuadre = () => {
       // edito la factura recien (evita ver version cacheada de una pestana
       // abierta previamente con el mismo id).
       const ts = Date.now();
-      window.open(`/factura.html?id=${pedidoId}&_=${ts}`, `factura_${pedidoId}_${ts}`);
+      abrirOImprimirFactura(`/factura.html?id=${pedidoId}&_=${ts}`, { target: `factura_${pedidoId}_${ts}` });
       return;
     }
 

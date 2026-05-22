@@ -1686,6 +1686,13 @@ async function ensureNegocioThemeAndModulesColumns() {
   await ensureColumn('negocios', 'limite_usuarios INT NULL');
   await ensureColumn('negocios', 'limite_menu_qr INT NULL');
   await ensureColumn('negocios', 'plan_extras_json JSON NULL');
+  // Caracteristicas adicionales (toggles funcionales por negocio):
+  //  - impresion_directa: al cobrar/vista previa, imprime directamente con la config
+  //    del navegador (sin abrir nueva pestana). Imprime 2 tickets.
+  //  - mostrador_kds: integra mostrador al ciclo del KDS. Pedidos pendientes,
+  //    en preparacion y listos aparecen al lado de "Cuadre de caja".
+  await ensureColumn('negocios', 'impresion_directa TINYINT(1) NOT NULL DEFAULT 0');
+  await ensureColumn('negocios', 'mostrador_kds TINYINT(1) NOT NULL DEFAULT 0');
   // Backfill defensivo: cualquier registro sin plan queda como 'full' (no se bloquea nada).
   try {
     await query(`UPDATE negocios SET plan_id = 'full' WHERE plan_id IS NULL OR plan_id = ''`);

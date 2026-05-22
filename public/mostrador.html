@@ -12,8 +12,8 @@
     />
     <link rel="stylesheet" href="css/styles.css" />
     <script src="js/auth.js" defer></script>
-    <script src="js/mostrador.js" defer></script>
-    <script src="js/mostrador-cuadre.js" defer></script>
+    <script src="js/mostrador.js?v=20260522c" defer></script>
+    <script src="js/mostrador-cuadre.js?v=20260522c" defer></script>
   </head>
   <body data-role="vendedor">
     <header class="kanm-header">
@@ -52,6 +52,9 @@
 
       <div class="caja-tabs">
         <button class="kanm-tab active" data-tab="venta" id="tab-venta" type="button">Venta rapida</button>
+        <button class="kanm-tab" data-tab="cuentas" id="tab-cuentas" type="button" hidden>
+          Cuentas activas <span class="mostrador-kds-badge" id="mostrador-kds-badge" hidden>0</span>
+        </button>
         <button class="kanm-tab" data-tab="cuadre" id="tab-cuadre" type="button">Cuadre de caja</button>
       </div>
 
@@ -150,6 +153,9 @@
                   </button>
                   <button id="mostrador-cancelar" type="button" class="kanm-button ghost" hidden>
                     Cancelar venta
+                  </button>
+                  <button id="mostrador-enviar-cocina" type="button" class="kanm-button" hidden style="background:#f59e0b;color:#fff;">
+                    Enviar a cocina
                   </button>
                   <button id="mostrador-generar" type="button" class="kanm-button primary">
                     Crear venta
@@ -321,6 +327,52 @@
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panel KDS: cuentas activas (pendientes / preparacion / listas) -->
+      <section class="caja-panel hidden" id="panel-cuentas">
+        <div class="kanm-card mostrador-kds-card">
+          <div class="kanm-card-header">
+            <h2>Cuentas activas</h2>
+            <p class="kanm-subtitle">
+              Pedidos enviados a cocina. Los marcados como "Listos" pueden cobrarse desde aquí.
+              <span style="margin-left:8px;font-size:0.8rem;opacity:0.7;">Actualiza cada 10s automáticamente.</span>
+            </p>
+          </div>
+          <div id="mostrador-kds-mensaje" class="kanm-message"></div>
+          <div class="mostrador-kds-grid">
+            <div class="mostrador-kds-col" data-estado="pendiente">
+              <h3 class="mostrador-kds-col-titulo">
+                <span class="mostrador-kds-dot" style="background:#9ca3af;"></span>
+                Pendientes
+                <span class="mostrador-kds-col-count" id="kds-count-pendiente">0</span>
+              </h3>
+              <div class="mostrador-kds-lista" id="kds-lista-pendiente">
+                <div class="mostrador-kds-vacio">Sin pedidos pendientes.</div>
+              </div>
+            </div>
+            <div class="mostrador-kds-col" data-estado="preparando">
+              <h3 class="mostrador-kds-col-titulo">
+                <span class="mostrador-kds-dot" style="background:#f59e0b;"></span>
+                En preparación
+                <span class="mostrador-kds-col-count" id="kds-count-preparando">0</span>
+              </h3>
+              <div class="mostrador-kds-lista" id="kds-lista-preparando">
+                <div class="mostrador-kds-vacio">Nada en preparación.</div>
+              </div>
+            </div>
+            <div class="mostrador-kds-col" data-estado="listo">
+              <h3 class="mostrador-kds-col-titulo">
+                <span class="mostrador-kds-dot" style="background:#16a34a;"></span>
+                Listos para cobrar
+                <span class="mostrador-kds-col-count" id="kds-count-listo">0</span>
+              </h3>
+              <div class="mostrador-kds-lista" id="kds-lista-listo">
+                <div class="mostrador-kds-vacio">Ninguno listo aún.</div>
+              </div>
+            </div>
           </div>
         </div>
       </section>

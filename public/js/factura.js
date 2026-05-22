@@ -355,14 +355,23 @@
     if (!data || !data.pedido) return;
     const { pedido, items } = data;
 
-    // NCF: ocultar la fila completa cuando el pedido no tiene NCF asignado
-    // (negocios que no usan comprobante fiscal, o pedidos "Sin comprobante").
-    // Si hay e-CF (ecf_encf), el bloque eCF aparte ya cubre la informacion fiscal,
-    // y la fila NCF tradicional no aplica.
+    // NCF: mostramos la fila cuando el negocio usa secuencias fiscales (B01/B02
+    // configuradas) o cuando el pedido fue marcado con un tipo_comprobante explicito,
+    // aunque el NCF aun no se haya asignado (mostramos "Pendiente" en ese caso).
+    // Si el pedido tiene e-CF, el bloque eCF aparte cubre la info fiscal y ocultamos
+    // la fila tradicional para evitar duplicar.
     const ncfTexto = String(pedido.ncf || '').trim();
     const tieneEcf = Boolean(String(pedido.ecf_encf || '').trim());
-    const mostrarFilaNcf = Boolean(ncfTexto) && !tieneEcf;
-    if (ncfSpan) ncfSpan.textContent = ncfTexto || '-';
+    const tipoComprobantePedido = String(pedido.tipo_comprobante || '').trim().toLowerCase();
+    const tieneTipoComprobanteValido =
+      Boolean(tipoComprobantePedido) &&
+      !['sin_comprobante', 'sin comprobante', 'ninguno', 'ninguna', ''].includes(tipoComprobantePedido);
+    const b01Configurado = Boolean(configuracionFactura?.b01?.proximo || configuracionFactura?.b01?.inicio);
+    const b02Configurado = Boolean(configuracionFactura?.b02?.proximo || configuracionFactura?.b02?.inicio);
+    const negocioUsaComprobantes = b01Configurado || b02Configurado;
+    const mostrarFilaNcf =
+      !tieneEcf && (Boolean(ncfTexto) || tieneTipoComprobanteValido || negocioUsaComprobantes);
+    if (ncfSpan) ncfSpan.textContent = ncfTexto || 'Pendiente';
     if (ncfRow) ncfRow.hidden = !mostrarFilaNcf;
 
     if (fechaSpan) fechaSpan.textContent = formatDateTime(pedido.fecha_cierre || pedido.fecha_factura);

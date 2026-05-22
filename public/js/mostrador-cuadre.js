@@ -276,6 +276,7 @@
     return local.toISOString().slice(0, 10);
   };
 
+  const panelCuentas = document.getElementById('panel-cuentas');
   const mostrarTab = (tab) => {
     if (!tabsMostrador.length) return;
 
@@ -290,6 +291,9 @@
     }
     if (panelCuadre) {
       panelCuadre.classList.toggle('hidden', tab !== 'cuadre');
+    }
+    if (panelCuentas) {
+      panelCuentas.classList.toggle('hidden', tab !== 'cuentas');
     }
   };
 

@@ -2100,9 +2100,16 @@ function mapNegocioWithDefaults(row = {}) {
   const deletedAt = row.deleted_at ?? row.deletedAt ?? null;
   const suspendido = row.suspendido ?? row.suspendido ?? 0;
   const activo = row.activo ?? 1;
+  // Caracteristicas adicionales (toggles funcionales)
+  const impresionDirecta = Number(row.impresion_directa ?? row.impresionDirecta ?? 0) === 1 ? 1 : 0;
+  const mostradorKds = Number(row.mostrador_kds ?? row.mostradorKds ?? 0) === 1 ? 1 : 0;
 
   return {
     ...row,
+    impresion_directa: impresionDirecta,
+    impresionDirecta,
+    mostrador_kds: mostradorKds,
+    mostradorKds,
     colorPrimario,
     colorSecundario,
     color_header: colorHeader,
@@ -12851,6 +12858,40 @@ app.get('/api/productos', (req, res) => {
         productosConReceta = new Set();
       }
 
+      // Stock dinamico para productos con receta:
+      //   stock_disponible_receta = MIN(FLOOR(stock_insumo / cantidad_en_receta))
+      // por cada insumo de la receta. Ej: sandwich (1 pan + 1 jamon + 1 queso),
+      // con 10 panes, 8 jamones, 15 quesos -> stock = MIN(10, 8, 15) = 8 sandwiches.
+      // Solo cuentan insumos con stock_indefinido = 0 (los infinitos no limitan).
+      let stockReceta = new Map();
+      try {
+        const filasStock = await db.all(
+          `SELECT r.producto_final_id,
+                  MIN(FLOOR(COALESCE(i.stock, 0) / NULLIF(rd.cantidad, 0))) AS stock_calc
+             FROM recetas r
+             INNER JOIN receta_detalle rd ON rd.receta_id = r.id
+             INNER JOIN productos i ON i.id = rd.insumo_id AND i.negocio_id = r.negocio_id
+            WHERE r.negocio_id = ?
+              AND COALESCE(r.activo, 1) = 1
+              AND COALESCE(i.stock_indefinido, 0) = 0
+              AND COALESCE(rd.cantidad, 0) > 0
+            GROUP BY r.producto_final_id`,
+          [negocioId]
+        );
+        (filasStock || []).forEach((row) => {
+          const pid = Number(row.producto_final_id);
+          const val = Number(row.stock_calc);
+          if (Number.isFinite(pid) && Number.isFinite(val)) {
+            stockReceta.set(pid, Math.max(0, val));
+          }
+        });
+      } catch (stockRecetaErr) {
+        console.warn(
+          'No se pudo calcular stock_disponible_receta:',
+          stockRecetaErr?.message || stockRecetaErr
+        );
+      }
+
       // Valor de inventario REAL por producto, calculado desde los lotes activos.
       // Esto es mas preciso que stock * costo_promedio porque cada lote puede tener
       // su propio costo. Si un producto no tiene lotes activos, valor_inventario_lotes = 0
@@ -12888,23 +12929,40 @@ app.get('/api/productos', (req, res) => {
         const valorInventarioLotes = valorLote ? Number(valorLote.valor.toFixed(4)) : 0;
         const stockEnLotes = valorLote ? Number(valorLote.stock_lotes.toFixed(4)) : 0;
 
+        // Si el producto tiene receta y al menos un insumo con stock controlado,
+        // calculamos cuantas unidades pueden prepararse y exponemos:
+        //   - stock_disponible_receta: cuantas pueden prepararse hoy
+        //   - stock_calculado_por_receta: 1 (marca para que el frontend lo trate como
+        //     stock real en vez de "Sin limite").
+        const stockRecetaCalc = stockReceta.get(productoId);
+        const tieneStockReceta = tieneReceta === 1 && Number.isFinite(stockRecetaCalc);
+
         const costoReceta = costosReceta.get(productoId);
-        if (costoReceta !== undefined) {
-          return {
-            ...row,
-            tiene_receta: tieneReceta,
-            costo_unitario_real: Number(costoReceta.toFixed(4)),
-            costo_unitario_real_calculado: 1,
-            valor_inventario_lotes: valorInventarioLotes,
-            stock_en_lotes: stockEnLotes,
-          };
-        }
-        return {
-          ...row,
+        const extras = {
           tiene_receta: tieneReceta,
           valor_inventario_lotes: valorInventarioLotes,
           stock_en_lotes: stockEnLotes,
         };
+        if (tieneStockReceta) {
+          extras.stock_disponible_receta = stockRecetaCalc;
+          extras.stock_calculado_por_receta = 1;
+          // Sobreescribimos stock para que el frontend (mostrador, caja, KDS) muestre
+          // el stock real disponible en lugar de "Sin limite" o el valor crudo de DB.
+          // El flag stock_indefinido pasa a 0 logicamente para este producto en la
+          // respuesta (su stock real es el calculado).
+          extras.stock = stockRecetaCalc;
+          extras.stock_indefinido = 0;
+        }
+
+        if (costoReceta !== undefined) {
+          return {
+            ...row,
+            ...extras,
+            costo_unitario_real: Number(costoReceta.toFixed(4)),
+            costo_unitario_real_calculado: 1,
+          };
+        }
+        return { ...row, ...extras };
       });
 
       res.json(productos);
@@ -15493,6 +15551,256 @@ app.put('/api/cuentas/:id/cerrar', (req, res) => {
   });
 });
 
+// Cobro a CREDITO: marca los pedidos como pagados con metodo "credito",
+// busca o crea el cliente por nombre, crea registro en clientes_deudas con los
+// items de la cuenta. NO toca caja (no hay ingreso de dinero) y NO toca stock
+// ni lotes (ya estan descontados desde la creacion del pedido).
+app.post('/api/caja/cobrar-credito', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const cuentaId = Number(req.body?.cuenta_id);
+    const clienteNombreRaw = String(req.body?.cliente_nombre || req.body?.cliente || '').trim();
+    if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cuenta invalida.' });
+    }
+    if (!clienteNombreRaw) {
+      return res.status(400).json({ ok: false, error: 'Debes indicar el nombre del cliente.' });
+    }
+    if (clienteNombreRaw.length > 120) {
+      return res.status(400).json({ ok: false, error: 'El nombre del cliente es demasiado largo.' });
+    }
+
+    const tipoCmpt = String(req.body?.tipo_comprobante || 'B02').trim().toUpperCase();
+    const descuentoPorcentaje = Math.max(Number(req.body?.descuento_porcentaje) || 0, 0);
+    const propinaPorcentaje = Math.max(Number(req.body?.propina_porcentaje) || 0, 0);
+    const comentariosNorm = normalizarCampoTexto(req.body?.comentarios, null);
+
+    try {
+      // 1) Buscar o crear cliente
+      let cliente = await db.get(
+        `SELECT id, nombre FROM clientes
+          WHERE negocio_id = ? AND LOWER(TRIM(nombre)) = ? AND COALESCE(activo, 1) = 1
+          LIMIT 1`,
+        [negocioId, clienteNombreRaw.toLowerCase()]
+      );
+      let clienteCreado = false;
+      if (!cliente) {
+        const ins = await db.run(
+          `INSERT INTO clientes (negocio_id, nombre, activo) VALUES (?, ?, 1)`,
+          [negocioId, clienteNombreRaw]
+        );
+        cliente = { id: ins?.lastID, nombre: clienteNombreRaw };
+        clienteCreado = true;
+      }
+      if (!cliente?.id) {
+        return res.status(500).json({ ok: false, error: 'No se pudo crear o asociar el cliente.' });
+      }
+
+      // 2) Obtener pedidos cobrables de la cuenta
+      const pedidos = await obtenerPedidosCuentaParaCobro(cuentaId, negocioId, { incluirEnCurso: false });
+      if (!pedidos.length) {
+        return res.status(404).json({ ok: false, error: 'No hay pedidos listos para esta cuenta.' });
+      }
+
+      // 3) Calcular totales agregados de la cuenta
+      let subtotalCuenta = 0;
+      let impuestoCuenta = 0;
+      for (const p of pedidos) {
+        subtotalCuenta += Number(p.subtotal) || 0;
+        impuestoCuenta += Number(p.impuesto) || 0;
+      }
+      const baseConItbis = subtotalCuenta + impuestoCuenta;
+      const descuentoMonto = Number((baseConItbis * (descuentoPorcentaje / 100)).toFixed(2));
+      const propinaMonto = Number(((baseConItbis - descuentoMonto) * (propinaPorcentaje / 100)).toFixed(2));
+      const totalCuenta = Math.max(Number((baseConItbis - descuentoMonto + propinaMonto).toFixed(2)), 0);
+
+      // 4) Asignar NCF / e-NCF segun corresponda:
+      //    - B01/B02/B14: NCF tradicional via generarNCFAsync
+      //    - E31/E32/etc: e-NCF via generarECFAsync (negocio con FE activada)
+      const esECF = esTipoComprobanteElectronico(tipoCmpt);
+      let ncfAsignado = req.body?.ncf || null;
+      if (!ncfAsignado) {
+        try {
+          if (esECF) {
+            ncfAsignado = await generarECFAsync(tipoCmpt, negocioId);
+          } else if (['B01', 'B02', 'B14'].includes(tipoCmpt)) {
+            ncfAsignado = await generarNCFAsync(tipoCmpt, negocioId);
+          }
+        } catch (ncfErr) {
+          console.warn('No se pudo asignar NCF/e-NCF para credito:', ncfErr?.message || ncfErr);
+          ncfAsignado = null;
+          if (esECF) {
+            // Si requiere e-CF y no se pudo generar, abortamos (no podemos cobrar a credito sin e-NCF valido).
+            return res.status(409).json({
+              ok: false,
+              error: 'No hay e-NCF disponible para el tipo ' + tipoCmpt + '. Verifica las secuencias e-CF del negocio.',
+            });
+          }
+        }
+      }
+
+      await db.run('BEGIN');
+      try {
+        const fechaCierre = new Date();
+        // 5) Marcar todos los pedidos como pagados a credito
+        for (const p of pedidos) {
+          await db.run(
+            `UPDATE pedidos
+                SET estado = 'pagado',
+                    fecha_cierre = ?,
+                    cliente = COALESCE(NULLIF(?, ''), cliente),
+                    ncf = COALESCE(NULLIF(?, ''), ncf),
+                    tipo_comprobante = ?,
+                    metodo_pago = 'credito',
+                    descuento_porcentaje = ?,
+                    descuento_monto = ?,
+                    propina_porcentaje = ?,
+                    propina_monto = ?,
+                    comentarios = COALESCE(NULLIF(?, ''), comentarios)
+              WHERE id = ? AND negocio_id = ?`,
+            [
+              fechaCierre,
+              clienteNombreRaw,
+              ncfAsignado || '',
+              tipoCmpt,
+              descuentoPorcentaje,
+              descuentoMonto,
+              propinaPorcentaje,
+              propinaMonto,
+              comentariosNorm || '',
+              p.id,
+              negocioId,
+            ]
+          );
+        }
+
+        // 6) Cerrar la cuenta en la tabla cuentas (si existe)
+        try {
+          await db.run(
+            `UPDATE cuentas SET estado = 'cerrada', fecha_cierre = ? WHERE id = ? AND negocio_id = ?`,
+            [fechaCierre, cuentaId, negocioId]
+          );
+        } catch (cuentaErr) {
+          // No bloquea: pedidos ya estan cerrados.
+          console.warn('No se pudo cerrar la cuenta (tabla cuentas):', cuentaErr?.message || cuentaErr);
+        }
+
+        // 7) Crear deuda en clientes_deudas
+        const descripcion = `Cobro a credito · Cuenta #${cuentaId} (${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'})`;
+        const insertDeuda = await db.run(
+          `INSERT INTO clientes_deudas
+            (cliente_id, negocio_id, fecha, descripcion, monto_total, origen_caja, tipo_comprobante, ncf, notas)
+           VALUES (?, ?, ?, ?, ?, 'caja', ?, ?, ?)`,
+          [cliente.id, negocioId, fechaCierre, descripcion, totalCuenta, tipoCmpt, ncfAsignado, comentariosNorm]
+        );
+        const deudaId = insertDeuda?.lastID;
+
+        // 8) Copiar items de los pedidos al detalle de la deuda (y acumular para FE)
+        const itemsParaFe = [];
+        for (const p of pedidos) {
+          const items = await db.all(
+            `SELECT dp.producto_id, dp.cantidad, dp.precio_unitario,
+                    pr.nombre AS producto_nombre,
+                    COALESCE(NULLIF(dp.costo_unitario_snapshot, 0), pr.costo_unitario_real, pr.costo_promedio_actual, 0) AS costo_snapshot
+               FROM detalle_pedido dp
+               LEFT JOIN productos pr ON pr.id = dp.producto_id
+              WHERE dp.pedido_id = ? AND dp.negocio_id = ?`,
+            [p.id, negocioId]
+          );
+          for (const it of items || []) {
+            const cant = Number(it.cantidad) || 0;
+            const precio = Number(it.precio_unitario) || 0;
+            const totalLinea = Number((cant * precio).toFixed(2));
+            await db.run(
+              `INSERT INTO clientes_deudas_detalle
+                (deuda_id, producto_id, nombre_producto, cantidad, precio_unitario, total_linea, negocio_id, costo_unitario_snapshot)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              [deudaId, it.producto_id, it.producto_nombre || `Producto ${it.producto_id}`, cant, precio, totalLinea, negocioId, Number(it.costo_snapshot) || 0]
+            );
+            itemsParaFe.push({
+              nombre_producto: it.producto_nombre || `Producto ${it.producto_id}`,
+              cantidad: cant,
+              precio_unitario: precio,
+              total_linea: totalLinea,
+            });
+          }
+        }
+
+        await db.run('COMMIT');
+
+        // 9) Actualizar COGS de los pedidos (suma de consumos FIFO ya registrados)
+        try {
+          await actualizarCogsPedidos(pedidos.map((p) => p.id), negocioId);
+        } catch (cogsErr) {
+          console.warn('No se pudo actualizar cogs en cobro credito:', cogsErr?.message || cogsErr);
+        }
+
+        // 10) Si es e-CF, registrar el documento en el modulo de FE para que vaya a DGII.
+        if (esECF && ncfAsignado) {
+          try {
+            await registrarDocumentoFacturacionElectronicaDeuda({
+              negocioId,
+              deudaId,
+              clienteId: cliente.id,
+              tipoDocumento: tipoCmpt,
+              encf: ncfAsignado,
+              cliente: {
+                nombre: cliente.nombre,
+                documento: null,
+                telefono: null,
+                email: null,
+                direccion: null,
+              },
+              fecha: fechaCierre,
+              descripcion,
+              notas: comentariosNorm,
+              items: itemsParaFe,
+              totales: {
+                subtotal: Number(subtotalCuenta.toFixed(2)),
+                impuesto: Number(impuestoCuenta.toFixed(2)),
+                descuento: descuentoMonto,
+                total: totalCuenta,
+              },
+            });
+          } catch (feErr) {
+            // No revertimos la deuda si FE falla: el cobro a credito ya quedo registrado.
+            // El admin puede reintentar la emision desde el modulo de FE.
+            console.warn('No se pudo registrar e-CF de credito en FE:', feErr?.message || feErr);
+          }
+        }
+
+        limpiarCacheAnalitica(negocioId);
+
+        return res.json({
+          ok: true,
+          factura: {
+            id: pedidos[0].id,
+            ncf: ncfAsignado,
+            tipo_comprobante: tipoCmpt,
+            cliente: clienteNombreRaw,
+            metodo_pago: 'credito',
+          },
+          cliente: { ...cliente, creado: clienteCreado },
+          deuda_id: deudaId,
+          totales: {
+            subtotal: Number(subtotalCuenta.toFixed(2)),
+            impuesto: Number(impuestoCuenta.toFixed(2)),
+            descuento: descuentoMonto,
+            propina: propinaMonto,
+            total: totalCuenta,
+          },
+        });
+      } catch (txErr) {
+        await db.run('ROLLBACK').catch(() => {});
+        throw txErr;
+      }
+    } catch (error) {
+      console.error('Error en cobro a credito:', error?.message || error);
+      return res.status(500).json({ ok: false, error: error?.message || 'No se pudo procesar el cobro a credito.' });
+    }
+  });
+});
+
 app.put('/api/cuentas/:id/cobro-adelantado', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const cuentaId = Number(req.params.id);
@@ -16872,7 +17180,8 @@ app.get('/api/negocios', (req, res) => {
              n.logo_url, n.titulo_sistema, n.activo, n.suspendido, n.deleted_at, n.motivo_suspension, n.updated_at,
              n.creado_en,
              n.plan_id, n.plan_activado_en, n.plan_vence_en, n.limite_usuarios, n.limite_menu_qr,
-             n.permitir_b01, n.permitir_b02, n.permitir_b14
+             n.permitir_b01, n.permitir_b02, n.permitir_b14,
+             n.impresion_directa, n.mostrador_kds
         FROM negocios n
         LEFT JOIN usuarios u ON u.id = n.admin_principal_usuario_id
         LEFT JOIN empresas e ON e.id = n.empresa_id
@@ -17497,6 +17806,18 @@ app.put('/api/negocios/:id', (req, res) => {
       params.push(v === 0 || v === false ? 0 : 1);
     }
 
+    // Caracteristicas adicionales (toggles funcionales)
+    if (payload.impresion_directa !== undefined || payload.impresionDirecta !== undefined) {
+      const v = payload.impresion_directa ?? payload.impresionDirecta;
+      fields.push('impresion_directa = ?');
+      params.push(v === 1 || v === true || v === '1' ? 1 : 0);
+    }
+    if (payload.mostrador_kds !== undefined || payload.mostradorKds !== undefined) {
+      const v = payload.mostrador_kds ?? payload.mostradorKds;
+      fields.push('mostrador_kds = ?');
+      params.push(v === 1 || v === true || v === '1' ? 1 : 0);
+    }
+
     if (!fields.length) {
       return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
     }
@@ -17808,7 +18129,8 @@ app.get('/api/negocios/mi-tema', (req, res) => {
       db.get(
         `SELECT id, slug, nombre, titulo_sistema, color_primario, color_secundario, color_texto, color_header,
                 color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos, admin_principal_usuario_id,
-                logo_url, permitir_b01, permitir_b02, permitir_b14, activo
+                logo_url, permitir_b01, permitir_b02, permitir_b14, activo,
+                impresion_directa, mostrador_kds
          FROM negocios
          WHERE id = ?`,
       [negocioId],
@@ -17847,6 +18169,11 @@ app.get('/api/negocios/mi-tema', (req, res) => {
               permitir_b01: permitirB01,
               permitir_b02: permitirB02,
               permitir_b14: permitirB14,
+              // Caracteristicas adicionales por negocio
+              impresionDirecta: Number(negocioTema.impresion_directa) === 1 ? 1 : 0,
+              impresion_directa: Number(negocioTema.impresion_directa) === 1 ? 1 : 0,
+              mostradorKds: Number(negocioTema.mostrador_kds) === 1 ? 1 : 0,
+              mostrador_kds: Number(negocioTema.mostrador_kds) === 1 ? 1 : 0,
               permitirE31: facturacionElectronica.permitir_e31,
               permitirE32: facturacionElectronica.permitir_e32,
               permitirE33: facturacionElectronica.permitir_e33,
@@ -28170,20 +28497,24 @@ app.put('/api/productos/:id/receta', (req, res) => {
 });
 
 app.put('/api/productos/:id/stock', (req, res) => {
-  requireUsuarioSesion(req, res, (usuarioSesion) => {
-    const { id } = req.params;
-    const stockEntrada = req.body.stock;
-    const negocioId = usuarioSesion.negocio_id;
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const productoIdNum = Number(req.params.id);
+    if (!Number.isFinite(productoIdNum) || productoIdNum <= 0) {
+      return res.status(400).json({ error: 'ID de producto invalido.' });
+    }
+    const stockEntrada = req.body?.stock;
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
 
-    db.get(
-      'SELECT stock_indefinido FROM productos WHERE id = ? AND negocio_id = ?',
-      [id, negocioId],
-      async (err, producto) => {
-      if (err) {
-        console.error('Error al validar producto:', err.message);
-        return res.status(500).json({ error: 'Error al actualizar stock' });
-      }
-
+    try {
+      const producto = await db.get(
+        `SELECT id, stock, stock_indefinido,
+                COALESCE(costo_promedio_actual, 0) AS costo_promedio_actual,
+                COALESCE(costo_base_sin_itbis, 0) AS costo_base_sin_itbis,
+                COALESCE(costo_unitario_real, 0) AS costo_unitario_real
+           FROM productos
+          WHERE id = ? AND negocio_id = ?`,
+        [productoIdNum, negocioId]
+      );
       if (!producto) {
         return res.status(404).json({ error: 'Producto no encontrado' });
       }
@@ -28195,19 +28526,13 @@ app.put('/api/productos/:id/stock', (req, res) => {
         }
       }
 
+      // Stock indefinido: solo limpiamos la columna stock; lotes no aplican aqui.
       if (esStockIndefinido(producto)) {
-        db.run(
+        await db.run(
           'UPDATE productos SET stock = NULL WHERE id = ? AND negocio_id = ?',
-          [id, negocioId],
-          function (updateErr) {
-            if (updateErr) {
-              console.error('Error al limpiar stock indefinido:', updateErr.message);
-              return res.status(500).json({ error: 'Error al actualizar stock' });
-            }
-            return res.json({ message: 'Stock marcado como indefinido; no se controla cantidad.' });
-          }
+          [productoIdNum, negocioId]
         );
-        return;
+        return res.json({ message: 'Stock marcado como indefinido; no se controla cantidad.' });
       }
 
       if (stockEntrada === undefined || stockEntrada === null) {
@@ -28219,22 +28544,65 @@ app.put('/api/productos/:id/stock', (req, res) => {
         return res.status(400).json({ error: 'El stock debe ser un numero mayor o igual a 0' });
       }
 
-      const sql = 'UPDATE productos SET stock = ? WHERE id = ? AND negocio_id = ?';
-      const params = [stockValor, id, negocioId];
+      const stockActual = Number(producto.stock) || 0;
+      const delta = Number((stockValor - stockActual).toFixed(4));
 
-      db.run(sql, params, function (updateErr) {
-        if (updateErr) {
-          console.error('Error al actualizar stock:', updateErr.message);
-          return res.status(500).json({ error: 'Error al actualizar stock' });
+      await db.run('BEGIN');
+      try {
+        // 1) Actualizar el stock en productos (igual que antes).
+        const resUpd = await db.run(
+          'UPDATE productos SET stock = ? WHERE id = ? AND negocio_id = ?',
+          [stockValor, productoIdNum, negocioId]
+        );
+        if ((resUpd?.changes || 0) === 0) {
+          throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
         }
 
-        if (this.changes === 0) {
-          return res.status(404).json({ error: 'Producto no encontrado' });
+        // 2) Mantener sincronia con inventario_lotes:
+        //    - delta > 0: crear lote de "ajuste" con la cantidad agregada y
+        //      costo = costo_promedio_actual (o costo_unitario_real, lo que haya).
+        //    - delta < 0: consumir FIFO esa cantidad (origen='ajuste_manual').
+        //    - delta = 0: nada que hacer.
+        if (delta > 0.00005) {
+          const costoLote =
+            Number(producto.costo_promedio_actual) > 0
+              ? Number(producto.costo_promedio_actual)
+              : Number(producto.costo_unitario_real) || Number(producto.costo_base_sin_itbis) || 0;
+          await db.run(
+            `INSERT INTO inventario_lotes
+              (negocio_id, producto_id, cantidad_inicial, cantidad_restante, costo_unitario,
+               costo_unitario_incluye_itbis, fecha, origen, observaciones)
+             VALUES (?, ?, ?, ?, ?, 0, NOW(), 'ajuste_manual',
+                     'Lote creado por ajuste manual de stock')`,
+            [negocioId, productoIdNum, delta, delta, costoLote]
+          );
+        } else if (delta < -0.00005) {
+          // Consumir FIFO la diferencia (cantidad positiva).
+          await consumirStockFIFO({
+            productoId: productoIdNum,
+            cantidad: Math.abs(delta),
+            negocioId,
+            origen: 'ajuste_manual',
+            origenId: productoIdNum,
+          });
         }
 
-        res.json({ message: 'Stock actualizado correctamente' });
-      });
-    });
+        await db.run('COMMIT');
+        return res.json({
+          message: 'Stock actualizado correctamente',
+          stock_anterior: stockActual,
+          stock_nuevo: stockValor,
+          delta,
+        });
+      } catch (txErr) {
+        await db.run('ROLLBACK').catch(() => {});
+        throw txErr;
+      }
+    } catch (error) {
+      console.error('Error al actualizar stock:', error?.message || error);
+      const status = error?.status || 500;
+      return res.status(status).json({ error: error?.message || 'Error al actualizar stock' });
+    }
   });
 });
 
@@ -31149,21 +31517,37 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         `,
         paramsBase
       );
+      // COGS de deudas: preferimos la suma REAL desde inventario_consumos
+      // (registrada por consumirStockFIFO al crear/editar la deuda). Si una deuda
+      // no tiene consumos (data legacy o producto sin lotes), caemos al calculo
+      // tradicional con costo_unitario_snapshot.
       const cogsDeudasResumen = await db.get(
         `
           SELECT SUM(
-                   COALESCE(dd.cantidad, 0) * COALESCE(
-                     NULLIF(dd.costo_unitario_snapshot, 0),
-                     NULLIF(p.costo_unitario_real, 0),
-                     NULLIF(p.costo_promedio_actual, 0),
-                     NULLIF(p.costo_base_sin_itbis, 0),
-                     NULLIF(p.ultimo_costo_sin_itbis, 0),
+                   COALESCE(
+                     (SELECT SUM(ic.costo_total)
+                        FROM inventario_consumos ic
+                       WHERE ic.origen IN ('venta_deuda','produccion_deuda')
+                         AND ic.origen_id = d.id
+                         AND ic.negocio_id = d.negocio_id
+                         AND COALESCE(ic.revertido, 0) = 0),
+                     (SELECT SUM(
+                              COALESCE(dd2.cantidad, 0) * COALESCE(
+                                NULLIF(dd2.costo_unitario_snapshot, 0),
+                                NULLIF(p2.costo_unitario_real, 0),
+                                NULLIF(p2.costo_promedio_actual, 0),
+                                NULLIF(p2.costo_base_sin_itbis, 0),
+                                NULLIF(p2.ultimo_costo_sin_itbis, 0),
+                                0
+                              ))
+                        FROM clientes_deudas_detalle dd2
+                        LEFT JOIN productos p2
+                               ON p2.id = dd2.producto_id AND p2.negocio_id = d.negocio_id
+                       WHERE dd2.deuda_id = d.id),
                      0
                    )
                  ) AS total
-          FROM clientes_deudas_detalle dd
-          JOIN clientes_deudas d ON d.id = dd.deuda_id
-          LEFT JOIN productos p ON p.id = dd.producto_id AND p.negocio_id = d.negocio_id
+          FROM clientes_deudas d
           WHERE d.negocio_id = ?
             AND DATE(d.fecha) BETWEEN ? AND ?
         `,
@@ -31686,21 +32070,37 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
         `,
         paramsBase
       );
+      // COGS de deudas: preferimos la suma REAL desde inventario_consumos
+      // (registrada por consumirStockFIFO al crear/editar la deuda). Si una deuda
+      // no tiene consumos (data legacy o producto sin lotes), caemos al calculo
+      // tradicional con costo_unitario_snapshot.
       const cogsDeudasResumen = await db.get(
         `
           SELECT SUM(
-                   COALESCE(dd.cantidad, 0) * COALESCE(
-                     NULLIF(dd.costo_unitario_snapshot, 0),
-                     NULLIF(p.costo_unitario_real, 0),
-                     NULLIF(p.costo_promedio_actual, 0),
-                     NULLIF(p.costo_base_sin_itbis, 0),
-                     NULLIF(p.ultimo_costo_sin_itbis, 0),
+                   COALESCE(
+                     (SELECT SUM(ic.costo_total)
+                        FROM inventario_consumos ic
+                       WHERE ic.origen IN ('venta_deuda','produccion_deuda')
+                         AND ic.origen_id = d.id
+                         AND ic.negocio_id = d.negocio_id
+                         AND COALESCE(ic.revertido, 0) = 0),
+                     (SELECT SUM(
+                              COALESCE(dd2.cantidad, 0) * COALESCE(
+                                NULLIF(dd2.costo_unitario_snapshot, 0),
+                                NULLIF(p2.costo_unitario_real, 0),
+                                NULLIF(p2.costo_promedio_actual, 0),
+                                NULLIF(p2.costo_base_sin_itbis, 0),
+                                NULLIF(p2.ultimo_costo_sin_itbis, 0),
+                                0
+                              ))
+                        FROM clientes_deudas_detalle dd2
+                        LEFT JOIN productos p2
+                               ON p2.id = dd2.producto_id AND p2.negocio_id = d.negocio_id
+                       WHERE dd2.deuda_id = d.id),
                      0
                    )
                  ) AS total
-          FROM clientes_deudas_detalle dd
-          JOIN clientes_deudas d ON d.id = dd.deuda_id
-          LEFT JOIN productos p ON p.id = dd.producto_id AND p.negocio_id = d.negocio_id
+          FROM clientes_deudas d
           WHERE d.negocio_id = ?
             AND DATE(d.fecha) BETWEEN ? AND ?
         `,
@@ -31787,27 +32187,44 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
       const utilidadBruta = Number((ventasTotal - cogsTotal).toFixed(2));
       const utilidadNetaReal = Number((utilidadBruta - gastosOperativosTotal).toFixed(2));
 
+      // Valor de inventario: preferimos la suma REAL desde inventario_lotes
+      // (cantidad_restante * costo_unitario, por lote). Para productos sin lotes
+      // (data legacy), caemos al calculo tradicional stock * costo_unitario_real.
       const inventarioStockResumen = await db.get(
         `
           SELECT
             SUM(
               CASE
-                WHEN COALESCE(stock_indefinido, 0) = 0
-                  AND COALESCE(costo_unitario_real, 0) > 0
-                THEN COALESCE(stock, 0) * COALESCE(costo_unitario_real, 0)
+                WHEN COALESCE(p.stock_indefinido, 0) = 0
+                THEN COALESCE(
+                       (SELECT SUM(il.cantidad_restante * il.costo_unitario)
+                          FROM inventario_lotes il
+                         WHERE il.producto_id = p.id
+                           AND il.negocio_id = p.negocio_id
+                           AND il.cantidad_restante > 0),
+                       COALESCE(p.stock, 0) * COALESCE(p.costo_unitario_real, 0)
+                     )
                 ELSE 0
               END
             ) AS total,
             SUM(
               CASE
-                WHEN COALESCE(stock_indefinido, 0) = 0
-                  AND COALESCE(costo_unitario_real, 0) > 0
+                WHEN COALESCE(p.stock_indefinido, 0) = 0
+                  AND (
+                    EXISTS (
+                      SELECT 1 FROM inventario_lotes il2
+                       WHERE il2.producto_id = p.id
+                         AND il2.negocio_id = p.negocio_id
+                         AND il2.cantidad_restante > 0
+                    )
+                    OR COALESCE(p.costo_unitario_real, 0) > 0
+                  )
                 THEN 1
                 ELSE 0
               END
             ) AS cantidad
-          FROM productos
-          WHERE negocio_id = ?
+          FROM productos p
+          WHERE p.negocio_id = ?
         `,
         [negocioId]
       );

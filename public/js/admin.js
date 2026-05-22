@@ -11375,6 +11375,12 @@ const abrirModalNegocio = async (id = null) => {
     if (chkB02) chkB02.checked = Number(negocioSeleccionado?.permitir_b02 ?? 1) === 1;
     if (chkB14) chkB14.checked = Number(negocioSeleccionado?.permitir_b14 ?? 1) === 1;
 
+    // Caracteristicas adicionales (toggles funcionales)
+    const chkImpresionDirecta = document.getElementById('kanm-negocios-impresion-directa');
+    const chkMostradorKds = document.getElementById('kanm-negocios-mostrador-kds');
+    if (chkImpresionDirecta) chkImpresionDirecta.checked = Number(negocioSeleccionado?.impresion_directa ?? 0) === 1;
+    if (chkMostradorKds) chkMostradorKds.checked = Number(negocioSeleccionado?.mostrador_kds ?? 0) === 1;
+
     if (planInfoTexto) {
       const activado = negocioSeleccionado?.plan_activado_en
         ? new Date(negocioSeleccionado.plan_activado_en).toLocaleDateString('es-DO')
@@ -11503,6 +11509,12 @@ const guardarNegocio = async (event) => {
     if (chkB01) payload.permitir_b01 = chkB01.checked ? 1 : 0;
     if (chkB02) payload.permitir_b02 = chkB02.checked ? 1 : 0;
     if (chkB14) payload.permitir_b14 = chkB14.checked ? 1 : 0;
+
+    // Caracteristicas adicionales
+    const chkImpresionDirecta = document.getElementById('kanm-negocios-impresion-directa');
+    const chkMostradorKds = document.getElementById('kanm-negocios-mostrador-kds');
+    if (chkImpresionDirecta) payload.impresion_directa = chkImpresionDirecta.checked ? 1 : 0;
+    if (chkMostradorKds) payload.mostrador_kds = chkMostradorKds.checked ? 1 : 0;
   }
 
   const id = dom.inputId?.value;

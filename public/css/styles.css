@@ -9154,3 +9154,166 @@ body[data-role='mesera'] .kanm-main {
     left: 0;
   }
 }
+
+/* ==========================================================================
+   Mostrador KDS — panel "Cuentas activas" (Pendientes / Preparando / Listos)
+   ========================================================================== */
+.mostrador-kds-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #16a34a;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.mostrador-kds-card {
+  padding: 22px 24px;
+}
+
+.mostrador-kds-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.mostrador-kds-col {
+  background: #fff;
+  border: 1px solid var(--tone-12, rgba(37, 91, 199, 0.12));
+  border-radius: 14px;
+  padding: 14px;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mostrador-kds-col-titulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--kanm-gray-800, #24344a);
+}
+
+.mostrador-kds-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.mostrador-kds-col-count {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--kanm-gray-100, #f1f5f9);
+  color: var(--kanm-gray-800, #24344a);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.mostrador-kds-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.mostrador-kds-vacio {
+  padding: 14px;
+  text-align: center;
+  color: var(--kanm-gray-600, #6b7280);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.mostrador-kds-item {
+  border: 1px solid var(--tone-12, rgba(37, 91, 199, 0.18));
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  cursor: default;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.mostrador-kds-item:hover {
+  border-color: rgba(37, 91, 199, 0.32);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+}
+
+.mostrador-kds-item__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.mostrador-kds-item__num {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--color-primario, #255bc7);
+}
+
+.mostrador-kds-item__tiempo {
+  font-size: 0.75rem;
+  color: var(--kanm-gray-600, #6b7280);
+}
+
+.mostrador-kds-item__cliente {
+  font-size: 0.85rem;
+  color: var(--kanm-gray-800, #24344a);
+  margin-bottom: 4px;
+}
+
+.mostrador-kds-item__items {
+  font-size: 0.78rem;
+  color: var(--kanm-gray-600, #6b7280);
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.mostrador-kds-item__total {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--kanm-gray-800, #24344a);
+  margin-bottom: 6px;
+}
+
+.mostrador-kds-item__acciones {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.mostrador-kds-item__acciones button {
+  font-size: 0.82rem;
+  padding: 5px 10px;
+}
+
+.mostrador-kds-item--listo {
+  border-color: rgba(22, 163, 74, 0.45);
+  background: rgba(22, 163, 74, 0.04);
+}
+
+@media (max-width: 980px) {
+  .mostrador-kds-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/styles.css?v=20260521e" />
+  <link rel="stylesheet" href="/css/styles.css?v=20260522a" />
   <link rel="stylesheet" href="/css/admin-shell.css?v=20260424a" />
   <style>
     /* ================================================================
@@ -4445,6 +4445,34 @@
             </p>
           </section>
 
+          <!-- Caracteristicas adicionales (toggles funcionales por negocio) -->
+          <section class="kanm-modal-section" data-tone="config" id="kanm-negocios-caracteristicas-section">
+            <h4>Características adicionales</h4>
+            <p class="kanm-section-desc">
+              Funciones opcionales que el negocio puede activar/desactivar. Aplican inmediatamente al guardar.
+            </p>
+            <div class="kanm-modulos-grid">
+              <label class="kanm-modulo-card" for="kanm-negocios-impresion-directa" title="Al cobrar o ver vista previa, imprime directamente 2 tickets usando la configuración de impresión del navegador (sin abrir nueva pestaña).">
+                <input type="checkbox" id="kanm-negocios-impresion-directa" />
+                <span>
+                  Impresión directa
+                  <small style="display:block;font-weight:400;font-size:0.78rem;color:var(--posium-ink-soft,#666);margin-top:2px;">
+                    Imprime 2 tickets al instante (pre-factura o factura) sin abrir pestaña.
+                  </small>
+                </span>
+              </label>
+              <label class="kanm-modulo-card" for="kanm-negocios-mostrador-kds" title="Mostrador se integra al ciclo del KDS: puede mandar pedidos a cocina, recibe los listos para cobrar, y maneja varias cuentas a la vez.">
+                <input type="checkbox" id="kanm-negocios-mostrador-kds" />
+                <span>
+                  Integrar Mostrador al ciclo KDS
+                  <small style="display:block;font-weight:400;font-size:0.78rem;color:var(--posium-ink-soft,#666);margin-top:2px;">
+                    Mostrador maneja pedidos pendientes, en preparación y listos junto al cuadre de caja.
+                  </small>
+                </span>
+              </label>
+            </div>
+          </section>
+
           <!-- Modulos habilitados -->
           <section class="kanm-modal-section" data-tone="modulos">
             <h4>Módulos habilitados</h4>
@@ -5562,11 +5590,11 @@
       }
     })();
   </script>
-  <script src="/js/admin.js?v=20260521e"></script>
-  <script src="/js/admin-facturacion-posium.js?v=20260521e"></script>
-  <script src="/js/admin-cotizaciones.js?v=20260521e"></script>
-  <script src="/js/admin-clientes.js?v=20260521e"></script>
-  <script src="/js/admin-categorias.js?v=20260521e"></script>
+  <script src="/js/admin.js?v=20260522a"></script>
+  <script src="/js/admin-facturacion-posium.js?v=20260522a"></script>
+  <script src="/js/admin-cotizaciones.js?v=20260522a"></script>
+  <script src="/js/admin-clientes.js?v=20260522a"></script>
+  <script src="/js/admin-categorias.js?v=20260522a"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/notifications.js" defer></script>
 </body>
