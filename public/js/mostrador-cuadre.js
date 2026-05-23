@@ -546,6 +546,74 @@
     return partes.length ? partes.join(' + ') : 'Sin registrar';
   };
 
+  // Métodos de pago editables en el cuadre (igual que caja).
+  const METODOS_PAGO_CUADRE = [
+    { value: 'efectivo', label: 'Efectivo' },
+    { value: 'tarjeta', label: 'Tarjeta' },
+    { value: 'transferencia', label: 'Transferencia/Deposito' },
+  ];
+
+  // Detecta el método "primario" del pedido para preseleccionar el select.
+  const obtenerMetodoPagoValorCuadre = (pedido = {}) => {
+    const efectivoAplicado = obtenerEfectivoAplicadoCuadre(pedido);
+    const tarjeta = Number(pedido.pago_tarjeta) || 0;
+    const transferencia = Number(pedido.pago_transferencia) || 0;
+    const activos = [
+      efectivoAplicado > 0 ? 'efectivo' : null,
+      tarjeta > 0 ? 'tarjeta' : null,
+      transferencia > 0 ? 'transferencia' : null,
+    ].filter(Boolean);
+    if (!activos.length) return 'sin_registrar';
+    if (activos.length > 1) return 'mixto';
+    return activos[0];
+  };
+
+  // Actualiza el método de pago de una cuenta cobrada (replica de caja.js).
+  // Llama al endpoint PUT /api/caja/cuadre/:id/metodo-pago con origen=mostrador.
+  const actualizarMetodoPagoCuadre = async (cuentaId, metodo, control = null) => {
+    const cuentaNum = Number(cuentaId);
+    if (!Number.isFinite(cuentaNum) || cuentaNum <= 0) {
+      setCuadreMensaje('Cuenta invalida para actualizar metodo de pago.', 'error');
+      return;
+    }
+    const metodoNormalizado = (metodo || '').toString().trim().toLowerCase();
+    if (!METODOS_PAGO_CUADRE.some((item) => item.value === metodoNormalizado)) {
+      setCuadreMensaje('Selecciona un metodo de pago valido.', 'error');
+      return;
+    }
+    const metodoAnterior = control?.dataset?.metodoActual || '';
+    if (control) control.disabled = true;
+    try {
+      setCuadreMensaje('Actualizando metodo de pago...', 'info');
+      const respuesta = await fetchAutorizado(`/api/caja/cuadre/${cuentaNum}/metodo-pago`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          metodo_pago: metodoNormalizado,
+          turno: '1',
+          origen_caja: ORIGEN_CAJA,
+        }),
+      });
+      const data = await respuesta.json().catch(() => ({}));
+      if (!respuesta.ok || !data?.ok) {
+        throw new Error(data?.error || 'No se pudo actualizar el metodo de pago.');
+      }
+      if (control) control.dataset.metodoActual = metodoNormalizado;
+      await cargarResumenCuadre(false);
+      setCuadreMensaje('Metodo de pago actualizado correctamente.', 'info');
+    } catch (error) {
+      if (control) {
+        control.value =
+          metodoAnterior && metodoAnterior !== 'mixto' && metodoAnterior !== 'sin_registrar'
+            ? metodoAnterior
+            : '';
+      }
+      setCuadreMensaje(error?.message || 'No se pudo actualizar el metodo de pago.', 'error');
+    } finally {
+      if (control) control.disabled = false;
+    }
+  };
+
   const limpiarDetalleCuadreExpandido = () => {
     if (detalleCuadreFilaActiva) {
       detalleCuadreFilaActiva.classList.remove('is-expanded');
@@ -720,7 +788,34 @@
         ? `${pedido.mesa} - ${pedido.cliente}`
         : pedido.mesa || pedido.cliente || 'N/D';
 
+      // Select editable de método de pago (mismo patrón que caja).
       const metodoLabel = obtenerMetodoPagoLabel(pedido);
+      const metodoValor = obtenerMetodoPagoValorCuadre(pedido);
+      const opcionActual =
+        metodoValor === 'mixto'
+          ? '<option value="" selected disabled>Mixto</option>'
+          : metodoValor === 'sin_registrar'
+            ? '<option value="" selected disabled>Sin registrar</option>'
+            : '';
+      const opcionesMetodo = METODOS_PAGO_CUADRE.map(
+        (metodo) =>
+          `<option value="${metodo.value}" ${metodo.value === metodoValor ? 'selected' : ''}>${metodo.label}</option>`
+      ).join('');
+      const metodoControl = `
+        <div class="cuadre-metodo-cell">
+          <select
+            class="cuadre-metodo-select"
+            data-cambiar-metodo="1"
+            data-cuenta-id="${pedido.id}"
+            data-metodo-actual="${metodoValor}"
+            aria-label="Metodo de pago para cuenta #${pedido.numero_cuenta_negocio || pedido.cuenta_id || pedido.id}"
+            title="Metodo de pago actual: ${metodoLabel}"
+          >
+            ${opcionActual}
+            ${opcionesMetodo}
+          </select>
+        </div>
+      `;
 
       fila.dataset.cuadreId = pedido.id;
       fila.style.cursor = 'pointer';
@@ -730,11 +825,20 @@
         <td>#${pedido.id}</td>
         <td>${mesaCliente}</td>
         <td>${formatDateTime(pedido.fecha_cierre || pedido.pedidos?.[0]?.fecha_cierre)}</td>
-        <td>${metodoLabel}</td>
+        <td>${metodoControl}</td>
         <td>${formatCurrency(total)}</td>
       `;
 
       fragment.appendChild(fila);
+    });
+
+    // Prevenir que el click en el select expanda/colapse la fila.
+    fragment.querySelectorAll('[data-cambiar-metodo]').forEach((control) => {
+      ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'click'].forEach((eventName) => {
+        control.addEventListener(eventName, (event) => {
+          event.stopPropagation();
+        });
+      });
     });
 
     cuadreDetalleBody.appendChild(fragment);
@@ -1019,6 +1123,17 @@
       const cuadreId = Number(fila.dataset.cuadreId);
       if (!Number.isFinite(cuadreId) || cuadreId <= 0) return;
       mostrarDetalleCuadre(fila, cuadreId);
+    });
+
+    // Cambio de método de pago desde la tabla (igual que caja).
+    cuadreDetalleBody?.addEventListener('change', (event) => {
+      const select = event.target?.closest?.('[data-cambiar-metodo]');
+      if (!select) return;
+      event.stopPropagation();
+      const cuentaId = Number(select.dataset.cuentaId);
+      const metodo = String(select.value || '').trim().toLowerCase();
+      if (!metodo) return;
+      actualizarMetodoPagoCuadre(cuentaId, metodo, select);
     });
 
     actualizarDiferenciaCuadre();
