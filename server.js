@@ -11327,6 +11327,152 @@ app.get('/api/caja/cierres/:id/detalle', (req, res) => {
   });
 });
 
+// Endpoint para impresion de ticket de cierre de cuadre (formato 88mm).
+// Devuelve TODA la info necesaria para imprimir en una sola llamada:
+//   - cierre: id, fecha_operacion, fecha_cierre, usuario, fondo_inicial,
+//     total_sistema, total_declarado, diferencia, observaciones, total_ventas
+//   - negocio: nombre, rnc, telefono, direccion, logo_url
+//   - pedidos: array con id, numero_cuenta, fecha_hora, cliente, ncf, total, metodo_pago
+//   - totales_metodo: { efectivo, tarjeta, transferencia, credito }
+app.get('/api/caja/cierres/:id/ticket', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const cierreId = Number(req.params.id);
+    if (!Number.isInteger(cierreId) || cierreId <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de cierre invalido' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
+
+    try {
+      // 1) Datos del cierre
+      const cierre = await db.get(
+        `SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol, origen_caja,
+                fondo_inicial, total_sistema, total_declarado, diferencia, observaciones
+           FROM cierres_caja
+          WHERE id = ? AND negocio_id = ?`,
+        [cierreId, negocioId]
+      );
+      if (!cierre) {
+        return res.status(404).json({ ok: false, error: 'Cierre no encontrado' });
+      }
+
+      // 2) Datos del negocio
+      const negocio = await db.get(
+        `SELECT id, nombre, titulo_sistema, rnc, telefono, direccion, logo_url
+           FROM negocios
+          WHERE id = ?`,
+        [negocioId]
+      );
+
+      // 3) Pedidos del cierre (ya agrupados por cuenta) con fecha y método de pago
+      const pedidosRaw = await new Promise((resolve, reject) => {
+        obtenerPedidosDetalleCierre(cierreId, negocioId, origenCaja, (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        });
+      });
+
+      // 4) Facturas a credito (deudas) creadas en el cierre
+      const fechaOperacionCierre = normalizarFechaOperacion(
+        cierre?.fecha_operacion || cierre?.fecha_cierre || new Date()
+      );
+      const facturasCredito = await new Promise((resolve, reject) => {
+        obtenerFacturasClientesDetalleCierre(
+          cierreId,
+          negocioId,
+          origenCaja,
+          fechaOperacionCierre,
+          (err, rows) => {
+            if (err) reject(err);
+            else resolve(rows || []);
+          }
+        );
+      });
+
+      // 5) Normalizar pedidos para el ticket (uniforme: id, numero_cuenta, fecha_hora, cliente, ncf, total, metodo_pago)
+      const determinarMetodoPago = (p) => {
+        const efectivo = Number(p.pago_efectivo) || 0;
+        const tarjeta = Number(p.pago_tarjeta) || 0;
+        const transferencia = Number(p.pago_transferencia) || 0;
+        const metodos = [];
+        if (efectivo > 0.005) metodos.push('Efectivo');
+        if (tarjeta > 0.005) metodos.push('Tarjeta');
+        if (transferencia > 0.005) metodos.push('Transferencia');
+        if (!metodos.length) return p.tipo_registro === 'credito' || p.metodo_pago === 'credito'
+          ? 'Crédito'
+          : 'Efectivo';
+        if (metodos.length === 1) return metodos[0];
+        return `Mixto (${metodos.join('+')})`;
+      };
+
+      const pedidosNorm = (pedidosRaw || []).map((p) => ({
+        id: p.id,
+        numero_cuenta_negocio: p.numero_cuenta_negocio || p.cuenta_id || p.id,
+        cuenta_id: p.cuenta_id || p.id,
+        fecha_hora: p.fecha_cierre || p.fecha_listo,
+        cliente: p.cliente || p.mesa || '',
+        ncf: p.ncf || '',
+        total: Number(p.total) || 0,
+        metodo_pago: determinarMetodoPago(p),
+      }));
+
+      const facturasNorm = (facturasCredito || []).map((f) => ({
+        id: f.id,
+        numero_cuenta_negocio: f.numero || f.id,
+        cuenta_id: f.id,
+        fecha_hora: f.fecha_cierre || f.fecha,
+        cliente: f.cliente_nombre || f.cliente || '',
+        ncf: f.ncf || '',
+        total: Number(f.monto_total || f.total) || 0,
+        metodo_pago: 'Crédito',
+      }));
+
+      // Ordenar por fecha ASC para mostrar cronológicamente
+      const todosPedidos = [...pedidosNorm, ...facturasNorm].sort((a, b) => {
+        const fa = new Date(a.fecha_hora || 0).getTime();
+        const fb = new Date(b.fecha_hora || 0).getTime();
+        return fa - fb;
+      });
+
+      // 6) Totales por método de pago
+      let totalEfectivo = 0;
+      let totalTarjeta = 0;
+      let totalTransferencia = 0;
+      let totalCredito = 0;
+      (pedidosRaw || []).forEach((p) => {
+        totalEfectivo += Number(p.pago_efectivo) || 0;
+        totalTarjeta += Number(p.pago_tarjeta) || 0;
+        totalTransferencia += Number(p.pago_transferencia) || 0;
+      });
+      (facturasCredito || []).forEach((f) => {
+        totalCredito += Number(f.monto_total || f.total) || 0;
+      });
+
+      const totalVentas = todosPedidos.reduce((acc, p) => acc + (Number(p.total) || 0), 0);
+
+      res.json({
+        ok: true,
+        cierre: {
+          ...cierre,
+          fecha_operacion: fechaOperacionCierre,
+          total_ventas: Number(totalVentas.toFixed(2)),
+        },
+        negocio: negocio || {},
+        pedidos: todosPedidos,
+        totales_metodo: {
+          efectivo: Number(totalEfectivo.toFixed(2)),
+          tarjeta: Number(totalTarjeta.toFixed(2)),
+          transferencia: Number(totalTransferencia.toFixed(2)),
+          credito: Number(totalCredito.toFixed(2)),
+        },
+      });
+    } catch (error) {
+      console.error('Error al generar ticket de cierre:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo generar el ticket del cierre.' });
+    }
+  });
+});
+
 app.delete('/api/admin/eliminar/cierre-caja/:id', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     if (!esUsuarioAdmin(usuarioSesion) && !esUsuarioSupervisor(usuarioSesion) && !esSuperAdmin(usuarioSesion)) {

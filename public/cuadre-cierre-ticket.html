@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cierre de cuadre</title>
+    <script src="/js/auth.js" defer></script>
+    <script src="/js/cuadre-cierre-ticket.js?v=20260522a" defer></script>
+    <style>
+      /* Ticket optimizado para impresora térmica de 88mm. */
+      :root {
+        --ticket-ancho: 80mm; /* 88mm de papel menos margen izq/der */
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #f5f5f5;
+        font-family: 'Courier New', 'Consolas', monospace;
+        font-size: 11px;
+        color: #000;
+        line-height: 1.35;
+      }
+      .ticket {
+        width: var(--ticket-ancho);
+        max-width: 100%;
+        margin: 10px auto;
+        background: #fff;
+        padding: 8px 6px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        box-sizing: border-box;
+      }
+      .ticket h1,
+      .ticket h2 {
+        margin: 0;
+        padding: 0;
+        font-weight: 700;
+        text-align: center;
+        font-size: 13px;
+      }
+      .ticket h2 {
+        font-size: 11px;
+        margin-top: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .ticket .meta-negocio {
+        text-align: center;
+        font-size: 10px;
+        margin-bottom: 4px;
+      }
+      .ticket hr {
+        border: 0;
+        border-top: 1px dashed #000;
+        margin: 6px 0;
+      }
+      .ticket .seccion-titulo {
+        font-weight: 700;
+        text-align: center;
+        text-transform: uppercase;
+        margin: 4px 0 2px;
+        letter-spacing: 0.5px;
+      }
+      .ticket .fila {
+        display: flex;
+        justify-content: space-between;
+        gap: 6px;
+        font-size: 11px;
+      }
+      .ticket .fila--small {
+        font-size: 10px;
+      }
+      .ticket .fila--total {
+        font-weight: 700;
+        font-size: 13px;
+        margin-top: 4px;
+        padding-top: 4px;
+        border-top: 1px solid #000;
+      }
+      .ticket .venta-item {
+        margin: 3px 0;
+        padding-bottom: 2px;
+        border-bottom: 1px dotted #ccc;
+      }
+      .ticket .venta-item:last-child {
+        border-bottom: 0;
+      }
+      .ticket .venta-fecha {
+        font-size: 9.5px;
+        color: #333;
+      }
+      .ticket .venta-cliente {
+        font-size: 9.5px;
+        font-style: italic;
+      }
+      .ticket .venta-monto {
+        font-weight: 700;
+      }
+      .ticket .acciones {
+        margin: 10px auto 0;
+        max-width: var(--ticket-ancho);
+        text-align: center;
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+      }
+      .ticket .acciones button {
+        background: #255bc7;
+        color: #fff;
+        border: 0;
+        padding: 8px 14px;
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .ticket .acciones button.secundario {
+        background: #6b7280;
+      }
+      .ticket .pie {
+        text-align: center;
+        font-size: 9.5px;
+        margin-top: 6px;
+        color: #444;
+      }
+      .ticket #mensaje-carga {
+        text-align: center;
+        padding: 40px 10px;
+        color: #666;
+      }
+      .ticket #mensaje-error {
+        text-align: center;
+        padding: 30px 10px;
+        color: #b4233b;
+        font-weight: 700;
+      }
+      .ticket .metodos-pago .fila {
+        font-size: 10.5px;
+      }
+
+      /* Reglas de impresión: ocultar acciones, sin márgenes, ancho exacto. */
+      @media print {
+        @page {
+          size: 88mm auto;
+          margin: 0;
+        }
+        html, body {
+          background: #fff;
+          margin: 0;
+          padding: 0;
+        }
+        .ticket {
+          width: 88mm;
+          margin: 0;
+          padding: 4mm 3mm;
+          box-shadow: none;
+        }
+        .acciones,
+        .no-print {
+          display: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body data-role="admin,caja,vendedor">
+    <div class="ticket" id="ticket-cuadre">
+      <div id="mensaje-carga">Cargando cierre…</div>
+    </div>
+    <div class="acciones no-print">
+      <button type="button" id="btn-imprimir">Imprimir</button>
+      <button type="button" class="secundario" id="btn-cerrar">Cerrar</button>
+    </div>
+  </body>
+</html>

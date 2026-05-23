@@ -4652,7 +4652,7 @@ const registrarCuadre = async () => {
 
 
 
-    setCuadreMensaje('Cuadre registrado correctamente.', 'info');
+    setCuadreMensaje('Cuadre registrado correctamente. Abriendo ticket para imprimir...', 'info');
 
     resetFormularioCuadre();
 
@@ -4662,7 +4662,29 @@ const registrarCuadre = async () => {
 
     await recargarEstadoCaja(false);
 
-    notificarActualizacionGlobal('cierre-registrado', { cierreId: data.cierre?.id });
+    notificarActualizacionGlobal('cierre-registrado', { cierleId: data.cierre?.id });
+
+
+
+    // Abrir automáticamente el ticket 88mm para imprimir el cierre recién creado.
+
+    const cierreIdNuevo = Number(data?.cierre?.id);
+
+    if (Number.isFinite(cierreIdNuevo) && cierreIdNuevo > 0) {
+
+      try {
+
+        const ticketUrl = `/cuadre-cierre-ticket.html?cierre_id=${encodeURIComponent(cierreIdNuevo)}&origen=caja`;
+
+        window.open(ticketUrl, '_blank', 'noopener');
+
+      } catch (printErr) {
+
+        console.warn('No se pudo abrir el ticket del cuadre:', printErr);
+
+      }
+
+    }
 
 
 

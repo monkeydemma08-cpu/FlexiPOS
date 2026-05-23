@@ -9295,6 +9295,16 @@ const renderCierresCaja = () => {
       acciones.appendChild(botonImprimir);
     }
 
+    // Nuevo: botón para imprimir el ticket 88mm (papel térmico).
+    const botonTicket = document.createElement('button');
+    botonTicket.type = 'button';
+    botonTicket.className = 'kanm-button ghost';
+    botonTicket.textContent = 'Ticket 88mm';
+    botonTicket.dataset.ticketCierre = cierre.id;
+    botonTicket.dataset.origenCierre = cierre.origen_caja || 'caja';
+    botonTicket.title = 'Imprime un cierre formato ticket térmico 88mm con cada venta y total';
+    acciones.appendChild(botonTicket);
+
     celdaAcciones.appendChild(acciones);
     fila.appendChild(celdaAcciones);
 
@@ -12886,6 +12896,19 @@ cierresTabla?.addEventListener('click', (event) => {
     const id = Number(botonImprimir.dataset.imprimirCierre);
     if (Number.isInteger(id) && id > 0) {
       const url = `/cuadre-imprimir.html?id=${encodeURIComponent(id)}`;
+      window.open(url, '_blank', 'noopener');
+    }
+    return;
+  }
+
+  // Botón ticket térmico 88mm
+  const botonTicket = event.target.closest('[data-ticket-cierre]');
+  if (botonTicket) {
+    event.preventDefault();
+    const id = Number(botonTicket.dataset.ticketCierre);
+    const origen = botonTicket.dataset.origenCierre || 'caja';
+    if (Number.isInteger(id) && id > 0) {
+      const url = `/cuadre-cierre-ticket.html?cierre_id=${encodeURIComponent(id)}&origen=${encodeURIComponent(origen)}`;
       window.open(url, '_blank', 'noopener');
     }
     return;
