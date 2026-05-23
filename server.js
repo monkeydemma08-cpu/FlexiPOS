@@ -34045,100 +34045,80 @@ app.post('/api/notas-credito/ventas', (req, res) => {
 });
 
 app.post('/api/notas-credito/compras', (req, res) => {
-  const { compra_id, fecha, motivo, monto, ncf_nota, ncf_referencia } = req.body || {};
-  const montoValor = normalizarNumero(monto, null);
+  // FIX SEGURIDAD (C-1): requerir sesion y filtrar por negocio_id en TODAS las
+  // queries internas. Antes este endpoint NO tenia auth y permitia crear notas
+  // de credito sobre compras de cualquier negocio.
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const { compra_id, fecha, motivo, monto, ncf_nota, ncf_referencia } = req.body || {};
+    const montoValor = normalizarNumero(monto, null);
 
-  if (!compra_id || montoValor === null || montoValor <= 0) {
-    return res
-      .status(400)
-      .json({ ok: false, error: 'La compra y el monto de la nota de cr?dito son obligatorios' });
-  }
-
-  db.run('BEGIN TRANSACTION', (beginErr) => {
-    if (beginErr) {
-      console.error('Error al iniciar nota de cr?dito de compra:', beginErr.message);
-      return res.status(500).json({ ok: false, error: 'Error al registrar la nota de cr?dito' });
+    if (!compra_id || montoValor === null || montoValor <= 0) {
+      return res
+        .status(400)
+        .json({ ok: false, error: 'La compra y el monto de la nota de credito son obligatorios' });
     }
 
-    const finalizarError = (mensaje, errorObj) => {
-      if (errorObj) {
-        console.error(mensaje, errorObj.message);
-      } else {
-        console.error(mensaje);
-      }
-      db.run('ROLLBACK', (rollbackErr) => {
-        if (rollbackErr) {
-          console.error('Error al revertir nota de cr?dito de compra:', rollbackErr.message);
-        }
-        res.status(500).json({ ok: false, error: mensaje });
-      });
-    };
-
-    db.get('SELECT id, ncf FROM compras WHERE id = ?', [compra_id], (compraErr, compra) => {
-      if (compraErr) {
-        return finalizarError('Error al consultar la compra para la nota de cr?dito', compraErr);
-      }
-
-      if (!compra) {
-        db.run('ROLLBACK', () => {
-          res.status(404).json({ ok: false, error: 'Compra no encontrada' });
-        });
-        return;
-      }
-
-      const insertSql = `
-        INSERT INTO notas_credito_compras (compra_id, fecha, motivo, monto, ncf_nota, ncf_referencia)
-        VALUES (?, COALESCE(?, CURRENT_DATE), ?, ?, ?, ?)
-      `;
-
-      db.run(
-        insertSql,
-        [
-          compra_id,
-          fecha,
-          normalizarCampoTexto(motivo, null),
-          montoValor,
-          ncf_nota || null,
-          ncf_referencia || compra.ncf || null,
-        ],
-        function (notaErr) {
-          if (notaErr) {
-            return finalizarError('Error al registrar la nota de cr?dito', notaErr);
-          }
-
-          const notaId = this.lastID;
-          const updateSql = `
-            UPDATE compras
-            SET estado = 'nota_credito',
-                nota_credito_referencia = ?
-            WHERE id = ?
-          `;
-
-          db.run(updateSql, [notaId, compra_id], (updateErr) => {
-            if (updateErr) {
-              return finalizarError('Error al actualizar la compra con la nota de cr?dito', updateErr);
-            }
-
-            db.run('COMMIT', (commitErr) => {
-              if (commitErr) {
-                return finalizarError('Error al confirmar la nota de cr?dito de compra', commitErr);
-              }
-
-              res.status(201).json({
-                ok: true,
-                nota_credito: {
-                  id: notaId,
-                  compra_id,
-                  monto: montoValor,
-                  ncf_nota: ncf_nota || null,
-                  ncf_referencia: ncf_referencia || compra.ncf || null,
-                },
-              });
-            });
-          });
-        }
+    try {
+      // Verificamos que la compra exista Y pertenezca al negocio del usuario.
+      const compra = await db.get(
+        'SELECT id, ncf FROM compras WHERE id = ? AND negocio_id = ?',
+        [compra_id, negocioId]
       );
-    });
+      if (!compra) {
+        return res.status(404).json({ ok: false, error: 'Compra no encontrada' });
+      }
+
+      await db.run('BEGIN');
+      try {
+        // INSERT con negocio_id (antes faltaba y permitia cross-tenant).
+        const insertResult = await db.run(
+          `INSERT INTO notas_credito_compras
+            (compra_id, fecha, motivo, monto, ncf_nota, ncf_referencia, negocio_id)
+           VALUES (?, COALESCE(?, CURRENT_DATE), ?, ?, ?, ?, ?)`,
+          [
+            compra_id,
+            fecha,
+            normalizarCampoTexto(motivo, null),
+            montoValor,
+            ncf_nota || null,
+            ncf_referencia || compra.ncf || null,
+            negocioId,
+          ]
+        );
+        const notaId = insertResult?.lastID;
+
+        // UPDATE con negocio_id (antes permitia actualizar compras de otros negocios).
+        await db.run(
+          `UPDATE compras
+              SET estado = 'nota_credito',
+                  nota_credito_referencia = ?
+            WHERE id = ? AND negocio_id = ?`,
+          [notaId, compra_id, negocioId]
+        );
+
+        await db.run('COMMIT');
+        return res.status(201).json({
+          ok: true,
+          nota_credito: {
+            id: notaId,
+            compra_id,
+            monto: montoValor,
+            ncf_nota: ncf_nota || null,
+            ncf_referencia: ncf_referencia || compra.ncf || null,
+          },
+        });
+      } catch (txErr) {
+        await db.run('ROLLBACK').catch(() => {});
+        throw txErr;
+      }
+    } catch (error) {
+      console.error('Error al registrar nota de credito de compra:', error?.message || error);
+      return res.status(500).json({ ok: false, error: 'Error al registrar la nota de credito' });
+    }
   });
 });
 

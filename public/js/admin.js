@@ -3234,8 +3234,17 @@ const construirOpcionesInsumos = (select, seleccionadoId) => {
   insumos.forEach((insumo) => {
     const option = document.createElement('option');
     option.value = insumo.id;
-    const unidad = String(insumo.unidad_base || 'UND').toUpperCase();
-    option.textContent = `${insumo.nombre} (${unidad})`;
+    const unidadBase = String(insumo.unidad_base || 'UND').toUpperCase();
+    const contenidoUnidad = insumo.contenido_unidad
+      ? String(insumo.contenido_unidad).toUpperCase()
+      : null;
+    // Si el insumo tiene contenido_unidad (ej: chinola con "30 GR por UND"),
+    // mostramos ambas: "Chinola (UND · contenido GR)".
+    const etiquetaUnidad =
+      contenidoUnidad && contenidoUnidad !== unidadBase
+        ? `${unidadBase} · contenido ${contenidoUnidad}`
+        : unidadBase;
+    option.textContent = `${insumo.nombre} (${etiquetaUnidad})`;
     select.appendChild(option);
   });
 
@@ -3255,17 +3264,42 @@ const construirOpcionesUnidadReceta = (select) => {
   });
 };
 
-const actualizarUnidadReceta = (insumoSelect, unidadSelect) => {
+const actualizarUnidadReceta = (insumoSelect, unidadSelect, opciones = {}) => {
   if (!unidadSelect) return;
   const insumo = obtenerInsumoPorId(insumoSelect?.value);
-  const unidadBase = String(insumo?.unidad_base || unidadSelect.value || 'UND').toUpperCase();
-  if (!unidadSelect.querySelector(`option[value="${unidadBase}"]`)) {
-    const option = document.createElement('option');
-    option.value = unidadBase;
-    option.textContent = unidadBase;
-    unidadSelect.appendChild(option);
+  const unidadBase = String(insumo?.unidad_base || 'UND').toUpperCase();
+  const contenidoUnidad = insumo?.contenido_unidad
+    ? String(insumo.contenido_unidad).toUpperCase()
+    : null;
+
+  // Unidades permitidas para la receta:
+  //  - SIEMPRE la unidad_base del insumo
+  //  - Si tiene contenido_unidad diferente, tambien esa (preferida por defecto)
+  const unidadesPermitidas = [unidadBase];
+  if (contenidoUnidad && contenidoUnidad !== unidadBase) {
+    unidadesPermitidas.push(contenidoUnidad);
   }
-  unidadSelect.value = unidadBase;
+
+  // Reconstruir el select con solo las opciones validas para este insumo.
+  unidadSelect.innerHTML = '';
+  unidadesPermitidas.forEach((u) => {
+    const option = document.createElement('option');
+    option.value = u;
+    const meta = UNIDADES_RECETA?.find?.((x) => x.value === u);
+    option.textContent = meta?.label || u;
+    unidadSelect.appendChild(option);
+  });
+
+  // Default: la unidad pasada (al cargar receta existente) si esta en la lista,
+  // o contenido_unidad si existe, o unidad_base como fallback.
+  const unidadDeseada = opciones.unidadDeseada
+    ? String(opciones.unidadDeseada).toUpperCase()
+    : (contenidoUnidad && contenidoUnidad !== unidadBase ? contenidoUnidad : unidadBase);
+  const unidadFinal = unidadesPermitidas.includes(unidadDeseada) ? unidadDeseada : unidadesPermitidas[0];
+  unidadSelect.value = unidadFinal;
+
+  // Habilitar el select solo si hay mas de una opcion (UND + contenido_unidad).
+  unidadSelect.disabled = unidadesPermitidas.length < 2;
 };
 
 const crearFilaReceta = (detalle = {}) => {
@@ -3292,10 +3326,6 @@ const crearFilaReceta = (detalle = {}) => {
   const selectUnidad = document.createElement('select');
   selectUnidad.className = 'receta-unidad-select';
   construirOpcionesUnidadReceta(selectUnidad);
-  selectUnidad.disabled = true;
-  if (detalle.unidad) {
-    selectUnidad.value = String(detalle.unidad).toUpperCase();
-  }
 
   const btnEliminar = document.createElement('button');
   btnEliminar.type = 'button';
@@ -3306,10 +3336,16 @@ const crearFilaReceta = (detalle = {}) => {
   });
 
   selectInsumo.addEventListener('change', () => {
+    // Cuando el usuario cambia de insumo, recalcular las unidades validas y
+    // dejar el default segun el nuevo insumo (preferir contenido_unidad).
     actualizarUnidadReceta(selectInsumo, selectUnidad);
   });
 
-  actualizarUnidadReceta(selectInsumo, selectUnidad);
+  // Al crear la fila: si vino una unidad pre-existente (edicion), respetarla;
+  // si no, dejar que tome el default segun el insumo (contenido_unidad o unidad_base).
+  actualizarUnidadReceta(selectInsumo, selectUnidad, {
+    unidadDeseada: detalle.unidad ? String(detalle.unidad).toUpperCase() : null,
+  });
 
   fila.appendChild(selectInsumo);
   fila.appendChild(inputCantidad);
