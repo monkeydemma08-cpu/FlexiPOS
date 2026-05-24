@@ -1901,8 +1901,10 @@ const crearCardCuenta = (cuenta, vista = 'pendiente') => {
     if (itemsVista.length) {
       itemsVista.forEach((item) => {
         const li = document.createElement('li');
+        const baseName = item.nombre || `Producto ${item.producto_id}`;
+        const displayName = item.sabor ? `${baseName} (${item.sabor})` : baseName;
         li.textContent =
-          `${item.nombre || `Producto ${item.producto_id}`} x ` +
+          `${displayName} x ` +
           formatearCantidadItemMesera(item.cantidad_mostrar);
         lista.appendChild(li);
       });

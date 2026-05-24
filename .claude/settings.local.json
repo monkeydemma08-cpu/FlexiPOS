@@ -4,7 +4,8 @@
       "Bash(node -e ':*)",
       "Bash(node -e ' *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://fc.dgii.gov.do/CerteCF/Autenticacion\")",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://fc.dgii.gov.do/CerteCF/Autenticacion/api/Autenticacion/Semilla\")"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://fc.dgii.gov.do/CerteCF/Autenticacion/api/Autenticacion/Semilla\")",
+      "Bash(node --check public/js/mesera.js)"
     ]
   }
 }
