@@ -5,7 +5,8 @@
       "Bash(node -e ' *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://fc.dgii.gov.do/CerteCF/Autenticacion\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://fc.dgii.gov.do/CerteCF/Autenticacion/api/Autenticacion/Semilla\")",
-      "Bash(node --check public/js/mesera.js)"
+      "Bash(node --check public/js/mesera.js)",
+      "Bash(awk '/^const cerrarCuentaYRegistrarPago/,/^};/{print NR\": \"$0; if \\(/^};/ && NR > 8966\\) exit}' /c/Users/Usuario/OneDrive/Documents/KANM/server.js)"
     ]
   }
 }

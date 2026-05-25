@@ -36129,6 +36129,266 @@ app.get('/api/health', async (req, res) => {
   res.status(mysqlOk ? 200 : 503).json(payload);
 });
 
+// ============================================================
+// INTEGRACION TIENDA EXTERNA (pagina web con su propio carrito y pago)
+// Endpoints server-to-server protegidos por API key.
+// Config en .env:
+//   INTEGRACION_TIENDA_API_KEY=<secret>
+//   INTEGRACION_TIENDA_NEGOCIO_ID=3
+// ============================================================
+const INTEGRACION_TIENDA_API_KEY = (process.env.INTEGRACION_TIENDA_API_KEY || '').trim();
+const INTEGRACION_TIENDA_NEGOCIO_ID = Number(process.env.INTEGRACION_TIENDA_NEGOCIO_ID || 0) || null;
+
+const validarApiKeyIntegracionTienda = (req, res) => {
+  if (!INTEGRACION_TIENDA_API_KEY || !INTEGRACION_TIENDA_NEGOCIO_ID) {
+    res.status(503).json({
+      ok: false,
+      error: 'Integracion tienda externa no configurada. Falta INTEGRACION_TIENDA_API_KEY o INTEGRACION_TIENDA_NEGOCIO_ID en .env.',
+    });
+    return false;
+  }
+  const recibida = (req.headers['x-api-key'] || req.headers['x-apikey'] || '').toString().trim();
+  if (!recibida || recibida !== INTEGRACION_TIENDA_API_KEY) {
+    res.status(401).json({ ok: false, error: 'API key invalida.' });
+    return false;
+  }
+  return true;
+};
+
+// GET /api/integraciones/tienda/productos
+// Devuelve el catalogo del negocio configurado (productos activos).
+app.get('/api/integraciones/tienda/productos', async (req, res) => {
+  if (!validarApiKeyIntegracionTienda(req, res)) return;
+  try {
+    const negocioId = INTEGRACION_TIENDA_NEGOCIO_ID;
+    const rows = await db.all(
+      `SELECT p.id, p.nombre, p.precio, p.precios, p.stock, p.stock_indefinido,
+              p.image_url, p.sabores, p.categoria_id, c.nombre AS categoria_nombre
+         FROM productos p
+         LEFT JOIN categorias c ON c.id = p.categoria_id
+        WHERE p.negocio_id = ? AND COALESCE(p.activo, 1) = 1
+        ORDER BY c.nombre ASC, p.nombre ASC`,
+      [negocioId]
+    );
+    const productos = (rows || []).map((row) => {
+      const stockIndefinido = Number(row.stock_indefinido) === 1;
+      return {
+        id: Number(row.id),
+        nombre: row.nombre,
+        precio_base: Number(row.precio) || 0,
+        precios: normalizarListaPrecios(row.precios),
+        sabores: normalizarListaSabores(row.sabores),
+        stock: stockIndefinido ? null : Number(row.stock) || 0,
+        stock_indefinido: stockIndefinido,
+        disponible: stockIndefinido || (Number(row.stock) || 0) > 0,
+        image_url: row.image_url || null,
+        categoria_id: row.categoria_id || null,
+        categoria_nombre: row.categoria_nombre || null,
+      };
+    });
+    res.json({ ok: true, negocio_id: negocioId, productos });
+  } catch (error) {
+    console.error('Error al listar productos para tienda externa:', error?.message || error);
+    res.status(500).json({ ok: false, error: 'No se pudo obtener el catalogo.' });
+  }
+});
+
+// POST /api/integraciones/tienda/pedidos
+// Crea un pedido para llevar (pickup) que aparece en la vista de caja.
+// La nota se marca con [PAGADO ONLINE ...] para que el cajero no vuelva a cobrar.
+// Body:
+// {
+//   "cliente": "Nombre Apellido",
+//   "telefono": "8095551234",
+//   "nota": "Sin nueces",
+//   "referencia_externa": "WEB-12345",
+//   "pago": { "metodo": "tarjeta|transferencia|efectivo", "referencia": "txid_pasarela", "monto": 1500 },
+//   "items": [
+//     { "producto_id": 17, "cantidad": 2, "sabor": "Chocolate" },
+//     { "producto_id": 23, "cantidad": 1 }
+//   ]
+// }
+app.post('/api/integraciones/tienda/pedidos', async (req, res) => {
+  if (!validarApiKeyIntegracionTienda(req, res)) return;
+
+  const payload = req.body || {};
+  const itemsEntrada = Array.isArray(payload.items) ? payload.items : [];
+  if (!itemsEntrada.length) {
+    return res.status(400).json({ ok: false, error: 'Agrega al menos un producto al pedido.' });
+  }
+
+  const negocioId = INTEGRACION_TIENDA_NEGOCIO_ID;
+  const cliente = limpiarTextoGeneral(payload.cliente) || 'Cliente Web';
+  const telefono = limpiarTextoGeneral(payload.telefono);
+  const notaUsuario = limpiarTextoGeneral(payload.nota);
+  const referenciaExterna = limpiarTextoGeneral(payload.referencia_externa);
+  const pago = payload.pago && typeof payload.pago === 'object' ? payload.pago : {};
+  const metodoPagoRaw = (pago.metodo || 'tarjeta').toString().trim().toLowerCase();
+  const metodoPago = ['efectivo', 'tarjeta', 'transferencia'].includes(metodoPagoRaw) ? metodoPagoRaw : 'tarjeta';
+  const refPago = limpiarTextoGeneral(pago.referencia);
+
+  let transaccionIniciada = false;
+
+  try {
+    const estadoNegocio = await validarEstadoNegocio(negocioId);
+    if (!estadoNegocio?.ok) {
+      return res.status(estadoNegocio?.status || 403).json({
+        ok: false,
+        error: estadoNegocio?.error || 'El negocio no esta disponible para integraciones.',
+      });
+    }
+
+    const modoInventario = await obtenerModoInventarioCostos(negocioId);
+    const usaRecetas = modoInventario === 'PREPARACION';
+    const bloquearInsumosSinStock = usaRecetas ? await obtenerConfigBloqueoInsumos(negocioId) : false;
+
+    const resultadoItems = await prepararItemsPedidoMenuPublico(itemsEntrada, negocioId, {
+      validarStock: true,
+      usaRecetas,
+      bloquearInsumosSinStock,
+    });
+
+    const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+    const totales = calcularTotalesConImpuestoConfigurado(resultadoItems.subtotalBruto, configImpuesto);
+    const subtotal = totales.subtotal;
+    const impuesto = totales.impuesto;
+    const total = totales.total;
+    const estadoInicial = resultadoItems.tienePreparacion ? 'pendiente' : 'listo';
+    const fechaListo = estadoInicial === 'listo' ? new Date() : null;
+
+    const partesNota = [];
+    if (notaUsuario) partesNota.push(notaUsuario);
+    const marcaPago = `[PAGADO ONLINE - ${metodoPago.toUpperCase()}${refPago ? ` ref: ${refPago}` : ''}]`;
+    partesNota.push(marcaPago);
+    if (referenciaExterna) partesNota.push(`Ref. tienda: ${referenciaExterna}`);
+    const notaFinal = partesNota.join(' | ');
+
+    await db.run('BEGIN');
+    transaccionIniciada = true;
+
+    const insertResult = await db.run(
+      `INSERT INTO pedidos (
+         cuenta_id, mesa, cliente, modo_servicio, nota, estado,
+         subtotal, impuesto, total, fecha_listo, origen_caja, creado_por, negocio_id,
+         delivery_estado, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        null, null, cliente, 'para_llevar', notaFinal, estadoInicial,
+        subtotal, impuesto, total, fechaListo, 'caja', null, negocioId,
+        null, telefono, null, null, null,
+      ]
+    );
+    const pedidoId = insertResult.lastID;
+    await db.run('UPDATE pedidos SET cuenta_id = ? WHERE id = ? AND negocio_id = ?', [pedidoId, pedidoId, negocioId]);
+
+    const consumoRegistros = [];
+    const estadoPreparacionDetalle = estadoInicial === 'listo' ? 'listo' : 'pendiente';
+    for (const item of resultadoItems.itemsProcesados) {
+      const cantidadListaInicial = estadoInicial === 'listo' ? item.cantidad : 0;
+      const detalleResult = await db.run(
+        'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id, estado_preparacion, cantidad_lista, sabor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [pedidoId, item.producto_id, item.cantidad, item.precio_unitario, negocioId, estadoPreparacionDetalle, cantidadListaInicial, item.sabor || null]
+      );
+      const detalleId = detalleResult?.lastID;
+      if (detalleId && Array.isArray(item.consumos) && item.consumos.length) {
+        item.consumos.forEach((consumo) => {
+          consumoRegistros.push({
+            detalle_pedido_id: detalleId,
+            producto_final_id: item.producto_id,
+            insumo_id: consumo.insumo_id,
+            cantidad_base: consumo.cantidad_base,
+            unidad_base: consumo.unidad_consumo,
+          });
+        });
+      }
+      if (!item.stock_indefinido) {
+        const stockResult = await db.run(
+          'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+          [item.cantidad, item.producto_id, negocioId, item.cantidad]
+        );
+        if (stockResult.changes === 0) {
+          const err = new Error(`Stock insuficiente para el producto ${item.producto_id}.`);
+          err.status = 400;
+          throw err;
+        }
+        await consumirStockFIFO({
+          productoId: item.producto_id,
+          cantidad: item.cantidad,
+          negocioId,
+          origen: 'venta',
+          origenId: pedidoId,
+        });
+      }
+    }
+
+    if (usaRecetas && resultadoItems.consumoPorInsumo.size > 0) {
+      for (const [insumoId, cantidadUnidades] of resultadoItems.consumoPorInsumo.entries()) {
+        if (!cantidadUnidades) continue;
+        const insumo = resultadoItems.insumosMap.get(insumoId);
+        if (!insumo || esStockIndefinido(insumo)) continue;
+        const stockResult = await db.run(
+          'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+          [cantidadUnidades, insumoId, negocioId, cantidadUnidades]
+        );
+        if (stockResult.changes === 0) {
+          const err = new Error(`Stock insuficiente para el insumo ${insumoId}.`);
+          err.status = 400;
+          throw err;
+        }
+        await consumirStockFIFO({
+          productoId: insumoId,
+          cantidad: cantidadUnidades,
+          negocioId,
+          origen: 'produccion',
+          origenId: pedidoId,
+        });
+      }
+      for (const consumo of consumoRegistros) {
+        await db.run(
+          `INSERT INTO consumo_insumos (pedido_id, detalle_pedido_id, producto_final_id, insumo_id, cantidad_base, unidad_base, negocio_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [pedidoId, consumo.detalle_pedido_id, consumo.producto_final_id, consumo.insumo_id, consumo.cantidad_base, consumo.unidad_base, negocioId]
+        );
+      }
+    }
+
+    await db.run('COMMIT');
+    transaccionIniciada = false;
+
+    return res.status(201).json({
+      ok: true,
+      pedido: {
+        id: pedidoId,
+        cuenta_id: pedidoId,
+        negocio_id: negocioId,
+        estado: estadoInicial,
+        modo_servicio: 'para_llevar',
+        origen_caja: 'caja',
+        cliente,
+        telefono,
+        nota: notaFinal,
+        referencia_externa: referenciaExterna || null,
+        subtotal,
+        impuesto,
+        total,
+        items: resultadoItems.itemsProcesados,
+        pago: { metodo: metodoPago, referencia: refPago || null, total },
+      },
+      advertencias: resultadoItems.advertenciasInsumos?.length ? resultadoItems.advertenciasInsumos : undefined,
+      mensaje_cajero: 'Pedido pagado online. El cajero solo debe cobrar/cerrar la cuenta con el metodo indicado en la nota (no vuelva a cobrar al cliente).',
+    });
+  } catch (error) {
+    if (transaccionIniciada) {
+      await db.run('ROLLBACK').catch(() => {});
+    }
+    const status = error?.status || 500;
+    if (status >= 500) {
+      console.error('Error al crear pedido de tienda externa:', error?.message || error);
+    }
+    return res.status(status).json({ ok: false, error: error?.message || 'No se pudo crear el pedido.' });
+  }
+});
+
 app.use('/api', (req, res) => {
   res.status(404).json({ ok: false, error: 'Ruta no existe.' });
 });
