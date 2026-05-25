@@ -41,5 +41,8 @@ docs/**/brave-tmp/
 # de pruebas pasadas, mira docs/dgii-historico/paso2_xml_backup/.
 storage/dgii/paso2_xml/
 
+# ===== Backup local de XMLs DGII (no subir al repo, 19 MB) =====
+docs/dgii-historico/paso2_xml_backup/
+
 # ===== Worktrees de Claude Code =====
 .claude/worktrees/
