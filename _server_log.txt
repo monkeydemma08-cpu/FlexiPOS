@@ -1,9 +1,0 @@
-[dotenv@17.2.3] injecting env (13) from .env -- tip: 🔑 add access controls to secrets: https://dotenvx.com/ops
-[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔄 add secrets lifecycle management: https://dotenvx.com/ops
-[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
-server.js carga correctamente
-DGII Paso 2 montado (configuracion certificacion). Set ENABLE_DGII_PASO2=true para activar el procesamiento batch tambien.
-Preparando para escuchar en el puerto... { HOST: '0.0.0.0', PORT: 3000 }
-Servidor iniciado en http://0.0.0.0:3000
-[analytics/inventario] sin compras_inventario: Unknown column 'estado' in 'where clause'
-[mysql-pool] Pool agotado, request en cola. Considera subir MYSQL_POOL_LIMIT o reducir polling.

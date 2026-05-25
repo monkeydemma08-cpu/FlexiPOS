@@ -1,35 +1,40 @@
+# ===== Dependencias y secretos =====
 node_modules/
 .env
+
+# ===== Sistema operativo =====
+.DS_Store
+Thumbs.db
+
+# ===== Logs (todos los .log y variantes sueltas) =====
+*.log
+.server.log
+.server.err.log
+.tmp-server-*.log
+server-*.log
+server.err.log
+server.out.log
+server_stdout.log
+server_stderr.log
+
+# ===== Temporales de desarrollo =====
+/_tmp*
+/_check_*
+/_debug_*
+/_server_*
+/temp_write_check.txt
+/logs/
+/tools/tmp/
+
+# ===== Datos generados / cache =====
 backups/
 uploads/
 dist/
 npm-debug.log*
-.DS_Store
-# Archivos temporales de navegadores
+
+# ===== Cache de navegadores (no deberia estar en docs/) =====
 docs/brave-tmp/
 docs/**/brave-tmp/
 
-# Archivos del sistema
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Node
-node_modules/
-
-# PDFs generados (si no quieres versionarlos)
-# docs/*.pdf
-
-# Temporales locales de desarrollo
-/logs/
-/tools/tmp/
-/_tmp_*
-/temp_write_check.txt
-/maxParen.depth)[{]maxParen
-/server_stdout.log
-/server_stderr.log
-paso 2.docx
-postulacion_110308.xml
-semilla_1774541309332_120346.xml
+# ===== Worktrees de Claude Code =====
+.claude/worktrees/
