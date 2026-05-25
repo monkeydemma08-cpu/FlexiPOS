@@ -4153,19 +4153,17 @@ const renderDetalleCuadreActual = () => {
     const facturaDisponible = Number.isFinite(facturaId) && facturaId > 0;
 
     // === Detectar si la factura puede editarse desde este flujo ===
-    // No se permite si:
-    //   1. El negocio tiene Facturacion Electronica activa, O
-    //   2. El pedido es e-CF (tiene ecf_tipo, ecf_encf, o tipo_comprobante E3X).
+    // Solo se PROHIBE editar si la factura especifica ES e-CF (E31/E32 o tiene
+    // ecf_tipo/ecf_encf). Que el NEGOCIO tenga FE activa NO impide editar facturas
+    // legacy (B01/B02/B14/Sin comprobante) — esas siguen siendo editables porque
+    // no se enviaron a DGII como e-CF.
     const pedidoRelacionado = pedido.pedidos?.find((p) => Number(p?.id) === facturaId) || pedido.pedidos?.[0] || pedido;
     const tipoComp = String(pedidoRelacionado?.tipo_comprobante || pedido.tipo_comprobante || '').toUpperCase();
     const esPedidoEcf =
       !!pedidoRelacionado?.ecf_tipo ||
       !!pedidoRelacionado?.ecf_encf ||
       /^E\d{2}$/.test(tipoComp);
-    const feActivaNegocio = typeof esFacturacionElectronicaActiva === 'function'
-      ? esFacturacionElectronicaActiva()
-      : Number(secuenciasConfig?.facturacion_electronica_habilitada) === 1;
-    const puedeEditarFactura = facturaDisponible && !esPedidoEcf && !feActivaNegocio;
+    const puedeEditarFactura = facturaDisponible && !esPedidoEcf;
 
     const botonEditarHtml = puedeEditarFactura
       ? `<button type="button" class="kanm-button ghost" data-editar-factura="1" data-pedido-id="${facturaId}" style="margin-left:6px;" title="Editar cliente, RNC, tipo o items (requiere password admin)">Editar factura</button>`
@@ -6389,12 +6387,15 @@ const inicializarCuadre = () => {
     }
     editFacturaItemsBody.innerHTML = items
       .map((it, idx) => {
-        const nombre = it.nombre || it.descripcion || `Producto ${it.producto_id || ''}`;
+        const baseName = it.nombre || it.descripcion || `Producto ${it.producto_id || ''}`;
+        const sabor = it.sabor || '';
+        const nombre = sabor ? `${baseName} (${sabor})` : baseName;
         const cantidad = Number(it.cantidad) || 0;
         const precio = Number(it.precio_unitario) || 0;
         const subtotal = (cantidad * precio).toFixed(2);
+        const saborAttr = sabor ? ` data-sabor="${String(sabor).replace(/"/g, '&quot;')}"` : '';
         return `
-          <tr data-edit-item-row="${idx}" data-producto-id="${it.producto_id || ''}">
+          <tr data-edit-item-row="${idx}" data-producto-id="${it.producto_id || ''}"${saborAttr}>
             <td>${nombre}</td>
             <td>
               <input type="number" class="kanm-input" data-edit-cantidad min="0.01" step="0.01" value="${cantidad}" />
@@ -6512,11 +6513,13 @@ const inicializarCuadre = () => {
       const cantidad = Number(tr.querySelector('[data-edit-cantidad]')?.value);
       const precio = Number(tr.querySelector('[data-edit-precio]')?.value);
       const productoId = Number(tr.dataset.productoId) || null;
+      const sabor = tr.dataset.sabor || null;
       if (Number.isFinite(cantidad) && cantidad > 0 && Number.isFinite(precio) && precio >= 0) {
         items.push({
           producto_id: productoId,
           cantidad,
           precio_unitario: precio,
+          sabor,
         });
       }
     });
@@ -6548,10 +6551,35 @@ const inicializarCuadre = () => {
       if (!resp.ok || data?.ok === false) {
         throw new Error(data?.error || 'No se pudo guardar.');
       }
-      setEditFacturaMensaje('Factura actualizada correctamente.', 'success');
+      // Mensaje con info de ajuste de stock si hubo.
+      let mensajeOk = 'Factura actualizada correctamente.';
+      if (Array.isArray(data?.stock_ajustes) && data.stock_ajustes.length) {
+        const consumidos = data.stock_ajustes.filter((a) => a.delta > 0).length;
+        const devueltos = data.stock_ajustes.filter((a) => a.delta < 0).length;
+        const partes = [];
+        if (consumidos) partes.push(`${consumidos} producto(s) consumido(s)`);
+        if (devueltos) partes.push(`${devueltos} producto(s) devuelto(s) a stock`);
+        if (partes.length) mensajeOk += ` Inventario: ${partes.join(', ')}.`;
+      }
+      setEditFacturaMensaje(mensajeOk, 'success');
+
+      // Invalidar caches del detalle del cuadre, asi al volver a expandir
+      // se recargan items frescos (sino el cliente muestra los items viejos
+      // cacheados y parece que "no paso nada").
+      try {
+        if (typeof detalleCuadreCache !== 'undefined' && detalleCuadreCache?.clear) {
+          detalleCuadreCache.clear();
+        }
+        if (typeof limpiarDetalleCuadreExpandido === 'function') {
+          limpiarDetalleCuadreExpandido();
+        }
+      } catch (_) {}
+
       // Recargar el cuadre para que reflejen los cambios.
       if (typeof cargarCuadre === 'function') {
         try { await cargarCuadre(); } catch (_) {}
+      } else if (typeof cargarResumenCuadre === 'function') {
+        try { await cargarResumenCuadre(false); } catch (_) {}
       }
       setTimeout(cerrarModalEditarFactura, 900);
     } catch (error) {

@@ -13096,12 +13096,17 @@ const abrirModalEditarFactura = async (boton) => {
     if (modalEditarFacturaDescuento) modalEditarFacturaDescuento.value = Number(pedido.descuento_monto) || 0;
     if (modalEditarFacturaPropina) modalEditarFacturaPropina.value = Number(pedido.propina_monto) || 0;
 
-    editarFacturaItems = (Array.isArray(pedido.items) ? pedido.items : []).map((item) => ({
-      producto_id: item.producto_id,
-      nombre: item.nombre || `Producto ${item.producto_id}`,
-      cantidad: Number(item.cantidad) || 1,
-      precio_unitario: Number(item.precio_unitario) || 0,
-    }));
+    editarFacturaItems = (Array.isArray(pedido.items) ? pedido.items : []).map((item) => {
+      const baseName = item.nombre || `Producto ${item.producto_id}`;
+      const sabor = item.sabor || null;
+      return {
+        producto_id: item.producto_id,
+        nombre: sabor ? `${baseName} (${sabor})` : baseName,
+        cantidad: Number(item.cantidad) || 1,
+        precio_unitario: Number(item.precio_unitario) || 0,
+        sabor,
+      };
+    });
     editarFacturaRenderItems();
 
     if (modalEditarFacturaCargando) modalEditarFacturaCargando.hidden = true;
@@ -13159,6 +13164,7 @@ const guardarEditarFactura = async () => {
           nombre: item.nombre,
           cantidad: Number(item.cantidad),
           precio_unitario: Number(item.precio_unitario),
+          sabor: item.sabor || null,
         })),
       }),
     });
@@ -13168,7 +13174,21 @@ const guardarEditarFactura = async () => {
       return;
     }
     cerrarModalEditarFactura();
-    setMessage(cierresMensaje, 'Pedido actualizado correctamente.', 'success');
+    // Construir mensaje con info de ajustes de stock si hubo.
+    let mensaje = 'Pedido actualizado correctamente.';
+    if (Array.isArray(data.stock_ajustes) && data.stock_ajustes.length) {
+      const consumidos = data.stock_ajustes.filter((a) => a.delta > 0);
+      const devueltos = data.stock_ajustes.filter((a) => a.delta < 0);
+      const partes = [];
+      if (consumidos.length) partes.push(`${consumidos.length} con stock consumido`);
+      if (devueltos.length) partes.push(`${devueltos.length} con stock devuelto`);
+      if (partes.length) mensaje += ` Inventario ajustado (${partes.join(', ')}).`;
+    }
+    setMessage(cierresMensaje, mensaje, 'success');
+    // Recargar el detalle del cierre para reflejar los cambios.
+    if (detalleCierreActivo && typeof cargarDetalleCierre === 'function') {
+      try { await cargarDetalleCierre(detalleCierreActivo); } catch (_) {}
+    }
   } catch (e) {
     setMessage(modalEditarFacturaMensaje, 'Error de conexion.', 'error');
   } finally {

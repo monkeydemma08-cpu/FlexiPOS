@@ -16871,117 +16871,457 @@ app.patch('/api/pedidos/:id/factura', (req, res) => {
       return res.status(400).json({ ok: false, error: 'Pedido no valido.' });
     }
     const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
-    const { cliente, cliente_documento, descuento_monto, propina_monto, items } = req.body || {};
+    const body = req.body || {};
 
     try {
-      const pedido = await db.get(
-        `SELECT id, estado FROM pedidos WHERE id = ? AND negocio_id = ?`,
-        [pedidoId, negocioId]
-      );
-      if (!pedido) {
-        return res.status(404).json({ ok: false, error: 'Pedido no encontrado.' });
+      // Aplicar edicion usando la funcion compartida (cuenta-level + stock + cache).
+      const resultado = await aplicarEdicionFacturaCuenta({
+        pedidoId,
+        negocioId,
+        cliente:
+          body.cliente !== undefined ? normalizarCampoTexto(body.cliente) : undefined,
+        clienteDocumento:
+          body.cliente_documento !== undefined
+            ? normalizarCampoTexto(body.cliente_documento)
+            : undefined,
+        tipoNuevo:
+          body.tipo_comprobante !== undefined ? body.tipo_comprobante : undefined,
+        items: Array.isArray(body.items) ? body.items : null,
+        descuentoMontoOverride:
+          body.descuento_monto !== undefined ? body.descuento_monto : undefined,
+        propinaMontoOverride:
+          body.propina_monto !== undefined ? body.propina_monto : undefined,
+      });
+
+      // Auditoria best-effort.
+      try {
+        if (typeof registrarAccionAdmin === 'function') {
+          await registrarAccionAdmin({
+            adminId: usuarioSesion.id,
+            negocioId,
+            accion: 'editar_factura_admin',
+            detalle: JSON.stringify({
+              pedido_id: pedidoId,
+              cuenta_id: resultado.cuenta_id,
+              pedidos_cuenta: resultado.pedidos_afectados,
+              stock_ajustes: resultado.stock_ajustes,
+              cambios: {
+                cliente: body.cliente !== undefined,
+                cliente_documento: body.cliente_documento !== undefined,
+                tipo_comprobante: body.tipo_comprobante || null,
+                items: Array.isArray(body.items) ? body.items.length : null,
+              },
+              ejecuto_usuario_id: usuarioSesion.id,
+            }),
+          });
+        }
+      } catch (auditErr) {
+        console.warn('No se pudo registrar auditoria de editar factura (admin):', auditErr?.message || auditErr);
       }
 
-      const clienteFinal = normalizarCampoTexto(cliente);
-      const documentoFinal = normalizarCampoTexto(cliente_documento);
-      const descuentoFinal =
-        descuento_monto !== undefined && descuento_monto !== null
-          ? Math.max(Number(descuento_monto) || 0, 0)
-          : null;
-      const propinaFinal =
-        propina_monto !== undefined && propina_monto !== null
-          ? Math.max(Number(propina_monto) || 0, 0)
-          : null;
-
-      if (Array.isArray(items) && items.length > 0) {
-        // Validate items
-        for (const item of items) {
-          const cantidad = Number(item.cantidad);
-          const precio = Number(item.precio_unitario);
-          if (!Number.isFinite(cantidad) || cantidad <= 0) {
-            return res.status(400).json({ ok: false, error: 'Todas las cantidades deben ser mayores a cero.' });
-          }
-          if (!Number.isFinite(precio) || precio < 0) {
-            return res.status(400).json({ ok: false, error: 'Los precios no pueden ser negativos.' });
-          }
-        }
-
-        // Calculate new totals (no inventory adjustment — administrative correction only)
-        const subtotalBruto = items.reduce(
-          (acc, item) => acc + Number(item.cantidad) * Number(item.precio_unitario),
-          0
-        );
-        const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
-        const totales = calcularTotalesConImpuestoConfigurado(subtotalBruto, configImpuesto);
-
-        const descuentoMonto = descuentoFinal !== null ? descuentoFinal : 0;
-        const propinaMonto = propinaFinal !== null ? propinaFinal : 0;
-        const totalFinal = Number(
-          Math.max(totales.subtotal + totales.impuesto - descuentoMonto + propinaMonto, 0).toFixed(2)
-        );
-
-        await db.run('BEGIN');
-        try {
-          await db.run(
-            'DELETE FROM detalle_pedido WHERE pedido_id = ? AND negocio_id = ?',
-            [pedidoId, negocioId]
-          );
-          for (const item of items) {
-            const productoId = Number(item.producto_id) || null;
-            await db.run(
-              'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id) VALUES (?, ?, ?, ?, ?)',
-              [pedidoId, productoId, Number(item.cantidad), Number(item.precio_unitario), negocioId]
-            );
-          }
-
-          const sets = ['subtotal = ?', 'impuesto = ?', 'descuento_monto = ?', 'propina_monto = ?', 'total = ?'];
-          const params = [totales.subtotal, totales.impuesto, descuentoMonto, propinaMonto, totalFinal];
-          if (clienteFinal !== null) { sets.push('cliente = ?'); params.push(clienteFinal); }
-          if (documentoFinal !== null) { sets.push('cliente_documento = ?'); params.push(documentoFinal); }
-          params.push(pedidoId, negocioId);
-
-          await db.run(`UPDATE pedidos SET ${sets.join(', ')} WHERE id = ? AND negocio_id = ?`, params);
-          await db.run('COMMIT');
-        } catch (txErr) {
-          await db.run('ROLLBACK').catch(() => {});
-          throw txErr;
-        }
-      } else {
-        // Update only the provided scalar fields
-        const sets = [];
-        const params = [];
-        if (clienteFinal !== null) { sets.push('cliente = ?'); params.push(clienteFinal); }
-        if (documentoFinal !== null) { sets.push('cliente_documento = ?'); params.push(documentoFinal); }
-        if (descuentoFinal !== null) { sets.push('descuento_monto = ?'); params.push(descuentoFinal); }
-        if (propinaFinal !== null) { sets.push('propina_monto = ?'); params.push(propinaFinal); }
-
-        if (!sets.length) {
-          return res.json({ ok: true });
-        }
-        params.push(pedidoId, negocioId);
-        await db.run(`UPDATE pedidos SET ${sets.join(', ')} WHERE id = ? AND negocio_id = ?`, params);
-
-        if (descuentoFinal !== null || propinaFinal !== null) {
-          await db.run(
-            `UPDATE pedidos
-                SET total = (
-                  CASE WHEN (subtotal + impuesto - descuento_monto + propina_monto) > 0
-                       THEN (subtotal + impuesto - descuento_monto + propina_monto)
-                       ELSE 0 END
-                )
-              WHERE id = ? AND negocio_id = ?`,
-            [pedidoId, negocioId]
-          );
-        }
-      }
-
-      res.json({ ok: true });
+      res.json({ ok: true, ...resultado });
     } catch (error) {
-      console.error('Error al editar factura:', error?.message || error);
-      res.status(500).json({ ok: false, error: 'No se pudo actualizar la factura.' });
+      const status = error?.status || 500;
+      if (status >= 500) {
+        console.error('Error al editar factura:', error?.message || error);
+      }
+      res.status(status).json({ ok: false, error: error?.message || 'No se pudo actualizar la factura.' });
     }
   });
 });
+
+// ===========================================================================
+// FUNCION COMPARTIDA: aplicarEdicionFacturaCuenta
+//
+// Logica unica para editar una factura ya emitida. Usada por:
+//   - PATCH /api/pedidos/:id/factura            (admin/superadmin)
+//   - POST  /api/caja/facturas/:id/editar-con-admin (caja con password admin)
+//
+// Caracteristicas clave:
+//   - Trabaja a nivel de CUENTA, no pedido suelto. Si la cuenta tiene varios
+//     pedidos (mesera agrego en rondas), TODOS sus detalles se reemplazan y
+//     todo se consolida en el pedido principal (el que recibe el id).
+//   - AJUSTA STOCK real: devuelve el stock de los items que se eliminan/reducen
+//     y consume el stock de los items que se agregan/aumentan. Si no hay stock
+//     para los nuevos, aborta con error y hace ROLLBACK.
+//   - Rechaza ediciones sobre cualquier pedido e-CF (E31/E32) — DGII exige Nota
+//     de Credito en ese caso.
+//   - Invalida cache de analitica para que reportes/dashboards reflejen el cambio.
+//   - Devuelve un objeto con detalles para auditoria.
+// ===========================================================================
+const aplicarEdicionFacturaCuenta = async ({
+  pedidoId,
+  negocioId,
+  cliente,
+  clienteDocumento,
+  tipoNuevo,
+  items,
+  descuentoMontoOverride,
+  propinaMontoOverride,
+}) => {
+  const error = (status, message) => {
+    const e = new Error(message);
+    e.status = status;
+    return e;
+  };
+
+  // 1. Leer el pedido base.
+  const pedidoBase = await db.get(
+    `SELECT id, cuenta_id, estado, ecf_tipo, ecf_encf, tipo_comprobante, ncf,
+            subtotal, impuesto, descuento_monto, propina_monto, total
+       FROM pedidos
+      WHERE id = ? AND negocio_id = ? LIMIT 1`,
+    [pedidoId, negocioId]
+  );
+  if (!pedidoBase) {
+    throw error(404, 'Factura no encontrada.');
+  }
+  const tipoActual = String(pedidoBase.tipo_comprobante || '').toUpperCase();
+
+  // 2. Cargar TODOS los pedidos de la cuenta y validar que ninguno sea e-CF.
+  const cuentaIdParaEditar = pedidoBase.cuenta_id || pedidoBase.id;
+  const pedidosCuenta = await db.all(
+    `SELECT id, ecf_tipo, ecf_encf, tipo_comprobante, ncf,
+            subtotal, impuesto, descuento_monto, propina_monto, total
+       FROM pedidos
+      WHERE (cuenta_id = ? OR id = ?)
+        AND negocio_id = ?
+      ORDER BY id ASC`,
+    [cuentaIdParaEditar, cuentaIdParaEditar, negocioId]
+  );
+  for (const p of pedidosCuenta) {
+    const tipoPedido = String(p.tipo_comprobante || '').toUpperCase();
+    if (!!p.ecf_tipo || !!p.ecf_encf || /^E\d{2}$/.test(tipoPedido)) {
+      throw error(
+        403,
+        'Esta cuenta tiene al menos un pedido electronico (e-CF). Para corregirla emite una Nota de Credito.'
+      );
+    }
+  }
+
+  // 3. Validar tipo de comprobante nuevo si viene.
+  let tipoNormalizado = tipoNuevo;
+  if (tipoNuevo !== undefined && tipoNuevo !== null) {
+    const tipoStr = String(tipoNuevo || '').toUpperCase().trim();
+    if (tipoStr === '' || tipoStr === 'SIN COMPROBANTE') {
+      tipoNormalizado = 'Sin comprobante';
+    } else if (['B01', 'B02', 'B14'].includes(tipoStr)) {
+      tipoNormalizado = tipoStr;
+    } else {
+      throw error(
+        400,
+        'El tipo de comprobante solo puede cambiarse a B01, B02, B14 o "Sin comprobante".'
+      );
+    }
+  }
+
+  // 4. Validar items si vienen.
+  const itemsValidos = Array.isArray(items) ? items : null;
+  if (itemsValidos && itemsValidos.length > 0) {
+    for (const it of itemsValidos) {
+      const cantidad = Number(it.cantidad);
+      const precio = Number(it.precio_unitario);
+      if (!Number.isFinite(cantidad) || cantidad <= 0) {
+        throw error(400, 'Todas las cantidades deben ser mayores a cero.');
+      }
+      if (!Number.isFinite(precio) || precio < 0) {
+        throw error(400, 'Los precios no pueden ser negativos.');
+      }
+    }
+  }
+
+  const otrosPedidosCuenta = pedidosCuenta.filter((p) => Number(p.id) !== Number(pedidoId));
+  const propinaTotalCuenta = pedidosCuenta.reduce(
+    (acc, p) => acc + (Number(p.propina_monto) || 0),
+    0
+  );
+  const descuentoTotalCuenta = pedidosCuenta.reduce(
+    (acc, p) => acc + (Number(p.descuento_monto) || 0),
+    0
+  );
+
+  // Si vienen overrides explicitos de descuento/propina (caso admin),
+  // usarlos en lugar de la suma actual.
+  const descuentoFinal =
+    descuentoMontoOverride !== undefined && descuentoMontoOverride !== null
+      ? Math.max(Number(descuentoMontoOverride) || 0, 0)
+      : descuentoTotalCuenta;
+  const propinaFinal =
+    propinaMontoOverride !== undefined && propinaMontoOverride !== null
+      ? Math.max(Number(propinaMontoOverride) || 0, 0)
+      : propinaTotalCuenta;
+
+  // 5. Cargar items VIEJOS para poder devolver su stock antes de borrarlos.
+  //    Solo cargamos lo necesario (producto_id, cantidad, sabor) para luego
+  //    calcular delta y ajustar inventario.
+  const idsPedidos = pedidosCuenta.map((p) => p.id);
+  const placeholdersPedidos = idsPedidos.map(() => '?').join(',');
+  const itemsViejos = idsPedidos.length
+    ? await db.all(
+        `SELECT id, pedido_id, producto_id, cantidad, precio_unitario, sabor
+           FROM detalle_pedido
+          WHERE pedido_id IN (${placeholdersPedidos})
+            AND negocio_id = ?`,
+        [...idsPedidos, negocioId]
+      )
+    : [];
+
+  // 6. Si hay items nuevos, ejecutar la edicion completa en transaccion
+  //    con ajuste de stock.
+  let totales = null;
+  let totalFinal = null;
+  let stockAjustes = [];
+
+  await db.run('BEGIN');
+  try {
+    if (itemsValidos && itemsValidos.length > 0) {
+      const subtotalBruto = itemsValidos.reduce(
+        (acc, it) => acc + Number(it.cantidad) * Number(it.precio_unitario),
+        0
+      );
+      const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
+      totales = calcularTotalesConImpuestoConfigurado(subtotalBruto, configImpuesto);
+      totalFinal = Number(
+        Math.max(totales.subtotal + totales.impuesto - descuentoFinal + propinaFinal, 0).toFixed(2)
+      );
+
+      // --- AJUSTE DE STOCK ---
+      // Estrategia: agregar a un mapa { producto_id => delta } donde delta es la
+      // cantidad NETA a consumir (positivo = consumir, negativo = devolver).
+      // Por cada item viejo: delta -= cantidad (devolveriamos stock).
+      // Por cada item nuevo: delta += cantidad (consumiriamos stock).
+      // Aplicamos el delta neto a productos.stock con la validacion correspondiente.
+      const deltaStock = new Map();
+      for (const v of itemsViejos) {
+        const pid = Number(v.producto_id);
+        if (!Number.isFinite(pid) || pid <= 0) continue;
+        deltaStock.set(pid, (deltaStock.get(pid) || 0) - (Number(v.cantidad) || 0));
+      }
+      for (const n of itemsValidos) {
+        const pid = Number(n.producto_id);
+        if (!Number.isFinite(pid) || pid <= 0) continue;
+        deltaStock.set(pid, (deltaStock.get(pid) || 0) + (Number(n.cantidad) || 0));
+      }
+
+      // Aplicar ajustes. Solo afectamos productos NO indefinidos.
+      for (const [productoId, delta] of deltaStock.entries()) {
+        if (Math.abs(delta) < 0.0001) continue; // sin cambio
+        const prod = await db.get(
+          `SELECT id, nombre, stock, stock_indefinido FROM productos WHERE id = ? AND negocio_id = ? LIMIT 1`,
+          [productoId, negocioId]
+        );
+        if (!prod) {
+          throw error(400, `Producto ${productoId} no encontrado en el negocio.`);
+        }
+        if (esStockIndefinido(prod)) {
+          stockAjustes.push({ producto_id: productoId, nombre: prod.nombre, delta, ignorado: 'stock_indefinido' });
+          continue;
+        }
+        if (delta > 0) {
+          // Consumir: validar stock disponible.
+          const r = await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+            [delta, productoId, negocioId, delta]
+          );
+          if (r.changes === 0) {
+            throw error(
+              400,
+              `Stock insuficiente para "${prod.nombre || `producto ${productoId}`}". Disponible: ${Number(prod.stock) || 0}, requerido: ${delta}.`
+            );
+          }
+          // FIFO best-effort (no critico si falla).
+          try {
+            await consumirStockFIFO({
+              productoId,
+              cantidad: delta,
+              negocioId,
+              origen: 'venta',
+              origenId: pedidoId,
+            });
+          } catch (fifoErr) {
+            console.warn('FIFO best-effort fallo al consumir en edicion:', fifoErr?.message || fifoErr);
+          }
+          stockAjustes.push({ producto_id: productoId, nombre: prod.nombre, delta, accion: 'consumido' });
+        } else {
+          // Devolver stock al producto.
+          await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?',
+            [Math.abs(delta), productoId, negocioId]
+          );
+          stockAjustes.push({ producto_id: productoId, nombre: prod.nombre, delta, accion: 'devuelto' });
+        }
+      }
+
+      // Borrar consumo_insumos asociado a los pedidos de la cuenta (best-effort).
+      // El ajuste de receta al insertar nuevos items no se recalcula aqui porque
+      // requiere logica de receta-por-producto que solo aplica a algunos negocios.
+      // Para correcciones administrativas tipicas (cliente cambia un postre), el
+      // ajuste de stock del producto final es suficiente. Si el negocio usa recetas
+      // complejas, conviene anular y re-emitir la factura.
+      try {
+        await db.run(
+          `DELETE FROM consumo_insumos WHERE pedido_id IN (${placeholdersPedidos}) AND negocio_id = ?`,
+          [...idsPedidos, negocioId]
+        );
+      } catch (consumoErr) {
+        // Silencioso: la tabla puede no existir en algunas instancias.
+      }
+
+      // Borrar detalles de TODOS los pedidos de la cuenta.
+      for (const p of pedidosCuenta) {
+        await db.run(
+          'DELETE FROM detalle_pedido WHERE pedido_id = ? AND negocio_id = ?',
+          [p.id, negocioId]
+        );
+      }
+
+      // Insertar los items nuevos en el pedido principal.
+      for (const it of itemsValidos) {
+        const productoId = Number(it.producto_id) || null;
+        const cantidad = Number(it.cantidad);
+        // Sabor: si el frontend lo envia, usarlo. Si no, intentar conservar
+        // el sabor del item viejo que tenia el mismo producto_id + precio.
+        let saborFinal = it.sabor !== undefined ? (it.sabor || null) : null;
+        if (saborFinal === null && productoId) {
+          const viejo = itemsViejos.find(
+            (v) =>
+              Number(v.producto_id) === productoId &&
+              Number(v.precio_unitario) === Number(it.precio_unitario) &&
+              v.sabor
+          );
+          if (viejo) saborFinal = viejo.sabor;
+        }
+        await db.run(
+          `INSERT INTO detalle_pedido
+             (pedido_id, producto_id, cantidad, precio_unitario, negocio_id,
+              estado_preparacion, cantidad_lista, sabor)
+           VALUES (?, ?, ?, ?, ?, 'listo', ?, ?)`,
+          [
+            pedidoId,
+            productoId,
+            cantidad,
+            Number(it.precio_unitario),
+            negocioId,
+            cantidad,
+            saborFinal,
+          ]
+        );
+      }
+
+      // Update pedido principal con todos los totales consolidados.
+      await db.run(
+        `UPDATE pedidos
+            SET subtotal = ?, impuesto = ?, total = ?,
+                descuento_monto = ?, propina_monto = ?
+          WHERE id = ? AND negocio_id = ?`,
+        [
+          totales.subtotal,
+          totales.impuesto,
+          totalFinal,
+          descuentoFinal,
+          propinaFinal,
+          pedidoId,
+          negocioId,
+        ]
+      );
+
+      // Vaciar los otros pedidos de la cuenta.
+      for (const p of otrosPedidosCuenta) {
+        await db.run(
+          `UPDATE pedidos
+              SET subtotal = 0, impuesto = 0, total = 0,
+                  descuento_monto = 0, propina_monto = 0
+            WHERE id = ? AND negocio_id = ?`,
+          [p.id, negocioId]
+        );
+      }
+    } else if (
+      descuentoMontoOverride !== undefined ||
+      propinaMontoOverride !== undefined
+    ) {
+      // Caso: no se editan items pero si descuento/propina del header.
+      // Actualizamos solo el pedido principal.
+      await db.run(
+        `UPDATE pedidos
+            SET descuento_monto = ?, propina_monto = ?,
+                total = CASE
+                  WHEN (subtotal + impuesto - ? + ?) > 0
+                    THEN (subtotal + impuesto - ? + ?)
+                  ELSE 0
+                END
+          WHERE id = ? AND negocio_id = ?`,
+        [
+          descuentoFinal,
+          propinaFinal,
+          descuentoFinal,
+          propinaFinal,
+          descuentoFinal,
+          propinaFinal,
+          pedidoId,
+          negocioId,
+        ]
+      );
+    }
+
+    // Header (cliente, RNC, tipo_comprobante) en TODOS los pedidos de la cuenta.
+    const sets = [];
+    const params = [];
+    if (cliente !== undefined) {
+      sets.push('cliente = ?');
+      params.push(cliente);
+    }
+    if (clienteDocumento !== undefined) {
+      sets.push('cliente_documento = ?');
+      params.push(clienteDocumento);
+    }
+    if (
+      tipoNormalizado !== undefined &&
+      tipoNormalizado !== null &&
+      tipoNormalizado !== tipoActual
+    ) {
+      sets.push('tipo_comprobante = ?');
+      params.push(tipoNormalizado);
+    }
+    if (sets.length) {
+      for (const p of pedidosCuenta) {
+        await db.run(
+          `UPDATE pedidos SET ${sets.join(', ')} WHERE id = ? AND negocio_id = ?`,
+          [...params, p.id, negocioId]
+        );
+      }
+    }
+
+    await db.run('COMMIT');
+  } catch (txErr) {
+    await db.run('ROLLBACK').catch(() => {});
+    throw txErr;
+  }
+
+  // Invalidar cache de analitica para que reportes/dashboards reflejen los cambios.
+  try {
+    if (typeof limpiarCacheAnalitica === 'function') {
+      limpiarCacheAnalitica(negocioId);
+    }
+  } catch (cacheErr) {
+    console.warn('No se pudo limpiar cache de analitica tras editar factura:', cacheErr?.message || cacheErr);
+  }
+
+  return {
+    pedido_id: pedidoId,
+    cuenta_id: cuentaIdParaEditar,
+    pedidos_afectados: pedidosCuenta.map((p) => p.id),
+    totales: totales
+      ? {
+          subtotal: totales.subtotal,
+          impuesto: totales.impuesto,
+          descuento: descuentoFinal,
+          propina: propinaFinal,
+          total: totalFinal,
+        }
+      : null,
+    stock_ajustes: stockAjustes,
+  };
+};
 
 // ===========================================================================
 // POST /api/caja/facturas/:id/editar-con-admin
@@ -17021,20 +17361,7 @@ app.post('/api/caja/facturas/:id/editar-con-admin', (req, res) => {
     }
 
     try {
-      // 1. Rechazar si el negocio tiene FE activa (no permitir editar B0X cuando
-      //    el flujo legal del negocio es e-CF).
-      const configFE = await obtenerResumenFacturacionElectronicaNegocio(negocioId).catch(
-        () => ({ habilitada: 0 })
-      );
-      if (Number(configFE?.habilitada) === 1) {
-        return res.status(403).json({
-          ok: false,
-          error:
-            'Este negocio emite Facturación Electrónica. Las facturas e-CF no se pueden editar — debes emitir una Nota de Crédito.',
-        });
-      }
-
-      // 2. Validar password admin del negocio.
+      // Validar password admin del negocio.
       const auth = await validarPasswordAdminNegocio(negocioId, adminPassword);
       if (!auth?.ok) {
         return res.status(403).json({
@@ -17043,138 +17370,25 @@ app.post('/api/caja/facturas/:id/editar-con-admin', (req, res) => {
         });
       }
 
-      // 3. Leer el pedido. Rechazar si es e-CF o no existe.
-      const pedido = await db.get(
-        `SELECT id, estado, ecf_tipo, ecf_encf, tipo_comprobante, ncf,
-                subtotal, impuesto, descuento_monto, propina_monto, total
-         FROM pedidos
-         WHERE id = ? AND negocio_id = ? LIMIT 1`,
-        [pedidoId, negocioId]
-      );
-      if (!pedido) {
-        return res.status(404).json({ ok: false, error: 'Factura no encontrada.' });
-      }
-      const tipoActual = String(pedido.tipo_comprobante || '').toUpperCase();
-      const esEcf =
-        !!pedido.ecf_tipo ||
-        /^E\d{2}$/.test(tipoActual) ||
-        !!pedido.ecf_encf;
-      if (esEcf) {
-        return res.status(403).json({
-          ok: false,
-          error:
-            'Esta factura es electrónica (e-CF). Para corregirla emite una Nota de Crédito desde el módulo correspondiente.',
-        });
-      }
+      // Aplicar edicion usando la funcion compartida (cuenta-level + stock + cache).
+      const resultado = await aplicarEdicionFacturaCuenta({
+        pedidoId,
+        negocioId,
+        cliente:
+          body.cliente !== undefined ? normalizarCampoTexto(body.cliente) : undefined,
+        clienteDocumento:
+          body.cliente_documento !== undefined
+            ? normalizarCampoTexto(body.cliente_documento)
+            : undefined,
+        tipoNuevo: body.tipo_comprobante !== undefined ? body.tipo_comprobante : undefined,
+        items: Array.isArray(body.items) ? body.items : null,
+        descuentoMontoOverride:
+          body.descuento_monto !== undefined ? body.descuento_monto : undefined,
+        propinaMontoOverride:
+          body.propina_monto !== undefined ? body.propina_monto : undefined,
+      });
 
-      // 4. Recoger cambios del body con normalización conservadora.
-      const cliente = body.cliente !== undefined ? normalizarCampoTexto(body.cliente) : undefined;
-      const clienteDocumento =
-        body.cliente_documento !== undefined
-          ? normalizarCampoTexto(body.cliente_documento)
-          : undefined;
-      let tipoNuevo =
-        body.tipo_comprobante !== undefined
-          ? String(body.tipo_comprobante || '').toUpperCase().trim()
-          : undefined;
-      // Validar que el tipo nuevo SEA legacy (B0X o "Sin comprobante"), nunca e-CF.
-      if (tipoNuevo !== undefined) {
-        if (tipoNuevo === '' || tipoNuevo === 'SIN COMPROBANTE') {
-          tipoNuevo = 'Sin comprobante';
-        } else if (!['B01', 'B02', 'B14'].includes(tipoNuevo)) {
-          return res.status(400).json({
-            ok: false,
-            error: 'El tipo de comprobante solo puede cambiarse a B01, B02, B14 o "Sin comprobante".',
-          });
-        }
-      }
-      const items = Array.isArray(body.items) ? body.items : null;
-
-      // Validación de items si vienen.
-      if (items && items.length > 0) {
-        for (const it of items) {
-          const cantidad = Number(it.cantidad);
-          const precio = Number(it.precio_unitario);
-          if (!Number.isFinite(cantidad) || cantidad <= 0) {
-            return res.status(400).json({
-              ok: false,
-              error: 'Todas las cantidades deben ser mayores a cero.',
-            });
-          }
-          if (!Number.isFinite(precio) || precio < 0) {
-            return res.status(400).json({
-              ok: false,
-              error: 'Los precios no pueden ser negativos.',
-            });
-          }
-        }
-      }
-
-      // 5. Aplicar cambios en transacción.
-      await db.run('BEGIN');
-      try {
-        // 5a. Items (solo si se enviaron).
-        if (items && items.length > 0) {
-          const subtotalBruto = items.reduce(
-            (acc, it) => acc + Number(it.cantidad) * Number(it.precio_unitario),
-            0
-          );
-          const configImpuesto = await obtenerConfiguracionImpuestoNegocio(negocioId);
-          const totales = calcularTotalesConImpuestoConfigurado(subtotalBruto, configImpuesto);
-          const descuentoMonto = Number(pedido.descuento_monto) || 0;
-          const propinaMonto = Number(pedido.propina_monto) || 0;
-          const totalFinal = Number(
-            Math.max(totales.subtotal + totales.impuesto - descuentoMonto + propinaMonto, 0).toFixed(2)
-          );
-
-          await db.run(
-            'DELETE FROM detalle_pedido WHERE pedido_id = ? AND negocio_id = ?',
-            [pedidoId, negocioId]
-          );
-          for (const it of items) {
-            const productoId = Number(it.producto_id) || null;
-            await db.run(
-              'INSERT INTO detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, negocio_id) VALUES (?, ?, ?, ?, ?)',
-              [pedidoId, productoId, Number(it.cantidad), Number(it.precio_unitario), negocioId]
-            );
-          }
-          await db.run(
-            `UPDATE pedidos SET subtotal = ?, impuesto = ?, total = ?
-             WHERE id = ? AND negocio_id = ?`,
-            [totales.subtotal, totales.impuesto, totalFinal, pedidoId, negocioId]
-          );
-        }
-
-        // 5b. Encabezado (cliente, RNC, tipo).
-        const sets = [];
-        const params = [];
-        if (cliente !== undefined) {
-          sets.push('cliente = ?');
-          params.push(cliente);
-        }
-        if (clienteDocumento !== undefined) {
-          sets.push('cliente_documento = ?');
-          params.push(clienteDocumento);
-        }
-        if (tipoNuevo !== undefined && tipoNuevo !== tipoActual) {
-          sets.push('tipo_comprobante = ?');
-          params.push(tipoNuevo);
-        }
-        if (sets.length) {
-          params.push(pedidoId, negocioId);
-          await db.run(
-            `UPDATE pedidos SET ${sets.join(', ')} WHERE id = ? AND negocio_id = ?`,
-            params
-          );
-        }
-
-        await db.run('COMMIT');
-      } catch (txErr) {
-        await db.run('ROLLBACK').catch(() => {});
-        throw txErr;
-      }
-
-      // 6. Auditoría: registrar quién editó qué (best-effort).
+      // Auditoria best-effort.
       try {
         if (typeof registrarAccionAdmin === 'function') {
           await registrarAccionAdmin({
@@ -17183,11 +17397,14 @@ app.post('/api/caja/facturas/:id/editar-con-admin', (req, res) => {
             accion: 'editar_factura_caja',
             detalle: JSON.stringify({
               pedido_id: pedidoId,
+              cuenta_id: resultado.cuenta_id,
+              pedidos_cuenta: resultado.pedidos_afectados,
+              stock_ajustes: resultado.stock_ajustes,
               cambios: {
-                cliente: cliente !== undefined ? true : false,
-                cliente_documento: clienteDocumento !== undefined ? true : false,
-                tipo_comprobante: tipoNuevo !== undefined ? tipoNuevo : null,
-                items: items ? items.length : null,
+                cliente: body.cliente !== undefined,
+                cliente_documento: body.cliente_documento !== undefined,
+                tipo_comprobante: body.tipo_comprobante || null,
+                items: Array.isArray(body.items) ? body.items.length : null,
               },
               autorizo_admin_id: auth.admin_id,
               ejecuto_usuario_id: usuarioSesion.id,
@@ -17201,11 +17418,14 @@ app.post('/api/caja/facturas/:id/editar-con-admin', (req, res) => {
       res.json({
         ok: true,
         autorizado_por: auth.admin_usuario || auth.admin_nombre || 'admin',
-        pedido_id: pedidoId,
+        ...resultado,
       });
     } catch (error) {
-      console.error('Error en editar-con-admin:', error?.message || error);
-      res.status(500).json({ ok: false, error: 'No se pudo editar la factura.' });
+      const status = error?.status || 500;
+      if (status >= 500) {
+        console.error('Error en editar-con-admin:', error?.message || error);
+      }
+      res.status(status).json({ ok: false, error: error?.message || 'No se pudo editar la factura.' });
     }
   });
 });
