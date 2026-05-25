@@ -7,6 +7,7 @@ const bcrypt = require('bcryptjs');
 const http = require('http');
 const { Server } = require('socket.io');
 const QRCode = require('qrcode');
+const compression = require('compression');
 
 let nodemailer = null;
 try {
@@ -68,6 +69,21 @@ const app = express();
 let io = null;
 
 app.set('trust proxy', 1);
+
+// Compresion gzip/brotli para todas las respuestas. Reduce 60-80% el tamano
+// de JSON/JS/CSS en transit. Threshold 1KB para no gastar CPU en responses
+// pequenos. Level 6 es el sweet spot entre ratio y CPU. NO comprime si el
+// header 'x-no-compression' esta presente (escape para debugging).
+app.use(
+  compression({
+    threshold: 1024,
+    level: 6,
+    filter: (req, res) => {
+      if (req.headers['x-no-compression']) return false;
+      return compression.filter(req, res);
+    },
+  })
+);
 
 // Body parser principal a 5mb (antes 35mb que era excesivo y abria riesgo OOM
 // con un POST malicioso). Las rutas que reciben P12 / logo URI se manejan

@@ -36,5 +36,10 @@ npm-debug.log*
 docs/brave-tmp/
 docs/**/brave-tmp/
 
+# ===== Storage runtime DGII (XMLs generados por simulaciones) =====
+# Se regeneran al correr Paso 2. Si necesitas la evidencia historica
+# de pruebas pasadas, mira docs/dgii-historico/paso2_xml_backup/.
+storage/dgii/paso2_xml/
+
 # ===== Worktrees de Claude Code =====
 .claude/worktrees/
