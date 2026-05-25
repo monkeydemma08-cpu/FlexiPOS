@@ -1,7 +1,7 @@
 {
-  "name": "kanm",
+  "name": "posium",
   "version": "1.0.0",
-  "description": "",
+  "description": "POSIUM - sistema de punto de venta y facturacion",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
