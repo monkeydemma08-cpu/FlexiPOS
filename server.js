@@ -335,7 +335,13 @@ const seedUsuariosIniciales = async () => {
 const estadosValidos = ['pendiente', 'preparando', 'listo', 'pagado', 'cancelado'];
 const ESTADOS_DELIVERY = ['pendiente', 'disponible', 'asignado', 'entregado', 'cancelado'];
 const ADMIN_PASSWORD = 'admin123';
-const SESSION_EXPIRATION_HOURS = 12; // Ventana m?xima para considerar una sesi?n activa
+// Plazo de inactividad antes de invalidar una sesion. Se mide desde el ULTIMO
+// USO de la sesion (campo ultimo_uso), no desde su creacion. Esto significa
+// que mientras un usuario haga requests (mesera/cocina/bar/caja/mostrador),
+// su sesion se mantiene viva. Solo expira si esta inactivo durante este
+// periodo completo. 30 dias = 720 horas: practicamente solo se cierra si el
+// usuario hace logout explicito o lo cierran desde admin.
+const SESSION_EXPIRATION_HOURS = 24 * 30; // 30 dias de inactividad maxima
 const ANALYTICS_CACHE_TTL_MS = 2 * 60 * 1000;
 const analyticsCache = new Map();
 const analyticsAdvancedCache = new Map();
@@ -2684,14 +2690,17 @@ const cerrarSesionesActivasDeUsuario = (usuarioId, callback) => {
   );
 };
 
-// Mantiene una ?nica sesi?n activa por usuario sin bloquear el flujo de pedidos.
+// Mantiene una unica sesion activa por usuario sin bloquear el flujo de pedidos.
+// La expiracion se mide desde ultimo_uso (no desde creado_en) para que las
+// sesiones de mesera/cocina/bar/caja/mostrador no se cierren mientras trabajan.
+// Si ultimo_uso es NULL (sesion nueva sin requests), se considera creado_en.
 const cerrarSesionesExpiradas = (usuarioId, callback) => {
   const sql = `
     UPDATE sesiones_usuarios
     SET cerrado_en = CURRENT_TIMESTAMP
     WHERE usuario_id = ?
       AND cerrado_en IS NULL
-      AND DATE_ADD(creado_en, INTERVAL ${SESSION_EXPIRATION_HOURS} HOUR) <= CURRENT_TIMESTAMP
+      AND DATE_ADD(COALESCE(ultimo_uso, creado_en), INTERVAL ${SESSION_EXPIRATION_HOURS} HOUR) <= CURRENT_TIMESTAMP
   `;
 
   db.run(sql, [usuarioId], (err) => {
@@ -2791,7 +2800,7 @@ async function obtenerUsuarioSesionPorToken(token) {
     FROM sesiones_usuarios
     WHERE token = ?
       AND cerrado_en IS NULL
-      AND DATE_ADD(creado_en, INTERVAL ${SESSION_EXPIRATION_HOURS} HOUR) > CURRENT_TIMESTAMP
+      AND DATE_ADD(COALESCE(ultimo_uso, creado_en), INTERVAL ${SESSION_EXPIRATION_HOURS} HOUR) > CURRENT_TIMESTAMP
     ORDER BY creado_en DESC
     LIMIT 1
   `;
@@ -17643,7 +17652,7 @@ app.post('/api/bar/marcar-listo', (req, res) => {
           FROM sesiones_usuarios
           WHERE usuario_id IN (${placeholders})
             AND cerrado_en IS NULL
-            AND DATE_ADD(creado_en, INTERVAL ${SESSION_EXPIRATION_HOURS} HOUR) > CURRENT_TIMESTAMP
+            AND DATE_ADD(COALESCE(ultimo_uso, creado_en), INTERVAL ${SESSION_EXPIRATION_HOURS} HOUR) > CURRENT_TIMESTAMP
         `;
         const lastSql = `
           SELECT s.usuario_id, s.creado_en, s.ultimo_uso, s.cerrado_en
