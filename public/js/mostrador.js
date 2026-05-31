@@ -1257,6 +1257,16 @@ const toggleCamposPago = () => {
       if (inputPagoEfectivoEntregado) setMoneyInputValueMostrador(inputPagoEfectivoEntregado, 0);
       if (inputPagoTarjeta) setMoneyInputValueMostrador(inputPagoTarjeta, 0);
     }
+  } else if (metodo === 'combinado') {
+    // BUG FIX: al pasar a combinado, los campos quedaban con el valor del modo
+    // anterior (ej. efectivo = total). Eso hacia que al sumar el efectivo
+    // viejo + tarjeta + transferencia diera mas que el total y la validacion
+    // dijera "los montos exceden el total permitido".
+    // Solucion: resetear todos los campos a 0 para que el usuario los ponga
+    // manualmente sin heredar valores.
+    if (inputPagoEfectivoEntregado) setMoneyInputValueMostrador(inputPagoEfectivoEntregado, 0);
+    if (inputPagoTarjeta) setMoneyInputValueMostrador(inputPagoTarjeta, 0);
+    if (inputPagoTransferencia) setMoneyInputValueMostrador(inputPagoTransferencia, 0);
   }
 
   recalcularCambio();

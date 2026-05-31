@@ -817,6 +817,30 @@
         </div>
       `;
 
+      // Pedido principal para Ver/Editar factura: tomamos el primer pedido de
+      // la cuenta. La factura impresa consolida items de toda la cuenta y la
+      // edicion opera a nivel cuenta (igual que caja).
+      const facturaPedidoIdRaw = Number(
+        pedido.pedidos?.find((p) => Number(p?.id) > 0)?.id || pedido.id
+      );
+      const facturaPedidoId = Number.isFinite(facturaPedidoIdRaw) && facturaPedidoIdRaw > 0
+        ? facturaPedidoIdRaw
+        : null;
+      // Detectar si es e-CF (no editable, solo verla)
+      const pedidoRelacionado =
+        pedido.pedidos?.find((p) => Number(p?.id) === facturaPedidoId) || pedido.pedidos?.[0] || pedido;
+      const tipoComp = String(pedidoRelacionado?.tipo_comprobante || pedido.tipo_comprobante || '').toUpperCase();
+      const esPedidoEcf =
+        !!pedidoRelacionado?.ecf_tipo ||
+        !!pedidoRelacionado?.ecf_encf ||
+        /^E\d{2}$/.test(tipoComp);
+      const facturaBtnsHtml = facturaPedidoId
+        ? `
+            <button type="button" class="kanm-button ghost" data-ver-factura="1" data-pedido-id="${facturaPedidoId}" title="Ver factura">Ver factura</button>
+            ${esPedidoEcf ? '' : `<button type="button" class="kanm-button ghost" data-editar-factura="1" data-pedido-id="${facturaPedidoId}" style="margin-left:6px;" title="Editar factura (requiere password admin)">Editar</button>`}
+          `
+        : '<span class="kanm-subtitle">—</span>';
+
       fila.dataset.cuadreId = pedido.id;
       fila.style.cursor = 'pointer';
       fila.setAttribute('aria-expanded', 'false');
@@ -827,6 +851,7 @@
         <td>${formatDateTime(pedido.fecha_cierre || pedido.pedidos?.[0]?.fecha_cierre)}</td>
         <td>${metodoControl}</td>
         <td>${formatCurrency(total)}</td>
+        <td style="white-space:nowrap;">${facturaBtnsHtml}</td>
       `;
 
       fragment.appendChild(fila);
@@ -1118,6 +1143,29 @@
     });
 
     cuadreDetalleBody?.addEventListener('click', (event) => {
+      // Boton Ver factura: abre la factura en nueva pestana.
+      const botonVerFactura = event.target.closest('[data-ver-factura]');
+      if (botonVerFactura) {
+        event.preventDefault();
+        event.stopPropagation();
+        const pedidoId = Number(botonVerFactura.dataset.pedidoId);
+        if (Number.isFinite(pedidoId) && pedidoId > 0) {
+          const ts = Date.now();
+          window.open(`/factura.html?id=${pedidoId}&_=${ts}`, `factura_${pedidoId}_${ts}`);
+        }
+        return;
+      }
+      // Boton Editar factura: abre el modal de edicion.
+      const botonEditarFactura = event.target.closest('[data-editar-factura]');
+      if (botonEditarFactura) {
+        event.preventDefault();
+        event.stopPropagation();
+        const pedidoId = Number(botonEditarFactura.dataset.pedidoId);
+        if (Number.isFinite(pedidoId) && pedidoId > 0 && typeof abrirModalEditarFacturaMostrador === 'function') {
+          abrirModalEditarFacturaMostrador(pedidoId);
+        }
+        return;
+      }
       const fila = event.target.closest('tr');
       if (!fila || fila.classList.contains('cuadre-detalle-expand')) return;
       const cuadreId = Number(fila.dataset.cuadreId);
@@ -1156,6 +1204,7 @@
     recargarEstadoMostrador(true);
     inicializarCuadre();
     iniciarActualizacionPeriodica();
+    inicializarModalEditarFactura();
   });
 
   window.addEventListener('storage', (event) => {
@@ -1163,4 +1212,276 @@
       procesarSyncGlobal(event.newValue);
     }
   });
+
+  // ============================================================
+  // Modal Editar factura (cuadre mostrador)
+  // ============================================================
+  let editModalEl = null;
+  let editPedidoIdInput = null;
+  let editClienteInput = null;
+  let editDocumentoInput = null;
+  let editTipoSelect = null;
+  let editItemsBody = null;
+  let editMetodoPagoSelect = null;
+  let editPagosCombinadoWrap = null;
+  let editPagoEfectivoInput = null;
+  let editPagoTarjetaInput = null;
+  let editPagoTransferenciaInput = null;
+  let editPagoTotalDisplay = null;
+  let editPagoAviso = null;
+  let editPasswordInput = null;
+  let editMensaje = null;
+  let editGuardarBtn = null;
+  let editPedidoActualTotal = 0;
+
+  const fmtCurrencyMostradorEdit = (n) => {
+    try {
+      return new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP' }).format(Number(n) || 0);
+    } catch (_) {
+      return `RD$${(Number(n) || 0).toFixed(2)}`;
+    }
+  };
+
+  const setEditMensajeMostrador = (txt, tipo = 'info') => {
+    if (!editMensaje) return;
+    editMensaje.textContent = txt || '';
+    editMensaje.classList.remove('kanm-message-error', 'kanm-message-success');
+    if (tipo === 'error') editMensaje.classList.add('kanm-message-error');
+    if (tipo === 'success') editMensaje.classList.add('kanm-message-success');
+  };
+
+  const renderEditItemsMostrador = (items = []) => {
+    if (!editItemsBody) return;
+    if (!items.length) {
+      editItemsBody.innerHTML = '<tr><td colspan="5" class="kanm-subtitle">Sin items.</td></tr>';
+      return;
+    }
+    editItemsBody.innerHTML = items
+      .map((it, idx) => {
+        const baseName = it.nombre || `Producto ${it.producto_id || ''}`;
+        const sabor = it.sabor || '';
+        const nombre = sabor ? `${baseName} (${sabor})` : baseName;
+        const cantidad = Number(it.cantidad) || 0;
+        const precio = Number(it.precio_unitario) || 0;
+        const sub = (cantidad * precio).toFixed(2);
+        const saborAttr = sabor ? ` data-sabor="${String(sabor).replace(/"/g, '&quot;')}"` : '';
+        return `
+          <tr data-edit-item-row="${idx}" data-producto-id="${it.producto_id || ''}"${saborAttr}>
+            <td>${nombre}</td>
+            <td><input type="number" class="kanm-input" data-edit-cant min="0.01" step="0.01" value="${cantidad}" /></td>
+            <td><input type="number" class="kanm-input" data-edit-precio min="0" step="0.01" value="${precio.toFixed(2)}" /></td>
+            <td><span data-edit-sub>RD$${sub}</span></td>
+            <td><button type="button" class="kanm-button ghost" data-edit-elim title="Quitar">✕</button></td>
+          </tr>
+        `;
+      })
+      .join('');
+  };
+
+  const recalcSubtotalesEditMostrador = () => {
+    editItemsBody?.querySelectorAll('tr[data-edit-item-row]').forEach((tr) => {
+      const c = Number(tr.querySelector('[data-edit-cant]')?.value) || 0;
+      const p = Number(tr.querySelector('[data-edit-precio]')?.value) || 0;
+      const out = tr.querySelector('[data-edit-sub]');
+      if (out) out.textContent = `RD$${(c * p).toFixed(2)}`;
+    });
+  };
+
+  const recalcTotalPagosCombinado = () => {
+    const efe = Number(editPagoEfectivoInput?.value) || 0;
+    const tar = Number(editPagoTarjetaInput?.value) || 0;
+    const tra = Number(editPagoTransferenciaInput?.value) || 0;
+    const total = efe + tar + tra;
+    if (editPagoTotalDisplay) editPagoTotalDisplay.textContent = fmtCurrencyMostradorEdit(total);
+    if (editPagoAviso) {
+      const diff = Math.abs(total - editPedidoActualTotal);
+      if (diff <= 0.05) {
+        editPagoAviso.textContent = '✓ La suma coincide con el total de la factura.';
+        editPagoAviso.style.color = '#0a7';
+      } else if (total < editPedidoActualTotal) {
+        editPagoAviso.textContent = `Falta ${fmtCurrencyMostradorEdit(editPedidoActualTotal - total)} para completar el total.`;
+        editPagoAviso.style.color = '#c00';
+      } else {
+        editPagoAviso.textContent = `Excede el total por ${fmtCurrencyMostradorEdit(total - editPedidoActualTotal)}.`;
+        editPagoAviso.style.color = '#c00';
+      }
+    }
+  };
+
+  const toggleCombinadoVisible = () => {
+    const visible = editMetodoPagoSelect?.value === 'combinado';
+    if (editPagosCombinadoWrap) editPagosCombinadoWrap.hidden = !visible;
+    if (visible) recalcTotalPagosCombinado();
+  };
+
+  function abrirModalEditarFacturaMostrador(pedidoId) {
+    if (!editModalEl) return;
+    setEditMensajeMostrador('Cargando factura…');
+    editModalEl.hidden = false;
+    if (editPedidoIdInput) editPedidoIdInput.value = String(pedidoId);
+    if (editPasswordInput) editPasswordInput.value = '';
+    if (editItemsBody) editItemsBody.innerHTML = '<tr><td colspan="5" class="kanm-subtitle">Cargando…</td></tr>';
+
+    fetch(`/api/pedidos/${pedidoId}/factura`, { headers: { ...(typeof getAuthHeaders === 'function' ? getAuthHeaders() : {}) } })
+      .then((r) => r.json().catch(() => ({})))
+      .then((data) => {
+        if (!data?.ok && !data?.pedido) throw new Error(data?.error || 'No se pudo cargar la factura.');
+        const pedido = data.pedido || {};
+        const items = Array.isArray(data.items) ? data.items : [];
+        const tipoAct = String(pedido.tipo_comprobante || '').toUpperCase();
+        if (pedido.ecf_tipo || pedido.ecf_encf || /^E\d{2}$/.test(tipoAct)) {
+          setEditMensajeMostrador('Esta factura es electronica (e-CF). No se puede editar — emite Nota de Credito.', 'error');
+          return;
+        }
+        if (editClienteInput) editClienteInput.value = pedido.cliente || '';
+        if (editDocumentoInput) editDocumentoInput.value = pedido.cliente_documento || '';
+        if (editTipoSelect) {
+          const ops = ['B01', 'B02', 'B14', 'Sin comprobante'];
+          editTipoSelect.value = ops.includes(pedido.tipo_comprobante) ? pedido.tipo_comprobante : 'B02';
+        }
+        editPedidoActualTotal = Number(pedido.total) || 0;
+        // Determinar metodo de pago actual segun campos pago_*
+        const pagEfe = Number(pedido.pago_efectivo) || 0;
+        const pagTar = Number(pedido.pago_tarjeta) || 0;
+        const pagTra = Number(pedido.pago_transferencia) || 0;
+        let metodoActual = 'efectivo';
+        const usados = [pagEfe > 0.01, pagTar > 0.01, pagTra > 0.01].filter(Boolean).length;
+        if (usados > 1) metodoActual = 'combinado';
+        else if (pagTar > 0.01) metodoActual = 'tarjeta';
+        else if (pagTra > 0.01) metodoActual = 'transferencia';
+        else metodoActual = 'efectivo';
+        if (editMetodoPagoSelect) editMetodoPagoSelect.value = metodoActual;
+        if (editPagoEfectivoInput) editPagoEfectivoInput.value = pagEfe.toFixed(2);
+        if (editPagoTarjetaInput) editPagoTarjetaInput.value = pagTar.toFixed(2);
+        if (editPagoTransferenciaInput) editPagoTransferenciaInput.value = pagTra.toFixed(2);
+        toggleCombinadoVisible();
+        renderEditItemsMostrador(items);
+        setEditMensajeMostrador('');
+      })
+      .catch((err) => setEditMensajeMostrador(err.message || 'Error cargando factura.', 'error'));
+  }
+
+  function cerrarModalEditarFacturaMostrador() {
+    if (editModalEl) editModalEl.hidden = true;
+    setEditMensajeMostrador('');
+  }
+
+  async function guardarEdicionFacturaMostrador() {
+    if (!editModalEl) return;
+    const pedidoId = Number(editPedidoIdInput?.value);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+      setEditMensajeMostrador('Pedido invalido.', 'error');
+      return;
+    }
+    const password = (editPasswordInput?.value || '').trim();
+    if (!password) {
+      setEditMensajeMostrador('Ingresa la contrasena del administrador.', 'error');
+      return;
+    }
+    // Items
+    const items = [];
+    editItemsBody?.querySelectorAll('tr[data-edit-item-row]').forEach((tr) => {
+      const c = Number(tr.querySelector('[data-edit-cant]')?.value);
+      const p = Number(tr.querySelector('[data-edit-precio]')?.value);
+      const productoId = Number(tr.dataset.productoId) || null;
+      const sabor = tr.dataset.sabor || null;
+      if (Number.isFinite(c) && c > 0 && Number.isFinite(p) && p >= 0) {
+        items.push({ producto_id: productoId, cantidad: c, precio_unitario: p, sabor });
+      }
+    });
+    if (!items.length) {
+      setEditMensajeMostrador('Debe haber al menos un item valido.', 'error');
+      return;
+    }
+    // Pago
+    const metodoPago = editMetodoPagoSelect?.value || 'efectivo';
+    let pagos = null;
+    if (metodoPago === 'combinado') {
+      const efe = Number(editPagoEfectivoInput?.value) || 0;
+      const tar = Number(editPagoTarjetaInput?.value) || 0;
+      const tra = Number(editPagoTransferenciaInput?.value) || 0;
+      pagos = { efectivo: efe, tarjeta: tar, transferencia: tra };
+    }
+    const payload = {
+      admin_password: password,
+      cliente: editClienteInput?.value?.trim() || '',
+      cliente_documento: editDocumentoInput?.value?.trim() || '',
+      tipo_comprobante: editTipoSelect?.value || 'B02',
+      items,
+      metodo_pago: metodoPago,
+      pagos,
+    };
+    if (editGuardarBtn) {
+      editGuardarBtn.disabled = true;
+      editGuardarBtn.textContent = 'Guardando…';
+    }
+    setEditMensajeMostrador('Guardando cambios…');
+    try {
+      const resp = await fetch(`/api/caja/facturas/${pedidoId}/editar-con-admin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(typeof getAuthHeaders === 'function' ? getAuthHeaders() : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.ok === false) {
+        throw new Error(data?.error || 'No se pudo guardar.');
+      }
+      setEditMensajeMostrador('Factura actualizada correctamente.', 'success');
+      if (typeof cargarResumenCuadre === 'function') {
+        try { await cargarResumenCuadre(false); } catch (_) {}
+      }
+      setTimeout(cerrarModalEditarFacturaMostrador, 900);
+    } catch (err) {
+      setEditMensajeMostrador(err.message || 'Error al guardar.', 'error');
+    } finally {
+      if (editGuardarBtn) {
+        editGuardarBtn.disabled = false;
+        editGuardarBtn.textContent = 'Guardar cambios';
+      }
+    }
+  }
+
+  function inicializarModalEditarFactura() {
+    editModalEl = document.getElementById('mostrador-editar-factura-modal');
+    if (!editModalEl) return;
+    editPedidoIdInput = document.getElementById('mostrador-editar-factura-pedido-id');
+    editClienteInput = document.getElementById('mostrador-editar-factura-cliente');
+    editDocumentoInput = document.getElementById('mostrador-editar-factura-documento');
+    editTipoSelect = document.getElementById('mostrador-editar-factura-tipo');
+    editItemsBody = document.getElementById('mostrador-editar-factura-items-body');
+    editMetodoPagoSelect = document.getElementById('mostrador-editar-factura-metodo-pago');
+    editPagosCombinadoWrap = document.getElementById('mostrador-editar-factura-pagos-combinado');
+    editPagoEfectivoInput = document.getElementById('mostrador-editar-factura-pago-efectivo');
+    editPagoTarjetaInput = document.getElementById('mostrador-editar-factura-pago-tarjeta');
+    editPagoTransferenciaInput = document.getElementById('mostrador-editar-factura-pago-transferencia');
+    editPagoTotalDisplay = document.getElementById('mostrador-editar-factura-pago-total');
+    editPagoAviso = document.getElementById('mostrador-editar-factura-pago-aviso');
+    editPasswordInput = document.getElementById('mostrador-editar-factura-admin-password');
+    editMensaje = document.getElementById('mostrador-editar-factura-mensaje');
+    editGuardarBtn = document.getElementById('mostrador-editar-factura-guardar');
+
+    document.getElementById('mostrador-editar-factura-cerrar')?.addEventListener('click', cerrarModalEditarFacturaMostrador);
+    document.getElementById('mostrador-editar-factura-cancelar')?.addEventListener('click', cerrarModalEditarFacturaMostrador);
+    editModalEl.addEventListener('click', (e) => { if (e.target === editModalEl) cerrarModalEditarFacturaMostrador(); });
+    editGuardarBtn?.addEventListener('click', guardarEdicionFacturaMostrador);
+
+    editItemsBody?.addEventListener('input', (e) => {
+      if (e.target.matches('[data-edit-cant]') || e.target.matches('[data-edit-precio]')) {
+        recalcSubtotalesEditMostrador();
+      }
+    });
+    editItemsBody?.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-edit-elim]');
+      if (!b) return;
+      b.closest('tr')?.remove();
+      recalcSubtotalesEditMostrador();
+    });
+    editMetodoPagoSelect?.addEventListener('change', toggleCombinadoVisible);
+    [editPagoEfectivoInput, editPagoTarjetaInput, editPagoTransferenciaInput].forEach((inp) => {
+      inp?.addEventListener('input', recalcTotalPagosCombinado);
+    });
+  }
 })();

@@ -16916,6 +16916,8 @@ app.patch('/api/pedidos/:id/factura', (req, res) => {
           body.descuento_monto !== undefined ? body.descuento_monto : undefined,
         propinaMontoOverride:
           body.propina_monto !== undefined ? body.propina_monto : undefined,
+        metodoPago: body.metodo_pago !== undefined ? body.metodo_pago : null,
+        pagos: body.pagos !== undefined ? body.pagos : null,
       });
 
       // Auditoria best-effort.
@@ -16983,6 +16985,8 @@ const aplicarEdicionFacturaCuenta = async ({
   items,
   descuentoMontoOverride,
   propinaMontoOverride,
+  metodoPago,
+  pagos,
 }) => {
   const error = (status, message) => {
     const e = new Error(message);
@@ -17316,6 +17320,66 @@ const aplicarEdicionFacturaCuenta = async ({
       }
     }
 
+    // Metodo de pago: si se especifica, actualizar pago_efectivo/pago_tarjeta/
+    // pago_transferencia del pedido PRINCIPAL. Los secundarios se ponen en 0
+    // (ya que la cuenta queda consolidada en el principal).
+    const metodoNormalizado =
+      typeof metodoPago === 'string' ? metodoPago.trim().toLowerCase() : null;
+    const metodosValidos = ['efectivo', 'tarjeta', 'transferencia', 'combinado'];
+    if (metodoNormalizado && metodosValidos.includes(metodoNormalizado)) {
+      // Calcular cuanto va a cada metodo. Si vienen detalles explicitos en
+      // 'pagos' (caso combinado), usar esos. Si no, todo el total al metodo
+      // unico seleccionado.
+      const totalParaPago = Number(
+        (totalFinal !== null ? totalFinal : (Number(pedidoBase.total) || 0)).toFixed(2)
+      );
+      let pagoEfectivo = 0;
+      let pagoTarjeta = 0;
+      let pagoTransferencia = 0;
+      if (metodoNormalizado === 'combinado' && pagos && typeof pagos === 'object') {
+        pagoEfectivo = Math.max(Number(pagos.efectivo) || 0, 0);
+        pagoTarjeta = Math.max(Number(pagos.tarjeta) || 0, 0);
+        pagoTransferencia = Math.max(Number(pagos.transferencia) || 0, 0);
+        const sumaCombinado = pagoEfectivo + pagoTarjeta + pagoTransferencia;
+        if (Math.abs(sumaCombinado - totalParaPago) > 0.05 && totalParaPago > 0) {
+          throw error(
+            400,
+            `La suma de los pagos combinados (${sumaCombinado.toFixed(2)}) no coincide con el total ${totalParaPago.toFixed(2)}.`
+          );
+        }
+      } else if (metodoNormalizado === 'efectivo') {
+        pagoEfectivo = totalParaPago;
+      } else if (metodoNormalizado === 'tarjeta') {
+        pagoTarjeta = totalParaPago;
+      } else if (metodoNormalizado === 'transferencia') {
+        pagoTransferencia = totalParaPago;
+      }
+      // Aplicar al principal.
+      await db.run(
+        `UPDATE pedidos
+            SET pago_efectivo = ?,
+                pago_efectivo_entregado = ?,
+                pago_tarjeta = ?,
+                pago_transferencia = ?,
+                pago_cambio = 0
+          WHERE id = ? AND negocio_id = ?`,
+        [pagoEfectivo, pagoEfectivo, pagoTarjeta, pagoTransferencia, pedidoId, negocioId]
+      );
+      // Y limpiar los secundarios.
+      for (const p of otrosPedidosCuenta) {
+        await db.run(
+          `UPDATE pedidos
+              SET pago_efectivo = 0,
+                  pago_efectivo_entregado = 0,
+                  pago_tarjeta = 0,
+                  pago_transferencia = 0,
+                  pago_cambio = 0
+            WHERE id = ? AND negocio_id = ?`,
+          [p.id, negocioId]
+        );
+      }
+    }
+
     await db.run('COMMIT');
   } catch (txErr) {
     await db.run('ROLLBACK').catch(() => {});
@@ -17411,6 +17475,8 @@ app.post('/api/caja/facturas/:id/editar-con-admin', (req, res) => {
           body.descuento_monto !== undefined ? body.descuento_monto : undefined,
         propinaMontoOverride:
           body.propina_monto !== undefined ? body.propina_monto : undefined,
+        metodoPago: body.metodo_pago !== undefined ? body.metodo_pago : null,
+        pagos: body.pagos !== undefined ? body.pagos : null,
       });
 
       // Auditoria best-effort.
@@ -17430,6 +17496,7 @@ app.post('/api/caja/facturas/:id/editar-con-admin', (req, res) => {
                 cliente_documento: body.cliente_documento !== undefined,
                 tipo_comprobante: body.tipo_comprobante || null,
                 items: Array.isArray(body.items) ? body.items.length : null,
+                metodo_pago: body.metodo_pago || null,
               },
               autorizo_admin_id: auth.admin_id,
               ejecuto_usuario_id: usuarioSesion.id,
