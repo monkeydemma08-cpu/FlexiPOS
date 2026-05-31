@@ -17378,6 +17378,51 @@ const aplicarEdicionFacturaCuenta = async ({
           [p.id, negocioId]
         );
       }
+
+      // IMPORTANTE: el cuadre de caja y los totales (efectivo/tarjeta/transferencia)
+      // se calculan desde la tabla `pagos_cuenta` cuando existen movimientos; solo
+      // caen a pedidos.pago_* si no hay ninguno. Por eso, ademas de actualizar el
+      // pedido, hay que redistribuir los movimientos de pago de la cuenta para que
+      // el cambio de metodo (incluido el combinado) se refleje en el cuadre.
+      const movimientosCuenta = await db.all(
+        `SELECT id FROM pagos_cuenta
+          WHERE cuenta_id = ? AND negocio_id = ?
+          ORDER BY id ASC`,
+        [cuentaIdParaEditar, negocioId]
+      );
+      if (movimientosCuenta.length) {
+        // Consolidar toda la nueva distribucion en el primer movimiento.
+        await db.run(
+          `UPDATE pagos_cuenta
+              SET pago_efectivo = ?,
+                  pago_efectivo_entregado = ?,
+                  pago_tarjeta = ?,
+                  pago_transferencia = ?,
+                  pago_cambio = 0
+            WHERE id = ? AND negocio_id = ?`,
+          [
+            redondearMontoPago(pagoEfectivo),
+            redondearMontoPago(pagoEfectivo),
+            redondearMontoPago(pagoTarjeta),
+            redondearMontoPago(pagoTransferencia),
+            movimientosCuenta[0].id,
+            negocioId,
+          ]
+        );
+        // Y poner en cero el resto de movimientos de la cuenta.
+        for (let i = 1; i < movimientosCuenta.length; i += 1) {
+          await db.run(
+            `UPDATE pagos_cuenta
+                SET pago_efectivo = 0,
+                    pago_efectivo_entregado = 0,
+                    pago_tarjeta = 0,
+                    pago_transferencia = 0,
+                    pago_cambio = 0
+              WHERE id = ? AND negocio_id = ?`,
+            [movimientosCuenta[i].id, negocioId]
+          );
+        }
+      }
     }
 
     await db.run('COMMIT');

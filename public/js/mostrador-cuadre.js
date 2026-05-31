@@ -1161,8 +1161,13 @@
         event.preventDefault();
         event.stopPropagation();
         const pedidoId = Number(botonEditarFactura.dataset.pedidoId);
-        if (Number.isFinite(pedidoId) && pedidoId > 0 && typeof abrirModalEditarFacturaMostrador === 'function') {
-          abrirModalEditarFacturaMostrador(pedidoId);
+        if (Number.isFinite(pedidoId) && pedidoId > 0) {
+          try {
+            abrirModalEditarFacturaMostrador(pedidoId);
+          } catch (err) {
+            console.error('[mostrador] Error abriendo modal editar factura:', err);
+            alert('Error al abrir el editor: ' + (err?.message || err));
+          }
         }
         return;
       }
@@ -1315,14 +1320,19 @@
   };
 
   function abrirModalEditarFacturaMostrador(pedidoId) {
-    if (!editModalEl) return;
+    if (!editModalEl) {
+      alert('Modal de edicion no esta inicializado. ¿Esta cargado el HTML?');
+      return;
+    }
     setEditMensajeMostrador('Cargando factura…');
     editModalEl.hidden = false;
+    // El overlay usa opacity/pointer-events; hace falta la clase is-visible para mostrarlo.
+    requestAnimationFrame(() => editModalEl.classList.add('is-visible'));
     if (editPedidoIdInput) editPedidoIdInput.value = String(pedidoId);
     if (editPasswordInput) editPasswordInput.value = '';
     if (editItemsBody) editItemsBody.innerHTML = '<tr><td colspan="5" class="kanm-subtitle">Cargando…</td></tr>';
 
-    fetch(`/api/pedidos/${pedidoId}/factura`, { headers: { ...(typeof getAuthHeaders === 'function' ? getAuthHeaders() : {}) } })
+    fetch(`/api/pedidos/${pedidoId}/factura`, { headers: { ...obtenerAuthHeaders() } })
       .then((r) => r.json().catch(() => ({})))
       .then((data) => {
         if (!data?.ok && !data?.pedido) throw new Error(data?.error || 'No se pudo cargar la factura.');
@@ -1362,7 +1372,10 @@
   }
 
   function cerrarModalEditarFacturaMostrador() {
-    if (editModalEl) editModalEl.hidden = true;
+    if (editModalEl) {
+      editModalEl.classList.remove('is-visible');
+      editModalEl.hidden = true;
+    }
     setEditMensajeMostrador('');
   }
 
@@ -1421,7 +1434,7 @@
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(typeof getAuthHeaders === 'function' ? getAuthHeaders() : {}),
+          ...obtenerAuthHeaders(),
         },
         body: JSON.stringify(payload),
       });
@@ -1446,7 +1459,10 @@
 
   function inicializarModalEditarFactura() {
     editModalEl = document.getElementById('mostrador-editar-factura-modal');
-    if (!editModalEl) return;
+    if (!editModalEl) {
+      console.warn('[mostrador] Modal editar factura NO encontrado en DOM. ¿HTML viejo? Recarga con Ctrl+Shift+R.');
+      return;
+    }
     editPedidoIdInput = document.getElementById('mostrador-editar-factura-pedido-id');
     editClienteInput = document.getElementById('mostrador-editar-factura-cliente');
     editDocumentoInput = document.getElementById('mostrador-editar-factura-documento');
