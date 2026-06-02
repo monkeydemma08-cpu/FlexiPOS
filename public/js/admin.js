@@ -13209,6 +13209,9 @@ const guardarEditarFactura = async () => {
       if (devueltos.length) partes.push(`${devueltos.length} con stock devuelto`);
       if (partes.length) mensaje += ` Inventario ajustado (${partes.join(', ')}).`;
     }
+    if (data.ncf_nuevo) {
+      mensaje += ` Se emitió un nuevo comprobante: ${data.ncf_nuevo}.`;
+    }
     setMessage(cierresMensaje, mensaje, 'success');
     // Recargar el detalle del cierre para reflejar los cambios.
     if (detalleCierreActivo && typeof cargarDetalleCierre === 'function') {

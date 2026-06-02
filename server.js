@@ -17100,6 +17100,7 @@ const aplicarEdicionFacturaCuenta = async ({
   let totales = null;
   let totalFinal = null;
   let stockAjustes = [];
+  let ncfNuevoGenerado = null;
 
   await db.run('BEGIN');
   try {
@@ -17293,6 +17294,10 @@ const aplicarEdicionFacturaCuenta = async ({
     }
 
     // Header (cliente, RNC, tipo_comprobante) en TODOS los pedidos de la cuenta.
+    const tipoCambio =
+      tipoNormalizado !== undefined &&
+      tipoNormalizado !== null &&
+      tipoNormalizado !== tipoActual;
     const sets = [];
     const params = [];
     if (cliente !== undefined) {
@@ -17303,11 +17308,7 @@ const aplicarEdicionFacturaCuenta = async ({
       sets.push('cliente_documento = ?');
       params.push(clienteDocumento);
     }
-    if (
-      tipoNormalizado !== undefined &&
-      tipoNormalizado !== null &&
-      tipoNormalizado !== tipoActual
-    ) {
+    if (tipoCambio) {
       sets.push('tipo_comprobante = ?');
       params.push(tipoNormalizado);
     }
@@ -17317,6 +17318,47 @@ const aplicarEdicionFacturaCuenta = async ({
           `UPDATE pedidos SET ${sets.join(', ')} WHERE id = ? AND negocio_id = ?`,
           [...params, p.id, negocioId]
         );
+      }
+    }
+
+    // Si cambió el tipo de comprobante, el NCF debe tomar la secuencia del NUEVO
+    // tipo. Ej.: corregir B02 -> B01 genera un NCF nuevo de la serie B01 y la
+    // factura pasa a mostrar ese comprobante. El NCF visible es el del pedido
+    // principal (pedidoId). Esto NO aplica a e-CF (esas ediciones se rechazan
+    // arriba). La secuencia se incrementa dentro de la misma transaccion, asi que
+    // si la edicion falla, el correlativo tambien se revierte.
+    if (tipoCambio) {
+      const tipoUpper = String(tipoNormalizado).toUpperCase();
+      if (['B01', 'B02', 'B14'].includes(tipoUpper)) {
+        try {
+          ncfNuevoGenerado = await generarNCFAsync(tipoUpper, negocioId);
+        } catch (ncfErr) {
+          throw error(
+            400,
+            `No se pudo generar el NCF para ${tipoUpper}: ${
+              ncfErr?.message || ncfErr
+            }. Revisa la secuencia de comprobantes configurada para ese tipo.`
+          );
+        }
+        await db.run(
+          `UPDATE pedidos SET ncf = ? WHERE id = ? AND negocio_id = ?`,
+          [ncfNuevoGenerado, pedidoId, negocioId]
+        );
+        // Los secundarios de la cuenta no deben conservar un NCF de la serie vieja.
+        for (const p of otrosPedidosCuenta) {
+          await db.run(
+            `UPDATE pedidos SET ncf = NULL WHERE id = ? AND negocio_id = ?`,
+            [p.id, negocioId]
+          );
+        }
+      } else {
+        // "Sin comprobante": quitar el NCF de toda la cuenta.
+        for (const p of pedidosCuenta) {
+          await db.run(
+            `UPDATE pedidos SET ncf = NULL WHERE id = ? AND negocio_id = ?`,
+            [p.id, negocioId]
+          );
+        }
       }
     }
 
@@ -17454,6 +17496,7 @@ const aplicarEdicionFacturaCuenta = async ({
         }
       : null,
     stock_ajustes: stockAjustes,
+    ncf_nuevo: ncfNuevoGenerado,
   };
 };
 
@@ -17471,11 +17514,13 @@ const aplicarEdicionFacturaCuenta = async ({
 //
 // Lo que permite cambiar:
 //   - cliente, cliente_documento (RNC/cédula)
-//   - tipo_comprobante (solo entre B01/B02/B14)
+//   - tipo_comprobante (solo entre B01/B02/B14/Sin comprobante)
 //   - items (cantidad y precio); NO toca inventario (corrección administrativa)
 //
-// El NCF NO se cambia (la secuencia ya emitida; cambiarla complica auditoría).
-// Si necesitas un NCF diferente, anula y vuelve a emitir.
+// Si cambia el tipo de comprobante, se regenera el NCF tomando la secuencia del
+// NUEVO tipo (ej. B02 -> B01 emite un NCF de la serie B01). El correlativo se
+// incrementa dentro de la misma transacción, así que si la edición falla se
+// revierte. Las facturas e-CF no se pueden editar — emite una Nota de Crédito.
 // ===========================================================================
 app.post('/api/caja/facturas/:id/editar-con-admin', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
