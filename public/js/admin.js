@@ -12925,6 +12925,7 @@ const modalEditarFacturaCargando = document.getElementById('modal-editar-factura
 const modalEditarFacturaContenido = document.getElementById('modal-editar-factura-contenido');
 const modalEditarFacturaCliente = document.getElementById('modal-editar-factura-cliente');
 const modalEditarFacturaDocumento = document.getElementById('modal-editar-factura-documento');
+const modalEditarFacturaTipo = document.getElementById('modal-editar-factura-tipo');
 const modalEditarFacturaItemsTbody = document.getElementById('modal-editar-factura-items');
 const modalEditarFacturaBuscarProducto = document.getElementById('modal-editar-factura-buscar-producto');
 const modalEditarFacturaListaProductos = document.getElementById('modal-editar-factura-lista-productos');
@@ -13096,6 +13097,29 @@ const abrirModalEditarFactura = async (boton) => {
     if (modalEditarFacturaDescuento) modalEditarFacturaDescuento.value = Number(pedido.descuento_monto) || 0;
     if (modalEditarFacturaPropina) modalEditarFacturaPropina.value = Number(pedido.propina_monto) || 0;
 
+    // Tipo de comprobante: preseleccionar el actual. Solo se permiten tipos legacy.
+    const tipoActual = String(pedido.tipo_comprobante || '').toUpperCase();
+    const esEcf = !!pedido.ecf_tipo || !!pedido.ecf_encf || /^E\d{2}$/.test(tipoActual);
+    if (modalEditarFacturaTipo) {
+      const opcionesLegacy = ['B01', 'B02', 'B14', 'Sin comprobante'];
+      modalEditarFacturaTipo.value = opcionesLegacy.includes(pedido.tipo_comprobante)
+        ? pedido.tipo_comprobante
+        : 'B02';
+      // Las facturas e-CF no se pueden editar; deshabilitar el selector.
+      modalEditarFacturaTipo.disabled = esEcf;
+    }
+    if (esEcf) {
+      setMessage(
+        modalEditarFacturaMensaje,
+        'Esta factura es electrónica (e-CF). No se puede editar — emite una Nota de Crédito.',
+        'error'
+      );
+      if (modalEditarFacturaCargando) modalEditarFacturaCargando.hidden = true;
+      if (modalEditarFacturaContenido) modalEditarFacturaContenido.hidden = false;
+      if (modalEditarFacturaGuardar) modalEditarFacturaGuardar.disabled = true;
+      return;
+    }
+
     editarFacturaItems = (Array.isArray(pedido.items) ? pedido.items : []).map((item) => {
       const baseName = item.nombre || `Producto ${item.producto_id}`;
       const sabor = item.sabor || null;
@@ -13157,6 +13181,7 @@ const guardarEditarFactura = async () => {
       body: JSON.stringify({
         cliente: cliente || null,
         cliente_documento: cliente_documento || null,
+        tipo_comprobante: modalEditarFacturaTipo?.value || undefined,
         descuento_monto,
         propina_monto,
         items: editarFacturaItems.map((item) => ({

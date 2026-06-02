@@ -6680,7 +6680,7 @@ const obtenerPedidoConDetalle = async (pedidoId, negocioId) => {
                cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, cliente_documento, ncf, tipo_comprobante, propina_monto,
                descuento_monto, delivery_estado, delivery_usuario_id, delivery_usuario_nombre, delivery_fecha_asignacion,
                delivery_fecha_entrega, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas,
-               cliente_dispositivo_id, cliente_alias
+               cliente_dispositivo_id, cliente_alias, ecf_tipo, ecf_encf
         FROM pedidos
       WHERE id = ? AND negocio_id = ?
     `,
