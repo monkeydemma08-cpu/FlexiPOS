@@ -1340,6 +1340,13 @@
         const items = Array.isArray(data.items) ? data.items : [];
         const tipoAct = String(pedido.tipo_comprobante || '').toUpperCase();
         if (pedido.ecf_tipo || pedido.ecf_encf || /^E\d{2}$/.test(tipoAct)) {
+          // Factura electronica: no editable. Limpiar el "Cargando…" y dejar un
+          // estado claro en vez de un spinner infinito.
+          if (editItemsBody) {
+            editItemsBody.innerHTML =
+              '<tr><td colspan="5" class="kanm-subtitle">Factura electrónica (e-CF): no se puede editar. Para corregirla, emite una Nota de Crédito.</td></tr>';
+          }
+          if (editGuardarBtn) editGuardarBtn.disabled = true;
           setEditMensajeMostrador('Esta factura es electronica (e-CF). No se puede editar — emite Nota de Credito.', 'error');
           return;
         }

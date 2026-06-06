@@ -10006,7 +10006,10 @@ const obtenerPedidosPendientesDeCierre = (fecha, negocioId, opcionesOrCallback, 
       SUM(COALESCE(pago_efectivo, 0)) AS pago_efectivo,
       SUM(COALESCE(pago_tarjeta, 0)) AS pago_tarjeta,
       SUM(COALESCE(pago_transferencia, 0)) AS pago_transferencia,
-      SUM(COALESCE(pago_cambio, 0)) AS pago_cambio
+      SUM(COALESCE(pago_cambio, 0)) AS pago_cambio,
+      MAX(tipo_comprobante) AS tipo_comprobante,
+      MAX(ecf_tipo) AS ecf_tipo,
+      MAX(ecf_encf) AS ecf_encf
     FROM pedidos
     WHERE ${filtros.join('\n      AND ')}
     GROUP BY COALESCE(cuenta_id, id)
