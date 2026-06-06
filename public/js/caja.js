@@ -4163,10 +4163,16 @@ const renderDetalleCuadreActual = () => {
       !!pedidoRelacionado?.ecf_tipo ||
       !!pedidoRelacionado?.ecf_encf ||
       /^E\d{2}$/.test(tipoComp);
-    const puedeEditarFactura = facturaDisponible && !esPedidoEcf;
+    // Los e-CF reales no se editan. Excepcion: si el negocio tiene la FE
+    // DESACTIVADA, esos e-CF son residuales y se permiten convertir a legacy.
+    const feHabilitadaCuadre = resumenCuadre.feHabilitada === true;
+    const puedeEditarFactura = facturaDisponible && (!esPedidoEcf || !feHabilitadaCuadre);
+    const tituloBotonEditar = esPedidoEcf
+      ? 'Convertir factura electronica residual a Sin comprobante (requiere password admin)'
+      : 'Editar cliente, RNC, tipo o items (requiere password admin)';
 
     const botonEditarHtml = puedeEditarFactura
-      ? `<button type="button" class="kanm-button ghost" data-editar-factura="1" data-pedido-id="${facturaId}" style="margin-left:6px;" title="Editar cliente, RNC, tipo o items (requiere password admin)">Editar factura</button>`
+      ? `<button type="button" class="kanm-button ghost" data-editar-factura="1" data-pedido-id="${facturaId}" style="margin-left:6px;" title="${tituloBotonEditar}">Editar factura</button>`
       : '';
 
     fila.dataset.cuadreId = pedido.id;
@@ -4339,6 +4345,8 @@ const cargarResumenCuadre = async (mostrarCarga = true) => {
       cantidadPedidos: Number(data.cantidad_pedidos) || 0,
 
       pedidos: Array.isArray(data.pedidos) ? data.pedidos : [],
+
+      feHabilitada: Number(data.fe_habilitada) === 1,
 
     };
 
@@ -6449,9 +6457,16 @@ const inicializarCuadre = () => {
         throw new Error(data?.error || 'No se pudo cargar la factura');
       }
       const pedido = data?.pedido || {};
-      // Defensa final: si por alguna razón llega un e-CF aquí, cancelar.
       const tipoAct = String(pedido.tipo_comprobante || '').toUpperCase();
-      if (pedido.ecf_tipo || pedido.ecf_encf || /^E\d{2}$/.test(tipoAct)) {
+      const esEcf = !!pedido.ecf_tipo || !!pedido.ecf_encf || /^E\d{2}$/.test(tipoAct);
+      const feOn = resumenCuadre.feHabilitada === true;
+      // e-CF real (FE activa): no editable. e-CF residual (FE off): se permite
+      // convertir a "Sin comprobante".
+      if (esEcf && feOn) {
+        if (editFacturaItemsBody) {
+          editFacturaItemsBody.innerHTML =
+            '<tr><td colspan="5" class="kanm-subtitle">Factura electrónica (e-CF): no se puede editar. Emite una Nota de Crédito.</td></tr>';
+        }
         setEditFacturaMensaje('Esta factura es electrónica (e-CF) y no puede editarse. Emite una Nota de Crédito.', 'error');
         return;
       }
@@ -6459,11 +6474,23 @@ const inicializarCuadre = () => {
       if (editFacturaDocumentoInput) editFacturaDocumentoInput.value = pedido.cliente_documento || '';
       if (editFacturaTipoSelect) {
         const opciones = ['B01', 'B02', 'B14', 'Sin comprobante'];
-        const tipoActual = opciones.includes(pedido.tipo_comprobante) ? pedido.tipo_comprobante : 'B02';
+        // e-CF residual: el destino natural es "Sin comprobante".
+        const tipoActual = esEcf
+          ? 'Sin comprobante'
+          : opciones.includes(pedido.tipo_comprobante)
+            ? pedido.tipo_comprobante
+            : 'B02';
         editFacturaTipoSelect.value = tipoActual;
       }
       renderEditFacturaItems(Array.isArray(data?.items) ? data.items : []);
-      setEditFacturaMensaje('');
+      if (esEcf) {
+        setEditFacturaMensaje(
+          'Esta factura quedó como e-CF pero el negocio no tiene facturación electrónica activa. Al guardar se convertirá al tipo elegido (por defecto "Sin comprobante") y se limpiarán sus datos electrónicos.',
+          'info'
+        );
+      } else {
+        setEditFacturaMensaje('');
+      }
     } catch (error) {
       setEditFacturaMensaje(error.message || 'No se pudo cargar la factura.', 'error');
     }

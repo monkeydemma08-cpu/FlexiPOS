@@ -13551,7 +13551,7 @@ app.get('/api/caja/resumen-dia', (req, res) => {
       fecha,
       negocioId,
       { soloPendientes, ignorarFecha: modoTurno, origen_caja: origenCaja },
-      (err, resumen) => {
+      async (err, resumen) => {
         if (err) {
           console.error('Error al calcular resumen de caja:', err);
           return res.status(500).json({ ok: false, error: 'No se pudo obtener el resumen diario.' });
@@ -13570,6 +13570,19 @@ app.get('/api/caja/resumen-dia', (req, res) => {
           cantidad_pedidos: resumen.cantidad_pedidos,
           salidas: resumen.salidas,
         };
+
+        // Estado de la facturacion electronica del negocio. El cuadre lo usa para
+        // saber si los e-CF son editables: solo se permite editarlos/convertirlos
+        // cuando la FE esta DESACTIVADA (habilitada=0).
+        try {
+          const feRow = await db.get(
+            'SELECT habilitada FROM facturacion_electronica_config WHERE negocio_id = ? LIMIT 1',
+            [negocioId]
+          );
+          respuesta.fe_habilitada = normalizarFlag(feRow?.habilitada, 0);
+        } catch (_) {
+          respuesta.fe_habilitada = 0;
+        }
 
         if (detalle) {
           respuesta.pedidos = resumen.pedidos || [];
@@ -17021,12 +17034,33 @@ const aplicarEdicionFacturaCuenta = async ({
       ORDER BY id ASC`,
     [cuentaIdParaEditar, cuentaIdParaEditar, negocioId]
   );
-  for (const p of pedidosCuenta) {
+  const cuentaTieneEcf = pedidosCuenta.some((p) => {
     const tipoPedido = String(p.tipo_comprobante || '').toUpperCase();
-    if (!!p.ecf_tipo || !!p.ecf_encf || /^E\d{2}$/.test(tipoPedido)) {
+    return !!p.ecf_tipo || !!p.ecf_encf || /^E\d{2}$/.test(tipoPedido);
+  });
+
+  // Regla e-CF: una factura electronica NO se edita mientras el negocio tenga la
+  // facturacion electronica ACTIVA (protege comprobantes reales enviados a DGII).
+  // Pero si el negocio tiene la FE DESACTIVADA (habilitada != 1), esos e-CF son
+  // residuales (p.ej. quedaron de pruebas o de cuando estuvo activa por error) y
+  // SI se permiten convertir a legacy/"Sin comprobante", limpiando sus datos
+  // fiscales electronicos. Asi el usuario puede corregir sus facturas sin tocar
+  // los e-CF de negocios que de verdad facturan electronicamente.
+  let feHabilitadaNegocio = 0;
+  if (cuentaTieneEcf) {
+    try {
+      const feRow = await db.get(
+        'SELECT habilitada FROM facturacion_electronica_config WHERE negocio_id = ? LIMIT 1',
+        [negocioId]
+      );
+      feHabilitadaNegocio = normalizarFlag(feRow?.habilitada, 0);
+    } catch (_) {
+      feHabilitadaNegocio = 0;
+    }
+    if (feHabilitadaNegocio === 1) {
       throw error(
         403,
-        'Esta cuenta tiene al menos un pedido electronico (e-CF). Para corregirla emite una Nota de Credito.'
+        'Esta cuenta tiene un comprobante electronico (e-CF) y el negocio tiene la facturacion electronica ACTIVA. Para corregirla emite una Nota de Credito (o desactiva la facturacion electronica del negocio si fue un error).'
       );
     }
   }
@@ -17045,6 +17079,12 @@ const aplicarEdicionFacturaCuenta = async ({
         'El tipo de comprobante solo puede cambiarse a B01, B02, B14 o "Sin comprobante".'
       );
     }
+  }
+
+  // Si la cuenta tiene e-CF residual (permitido solo con FE desactivada) y no se
+  // especifico un tipo nuevo, forzar "Sin comprobante" para que deje de ser e-CF.
+  if (cuentaTieneEcf && (tipoNormalizado === undefined || tipoNormalizado === null)) {
+    tipoNormalizado = 'Sin comprobante';
   }
 
   // 4. Validar items si vienen.
@@ -17362,6 +17402,22 @@ const aplicarEdicionFacturaCuenta = async ({
             [p.id, negocioId]
           );
         }
+      }
+    }
+
+    // Si la cuenta TENIA e-CF (esto solo se permite con la FE desactivada),
+    // limpiar todos los campos fiscales electronicos para que las facturas queden
+    // como legacy/"Sin comprobante" reales, sin restos de la e-CF anterior.
+    if (cuentaTieneEcf) {
+      for (const p of pedidosCuenta) {
+        await db.run(
+          `UPDATE pedidos
+              SET ecf_tipo = NULL, ecf_encf = NULL, ecf_estado = NULL,
+                  ecf_track_id = NULL, ecf_codigo_seguridad = NULL,
+                  ecf_qr_url = NULL, ecf_xml_firmado = NULL
+            WHERE id = ? AND negocio_id = ?`,
+          [p.id, negocioId]
+        );
       }
     }
 

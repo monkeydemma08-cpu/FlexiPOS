@@ -834,10 +834,18 @@
         !!pedidoRelacionado?.ecf_tipo ||
         !!pedidoRelacionado?.ecf_encf ||
         /^E\d{2}$/.test(tipoComp);
+      // Los e-CF normalmente NO se editan. Excepcion: si el negocio tiene la
+      // facturacion electronica DESACTIVADA, esos e-CF son residuales y se
+      // permiten convertir a "Sin comprobante" desde el editor.
+      const feHabilitada = resumenCuadre.feHabilitada === true;
+      const bloquearEdicion = esPedidoEcf && feHabilitada;
+      const tituloEditar = esPedidoEcf
+        ? 'Convertir factura electronica residual a Sin comprobante'
+        : 'Editar factura (requiere password admin)';
       const facturaBtnsHtml = facturaPedidoId
         ? `
             <button type="button" class="kanm-button ghost" data-ver-factura="1" data-pedido-id="${facturaPedidoId}" title="Ver factura">Ver factura</button>
-            ${esPedidoEcf ? '' : `<button type="button" class="kanm-button ghost" data-editar-factura="1" data-pedido-id="${facturaPedidoId}" style="margin-left:6px;" title="Editar factura (requiere password admin)">Editar</button>`}
+            ${bloquearEdicion ? '' : `<button type="button" class="kanm-button ghost" data-editar-factura="1" data-pedido-id="${facturaPedidoId}" style="margin-left:6px;" title="${tituloEditar}">Editar</button>`}
           `
         : '<span class="kanm-subtitle">—</span>';
 
@@ -908,6 +916,7 @@
         totalDescuentos: Number(data.total_descuentos) || 0,
         cantidadPedidos: Number(data.cantidad_pedidos) || 0,
         pedidos: Array.isArray(data.pedidos) ? data.pedidos : [],
+        feHabilitada: Number(data.fe_habilitada) === 1,
       };
 
       totalSalidas = Number(data.total_salidas) || 0;
@@ -1339,9 +1348,11 @@
         const pedido = data.pedido || {};
         const items = Array.isArray(data.items) ? data.items : [];
         const tipoAct = String(pedido.tipo_comprobante || '').toUpperCase();
-        if (pedido.ecf_tipo || pedido.ecf_encf || /^E\d{2}$/.test(tipoAct)) {
-          // Factura electronica: no editable. Limpiar el "Cargando…" y dejar un
-          // estado claro en vez de un spinner infinito.
+        const esEcf = !!pedido.ecf_tipo || !!pedido.ecf_encf || /^E\d{2}$/.test(tipoAct);
+        const feOn = resumenCuadre.feHabilitada === true;
+        if (esEcf && feOn) {
+          // FE activa: las facturas electronicas reales NO se editan. Limpiar el
+          // "Cargando…" y dejar un estado claro en vez de un spinner infinito.
           if (editItemsBody) {
             editItemsBody.innerHTML =
               '<tr><td colspan="5" class="kanm-subtitle">Factura electrónica (e-CF): no se puede editar. Para corregirla, emite una Nota de Crédito.</td></tr>';
@@ -1354,7 +1365,12 @@
         if (editDocumentoInput) editDocumentoInput.value = pedido.cliente_documento || '';
         if (editTipoSelect) {
           const ops = ['B01', 'B02', 'B14', 'Sin comprobante'];
-          editTipoSelect.value = ops.includes(pedido.tipo_comprobante) ? pedido.tipo_comprobante : 'B02';
+          // Si es un e-CF residual (FE off), el destino natural es "Sin comprobante".
+          editTipoSelect.value = esEcf
+            ? 'Sin comprobante'
+            : ops.includes(pedido.tipo_comprobante)
+              ? pedido.tipo_comprobante
+              : 'B02';
         }
         editPedidoActualTotal = Number(pedido.total) || 0;
         // Determinar metodo de pago actual segun campos pago_*
@@ -1373,7 +1389,14 @@
         if (editPagoTransferenciaInput) editPagoTransferenciaInput.value = pagTra.toFixed(2);
         toggleCombinadoVisible();
         renderEditItemsMostrador(items);
-        setEditMensajeMostrador('');
+        if (esEcf) {
+          setEditMensajeMostrador(
+            'Esta factura quedó como e-CF pero el negocio no tiene facturación electrónica activa. Al guardar se convertirá al tipo que elijas (por defecto "Sin comprobante") y se limpiarán sus datos electrónicos.',
+            'info'
+          );
+        } else {
+          setEditMensajeMostrador('');
+        }
       })
       .catch((err) => setEditMensajeMostrador(err.message || 'Error cargando factura.', 'error'));
   }
