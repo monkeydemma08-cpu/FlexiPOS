@@ -6,7 +6,7 @@ const {
   MYSQL_PASSWORD = '',
   MYSQL_DATABASE = '',
   MYSQL_PORT = 3306,
-  MYSQL_POOL_LIMIT = '15',
+  MYSQL_POOL_LIMIT = '25',
 } = process.env;
 
 // Pool de conexiones MySQL con configuracion defensiva:
@@ -14,8 +14,9 @@ const {
 //     cierre por inactividad (default 8 horas), lo cual dejaria al pool con
 //     conexiones zombie que cuelgan los requests.
 //   - keepAliveInitialDelay: cuando empezar a hacer keep-alive (ms).
-//   - connectionLimit: 15 da margen sobre los 10 originales. Si el polling
-//     se acumula, hay 5 conexiones de buffer para auth.
+//   - connectionLimit: 25 da margen para el polling de varios modulos
+//     (mesera/cocina/bar/caja/mostrador) mas ediciones concurrentes. Sigue
+//     muy por debajo del max_connections de MySQL (151 por defecto).
 //   - queueLimit: 50. Antes era 0 (ilimitado). Con cola ilimitada, si el
 //     pool se agota, los requests se acumulan eternamente. Con limite, fallan
 //     rapido y devuelven 503 en vez de colgar.
@@ -41,7 +42,8 @@ pool.on?.('enqueue', () => {
   if (ahora - _ultimoPoolWarnAt > 30_000) {
     _ultimoPoolWarnAt = ahora;
     console.warn(
-      '[mysql-pool] Pool agotado, request en cola. Considera subir MYSQL_POOL_LIMIT o reducir polling.'
+      '[mysql-pool] Pool agotado, request en cola. Considera subir MYSQL_POOL_LIMIT o reducir polling.',
+      poolStats() || ''
     );
   }
 });
