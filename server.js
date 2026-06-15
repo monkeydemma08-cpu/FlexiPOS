@@ -31929,8 +31929,13 @@ app.get('/api/admin/analytics/overview', (req, res) => {
       return res.json(cached.data);
     }
 
+    // El agrupamiento por dia se hace en hora RD (UTC-4, sin DST) para que las
+    // ventas de la noche no salten al dia siguiente. Auto-ajusta: 0 si la sesion
+    // MySQL ya esta en hora RD, -4 si esta en UTC. fechaBaseRaw queda crudo (lo usa
+    // DAYOFWEEK/HOUR y la hora mostrada; el frontend convierte la hora cruda).
+    const OFFSET_RD = '(-4 - TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()))';
     const fechaBaseRaw = 'COALESCE(fecha_factura, fecha_cierre, fecha_creacion)';
-    const fechaBase = `DATE(${fechaBaseRaw})`;
+    const fechaBase = `DATE(${fechaBaseRaw} + INTERVAL ${OFFSET_RD} HOUR)`;
     const paramsBase = [negocioId, rango.desde, rango.hasta];
 
     try {
@@ -32078,7 +32083,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
       const ventasSeriePedidos = await db.all(
         `
           SELECT ${fechaBase} AS fecha,
-                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total,
+                 SUM(subtotal + impuesto - descuento_monto) AS total,
                  COUNT(DISTINCT COALESCE(cuenta_id, id)) AS ventas
           FROM pedidos
           WHERE estado = 'pagado'
@@ -32117,7 +32122,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
       const ventasPorDiaSemanaPedidos = await db.all(
         `
           SELECT DAYOFWEEK(${fechaBaseRaw}) AS dia_semana,
-                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total,
+                 SUM(subtotal + impuesto - descuento_monto) AS total,
                  COUNT(DISTINCT COALESCE(cuenta_id, id)) AS ventas
           FROM pedidos
           WHERE estado = 'pagado'
@@ -32157,7 +32162,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
       const ventasPorHoraPedidos = await db.all(
         `
           SELECT HOUR(${fechaBaseRaw}) AS hora,
-                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total,
+                 SUM(subtotal + impuesto - descuento_monto) AS total,
                  COUNT(DISTINCT COALESCE(cuenta_id, id)) AS ventas
           FROM pedidos
           WHERE estado = 'pagado'
@@ -32337,7 +32342,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
       const ventasPorDiaMesPedidos = await db.all(
         `
           SELECT DAY(${fechaBaseRaw}) AS dia_mes,
-                 SUM(subtotal + impuesto - descuento_monto + propina_monto) AS total
+                 SUM(subtotal + impuesto - descuento_monto) AS total
           FROM pedidos
           WHERE estado = 'pagado'
             AND negocio_id = ?
