@@ -93,11 +93,15 @@ const createAnalisisExtensionRouter = ({
       return callback(usuarioSesion, negocioId);
     });
 
-  const fechaBaseRaw = 'COALESCE(fecha_factura, fecha_cierre, fecha_creacion)';
+  // Correccion de zona horaria a hora RD (UTC-4, sin DST). Auto-ajusta: 0 si la
+  // sesion MySQL ya esta en hora RD, -4 si esta en UTC. Evita que las ventas de la
+  // noche se cuenten en el dia siguiente.
+  const OFFSET_RD = '(-4 - TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()))';
+  const fechaBaseRaw = `(COALESCE(fecha_factura, fecha_cierre, fecha_creacion) + INTERVAL ${OFFSET_RD} HOUR)`;
   const fechaBase = `DATE(${fechaBaseRaw})`;
   // Helpers que prefijan correctamente cada columna con el alias dado.
   const fechaBaseRawFor = (alias = 'p') =>
-    `COALESCE(${alias}.fecha_factura, ${alias}.fecha_cierre, ${alias}.fecha_creacion)`;
+    `(COALESCE(${alias}.fecha_factura, ${alias}.fecha_cierre, ${alias}.fecha_creacion) + INTERVAL ${OFFSET_RD} HOUR)`;
   const fechaBaseFor = (alias = 'p') => `DATE(${fechaBaseRawFor(alias)})`;
 
   // -------------------------------------------------------------------------

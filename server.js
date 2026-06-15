@@ -33302,6 +33302,13 @@ app.get('/api/reportes/607', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
 
+    // Correccion de zona horaria: el negocio opera en hora RD (UTC-4, sin DST).
+    // Si el servidor MySQL guarda en UTC, las ventas de la noche "saltan" al dia
+    // siguiente. Este offset auto-ajusta: 0 si la sesion ya esta en hora RD, -4 si
+    // esta en UTC. Asi la fecha de la factura se agrupa por el dia real RD.
+    const OFFSET_RD = '(-4 - TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()))';
+    const fechaBaseRD = `(COALESCE(fecha_factura, fecha_cierre, fecha_creacion) + INTERVAL ${OFFSET_RD} HOUR)`;
+
     const sql = `
     SELECT
       COALESCE(cuenta_id, id) AS factura_id,
@@ -33316,8 +33323,8 @@ app.get('/api/reportes/607', (req, res) => {
       MIN(COALESCE(fecha_factura, fecha_cierre, fecha_creacion)) AS fecha_factura
     FROM pedidos
     WHERE estado = 'pagado'
-      AND DATE_FORMAT(COALESCE(fecha_factura, fecha_cierre, fecha_creacion), '%Y') = ?
-      AND DATE_FORMAT(COALESCE(fecha_factura, fecha_cierre, fecha_creacion), '%m') = ?
+      AND DATE_FORMAT(${fechaBaseRD}, '%Y') = ?
+      AND DATE_FORMAT(${fechaBaseRD}, '%m') = ?
       AND negocio_id = ?
     GROUP BY factura_id
     ORDER BY fecha_factura ASC
@@ -33337,7 +33344,9 @@ app.get('/api/reportes/607', (req, res) => {
           const impuesto = Number(row.impuesto) || 0;
           const descuento = Number(row.descuento_monto) || 0;
           const propina = Number(row.propina_monto) || 0;
-          const total = subtotal + impuesto - descuento + propina;
+          // El total del 607 va SIN propina (la propina no es venta; se muestra
+          // aparte). Asi cuadra con el total de "Analisis de negocio".
+          const total = subtotal + impuesto - descuento;
 
           return {
             id: row.id,
