@@ -33302,6 +33302,13 @@ app.get('/api/reportes/607', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
 
+    // Para el filtro de mes/anio del 607 llevamos la fecha a hora RD (UTC-4, sin
+    // DST) y asi las ventas de la noche no se cuelan al mes siguiente. Auto-ajusta:
+    // 0 si la sesion MySQL ya esta en hora RD, -4 si esta en UTC. La fecha mostrada
+    // (fecha_factura) se deja cruda; el frontend la convierte a hora RD.
+    const OFFSET_RD = '(-4 - TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()))';
+    const fechaMesRD = `(COALESCE(fecha_factura, fecha_cierre, fecha_creacion) + INTERVAL ${OFFSET_RD} HOUR)`;
+
     const sql = `
     SELECT
       COALESCE(cuenta_id, id) AS factura_id,
@@ -33316,8 +33323,8 @@ app.get('/api/reportes/607', (req, res) => {
       MIN(COALESCE(fecha_factura, fecha_cierre, fecha_creacion)) AS fecha_factura
     FROM pedidos
     WHERE estado = 'pagado'
-      AND DATE_FORMAT(COALESCE(fecha_factura, fecha_cierre, fecha_creacion), '%Y') = ?
-      AND DATE_FORMAT(COALESCE(fecha_factura, fecha_cierre, fecha_creacion), '%m') = ?
+      AND DATE_FORMAT(${fechaMesRD}, '%Y') = ?
+      AND DATE_FORMAT(${fechaMesRD}, '%m') = ?
       AND negocio_id = ?
     GROUP BY factura_id
     ORDER BY fecha_factura ASC

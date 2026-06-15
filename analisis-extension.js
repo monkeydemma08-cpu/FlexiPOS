@@ -93,12 +93,19 @@ const createAnalisisExtensionRouter = ({
       return callback(usuarioSesion, negocioId);
     });
 
+  // Las ventas de la noche pueden quedar guardadas en UTC; al AGRUPAR por dia hay
+  // que llevarlas a hora RD (UTC-4, sin DST) para que no "salten" al dia siguiente.
+  // Auto-ajusta: 0 si la sesion MySQL ya esta en hora RD, -4 si esta en UTC.
+  // OJO: el offset solo se aplica al DATE() de agrupacion. La version RAW se deja
+  // sin tocar (la usa la hora mostrada y el analisis por hora/dia de semana; el
+  // frontend ya convierte la hora cruda a hora RD para mostrarla).
+  const OFFSET_RD = '(-4 - TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()))';
   const fechaBaseRaw = 'COALESCE(fecha_factura, fecha_cierre, fecha_creacion)';
-  const fechaBase = `DATE(${fechaBaseRaw})`;
+  const fechaBase = `DATE(${fechaBaseRaw} + INTERVAL ${OFFSET_RD} HOUR)`;
   // Helpers que prefijan correctamente cada columna con el alias dado.
   const fechaBaseRawFor = (alias = 'p') =>
     `COALESCE(${alias}.fecha_factura, ${alias}.fecha_cierre, ${alias}.fecha_creacion)`;
-  const fechaBaseFor = (alias = 'p') => `DATE(${fechaBaseRawFor(alias)})`;
+  const fechaBaseFor = (alias = 'p') => `DATE(${fechaBaseRawFor(alias)} + INTERVAL ${OFFSET_RD} HOUR)`;
 
   // -------------------------------------------------------------------------
   // /ventas-dia — detalle de las ventas (cuentas) de un dia. Es el drill-down
