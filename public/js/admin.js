@@ -7880,6 +7880,18 @@ const renderAnalisisSerie = (ventasSerie, gastosSerie) => {
   if (!analisisSerieBody) return;
   analisisSerieBody.innerHTML = '';
 
+  // Drill-down: al tocar un día se muestran las ventas de ese día. Se enlaza una
+  // sola vez (la tabla se reconstruye pero el <tbody> persiste).
+  if (!analisisSerieBody.dataset.drilldownBound) {
+    analisisSerieBody.dataset.drilldownBound = '1';
+    analisisSerieBody.addEventListener('click', (event) => {
+      const fila = event.target.closest('tr[data-fecha]');
+      if (fila && typeof abrirDetalleVentasDia === 'function') {
+        abrirDetalleVentasDia(fila.dataset.fecha);
+      }
+    });
+  }
+
   const mapa = new Map();
   (ventasSerie || []).forEach((row) => {
     mapa.set(row.fecha, {
@@ -7910,6 +7922,9 @@ const renderAnalisisSerie = (ventasSerie, gastosSerie) => {
 
   serie.forEach((item) => {
     const fila = document.createElement('tr');
+    fila.dataset.fecha = item.fecha;
+    fila.style.cursor = 'pointer';
+    fila.title = 'Ver el detalle de las ventas de este día';
     const ganancia = Number((item.ventas - item.gastos).toFixed(2));
     const ventasPct = maxValor > 0 ? Math.round((item.ventas / maxValor) * 100) : 0;
     const gastosPct = maxValor > 0 ? Math.round((item.gastos / maxValor) * 100) : 0;
@@ -7951,6 +7966,76 @@ const renderAnalisisSerie = (ventasSerie, gastosSerie) => {
     analisisSerieBody.appendChild(fila);
   });
 };
+
+// Drill-down: detalle de las ventas de un día (fecha/hora, NCF, # cuenta, monto).
+const cerrarDetalleVentasDia = () => {
+  const modal = document.getElementById('analisis-dia-modal');
+  if (!modal) return;
+  modal.classList.remove('is-visible');
+  modal.hidden = true;
+};
+
+const abrirDetalleVentasDia = async (fecha) => {
+  const modal = document.getElementById('analisis-dia-modal');
+  if (!modal || !fecha) return;
+  const titulo = document.getElementById('analisis-dia-titulo');
+  const cargando = document.getElementById('analisis-dia-cargando');
+  const contenido = document.getElementById('analisis-dia-contenido');
+  const body = document.getElementById('analisis-dia-body');
+  const totalEl = document.getElementById('analisis-dia-total');
+  const mensaje = document.getElementById('analisis-dia-mensaje');
+
+  // La serie puede traer "2026-04-30" o "2026-04-30T04:00:00.000Z"; normalizar.
+  const m = String(fecha).match(/^\d{4}-\d{2}-\d{2}/);
+  const fechaIso = m ? m[0] : String(fecha);
+
+  if (titulo) titulo.textContent = `Ventas del ${formatDate(fechaIso)}`;
+  if (cargando) cargando.hidden = false;
+  if (contenido) contenido.hidden = true;
+  if (mensaje) { mensaje.textContent = ''; mensaje.className = 'kanm-message'; }
+  if (body) body.innerHTML = '';
+  modal.hidden = false;
+  requestAnimationFrame(() => modal.classList.add('is-visible'));
+
+  try {
+    const resp = await fetchConAutorizacion(
+      `/api/admin/analytics/ventas-dia?fecha=${encodeURIComponent(fechaIso)}`
+    );
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) throw new Error(data.error || 'No se pudo cargar el detalle.');
+    const ventas = Array.isArray(data.ventas) ? data.ventas : [];
+    if (!ventas.length) {
+      if (body) body.innerHTML = '<tr><td colspan="5" class="tabla-vacia">No hay ventas registradas ese día.</td></tr>';
+    } else if (body) {
+      body.innerHTML = ventas
+        .map((v) => {
+          const f = new Date(v.fecha);
+          const fechaHora = Number.isNaN(f.getTime())
+            ? '-'
+            : f.toLocaleString('es-DO', { timeZone: 'America/Santo_Domingo', hour12: true });
+          return `<tr>
+            <td>#${v.numero_cuenta ?? v.cuenta_id}</td>
+            <td>${fechaHora}</td>
+            <td class="kanm-mono">${v.ncf || '—'}</td>
+            <td>${v.tipo_comprobante || '—'}</td>
+            <td style="text-align:right">${formatCurrency(Number(v.monto) || 0)}</td>
+          </tr>`;
+        })
+        .join('');
+    }
+    if (totalEl) totalEl.textContent = formatCurrency(Number(data.total) || 0);
+    if (cargando) cargando.hidden = true;
+    if (contenido) contenido.hidden = false;
+  } catch (e) {
+    if (cargando) cargando.hidden = true;
+    if (mensaje) setMessage(mensaje, e.message || 'Error al cargar el detalle.', 'error');
+  }
+};
+
+document.getElementById('analisis-dia-cerrar')?.addEventListener('click', cerrarDetalleVentasDia);
+document.getElementById('analisis-dia-modal')?.addEventListener('click', (event) => {
+  if (event.target.id === 'analisis-dia-modal') cerrarDetalleVentasDia();
+});
 
 const renderCapitalInicialAnalisis = (capital, configuracion, rango) => {
   const periodoInicio = capital?.periodo_inicio || rango?.desde || '';

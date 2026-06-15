@@ -93,16 +93,60 @@ const createAnalisisExtensionRouter = ({
       return callback(usuarioSesion, negocioId);
     });
 
-  // Correccion de zona horaria a hora RD (UTC-4, sin DST). Auto-ajusta: 0 si la
-  // sesion MySQL ya esta en hora RD, -4 si esta en UTC. Evita que las ventas de la
-  // noche se cuenten en el dia siguiente.
-  const OFFSET_RD = '(-4 - TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()))';
-  const fechaBaseRaw = `(COALESCE(fecha_factura, fecha_cierre, fecha_creacion) + INTERVAL ${OFFSET_RD} HOUR)`;
+  const fechaBaseRaw = 'COALESCE(fecha_factura, fecha_cierre, fecha_creacion)';
   const fechaBase = `DATE(${fechaBaseRaw})`;
   // Helpers que prefijan correctamente cada columna con el alias dado.
   const fechaBaseRawFor = (alias = 'p') =>
-    `(COALESCE(${alias}.fecha_factura, ${alias}.fecha_cierre, ${alias}.fecha_creacion) + INTERVAL ${OFFSET_RD} HOUR)`;
+    `COALESCE(${alias}.fecha_factura, ${alias}.fecha_cierre, ${alias}.fecha_creacion)`;
   const fechaBaseFor = (alias = 'p') => `DATE(${fechaBaseRawFor(alias)})`;
+
+  // -------------------------------------------------------------------------
+  // /ventas-dia — detalle de las ventas (cuentas) de un dia. Es el drill-down
+  // del "Analisis de negocio": al tocar un dia muestra, por cada venta, su
+  // fecha/hora, el NCF (secuencia utilizada), el numero de cuenta y el monto.
+  // El monto va SIN propina, igual que la serie de ventas del analisis.
+  // -------------------------------------------------------------------------
+  router.get('/ventas-dia', (req, res) => {
+    ensureAdmin(req, res, async (usuarioSesion, negocioId) => {
+      const fecha = String(req.query?.fecha || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+        return res.status(400).json({ ok: false, error: 'Fecha invalida (use YYYY-MM-DD).' });
+      }
+      try {
+        const ventas = await db.all(
+          `SELECT COALESCE(p.cuenta_id, p.id) AS cuenta_id,
+                  MAX(p.numero_cuenta_negocio) AS numero_cuenta,
+                  MAX(p.cliente) AS cliente,
+                  MAX(p.ncf) AS ncf,
+                  MAX(p.tipo_comprobante) AS tipo_comprobante,
+                  MIN(${fechaBaseRawFor('p')}) AS fecha,
+                  SUM(p.subtotal + p.impuesto - p.descuento_monto) AS monto,
+                  SUM(p.propina_monto) AS propina
+             FROM pedidos p
+            WHERE ${buildPedidoFilter({ alias: 'p' })}
+              AND ${fechaBaseFor('p')} = ?
+            GROUP BY COALESCE(p.cuenta_id, p.id)
+            ORDER BY fecha ASC`,
+          [negocioId, negocioId, fecha]
+        );
+        const data = (ventas || []).map((v) => ({
+          cuenta_id: v.cuenta_id,
+          numero_cuenta: v.numero_cuenta || v.cuenta_id,
+          cliente: v.cliente || null,
+          ncf: v.ncf || null,
+          tipo_comprobante: v.tipo_comprobante || null,
+          fecha: v.fecha,
+          monto: roundDecimal(v.monto),
+          propina: roundDecimal(v.propina),
+        }));
+        const total = data.reduce((acc, v) => acc + safeNumber(v.monto), 0);
+        res.json({ ok: true, fecha, total: roundDecimal(total), cantidad: data.length, ventas: data });
+      } catch (e) {
+        console.error('Error en /ventas-dia:', e?.message || e);
+        res.status(500).json({ ok: false, error: 'No se pudo cargar el detalle del dia.' });
+      }
+    });
+  });
 
   // -------------------------------------------------------------------------
   // 1) /restaurante — KPIs de la industria de restaurantes

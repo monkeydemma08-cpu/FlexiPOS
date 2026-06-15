@@ -4189,6 +4189,40 @@
     </div>
   </div>
 
+  <!-- Detalle de ventas de un día (drill-down de Análisis de negocio) -->
+  <div class="kanm-modal-overlay" id="analisis-dia-modal" hidden>
+    <div class="kanm-modal kanm-modal--wide" role="dialog" aria-modal="true" aria-labelledby="analisis-dia-titulo">
+      <div class="kanm-modal-header">
+        <h3 id="analisis-dia-titulo">Ventas del día</h3>
+        <button type="button" class="kanm-button ghost" id="analisis-dia-cerrar">Cerrar</button>
+      </div>
+      <div class="kanm-modal-body" style="overflow-y:auto;max-height:65vh">
+        <div id="analisis-dia-cargando" style="text-align:center;padding:20px;color:#666">Cargando...</div>
+        <div class="kanm-table-wrapper" id="analisis-dia-contenido" hidden>
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th># Cuenta</th>
+                <th>Fecha y hora</th>
+                <th>Secuencia (NCF)</th>
+                <th>Comprobante</th>
+                <th style="text-align:right">Monto</th>
+              </tr>
+            </thead>
+            <tbody id="analisis-dia-body"></tbody>
+            <tfoot>
+              <tr>
+                <td colspan="4" style="text-align:right;font-weight:600">Total</td>
+                <td style="text-align:right;font-weight:600" id="analisis-dia-total">RD$0.00</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div id="analisis-dia-mensaje" class="kanm-message" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="kanm-modal oculto" id="kanm-negocios-modal">
     <div class="kanm-modal-backdrop"></div>
     <div class="kanm-modal-panel">
@@ -5621,7 +5655,7 @@
       }
     })();
   </script>
-  <script src="/js/admin.js?v=20260531b"></script>
+  <script src="/js/admin.js?v=20260615"></script>
   <script src="/js/admin-facturacion-posium.js?v=20260522a"></script>
   <script src="/js/admin-cotizaciones.js?v=20260522a"></script>
   <script src="/js/admin-clientes.js?v=20260522a"></script>
