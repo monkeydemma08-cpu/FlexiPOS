@@ -842,10 +842,14 @@
       const tituloEditar = esPedidoEcf
         ? 'Convertir factura electronica residual a Sin comprobante'
         : 'Editar factura (requiere password admin)';
+      const accionesEditEliminar = bloquearEdicion
+        ? ''
+        : `<button type="button" class="kanm-button ghost" data-editar-factura="1" data-pedido-id="${facturaPedidoId}" style="margin-left:6px;" title="${tituloEditar}">Editar</button>
+           <button type="button" class="kanm-button ghost" data-eliminar-factura="1" data-pedido-id="${facturaPedidoId}" style="margin-left:6px;color:#c0392b;" title="Eliminar/anular factura (requiere password admin)">Eliminar</button>`;
       const facturaBtnsHtml = facturaPedidoId
         ? `
             <button type="button" class="kanm-button ghost" data-ver-factura="1" data-pedido-id="${facturaPedidoId}" title="Ver factura">Ver factura</button>
-            ${bloquearEdicion ? '' : `<button type="button" class="kanm-button ghost" data-editar-factura="1" data-pedido-id="${facturaPedidoId}" style="margin-left:6px;" title="${tituloEditar}">Editar</button>`}
+            ${accionesEditEliminar}
           `
         : '<span class="kanm-subtitle">—</span>';
 
@@ -1180,6 +1184,17 @@
         }
         return;
       }
+      // Boton Eliminar factura: pide password admin y anula la factura.
+      const botonEliminarFactura = event.target.closest('[data-eliminar-factura]');
+      if (botonEliminarFactura) {
+        event.preventDefault();
+        event.stopPropagation();
+        const pedidoId = Number(botonEliminarFactura.dataset.pedidoId);
+        if (Number.isFinite(pedidoId) && pedidoId > 0) {
+          abrirModalEliminarFacturaMostrador(pedidoId);
+        }
+        return;
+      }
       const fila = event.target.closest('tr');
       if (!fila || fila.classList.contains('cuadre-detalle-expand')) return;
       const cuadreId = Number(fila.dataset.cuadreId);
@@ -1409,6 +1424,73 @@
     setEditMensajeMostrador('');
   }
 
+  // ---- Eliminar / anular factura ----
+  const setMsgEliminarMostrador = (texto, tipo) => {
+    const msg = document.getElementById('mostrador-eliminar-factura-mensaje');
+    if (!msg) return;
+    msg.textContent = texto || '';
+    msg.className = 'kanm-message';
+    if (tipo === 'error') msg.classList.add('kanm-message-error');
+    else if (tipo === 'success') msg.classList.add('kanm-message-success');
+  };
+
+  function abrirModalEliminarFacturaMostrador(pedidoId) {
+    const modal = document.getElementById('mostrador-eliminar-factura-modal');
+    if (!modal) {
+      alert('Modal de eliminar no esta inicializado. Recarga con Ctrl+Shift+R.');
+      return;
+    }
+    const idInput = document.getElementById('mostrador-eliminar-factura-pedido-id');
+    const passInput = document.getElementById('mostrador-eliminar-factura-password');
+    if (idInput) idInput.value = String(pedidoId);
+    if (passInput) passInput.value = '';
+    setMsgEliminarMostrador('');
+    modal.hidden = false;
+    requestAnimationFrame(() => modal.classList.add('is-visible'));
+    passInput?.focus();
+  }
+
+  function cerrarModalEliminarFacturaMostrador() {
+    const modal = document.getElementById('mostrador-eliminar-factura-modal');
+    if (modal) {
+      modal.classList.remove('is-visible');
+      modal.hidden = true;
+    }
+  }
+
+  async function confirmarEliminarFacturaMostrador() {
+    const idInput = document.getElementById('mostrador-eliminar-factura-pedido-id');
+    const passInput = document.getElementById('mostrador-eliminar-factura-password');
+    const btn = document.getElementById('mostrador-eliminar-factura-confirmar');
+    const pedidoId = Number(idInput?.value);
+    const password = (passInput?.value || '').trim();
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) return;
+    if (!password) {
+      setMsgEliminarMostrador('Ingresa la contraseña del administrador.', 'error');
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Eliminando…'; }
+    setMsgEliminarMostrador('Eliminando…');
+    try {
+      const resp = await fetch(`/api/caja/facturas/${pedidoId}/eliminar-con-admin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...obtenerAuthHeaders() },
+        body: JSON.stringify({ admin_password: password }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.ok === false) throw new Error(data?.error || 'No se pudo eliminar.');
+      setMsgEliminarMostrador('Factura eliminada correctamente.', 'success');
+      if (typeof cargarResumenCuadre === 'function') {
+        try { await cargarResumenCuadre(false); } catch (_) {}
+      }
+      setTimeout(cerrarModalEliminarFacturaMostrador, 800);
+    } catch (err) {
+      setMsgEliminarMostrador(err.message || 'Error al eliminar.', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Eliminar factura'; }
+    }
+  }
+
   async function guardarEdicionFacturaMostrador() {
     if (!editModalEl) return;
     const pedidoId = Number(editPedidoIdInput?.value);
@@ -1513,6 +1595,13 @@
     document.getElementById('mostrador-editar-factura-cancelar')?.addEventListener('click', cerrarModalEditarFacturaMostrador);
     editModalEl.addEventListener('click', (e) => { if (e.target === editModalEl) cerrarModalEditarFacturaMostrador(); });
     editGuardarBtn?.addEventListener('click', guardarEdicionFacturaMostrador);
+
+    // Modal eliminar factura.
+    const elimModalEl = document.getElementById('mostrador-eliminar-factura-modal');
+    document.getElementById('mostrador-eliminar-factura-cerrar')?.addEventListener('click', cerrarModalEliminarFacturaMostrador);
+    document.getElementById('mostrador-eliminar-factura-cancelar')?.addEventListener('click', cerrarModalEliminarFacturaMostrador);
+    document.getElementById('mostrador-eliminar-factura-confirmar')?.addEventListener('click', confirmarEliminarFacturaMostrador);
+    elimModalEl?.addEventListener('click', (e) => { if (e.target === elimModalEl) cerrarModalEliminarFacturaMostrador(); });
 
     editItemsBody?.addEventListener('input', (e) => {
       if (e.target.matches('[data-edit-cant]') || e.target.matches('[data-edit-precio]')) {

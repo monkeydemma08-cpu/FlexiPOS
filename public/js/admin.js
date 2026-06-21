@@ -9654,6 +9654,8 @@ const consultarCierresCaja = async (mostrarCarga = true) => {
   const parametros = new URLSearchParams();
   if (desde) parametros.set('desde', desde);
   if (hasta) parametros.set('hasta', hasta);
+  // El admin ve TODOS los cuadres: los de caja y los de mostrador.
+  parametros.set('origen', 'todos');
 
   try {
     if (mostrarCarga) {

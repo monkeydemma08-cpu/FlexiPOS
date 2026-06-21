@@ -9806,11 +9806,21 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
 
 const esFechaISOValida = (valor) => typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valor);
 
+// Devuelve YYYY-MM-DD en hora de Republica Dominicana (UTC-4, sin DST),
+// SIN depender de la zona horaria del proceso Node ni del servidor MySQL. Asi la
+// "fecha de operacion" del cuadre y demas fechas de negocio caen en el dia RD
+// correcto aunque el servidor este en UTC (evita que se corra de dia).
+const _fmtFechaRD = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Santo_Domingo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
 const obtenerFechaLocalISO = (valor) => {
   if (valor instanceof Date) {
-    const tzOffset = valor.getTimezoneOffset();
-    const local = new Date(valor.getTime() - tzOffset * 60000);
-    return local.toISOString().slice(0, 10);
+    return Number.isNaN(valor.getTime())
+      ? _fmtFechaRD.format(new Date())
+      : _fmtFechaRD.format(valor); // en-CA => YYYY-MM-DD
   }
 
   if (typeof valor === 'string') {
@@ -9820,7 +9830,7 @@ const obtenerFechaLocalISO = (valor) => {
     }
   }
 
-  return obtenerFechaLocalISO(new Date());
+  return _fmtFechaRD.format(new Date());
 };
 
 const normalizarFechaOperacion = (valor) => {
@@ -9828,7 +9838,7 @@ const normalizarFechaOperacion = (valor) => {
     return valor;
   }
   if (valor instanceof Date) {
-    return Number.isNaN(valor.getTime()) ? obtenerFechaLocalISO(new Date()) : valor.toISOString().slice(0, 10);
+    return Number.isNaN(valor.getTime()) ? obtenerFechaLocalISO(new Date()) : obtenerFechaLocalISO(valor);
   }
   if (typeof valor === 'string') {
     const match = valor.trim().match(/^(\d{4}-\d{2}-\d{2})/);
@@ -9837,12 +9847,12 @@ const normalizarFechaOperacion = (valor) => {
     }
     const fecha = new Date(valor);
     if (!Number.isNaN(fecha.getTime())) {
-      return fecha.toISOString().slice(0, 10);
+      return obtenerFechaLocalISO(fecha);
     }
   }
   const fecha = new Date(valor);
   if (!Number.isNaN(fecha.getTime())) {
-    return fecha.toISOString().slice(0, 10);
+    return obtenerFechaLocalISO(fecha);
   }
   return obtenerFechaLocalISO(new Date());
 };
@@ -10694,13 +10704,21 @@ const obtenerCierresCaja = (desde, hasta, negocioId, origen, callback) => {
   const negocio = negocioId || NEGOCIO_ID_DEFAULT;
   const params = [negocio, desde, hasta];
   const filtros = ['cc.negocio_id = ?', 'DATE(cc.fecha_operacion) BETWEEN ? AND ?'];
+  // origen = 'todos' => admin ve TODOS los origenes (caja + mostrador). Si no,
+  // se filtra por el origen indicado (caja o mostrador).
+  const mostrarTodos = String(origen || '').toLowerCase() === 'todos';
   const origenCaja = normalizarOrigenCaja(origen, 'caja');
-  const filtroOrigenCierre = construirFiltroOrigenCaja(origenCaja, params, 'cc.origen_caja');
-  const filtroOrigenPedidos = construirFiltroOrigenCajaSql(origenCaja, 'p.origen_caja');
-  const filtroOrigenFacturas = construirFiltroOrigenCajaSql(origenCaja, 'd.origen_caja');
+  const filtroOrigenPedidos = mostrarTodos
+    ? '1=1'
+    : construirFiltroOrigenCajaSql(origenCaja, 'p.origen_caja');
+  const filtroOrigenFacturas = mostrarTodos
+    ? '1=1'
+    : construirFiltroOrigenCajaSql(origenCaja, 'd.origen_caja');
   const totalPedidoSql =
     'COALESCE(p.subtotal, 0) + COALESCE(p.impuesto, 0) - COALESCE(p.descuento_monto, 0) + COALESCE(p.propina_monto, 0)';
-  filtros.push(filtroOrigenCierre);
+  if (!mostrarTodos) {
+    filtros.push(construirFiltroOrigenCaja(origenCaja, params, 'cc.origen_caja'));
+  }
   const sql = `
     SELECT cc.id, cc.fecha_operacion, cc.fecha_cierre, cc.usuario, cc.usuario_rol, cc.origen_caja,
            cc.fondo_inicial, cc.total_sistema, cc.total_declarado, cc.diferencia, cc.observaciones,
@@ -10998,7 +11016,11 @@ const construirFilasCierresCSV = (cierres) =>
 app.get('/api/caja/cierres', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
-    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
+    const origenRaw = req.query?.origen ?? req.query?.origen_caja;
+    const origenCaja =
+      String(origenRaw || '').toLowerCase() === 'todos'
+        ? 'todos'
+        : normalizarOrigenCaja(origenRaw, 'caja');
     const rango = normalizarRangoCierres(req.query?.desde, req.query?.hasta);
 
     obtenerCierresCaja(rango.desde, rango.hasta, negocioId, origenCaja, (err, cierres) => {
@@ -17558,6 +17580,188 @@ const aplicarEdicionFacturaCuenta = async ({
     ncf_nuevo: ncfNuevoGenerado,
   };
 };
+
+// ===========================================================================
+// eliminarFacturaCuenta — ANULA (cancela) una factura/cuenta completa:
+//   - Devuelve el stock de todos sus items (excepto productos de stock indefinido).
+//   - Marca TODOS los pedidos de la cuenta como 'cancelado' => salen de reportes,
+//     cuadre y analitica (todos filtran estado='pagado').
+//   - Borra los pagos registrados de la cuenta (pagos_cuenta) y el consumo de
+//     insumos asociado.
+//   - Invalida la cache de analitica.
+// Misma regla e-CF que la edicion: si la cuenta es electronica y el negocio tiene
+// la FE activa, se rechaza (hay que emitir Nota de Credito).
+// ===========================================================================
+const eliminarFacturaCuenta = async ({ pedidoId, negocioId }) => {
+  const error = (status, message) => {
+    const e = new Error(message);
+    e.status = status;
+    return e;
+  };
+
+  const pedidoBase = await db.get(
+    `SELECT id, cuenta_id, estado FROM pedidos WHERE id = ? AND negocio_id = ? LIMIT 1`,
+    [pedidoId, negocioId]
+  );
+  if (!pedidoBase) throw error(404, 'Factura no encontrada.');
+
+  const cuentaId = pedidoBase.cuenta_id || pedidoBase.id;
+  const pedidosCuenta = await db.all(
+    `SELECT id, ecf_tipo, ecf_encf, tipo_comprobante, estado
+       FROM pedidos WHERE (cuenta_id = ? OR id = ?) AND negocio_id = ? ORDER BY id ASC`,
+    [cuentaId, cuentaId, negocioId]
+  );
+
+  // Regla e-CF (igual que la edicion).
+  const cuentaTieneEcf = pedidosCuenta.some((p) => {
+    const t = String(p.tipo_comprobante || '').toUpperCase();
+    return !!p.ecf_tipo || !!p.ecf_encf || /^E\d{2}$/.test(t);
+  });
+  if (cuentaTieneEcf) {
+    let feHab = 0;
+    try {
+      const feRow = await db.get(
+        'SELECT habilitada FROM facturacion_electronica_config WHERE negocio_id = ? LIMIT 1',
+        [negocioId]
+      );
+      feHab = normalizarFlag(feRow?.habilitada, 0);
+    } catch (_) {
+      feHab = 0;
+    }
+    if (feHab === 1) {
+      throw error(
+        403,
+        'Esta factura es electronica (e-CF) y el negocio tiene la facturacion electronica activa. No se puede eliminar — emite una Nota de Credito.'
+      );
+    }
+  }
+
+  const idsPedidos = pedidosCuenta.map((p) => p.id);
+  const placeholders = idsPedidos.map(() => '?').join(', ');
+
+  // Items a devolver al stock (agregados por producto).
+  const itemsCuenta = idsPedidos.length
+    ? await db.all(
+        `SELECT producto_id, SUM(cantidad) AS cantidad
+           FROM detalle_pedido
+          WHERE pedido_id IN (${placeholders}) AND negocio_id = ? AND producto_id IS NOT NULL
+          GROUP BY producto_id`,
+        [...idsPedidos, negocioId]
+      )
+    : [];
+
+  const stockAjustes = [];
+  await db.run('BEGIN');
+  try {
+    for (const it of itemsCuenta) {
+      const productoId = Number(it.producto_id);
+      const cantidad = Number(it.cantidad) || 0;
+      if (!Number.isFinite(productoId) || productoId <= 0 || cantidad <= 0) continue;
+      const prod = await db.get(
+        `SELECT id, nombre, stock, stock_indefinido FROM productos WHERE id = ? AND negocio_id = ? LIMIT 1`,
+        [productoId, negocioId]
+      );
+      if (!prod) continue;
+      if (esStockIndefinido(prod)) {
+        stockAjustes.push({ producto_id: productoId, nombre: prod.nombre, cantidad, ignorado: 'stock_indefinido' });
+        continue;
+      }
+      await db.run(
+        'UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?',
+        [cantidad, productoId, negocioId]
+      );
+      stockAjustes.push({ producto_id: productoId, nombre: prod.nombre, cantidad, accion: 'devuelto' });
+    }
+
+    if (idsPedidos.length) {
+      try {
+        await db.run(
+          `DELETE FROM consumo_insumos WHERE pedido_id IN (${placeholders}) AND negocio_id = ?`,
+          [...idsPedidos, negocioId]
+        );
+      } catch (_) {
+        // la tabla puede no existir en algunas instancias
+      }
+    }
+
+    // Quitar los pagos de la cuenta (salen del cuadre y de los totales de caja).
+    try {
+      await db.run('DELETE FROM pagos_cuenta WHERE cuenta_id = ? AND negocio_id = ?', [cuentaId, negocioId]);
+    } catch (_) {}
+
+    // Cancelar todos los pedidos de la cuenta.
+    for (const p of pedidosCuenta) {
+      await db.run(
+        `UPDATE pedidos SET estado = 'cancelado' WHERE id = ? AND negocio_id = ?`,
+        [p.id, negocioId]
+      );
+    }
+
+    await db.run('COMMIT');
+  } catch (txErr) {
+    await db.run('ROLLBACK').catch(() => {});
+    throw txErr;
+  }
+
+  try {
+    if (typeof limpiarCacheAnalitica === 'function') limpiarCacheAnalitica(negocioId);
+  } catch (_) {}
+
+  return { cuenta_id: cuentaId, pedidos_afectados: idsPedidos, stock_ajustes: stockAjustes };
+};
+
+// ===========================================================================
+// POST /api/caja/facturas/:id/eliminar-con-admin
+// Anula una factura desde el detalle de cuadre. Requiere password de admin.
+// ===========================================================================
+app.post('/api/caja/facturas/:id/eliminar-con-admin', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const pedidoId = Number(req.params.id);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Pedido no valido.' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const body = req.body || {};
+    const adminPassword = (body.admin_password || body.adminPassword || '').toString();
+    if (!adminPassword) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Se requiere la contraseña del administrador para eliminar la factura.',
+      });
+    }
+    try {
+      const auth = await validarPasswordAdminNegocio(negocioId, adminPassword);
+      if (!auth?.ok) {
+        return res.status(403).json({ ok: false, error: 'Contraseña de administrador incorrecta.' });
+      }
+      const resultado = await eliminarFacturaCuenta({ pedidoId, negocioId });
+      try {
+        if (typeof registrarAccionAdmin === 'function') {
+          await registrarAccionAdmin({
+            adminId: auth.admin_id,
+            negocioId,
+            accion: 'eliminar_factura_caja',
+            detalle: JSON.stringify({
+              pedido_id: pedidoId,
+              cuenta_id: resultado.cuenta_id,
+              pedidos_cuenta: resultado.pedidos_afectados,
+              stock_ajustes: resultado.stock_ajustes,
+              autorizo_admin_id: auth.admin_id,
+              ejecuto_usuario_id: usuarioSesion.id,
+            }),
+          });
+        }
+      } catch (auditErr) {
+        console.warn('No se pudo registrar auditoria de eliminar factura:', auditErr?.message || auditErr);
+      }
+      res.json({ ok: true, ...resultado });
+    } catch (e) {
+      const status = e?.status || 500;
+      if (status >= 500) console.error('Error al eliminar factura:', e?.message || e);
+      res.status(status).json({ ok: false, error: e?.message || 'No se pudo eliminar la factura.' });
+    }
+  });
+});
 
 // ===========================================================================
 // POST /api/caja/facturas/:id/editar-con-admin

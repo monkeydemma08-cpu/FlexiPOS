@@ -12,8 +12,8 @@
     />
     <link rel="stylesheet" href="css/styles.css" />
     <script src="js/auth.js" defer></script>
-    <script src="js/mostrador.js?v=20260606" defer></script>
-    <script src="js/mostrador-cuadre.js?v=20260606" defer></script>
+    <script src="js/mostrador.js?v=20260615" defer></script>
+    <script src="js/mostrador-cuadre.js?v=20260615" defer></script>
   </head>
   <body data-role="vendedor">
     <header class="kanm-header">
@@ -699,6 +699,34 @@
           <button type="button" class="kanm-button ghost" id="mostrador-editar-factura-cancelar">Cancelar</button>
           <button type="button" class="kanm-button" id="mostrador-editar-factura-guardar">
             Guardar cambios
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: eliminar/anular factura -->
+    <div class="kanm-modal-overlay" id="mostrador-eliminar-factura-modal" hidden>
+      <div class="kanm-modal" role="dialog" aria-modal="true" aria-labelledby="mostrador-eliminar-factura-title" style="max-width:460px;">
+        <div class="caja-split-header">
+          <div>
+            <h3 id="mostrador-eliminar-factura-title">Eliminar factura</h3>
+            <p class="kanm-subtitle">
+              Se anulará la factura: se devuelve el stock y sale del cuadre y de los reportes.
+              Esta acción requiere la contraseña del administrador.
+            </p>
+          </div>
+          <button type="button" class="kanm-button ghost" id="mostrador-eliminar-factura-cerrar">Cerrar</button>
+        </div>
+        <input type="hidden" id="mostrador-eliminar-factura-pedido-id" />
+        <div class="kanm-input-group">
+          <label for="mostrador-eliminar-factura-password">Contraseña de administrador *</label>
+          <input type="password" id="mostrador-eliminar-factura-password" placeholder="Requerida para eliminar" autocomplete="current-password" />
+        </div>
+        <div class="kanm-message" id="mostrador-eliminar-factura-mensaje"></div>
+        <div class="kanm-modal-actions">
+          <button type="button" class="kanm-button ghost" id="mostrador-eliminar-factura-cancelar">Cancelar</button>
+          <button type="button" class="kanm-button" id="mostrador-eliminar-factura-confirmar" style="background:#c0392b;">
+            Eliminar factura
           </button>
         </div>
       </div>
