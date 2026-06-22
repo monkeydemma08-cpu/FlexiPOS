@@ -291,6 +291,9 @@ const reporte607TotalSpan = document.getElementById('reporte-607-total');
 const reporte607MontoSpan = document.getElementById('reporte-607-monto');
 const reporte607Mensaje = document.getElementById('reporte-607-mensaje');
 const reporte607Tabla = document.getElementById('reporte-607-tabla');
+const reporte607FiltroTipo = document.getElementById('reporte-607-filtro-tipo');
+const reporte607CountB02 = document.getElementById('reporte-607-count-b02');
+const reporte607CountB01 = document.getElementById('reporte-607-count-b01');
 
 const reporte606MesInput = document.getElementById('reporte-606-mes');
 const reporte606ConsultarBtn = document.getElementById('reporte-606-consultar');
@@ -7265,12 +7268,28 @@ const renderReporte607 = () => {
   if (!reporte607Tabla) return;
   reporte607Tabla.innerHTML = '';
 
-  if (!datosReporte607.length) {
+  const normTipo = (t) => String(t || '').trim().toUpperCase();
+
+  // Conteos del MES COMPLETO (no dependen del filtro): cuántos B02 y B01 emitidos.
+  const countB02 = datosReporte607.filter((x) => normTipo(x.tipo_comprobante) === 'B02').length;
+  const countB01 = datosReporte607.filter((x) => normTipo(x.tipo_comprobante) === 'B01').length;
+  if (reporte607CountB02) reporte607CountB02.textContent = String(countB02);
+  if (reporte607CountB01) reporte607CountB01.textContent = String(countB01);
+
+  // Filtro por tipo de comprobante.
+  const filtro = normTipo(reporte607FiltroTipo?.value);
+  const filas = filtro
+    ? datosReporte607.filter((x) => normTipo(x.tipo_comprobante) === filtro)
+    : datosReporte607;
+
+  if (!filas.length) {
     const fila = document.createElement('tr');
     const celda = document.createElement('td');
     celda.colSpan = 11;
     celda.className = 'tabla-vacia';
-    celda.textContent = 'No hay ventas registradas en el periodo seleccionado.';
+    celda.textContent = filtro
+      ? `No hay facturas ${reporte607FiltroTipo?.value || ''} en el periodo seleccionado.`
+      : 'No hay ventas registradas en el periodo seleccionado.';
     fila.appendChild(celda);
     reporte607Tabla.appendChild(fila);
     reporte607TotalSpan.textContent = '0';
@@ -7278,7 +7297,7 @@ const renderReporte607 = () => {
     return;
   }
 
-  datosReporte607.forEach((filaDato) => {
+  filas.forEach((filaDato) => {
     const fila = document.createElement('tr');
     fila.innerHTML = `
       <td>${formatDate(filaDato.fecha_factura)}</td>
@@ -7295,8 +7314,9 @@ const renderReporte607 = () => {
     reporte607Tabla.appendChild(fila);
   });
 
-  reporte607TotalSpan.textContent = String(datosReporte607.length);
-  const totalMes = datosReporte607.reduce((acc, item) => acc + (item.total || 0), 0);
+  // "Facturas" y "Total mes" reflejan la vista filtrada.
+  reporte607TotalSpan.textContent = String(filas.length);
+  const totalMes = filas.reduce((acc, item) => acc + (item.total || 0), 0);
   reporte607MontoSpan.textContent = formatCurrency(totalMes);
 };
 
@@ -12940,6 +12960,9 @@ reporte607ExportarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   exportarReporte607();
 });
+
+// Filtro por tipo: solo re-renderiza la tabla (los datos ya están cargados).
+reporte607FiltroTipo?.addEventListener('change', () => renderReporte607());
 
 reporte606ConsultarBtn?.addEventListener('click', (event) => {
   event.preventDefault();

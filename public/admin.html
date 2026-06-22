@@ -2436,6 +2436,16 @@
             <label for="reporte-607-mes">Mes de consulta</label>
             <input type="month" id="reporte-607-mes" />
           </div>
+          <div class="kanm-input-group">
+            <label for="reporte-607-filtro-tipo">Filtrar por tipo</label>
+            <select id="reporte-607-filtro-tipo">
+              <option value="">Todos</option>
+              <option value="B02">B02 — Consumidor final</option>
+              <option value="B01">B01 — Crédito fiscal</option>
+              <option value="B14">B14 — Régimen especial</option>
+              <option value="Sin comprobante">Sin comprobante</option>
+            </select>
+          </div>
           <div class="admin-report-actions">
             <button type="button" class="kanm-button secondary" id="reporte-607-consultar">
               Consultar
@@ -2453,6 +2463,14 @@
           <div class="resumen-metric">
             <span class="resumen-label">Total mes</span>
             <span class="resumen-value" id="reporte-607-monto">DOP&nbsp;0.00</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">B02 emitidos</span>
+            <span class="resumen-value" id="reporte-607-count-b02">0</span>
+          </div>
+          <div class="resumen-metric">
+            <span class="resumen-label">B01 emitidos</span>
+            <span class="resumen-value" id="reporte-607-count-b01">0</span>
           </div>
         </div>
         <div id="reporte-607-mensaje" class="kanm-message"></div>
@@ -5655,7 +5673,7 @@
       }
     })();
   </script>
-  <script src="/js/admin.js?v=20260615b"></script>
+  <script src="/js/admin.js?v=20260615c"></script>
   <script src="/js/admin-facturacion-posium.js?v=20260522a"></script>
   <script src="/js/admin-cotizaciones.js?v=20260522a"></script>
   <script src="/js/admin-clientes.js?v=20260522a"></script>
