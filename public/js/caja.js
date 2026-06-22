@@ -6356,6 +6356,56 @@ const inicializarCuadre = () => {
   const editFacturaCerrarBtn = document.getElementById('caja-editar-factura-cerrar');
   const editFacturaCancelarBtn = document.getElementById('caja-editar-factura-cancelar');
   const editFacturaGuardarBtn = document.getElementById('caja-editar-factura-guardar');
+  const editFacturaBuscarProd = document.getElementById('caja-editar-factura-buscar-producto');
+  const editFacturaAgregarBtn = document.getElementById('caja-editar-factura-agregar');
+  const editFacturaListaProd = document.getElementById('caja-editar-factura-lista-productos');
+  let editFacturaCatalogo = [];
+
+  const cargarCatalogoProductosCaja = async () => {
+    if (editFacturaCatalogo.length) return;
+    try {
+      const resp = await fetchAutorizadoCaja('/api/productos');
+      const data = await resp.json().catch(() => []);
+      editFacturaCatalogo = Array.isArray(data) ? data : Array.isArray(data?.productos) ? data.productos : [];
+    } catch (_) {
+      editFacturaCatalogo = [];
+    }
+    if (editFacturaListaProd) {
+      editFacturaListaProd.innerHTML = '';
+      editFacturaCatalogo.forEach((prod) => {
+        const opt = document.createElement('option');
+        opt.value = prod.nombre;
+        editFacturaListaProd.appendChild(opt);
+      });
+    }
+  };
+
+  const agregarItemEditCaja = () => {
+    const termino = (editFacturaBuscarProd?.value || '').trim().toLowerCase();
+    if (!termino) return;
+    const prod = editFacturaCatalogo.find((p) => String(p.nombre || '').toLowerCase() === termino);
+    if (!prod) {
+      setEditFacturaMensaje('Producto no encontrado. Usa el nombre exacto de la lista.', 'error');
+      return;
+    }
+    if (!editFacturaItemsBody) return;
+    if (!editFacturaItemsBody.querySelector('tr[data-edit-item-row]')) editFacturaItemsBody.innerHTML = '';
+    const precio = Number(prod.precio) || 0;
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-edit-item-row', 'nuevo');
+    tr.dataset.productoId = String(prod.id);
+    tr.innerHTML = `
+      <td>${String(prod.nombre || '').replace(/</g, '&lt;')}</td>
+      <td><input type="number" class="kanm-input" data-edit-cantidad min="0.01" step="0.01" value="1" /></td>
+      <td><input type="number" class="kanm-input" data-edit-precio min="0" step="0.01" value="${precio.toFixed(2)}" /></td>
+      <td><span data-edit-subtotal>RD$${precio.toFixed(2)}</span></td>
+      <td><button type="button" class="kanm-button ghost" data-edit-eliminar="nuevo" title="Eliminar línea">✕</button></td>
+    `;
+    editFacturaItemsBody.appendChild(tr);
+    if (editFacturaBuscarProd) editFacturaBuscarProd.value = '';
+    setEditFacturaMensaje('');
+    recalcularSubtotalesEditFactura();
+  };
 
   // Diagnostico: avisar si el modal no esta en el DOM (caja.html viejo en cache).
   if (!editFacturaModal) {
@@ -6450,6 +6500,7 @@ const inicializarCuadre = () => {
     if (editFacturaItemsBody) {
       editFacturaItemsBody.innerHTML = '<tr><td colspan="5" class="kanm-subtitle">Cargando…</td></tr>';
     }
+    cargarCatalogoProductosCaja(); // para poder agregar productos
     try {
       const resp = await fetchAutorizadoCaja(`/api/pedidos/${pedidoId}/factura`);
       const data = await resp.json().catch(() => ({}));
@@ -6520,6 +6571,12 @@ const inicializarCuadre = () => {
   editFacturaCancelarBtn?.addEventListener('click', cerrarModalEditarFactura);
   editFacturaModal?.addEventListener('click', (event) => {
     if (event.target === editFacturaModal) cerrarModalEditarFactura();
+  });
+
+  // Agregar productos al editar.
+  editFacturaAgregarBtn?.addEventListener('click', agregarItemEditCaja);
+  editFacturaBuscarProd?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); agregarItemEditCaja(); }
   });
 
   // Guardar

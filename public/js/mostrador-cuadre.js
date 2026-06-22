@@ -1307,6 +1307,58 @@
       .join('');
   };
 
+  // ---- Agregar productos al editar ----
+  let productosCatalogoEdit = [];
+
+  const cargarCatalogoProductosEdit = async () => {
+    if (productosCatalogoEdit.length) return;
+    try {
+      const resp = await fetch('/api/productos', { headers: { ...obtenerAuthHeaders() } });
+      const data = await resp.json().catch(() => []);
+      productosCatalogoEdit = Array.isArray(data) ? data : Array.isArray(data?.productos) ? data.productos : [];
+    } catch (_) {
+      productosCatalogoEdit = [];
+    }
+    const datalist = document.getElementById('mostrador-editar-factura-lista-productos');
+    if (datalist) {
+      datalist.innerHTML = '';
+      productosCatalogoEdit.forEach((prod) => {
+        const opt = document.createElement('option');
+        opt.value = prod.nombre;
+        datalist.appendChild(opt);
+      });
+    }
+  };
+
+  const agregarItemEditMostrador = () => {
+    const buscar = document.getElementById('mostrador-editar-factura-buscar-producto');
+    const termino = (buscar?.value || '').trim().toLowerCase();
+    if (!termino) return;
+    const prod = productosCatalogoEdit.find((p) => String(p.nombre || '').toLowerCase() === termino);
+    if (!prod) {
+      setEditMensajeMostrador('Producto no encontrado. Usa el nombre exacto de la lista.', 'error');
+      return;
+    }
+    if (!editItemsBody) return;
+    // Si la tabla muestra un placeholder (Sin items / Cargando), limpiarlo.
+    if (!editItemsBody.querySelector('tr[data-edit-item-row]')) editItemsBody.innerHTML = '';
+    const precio = Number(prod.precio) || 0;
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-edit-item-row', 'nuevo');
+    tr.dataset.productoId = String(prod.id);
+    tr.innerHTML = `
+      <td>${String(prod.nombre || '').replace(/</g, '&lt;')}</td>
+      <td><input type="number" class="kanm-input" data-edit-cant min="0.01" step="0.01" value="1" /></td>
+      <td><input type="number" class="kanm-input" data-edit-precio min="0" step="0.01" value="${precio.toFixed(2)}" /></td>
+      <td><span data-edit-sub>RD$${precio.toFixed(2)}</span></td>
+      <td><button type="button" class="kanm-button ghost" data-edit-elim title="Quitar">✕</button></td>
+    `;
+    editItemsBody.appendChild(tr);
+    if (buscar) buscar.value = '';
+    setEditMensajeMostrador('');
+    recalcSubtotalesEditMostrador();
+  };
+
   const recalcSubtotalesEditMostrador = () => {
     editItemsBody?.querySelectorAll('tr[data-edit-item-row]').forEach((tr) => {
       const c = Number(tr.querySelector('[data-edit-cant]')?.value) || 0;
@@ -1352,6 +1404,7 @@
     editModalEl.hidden = false;
     // El overlay usa opacity/pointer-events; hace falta la clase is-visible para mostrarlo.
     requestAnimationFrame(() => editModalEl.classList.add('is-visible'));
+    cargarCatalogoProductosEdit(); // para poder agregar productos
     if (editPedidoIdInput) editPedidoIdInput.value = String(pedidoId);
     if (editPasswordInput) editPasswordInput.value = '';
     if (editItemsBody) editItemsBody.innerHTML = '<tr><td colspan="5" class="kanm-subtitle">Cargando…</td></tr>';
@@ -1617,6 +1670,12 @@
     editMetodoPagoSelect?.addEventListener('change', toggleCombinadoVisible);
     [editPagoEfectivoInput, editPagoTarjetaInput, editPagoTransferenciaInput].forEach((inp) => {
       inp?.addEventListener('input', recalcTotalPagosCombinado);
+    });
+
+    // Agregar productos al editar.
+    document.getElementById('mostrador-editar-factura-agregar')?.addEventListener('click', agregarItemEditMostrador);
+    document.getElementById('mostrador-editar-factura-buscar-producto')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); agregarItemEditMostrador(); }
     });
   }
 })();

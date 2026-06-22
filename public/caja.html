@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/styles.css" />
     <link rel="stylesheet" href="css/caja-shell.css?v=20260424a" />
     <script src="js/auth.js?v=20260519d" defer></script>
-    <script src="js/caja.js?v=20260606" defer></script>
+    <script src="js/caja.js?v=20260615" defer></script>
     <!-- Módulo de cotizaciones (reusado de admin). Se activa al ver el panel "Cotizaciones". -->
     <script src="/js/admin-cotizaciones.js?v=20260519d" defer></script>
   </head>
@@ -934,9 +934,14 @@
               </tbody>
             </table>
           </div>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <input type="text" id="caja-editar-factura-buscar-producto" class="kanm-input" placeholder="Buscar producto para agregar…" list="caja-editar-factura-lista-productos" style="flex:1;" autocomplete="off" />
+            <datalist id="caja-editar-factura-lista-productos"></datalist>
+            <button type="button" class="kanm-button" id="caja-editar-factura-agregar">Agregar</button>
+          </div>
           <span class="kanm-input-help">
-            Cambia cantidades o precios. Eliminar una línea quita el ítem. Esto NO ajusta inventario
-            (corrección administrativa).
+            Cambia cantidades/precios, quita o agrega productos. Al guardar se ajusta el inventario
+            (devuelve lo quitado, consume lo agregado).
           </span>
         </div>
 

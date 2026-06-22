@@ -12,8 +12,8 @@
     />
     <link rel="stylesheet" href="css/styles.css" />
     <script src="js/auth.js" defer></script>
-    <script src="js/mostrador.js?v=20260615" defer></script>
-    <script src="js/mostrador-cuadre.js?v=20260615" defer></script>
+    <script src="js/mostrador.js?v=20260615b" defer></script>
+    <script src="js/mostrador-cuadre.js?v=20260615b" defer></script>
   </head>
   <body data-role="vendedor">
     <header class="kanm-header">
@@ -642,6 +642,12 @@
               </tbody>
             </table>
           </div>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <input type="text" id="mostrador-editar-factura-buscar-producto" class="kanm-input" placeholder="Buscar producto para agregar…" list="mostrador-editar-factura-lista-productos" style="flex:1;" autocomplete="off" />
+            <datalist id="mostrador-editar-factura-lista-productos"></datalist>
+            <button type="button" class="kanm-button" id="mostrador-editar-factura-agregar">Agregar</button>
+          </div>
+          <span class="kanm-input-help">Agrega productos por nombre. Al guardar se ajusta el inventario.</span>
         </div>
 
         <!-- Seccion de metodo de pago (PEDIDO ESPECIFICO DEL USUARIO) -->
