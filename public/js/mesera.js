@@ -988,11 +988,23 @@ const activarTab = (tabId = 'tomar') => {
 const obtenerProductosActivos = () =>
   estado.productos.filter((producto) => producto.activo !== 0);
 
+// Busqueda por palabras sueltas (tokens): "empanada pollo" encuentra
+// "Empanada con pollo". Ignora orden, palabras intermedias y acentos.
+const _normalizarBusqueda = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+const coincideBusquedaTokens = (texto, termino) => {
+  const t = _normalizarBusqueda(texto);
+  const tokens = _normalizarBusqueda(termino).trim().split(/\s+/).filter(Boolean);
+  return tokens.every((tok) => t.includes(tok));
+};
+
 const obtenerProductosFiltrados = () => {
   const activos = obtenerProductosActivos();
   if (!estado.filtro) return activos;
-  const filtro = estado.filtro.toLowerCase();
-  return activos.filter((producto) => producto.nombre.toLowerCase().includes(filtro));
+  return activos.filter((producto) => coincideBusquedaTokens(producto.nombre, estado.filtro));
 };
 
 const actualizarContador = () => {

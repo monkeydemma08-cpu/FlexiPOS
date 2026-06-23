@@ -293,6 +293,21 @@ const reporte607Mensaje = document.getElementById('reporte-607-mensaje');
 const reporte607Tabla = document.getElementById('reporte-607-tabla');
 const reporte607FiltroTipo = document.getElementById('reporte-607-filtro-tipo');
 const reporte607FiltroCliente = document.getElementById('reporte-607-filtro-cliente');
+const reporte607BuscarNcf = document.getElementById('reporte-607-buscar-ncf');
+
+// Busqueda por palabras sueltas (tokens): "empanada pollo" encuentra
+// "Empanada con pollo". Ignora orden, palabras intermedias y acentos.
+const _normalizarBusquedaTokens = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+const coincideBusquedaTokens = (haystack, termino) => {
+  const t = _normalizarBusquedaTokens(haystack);
+  const tokens = _normalizarBusquedaTokens(termino).trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return true;
+  return tokens.every((tok) => t.includes(tok));
+};
 const reporte607CountB02 = document.getElementById('reporte-607-count-b02');
 const reporte607CountB01 = document.getElementById('reporte-607-count-b01');
 
@@ -3793,11 +3808,8 @@ const filtrarProductosVistaCompleta = () => {
   let lista = Array.isArray(productos) ? [...productos] : [];
 
   if (termino) {
-    lista = lista.filter(
-      (p) =>
-        p.nombre?.toLowerCase().includes(termino) ||
-        p.categoria_nombre?.toLowerCase().includes(termino) ||
-        String(p.id || '').includes(termino)
+    lista = lista.filter((p) =>
+      coincideBusquedaTokens(`${p.nombre || ''} ${p.categoria_nombre || ''} ${p.id || ''}`, termino)
     );
   }
 
@@ -3839,11 +3851,8 @@ const filtrarProductos = () => {
   let lista = Array.isArray(productos) ? [...productos] : [];
 
   if (termino) {
-    lista = lista.filter(
-      (p) =>
-        p.nombre?.toLowerCase().includes(termino) ||
-        p.categoria_nombre?.toLowerCase().includes(termino) ||
-        String(p.id || '').includes(termino)
+    lista = lista.filter((p) =>
+      coincideBusquedaTokens(`${p.nombre || ''} ${p.categoria_nombre || ''} ${p.id || ''}`, termino)
     );
   }
 
@@ -7290,12 +7299,14 @@ const renderReporte607 = () => {
     if (clientes.includes(seleccionActual)) reporte607FiltroCliente.value = seleccionActual;
   }
 
-  // Filtros por tipo de comprobante y por cliente.
+  // Filtros por tipo de comprobante, por cliente y búsqueda por NCF.
   const filtroTipo = normTipo(reporte607FiltroTipo?.value);
   const filtroCliente = (reporte607FiltroCliente?.value || '').trim().toLowerCase();
+  const buscarNcf = (reporte607BuscarNcf?.value || '').trim().toLowerCase();
   const filas = datosReporte607.filter((x) => {
     if (filtroTipo && normTipo(x.tipo_comprobante) !== filtroTipo) return false;
     if (filtroCliente && String(x.cliente || '').trim().toLowerCase() !== filtroCliente) return false;
+    if (buscarNcf && !String(x.ncf || '').toLowerCase().includes(buscarNcf)) return false;
     return true;
   });
 
@@ -7672,10 +7683,8 @@ const renderVentasProductosTabla = () => {
 
   let lista = [...todosProductosVentas];
   if (filtro) {
-    lista = lista.filter(
-      (p) =>
-        (p.nombre || '').toLowerCase().includes(filtro) ||
-        (p.categoria || '').toLowerCase().includes(filtro)
+    lista = lista.filter((p) =>
+      coincideBusquedaTokens(`${p.nombre || ''} ${p.categoria || ''}`, filtro)
     );
   }
 
@@ -12979,9 +12988,10 @@ reporte607ExportarBtn?.addEventListener('click', (event) => {
   exportarReporte607();
 });
 
-// Filtros (tipo / cliente): solo re-renderizan la tabla (los datos ya están cargados).
+// Filtros (tipo / cliente / NCF): solo re-renderizan la tabla (datos ya cargados).
 reporte607FiltroTipo?.addEventListener('change', () => renderReporte607());
 reporte607FiltroCliente?.addEventListener('change', () => renderReporte607());
+reporte607BuscarNcf?.addEventListener('input', () => renderReporte607());
 
 reporte606ConsultarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
