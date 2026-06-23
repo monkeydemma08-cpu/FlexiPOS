@@ -292,6 +292,7 @@ const reporte607MontoSpan = document.getElementById('reporte-607-monto');
 const reporte607Mensaje = document.getElementById('reporte-607-mensaje');
 const reporte607Tabla = document.getElementById('reporte-607-tabla');
 const reporte607FiltroTipo = document.getElementById('reporte-607-filtro-tipo');
+const reporte607FiltroCliente = document.getElementById('reporte-607-filtro-cliente');
 const reporte607CountB02 = document.getElementById('reporte-607-count-b02');
 const reporte607CountB01 = document.getElementById('reporte-607-count-b01');
 
@@ -7276,20 +7277,37 @@ const renderReporte607 = () => {
   if (reporte607CountB02) reporte607CountB02.textContent = String(countB02);
   if (reporte607CountB01) reporte607CountB01.textContent = String(countB01);
 
-  // Filtro por tipo de comprobante.
-  const filtro = normTipo(reporte607FiltroTipo?.value);
-  const filas = filtro
-    ? datosReporte607.filter((x) => normTipo(x.tipo_comprobante) === filtro)
-    : datosReporte607;
+  // Poblar el filtro de clientes con los clientes del periodo (preservando la
+  // selección actual). Se hace aquí para que siempre refleje los datos cargados.
+  if (reporte607FiltroCliente) {
+    const seleccionActual = reporte607FiltroCliente.value;
+    const clientes = Array.from(
+      new Set(datosReporte607.map((x) => (x.cliente || '').trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+    reporte607FiltroCliente.innerHTML =
+      '<option value="">Todos</option>' +
+      clientes.map((c) => `<option value="${c.replace(/"/g, '&quot;')}">${c}</option>`).join('');
+    if (clientes.includes(seleccionActual)) reporte607FiltroCliente.value = seleccionActual;
+  }
+
+  // Filtros por tipo de comprobante y por cliente.
+  const filtroTipo = normTipo(reporte607FiltroTipo?.value);
+  const filtroCliente = (reporte607FiltroCliente?.value || '').trim().toLowerCase();
+  const filas = datosReporte607.filter((x) => {
+    if (filtroTipo && normTipo(x.tipo_comprobante) !== filtroTipo) return false;
+    if (filtroCliente && String(x.cliente || '').trim().toLowerCase() !== filtroCliente) return false;
+    return true;
+  });
 
   if (!filas.length) {
     const fila = document.createElement('tr');
     const celda = document.createElement('td');
     celda.colSpan = 11;
     celda.className = 'tabla-vacia';
-    celda.textContent = filtro
-      ? `No hay facturas ${reporte607FiltroTipo?.value || ''} en el periodo seleccionado.`
-      : 'No hay ventas registradas en el periodo seleccionado.';
+    celda.textContent =
+      filtroTipo || filtroCliente
+        ? 'No hay facturas con esos filtros en el periodo seleccionado.'
+        : 'No hay ventas registradas en el periodo seleccionado.';
     fila.appendChild(celda);
     reporte607Tabla.appendChild(fila);
     reporte607TotalSpan.textContent = '0';
@@ -12961,8 +12979,9 @@ reporte607ExportarBtn?.addEventListener('click', (event) => {
   exportarReporte607();
 });
 
-// Filtro por tipo: solo re-renderiza la tabla (los datos ya están cargados).
+// Filtros (tipo / cliente): solo re-renderizan la tabla (los datos ya están cargados).
 reporte607FiltroTipo?.addEventListener('change', () => renderReporte607());
+reporte607FiltroCliente?.addEventListener('change', () => renderReporte607());
 
 reporte606ConsultarBtn?.addEventListener('click', (event) => {
   event.preventDefault();

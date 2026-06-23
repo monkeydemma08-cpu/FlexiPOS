@@ -33508,8 +33508,10 @@ app.get('/api/reportes/607', (req, res) => {
     return res.status(400).json({ ok: false, error: 'Debe proporcionar un mes y a?o v?lidos' });
   }
 
-  requireUsuarioSesion(req, res, (usuarioSesion) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const anioStr = String(anio);
+    const mesStr = String(mes).padStart(2, '0');
 
     // Para el filtro de mes/anio del 607 llevamos la fecha a hora RD (UTC-4, sin
     // DST) y asi las ventas de la noche no se cuelan al mes siguiente. Auto-ajusta:
@@ -33518,88 +33520,136 @@ app.get('/api/reportes/607', (req, res) => {
     const OFFSET_RD = '(-4 - TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()))';
     const fechaMesRD = `(COALESCE(fecha_factura, fecha_cierre, fecha_creacion) + INTERVAL ${OFFSET_RD} HOUR)`;
 
-    const sql = `
-    SELECT
-      COALESCE(cuenta_id, id) AS factura_id,
-      MAX(cliente) AS cliente,
-      MAX(cliente_documento) AS cliente_documento,
-      MAX(tipo_comprobante) AS tipo_comprobante,
-      MAX(ncf) AS ncf,
-      SUM(subtotal) AS subtotal,
-      SUM(impuesto) AS impuesto,
-      SUM(descuento_monto) AS descuento_monto,
-      SUM(propina_monto) AS propina_monto,
-      MIN(COALESCE(fecha_factura, fecha_cierre, fecha_creacion)) AS fecha_factura
-    FROM pedidos
-    WHERE estado = 'pagado'
-      AND DATE_FORMAT(${fechaMesRD}, '%Y') = ?
-      AND DATE_FORMAT(${fechaMesRD}, '%m') = ?
-      AND negocio_id = ?
-    GROUP BY factura_id
-    ORDER BY fecha_factura ASC
-  `;
+    try {
+      // 1) Ventas del POS (pedidos). Se excluyen los pedidos que ya estan como
+      //    factura de cliente (clientes_deudas.pedido_id) para no duplicarlos.
+      const pedidosRows = await db.all(
+        `SELECT
+            COALESCE(cuenta_id, id) AS factura_id,
+            MAX(cliente) AS cliente,
+            MAX(cliente_documento) AS cliente_documento,
+            MAX(tipo_comprobante) AS tipo_comprobante,
+            MAX(ncf) AS ncf,
+            SUM(subtotal) AS subtotal,
+            SUM(impuesto) AS impuesto,
+            SUM(descuento_monto) AS descuento_monto,
+            SUM(propina_monto) AS propina_monto,
+            MIN(COALESCE(fecha_factura, fecha_cierre, fecha_creacion)) AS fecha_factura
+          FROM pedidos
+          WHERE estado = 'pagado'
+            AND DATE_FORMAT(${fechaMesRD}, '%Y') = ?
+            AND DATE_FORMAT(${fechaMesRD}, '%m') = ?
+            AND negocio_id = ?
+            AND id NOT IN (
+              SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
+              WHERE negocio_id = ? AND pedido_id IS NOT NULL
+            )
+          GROUP BY factura_id
+          ORDER BY fecha_factura ASC`,
+        [anioStr, mesStr, negocioId, negocioId]
+      );
 
-    db.all(
-      sql,
-      [String(anio), String(mes).padStart(2, '0'), negocioId],
-      (err, rows) => {
-        if (err) {
-          console.error('Error al generar reporte 607:', err.message);
-          return res.status(500).json({ ok: false, error: 'Error al generar el reporte 607' });
+      // 2) Facturas de clientes (CxC / clientes_deudas). Tambien son ventas con
+      //    comprobante y deben aparecer en el 607.
+      const fechaDeudaRD = `(d.fecha + INTERVAL ${OFFSET_RD} HOUR)`;
+      const deudaRows = await db.all(
+        `SELECT d.id AS deuda_id, d.fecha AS fecha_factura, d.tipo_comprobante, d.ncf,
+                d.monto_total, d.subtotal_total, d.itbis_total,
+                c.nombre AS cliente, c.documento AS cliente_documento
+           FROM clientes_deudas d
+           LEFT JOIN clientes c ON c.id = d.cliente_id AND c.negocio_id = d.negocio_id
+          WHERE d.negocio_id = ?
+            AND DATE_FORMAT(${fechaDeudaRD}, '%Y') = ?
+            AND DATE_FORMAT(${fechaDeudaRD}, '%m') = ?
+          ORDER BY d.fecha ASC`,
+        [negocioId, anioStr, mesStr]
+      );
+
+      // Tasa de ITBIS del negocio (solo para derivar el gravado/itbis de deudas
+      // viejas que no lo tengan guardado).
+      let itbisRate = 0.18;
+      try {
+        const cfgImp = await obtenerConfiguracionImpuestoNegocio(negocioId);
+        const pct = Number(cfgImp?.porcentaje ?? cfgImp?.impuesto_porcentaje);
+        if (Number.isFinite(pct) && pct > 0) itbisRate = pct / 100;
+      } catch (_) {}
+
+      const datosPedidos = pedidosRows.map((row) => {
+        const subtotal = Number(row.subtotal) || 0;
+        const impuesto = Number(row.impuesto) || 0;
+        const descuento = Number(row.descuento_monto) || 0;
+        // El total del 607 va SIN propina (cuadra con "Analisis de negocio").
+        const total = subtotal + impuesto - descuento;
+        return {
+          origen: 'POS',
+          cliente: row.cliente || 'Consumidor final',
+          cliente_documento: row.cliente_documento || '00000000000',
+          tipo_comprobante: row.tipo_comprobante || 'B02',
+          ncf: row.ncf || '',
+          fecha_factura: row.fecha_factura,
+          monto_gravado: subtotal,
+          impuesto,
+          descuento,
+          propina: Number(row.propina_monto) || 0,
+          total,
+        };
+      });
+
+      const datosDeudas = deudaRows.map((d) => {
+        const total = Number(d.monto_total) || 0;
+        const tipo = String(d.tipo_comprobante || '').trim();
+        const esSinComprobante = !tipo || /sin\s*comprobante/i.test(tipo);
+        let gravado = d.subtotal_total != null ? Number(d.subtotal_total) : null;
+        let impuesto = d.itbis_total != null ? Number(d.itbis_total) : null;
+        if (gravado == null || impuesto == null) {
+          if (esSinComprobante) {
+            impuesto = 0;
+            gravado = total;
+          } else {
+            gravado = Number((total / (1 + itbisRate)).toFixed(2));
+            impuesto = Number((total - gravado).toFixed(2));
+          }
         }
+        return {
+          origen: 'CxC',
+          cliente: d.cliente || 'Cliente',
+          cliente_documento: d.cliente_documento || '00000000000',
+          tipo_comprobante: tipo || 'Sin comprobante',
+          ncf: d.ncf || '',
+          fecha_factura: d.fecha_factura,
+          monto_gravado: gravado,
+          impuesto,
+          descuento: 0,
+          propina: 0,
+          total,
+        };
+      });
 
-        const datos = rows.map((row) => {
-          const subtotal = Number(row.subtotal) || 0;
-          const impuesto = Number(row.impuesto) || 0;
-          const descuento = Number(row.descuento_monto) || 0;
-          const propina = Number(row.propina_monto) || 0;
-          // El total del 607 va SIN propina (la propina no es venta; se muestra
-          // aparte). Asi cuadra con el total de "Analisis de negocio".
-          const total = subtotal + impuesto - descuento;
+      const datos = [...datosPedidos, ...datosDeudas].sort(
+        (a, b) => new Date(a.fecha_factura) - new Date(b.fecha_factura)
+      );
 
-          return {
-            id: row.id,
-            cliente: row.cliente || 'Consumidor final',
-            cliente_documento: row.cliente_documento || '00000000000',
-            tipo_comprobante: row.tipo_comprobante || 'B02',
-            ncf: row.ncf || '',
-            fecha_factura: row.fecha_factura,
-            monto_gravado: subtotal,
-            impuesto,
-            descuento,
-            propina,
-            total,
-          };
-        });
-
-        if (formato === 'csv') {
-          const headers = [
-            'fecha_factura',
-            'ncf',
-            'tipo_comprobante',
-            'cliente',
-            'cliente_documento',
-            'monto_gravado',
-            'impuesto',
-            'descuento',
-            'propina',
-            'total',
-          ];
-          const csv = construirCSV(headers, datos);
-          res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-          res.setHeader(
-            'Content-Disposition',
-            `attachment; filename="reporte_607_${anio}-${String(mes).padStart(2, '0')}.csv"`
-          );
-          return res.send(csv);
-        }
-
-        const totalFacturas = datos.length;
-        const totalMes = datos.reduce((acc, item) => acc + item.total, 0);
-
-        res.json({ ok: true, resumen: { totalFacturas, totalMes }, data: datos });
+      if (formato === 'csv') {
+        const headers = [
+          'fecha_factura', 'ncf', 'tipo_comprobante', 'cliente', 'cliente_documento',
+          'monto_gravado', 'impuesto', 'descuento', 'propina', 'total',
+        ];
+        const csv = construirCSV(headers, datos);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="reporte_607_${anioStr}-${mesStr}.csv"`
+        );
+        return res.send(csv);
       }
-    );
+
+      const totalFacturas = datos.length;
+      const totalMes = datos.reduce((acc, item) => acc + item.total, 0);
+      res.json({ ok: true, resumen: { totalFacturas, totalMes }, data: datos });
+    } catch (err) {
+      console.error('Error al generar reporte 607:', err?.message || err);
+      res.status(500).json({ ok: false, error: 'Error al generar el reporte 607' });
+    }
   });
 });
 
