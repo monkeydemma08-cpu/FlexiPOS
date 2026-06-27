@@ -73,6 +73,7 @@
     const cierre = data?.cierre || {};
     const pedidos = Array.isArray(data?.pedidos) ? data.pedidos : [];
     const totalesMetodo = data?.totales_metodo || {};
+    const gastos = Array.isArray(data?.gastos) ? data.gastos : [];
 
     const nombreNegocio = negocio.nombre || 'Negocio';
     const rnc = negocio.rnc ? `RNC: ${negocio.rnc}` : '';
@@ -89,6 +90,8 @@
     const totalDeclarado = Number(cierre.total_declarado) || 0;
     const diferencia = Number(cierre.diferencia) || 0;
     const totalVentas = Number(cierre.total_ventas) || 0;
+    const totalGastos = Number(cierre.total_gastos)
+      || gastos.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
     const ventasCount = pedidos.length;
     const origenTexto = cierre.origen_caja || origen;
 
@@ -130,6 +133,29 @@
       .filter(Boolean)
       .join('');
 
+    const gastosHtml = gastos.length
+      ? gastos
+          .map((g) => {
+            const monto = Number(g.monto) || 0;
+            const descripcion = (g.descripcion || g.proveedor || g.categoria || 'Gasto')
+              .toString()
+              .trim();
+            const meta = [g.categoria, g.metodo_pago]
+              .filter((x) => x && String(x).trim())
+              .join(' · ');
+            return `
+              <div class="venta-item">
+                <div class="fila">
+                  <span>${escapar(descripcion || 'Gasto')}</span>
+                  <span class="venta-monto">${escapar(formatearMoneda(monto))}</span>
+                </div>
+                ${meta ? `<div class="venta-fecha">${escapar(meta)}</div>` : ''}
+              </div>
+            `;
+          })
+          .join('')
+      : '';
+
     ticketEl.innerHTML = `
       <h1>${escapar(nombreNegocio)}</h1>
       ${rnc ? `<div class="meta-negocio">${escapar(rnc)}</div>` : ''}
@@ -152,9 +178,15 @@
           ? `<div class="seccion-titulo">Por método de pago</div><div class="metodos-pago">${metodosHtml}</div><hr>`
           : ''
       }
+      ${
+        gastosHtml
+          ? `<div class="seccion-titulo">Gastos</div>${gastosHtml}<div class="fila" style="margin-top:3px;"><span><strong>Total gastos</strong></span><span><strong>${escapar(formatearMoneda(totalGastos))}</strong></span></div><hr>`
+          : ''
+      }
       <div class="seccion-titulo">Resumen</div>
       <div class="fila"><span>Fondo inicial</span><span>${escapar(formatearMoneda(fondoInicial))}</span></div>
       <div class="fila"><span>Total ventas</span><span>${escapar(formatearMoneda(totalVentas))}</span></div>
+      ${totalGastos > 0 ? `<div class="fila"><span>Total gastos</span><span>${escapar(formatearMoneda(totalGastos))}</span></div>` : ''}
       <div class="fila"><span>Efectivo esperado</span><span>${escapar(formatearMoneda(totalSistema))}</span></div>
       <div class="fila"><span>Total declarado</span><span>${escapar(formatearMoneda(totalDeclarado))}</span></div>
       <div class="fila fila--total">

@@ -11500,12 +11500,32 @@ app.get('/api/caja/cierres/:id/ticket', (req, res) => {
 
       const totalVentas = todosPedidos.reduce((acc, p) => acc + (Number(p.total) || 0), 0);
 
+      // 7) Gastos registrados en la fecha de operación del cierre
+      let gastos = [];
+      let totalGastos = 0;
+      try {
+        gastos = await db.all(
+          `SELECT id, fecha, monto, categoria, metodo_pago, proveedor, descripcion
+             FROM gastos
+            WHERE negocio_id = ?
+              AND DATE(fecha) = ?
+            ORDER BY fecha ASC, id ASC`,
+          [negocioId, fechaOperacionCierre]
+        );
+        totalGastos = (gastos || []).reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+      } catch (errGastos) {
+        console.warn('No se pudieron obtener gastos del cierre:', errGastos?.message || errGastos);
+        gastos = [];
+        totalGastos = 0;
+      }
+
       res.json({
         ok: true,
         cierre: {
           ...cierre,
           fecha_operacion: fechaOperacionCierre,
           total_ventas: Number(totalVentas.toFixed(2)),
+          total_gastos: Number(totalGastos.toFixed(2)),
         },
         negocio: negocio || {},
         pedidos: todosPedidos,
@@ -11515,6 +11535,7 @@ app.get('/api/caja/cierres/:id/ticket', (req, res) => {
           transferencia: Number(totalTransferencia.toFixed(2)),
           credito: Number(totalCredito.toFixed(2)),
         },
+        gastos,
       });
     } catch (error) {
       console.error('Error al generar ticket de cierre:', error?.message || error);
