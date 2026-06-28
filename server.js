@@ -370,6 +370,35 @@ const limpiarCacheAnalitica = (negocioId) => {
   }
 };
 
+// Anti-leak: los caches de analitica guardan payloads grandes con TTL, pero al
+// leer solo se revisa la expiracion del key consultado. Sin barrido, los rangos
+// de fecha que nunca se vuelven a pedir quedan en RAM para siempre. Este sweeper
+// borra entradas vencidas y aplica un tope duro de tamano. Corre cada 60s y no
+// mantiene vivo el proceso (unref).
+const ANALYTICS_CACHE_MAX = 200; // tope duro por cache (evita crecer sin limite)
+const _barrerCacheAnalitica = (mapa) => {
+  if (!mapa || typeof mapa.size !== 'number') return;
+  const ahora = Date.now();
+  for (const [key, entry] of mapa.entries()) {
+    if (!entry || !(entry.expiresAt > ahora)) mapa.delete(key);
+  }
+  // Si aun queda por encima del tope, eliminar las mas viejas (orden de insercion).
+  if (mapa.size > ANALYTICS_CACHE_MAX) {
+    const aRemover = mapa.size - Math.floor(ANALYTICS_CACHE_MAX * 0.8);
+    let n = 0;
+    for (const key of mapa.keys()) {
+      if (n++ >= aRemover) break;
+      mapa.delete(key);
+    }
+  }
+};
+setInterval(() => {
+  try {
+    _barrerCacheAnalitica(analyticsCache);
+    _barrerCacheAnalitica(analyticsAdvancedCache);
+  } catch (_e) {}
+}, 60_000).unref?.();
+
 const ROLES_OPERATIVOS = ['mesera', 'cocina', 'bar', 'caja', 'vendedor', 'delivery'];
 const ROLES_GESTION = ['admin', 'supervisor', 'empresa'];
 const usuarioRolesPermitidos = [...ROLES_OPERATIVOS, 'supervisor'];
