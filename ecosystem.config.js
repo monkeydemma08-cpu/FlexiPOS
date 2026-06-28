@@ -12,7 +12,7 @@
 module.exports = {
   apps: [
     {
-      name: 'posium',
+      name: 'KANM',
       script: 'server.js',
       cwd: __dirname,
 

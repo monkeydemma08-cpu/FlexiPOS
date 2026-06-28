@@ -2453,6 +2453,46 @@ async function runMigrations() {
   await ensureAnalisisExtensionColumns();
   await ensureTableAnalisisAlertas();
   await ensureTablePresupuestosCategoriaGasto();
+  await ensureIndicesRendimiento();
+}
+
+// Indices de rendimiento para las consultas mas calientes (polling cada 12-15s
+// desde cocina/bar/caja/mostrador). Sin estos, MySQL usa el indice de
+// negocio_id y luego filtra/ordena en memoria sobre TODO el historial del
+// negocio, asi que cada poll se vuelve mas lento a medida que crecen los datos.
+// Todos son idempotentes (no se recrean si ya existen) y puramente aditivos.
+async function ensureIndicesRendimiento() {
+  // pedidos: WHERE estado IN (...) AND negocio_id = ? ORDER BY fecha_creacion
+  // (cocina/bar/caja/mostrador piden los pedidos activos en cada refresco).
+  await ensureIndexByName(
+    'pedidos',
+    'idx_pedidos_negocio_estado_fecha',
+    '(negocio_id, estado, fecha_creacion)'
+  );
+  // caja/mostrador filtran ademas por origen_caja + estado.
+  await ensureIndexByName(
+    'pedidos',
+    'idx_pedidos_negocio_origen_estado',
+    '(negocio_id, origen_caja, estado)'
+  );
+  // historial_cocina/bar: SELECT DISTINCT pedido_id WHERE pedido_id IN (...)
+  // AND negocio_id = ? — sin indice en pedido_id era full scan en cada poll.
+  await ensureIndexByName(
+    'historial_cocina',
+    'idx_historial_cocina_negocio_pedido',
+    '(negocio_id, pedido_id)'
+  );
+  await ensureIndexByName(
+    'historial_bar',
+    'idx_historial_bar_negocio_pedido',
+    '(negocio_id, pedido_id)'
+  );
+  // detalle_pedido: JOIN por pedido_id en cada poll (obtenerDetallePedidosPorIds).
+  await ensureIndexByName(
+    'detalle_pedido',
+    'idx_detalle_pedido_negocio_pedido',
+    '(negocio_id, pedido_id)'
+  );
 }
 
 async function ensureTableSecuenciasCuenta() {
