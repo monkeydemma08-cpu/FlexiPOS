@@ -8,7 +8,7 @@
 //   pm2 save                # guarda para que reinicie solo al bootear
 //
 // De ahi en adelante, para actualizar tras un git pull:
-//   pm2 reload ecosystem.config.js   (o: pm2 restart posium)
+//   pm2 delete all && pm2 start ecosystem.config.js   (restart NO re-lee node_args/env)
 module.exports = {
   apps: [
     {
@@ -22,8 +22,14 @@ module.exports = {
       exec_mode: 'fork',
 
       // Tope del heap de V8. Sin esto, Node cree que puede usar ~1.5GB antes
-      // de hacer GC agresivo y, como el swap es 0, el sistema se pone lento.
+      // de hacer GC agresivo y el sistema se pone lento.
       // 512MB de heap => ~650-750MB de RSS real, que deja aire para MySQL.
+      //
+      // El limite va por NODE_OPTIONS (ver env, mas abajo) en vez de node_args:
+      // node_args a veces NO lo aplica PM2 segun la version/modo (verificado:
+      // el proceso arrancaba como "node server.js" sin el flag). NODE_OPTIONS
+      // lo obedece el propio Node siempre. Dejamos node_args tambien por si
+      // alguna version lo respeta (poner el flag dos veces es inofensivo).
       node_args: '--max-old-space-size=512',
 
       // Red de seguridad: si aun asi pasa de 700MB, PM2 lo reinicia solo.
@@ -44,6 +50,8 @@ module.exports = {
 
       env: {
         NODE_ENV: 'production',
+        // Tope de heap REAL y confiable. Node lo respeta siempre.
+        NODE_OPTIONS: '--max-old-space-size=512',
       },
     },
   ],
