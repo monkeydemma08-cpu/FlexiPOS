@@ -1132,6 +1132,13 @@ const crearPedidoSubcard = (cuenta, pedido, indice, conAcciones = false) => {
 
   subcard.appendChild(header);
   subcard.appendChild(tiempos);
+  // Cuenta compartida: nombre de la persona que tomó la orden (según su PIN).
+  if (pedido.mesera_nombre) {
+    const tomadoPor = document.createElement('p');
+    tomadoPor.className = 'pedido-info';
+    tomadoPor.textContent = `Tomó: ${pedido.mesera_nombre}`;
+    subcard.appendChild(tomadoPor);
+  }
   subcard.appendChild(cocineroInfo);
 
   if (pedido.nota) {

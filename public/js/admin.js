@@ -190,6 +190,7 @@ const gastosMetodoFiltroInput = document.getElementById('gastos-metodo-filtro');
 const gastosBuscarInput = document.getElementById('gastos-buscar');
 const gastosConsultarBtn = document.getElementById('gastos-consultar');
 const gastosLimpiarBtn = document.getElementById('gastos-limpiar');
+const gastosImprimirResumenBtn = document.getElementById('gastos-imprimir-resumen');
 const gastosMensajeLista = document.getElementById('gastos-mensaje-lista');
 const gastosTabla = document.getElementById('gastos-tabla');
 const gastosCategoriasList = document.getElementById('gastos-categorias');
@@ -283,6 +284,12 @@ const usuarioRolInput = document.getElementById('usuario-rol');
 const usuarioActivoInput = document.getElementById('usuario-activo');
 const usuarioFormMensaje = document.getElementById('usuario-form-mensaje');
 const usuarioLimpiarBtn = document.getElementById('usuario-limpiar');
+// Usuario compartido (mesera con varias personas + PIN)
+const usuarioCompartidoRow = document.getElementById('usuario-compartido-row');
+const usuarioCompartidoCheck = document.getElementById('usuario-compartido');
+const usuarioCompartidoPanel = document.getElementById('usuario-compartido-panel');
+const usuarioPinsLista = document.getElementById('usuario-pins-lista');
+const usuarioPinAgregarBtn = document.getElementById('usuario-pin-agregar');
 
 const reporte607MesInput = document.getElementById('reporte-607-mes');
 const reporte607ConsultarBtn = document.getElementById('reporte-607-consultar');
@@ -5405,6 +5412,84 @@ const ajustarRolesUsuariosUI = () => {
   reconstruirSelectRoles(usuarioRolInput, rolesFormulario, usuariosRolSelect?.value || 'mesera');
 };
 
+// ---- Usuario compartido (mesera con varias personas + PIN) ----
+
+// Crea una fila del editor: nombre + PIN (4 dígitos) + botón eliminar.
+const crearFilaPinUsuario = (nombre = '', pin = '') => {
+  const fila = document.createElement('div');
+  fila.className = 'usuario-pin-fila';
+
+  const inputNombre = document.createElement('input');
+  inputNombre.type = 'text';
+  inputNombre.className = 'usuario-pin-nombre';
+  inputNombre.placeholder = 'Nombre de la persona';
+  inputNombre.maxLength = 255;
+  inputNombre.value = nombre;
+
+  const inputPin = document.createElement('input');
+  inputPin.type = 'text';
+  inputPin.className = 'usuario-pin-codigo';
+  inputPin.placeholder = 'PIN (4 díg.)';
+  inputPin.inputMode = 'numeric';
+  inputPin.maxLength = 4;
+  inputPin.value = pin;
+  // Solo dígitos.
+  inputPin.addEventListener('input', () => {
+    inputPin.value = inputPin.value.replace(/\D/g, '').slice(0, 4);
+  });
+
+  const btnQuitar = document.createElement('button');
+  btnQuitar.type = 'button';
+  btnQuitar.className = 'kanm-button ghost usuario-pin-quitar';
+  btnQuitar.textContent = 'Quitar';
+  btnQuitar.addEventListener('click', () => fila.remove());
+
+  fila.appendChild(inputNombre);
+  fila.appendChild(inputPin);
+  fila.appendChild(btnQuitar);
+  return fila;
+};
+
+// Vuelve a pintar la lista de personas a partir de un arreglo [{nombre, pin}].
+const renderPinsUsuario = (pins = []) => {
+  if (!usuarioPinsLista) return;
+  usuarioPinsLista.innerHTML = '';
+  if (!pins.length) {
+    usuarioPinsLista.appendChild(crearFilaPinUsuario());
+    return;
+  }
+  pins.forEach((p) => {
+    usuarioPinsLista.appendChild(crearFilaPinUsuario(p.nombre || '', p.pin || ''));
+  });
+};
+
+// Lee las filas del editor y devuelve [{nombre, pin}] (ignora filas vacías).
+const leerPinsUsuario = () => {
+  if (!usuarioPinsLista) return [];
+  const filas = Array.from(usuarioPinsLista.querySelectorAll('.usuario-pin-fila'));
+  const resultado = [];
+  filas.forEach((fila) => {
+    const nombre = fila.querySelector('.usuario-pin-nombre')?.value.trim() || '';
+    const pin = fila.querySelector('.usuario-pin-codigo')?.value.trim() || '';
+    if (!nombre && !pin) return; // fila vacía: se ignora
+    resultado.push({ nombre, pin });
+  });
+  return resultado;
+};
+
+// Muestra u oculta la opción de compartido según el rol y el checkbox.
+const actualizarVisibilidadCompartido = () => {
+  const esMesera = usuarioRolInput?.value === 'mesera';
+  if (usuarioCompartidoRow) usuarioCompartidoRow.hidden = !esMesera;
+  const activo = esMesera && !!usuarioCompartidoCheck?.checked;
+  if (usuarioCompartidoPanel) usuarioCompartidoPanel.hidden = !activo;
+  if (!esMesera && usuarioCompartidoCheck) usuarioCompartidoCheck.checked = false;
+  // Si se activa y no hay filas, dejar una lista para empezar.
+  if (activo && usuarioPinsLista && !usuarioPinsLista.children.length) {
+    renderPinsUsuario([]);
+  }
+};
+
 const limpiarFormularioUsuario = () => {
   usuarioForm?.reset();
   if (usuarioIdInput) usuarioIdInput.value = '';
@@ -5414,6 +5499,9 @@ const limpiarFormularioUsuario = () => {
     usuarioRolInput.value = rolesPermitidos.includes(rolPreferido) ? rolPreferido : rolesPermitidos[0] || 'mesera';
   }
   if (usuarioActivoInput) usuarioActivoInput.checked = true;
+  if (usuarioCompartidoCheck) usuarioCompartidoCheck.checked = false;
+  if (usuarioPinsLista) usuarioPinsLista.innerHTML = '';
+  actualizarVisibilidadCompartido();
   setMessage(usuarioFormMensaje, '');
 };
 
@@ -5552,11 +5640,13 @@ const obtenerDatosFormularioUsuario = () => {
   const password = usuarioPasswordInput?.value.trim();
   const rol = usuarioRolInput?.value;
   const activo = usuarioActivoInput?.checked ?? true;
+  const esCompartido = rol === 'mesera' && !!usuarioCompartidoCheck?.checked;
+  const pins = esCompartido ? leerPinsUsuario() : [];
 
-  return { id, nombre, usuario, password, rol, activo };
+  return { id, nombre, usuario, password, rol, activo, esCompartido, pins };
 };
 
-const validarFormularioUsuario = ({ nombre, usuario, password, rol }, esEdicion) => {
+const validarFormularioUsuario = ({ nombre, usuario, password, rol, esCompartido, pins }, esEdicion) => {
   if (!nombre) {
     setMessage(usuarioFormMensaje, 'El nombre es obligatorio.', 'error');
     return false;
@@ -5583,20 +5673,53 @@ const validarFormularioUsuario = ({ nombre, usuario, password, rol }, esEdicion)
     return false;
   }
 
+  // Validación de cuenta compartida: al menos una persona, nombre + PIN de 4
+  // dígitos únicos.
+  if (esCompartido) {
+    const lista = Array.isArray(pins) ? pins : [];
+    if (!lista.length) {
+      setMessage(usuarioFormMensaje, 'Agrega al menos una persona con su PIN.', 'error');
+      return false;
+    }
+    const pinsVistos = new Set();
+    for (const persona of lista) {
+      if (!persona.nombre) {
+        setMessage(usuarioFormMensaje, 'Cada persona debe tener un nombre.', 'error');
+        return false;
+      }
+      if (!/^\d{4}$/.test(persona.pin)) {
+        setMessage(usuarioFormMensaje, `El PIN de "${persona.nombre}" debe ser de 4 dígitos.`, 'error');
+        return false;
+      }
+      if (pinsVistos.has(persona.pin)) {
+        setMessage(usuarioFormMensaje, `El PIN ${persona.pin} está repetido. Usa uno distinto por persona.`, 'error');
+        return false;
+      }
+      pinsVistos.add(persona.pin);
+    }
+  }
+
   return true;
 };
 
 const guardarUsuario = async () => {
-  const { id, nombre, usuario, password, rol, activo } = obtenerDatosFormularioUsuario();
+  const { id, nombre, usuario, password, rol, activo, esCompartido, pins } = obtenerDatosFormularioUsuario();
   const esEdicion = Boolean(id);
 
-  if (!validarFormularioUsuario({ nombre, usuario, password, rol }, esEdicion)) {
+  if (!validarFormularioUsuario({ nombre, usuario, password, rol, esCompartido, pins }, esEdicion)) {
     return;
   }
 
   const body = { nombre, usuario, rol, activo: activo ? 1 : 0 };
   if (password) {
     body.password = password;
+  }
+  // Cuenta compartida (solo mesera): enviamos el flag y el roster de personas.
+  if (rol === 'mesera') {
+    body.es_compartido = esCompartido ? 1 : 0;
+    if (esCompartido) {
+      body.pins = pins;
+    }
   }
 
   try {
@@ -6966,6 +7089,25 @@ const cargarGastos = async () => {
     console.error('Error al cargar gastos:', error);
     setMessage(gastosMensajeLista, 'Error al cargar los gastos.', 'error');
   }
+};
+
+// Construye los mismos filtros que usa la consulta de gastos (período, categoría,
+// tipo, método y búsqueda) para reutilizarlos en el ticket.
+const construirFiltrosGastos = () => {
+  const params = new URLSearchParams();
+  if (gastosDesdeInput?.value) params.set('from', gastosDesdeInput.value);
+  if (gastosHastaInput?.value) params.set('to', gastosHastaInput.value);
+  if (gastosCategoriaFiltroInput?.value) params.set('categoria', gastosCategoriaFiltroInput.value.trim());
+  if (gastosTipoFiltroInput?.value) params.set('tipo_gasto', gastosTipoFiltroInput.value);
+  if (gastosMetodoFiltroInput?.value) params.set('metodo_pago', gastosMetodoFiltroInput.value);
+  if (gastosBuscarInput?.value) params.set('q', gastosBuscarInput.value.trim());
+  return params;
+};
+
+// Abre el ticket de 88mm con el resumen de gastos del período/filtros actuales.
+const imprimirResumenGastos = () => {
+  const params = construirFiltrosGastos();
+  window.open(`/gastos-ticket.html?${params.toString()}`, '_blank', 'noopener');
 };
 
 const guardarGasto = async (payload, id = null) => {
@@ -12560,6 +12702,36 @@ usuarioLimpiarBtn?.addEventListener('click', () => {
   limpiarFormularioUsuario();
 });
 
+// Mostrar/ocultar la opción de compartido según el rol elegido en el formulario.
+usuarioRolInput?.addEventListener('change', () => {
+  actualizarVisibilidadCompartido();
+});
+
+usuarioCompartidoCheck?.addEventListener('change', () => {
+  actualizarVisibilidadCompartido();
+});
+
+usuarioPinAgregarBtn?.addEventListener('click', () => {
+  if (usuarioPinsLista) usuarioPinsLista.appendChild(crearFilaPinUsuario());
+});
+
+// Estado inicial correcto de la opción de compartido al cargar la página.
+actualizarVisibilidadCompartido();
+
+// Carga el roster de PINs de una cuenta compartida al editarla.
+const cargarPinsUsuarioEnFormulario = async (id) => {
+  try {
+    const respuesta = await fetchJsonAutorizado(`/api/usuarios/${id}/pins`);
+    if (!respuesta.ok) return;
+    const data = await respuesta.json().catch(() => ({}));
+    if (usuarioCompartidoCheck) usuarioCompartidoCheck.checked = !!data.es_compartido;
+    renderPinsUsuario(Array.isArray(data.pins) ? data.pins : []);
+    actualizarVisibilidadCompartido();
+  } catch (error) {
+    console.error('No se pudieron cargar los PINs del usuario:', error);
+  }
+};
+
 usuariosRolSelect?.addEventListener('change', (event) => {
   const rol = event.target.value;
   if (usuarioRolInput) {
@@ -12588,6 +12760,13 @@ usuariosTablaBody?.addEventListener('click', (event) => {
         : rolesPermitidos[0] || 'mesera';
     }
     if (usuarioActivoInput) usuarioActivoInput.checked = !!usuarioSeleccionado.activo;
+    // Cuenta compartida: reflejar el flag y (si aplica) cargar el roster de PINs.
+    if (usuarioCompartidoCheck) usuarioCompartidoCheck.checked = !!usuarioSeleccionado.es_compartido;
+    if (usuarioPinsLista) usuarioPinsLista.innerHTML = '';
+    actualizarVisibilidadCompartido();
+    if (usuarioSeleccionado.rol === 'mesera' && usuarioSeleccionado.es_compartido) {
+      cargarPinsUsuarioEnFormulario(usuarioSeleccionado.id);
+    }
     setMessage(usuarioFormMensaje, `Editando usuario ${usuarioSeleccionado.usuario}`, 'info');
   }
 
@@ -12862,6 +13041,11 @@ gastoForm?.addEventListener('submit', async (event) => {
 gastosConsultarBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   cargarGastos();
+});
+
+gastosImprimirResumenBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  imprimirResumenGastos();
 });
 
 gastosLimpiarBtn?.addEventListener('click', (event) => {

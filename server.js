@@ -2860,6 +2860,7 @@ async function obtenerUsuarioSesionPorToken(token) {
       empresaId: usuario.empresa_id ?? null,
       es_super_admin: !!usuario.es_super_admin,
       force_password_change: !!usuario.force_password_change,
+      es_compartido: !!usuario.es_compartido,
       config_modulos: configModulosSesion,
       configModulos: configModulosSesion,
       token,
@@ -6629,7 +6630,7 @@ const obtenerCuentasPorEstados = async (estados, negocioId, opciones = {}) => {
              impuesto, total, fecha_creacion, fecha_listo, fecha_cierre,
              cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, negocio_id,
              cliente_documento, ncf, tipo_comprobante, comentarios,
-             cliente_dispositivo_id, cliente_alias,
+             cliente_dispositivo_id, cliente_alias, mesera_pin_id, mesera_nombre,
              COALESCE(descuento_porcentaje, 0) AS descuento_porcentaje,
              COALESCE(descuento_monto, 0) AS descuento_monto,
              COALESCE(propina_porcentaje, 0) AS propina_porcentaje,
@@ -10990,6 +10991,21 @@ const registrarCierreCaja = async (payload, negocioId) => {
          AND ${filtroOrigenFacturas}`,
       paramsFacturas
     );
+
+    // Gastos: este cuadre reclama los gastos de su fecha de operación que aún no
+    // pertenecen a ningún cierre. Así cada cuadre muestra SOLO sus gastos: el
+    // primero del día toma los del día, y un cuadre posterior toma únicamente
+    // los agregados después del anterior. Sin duplicar y sin depender de fechas
+    // frágiles. Los gastos no tienen origen_caja (son del negocio, no de una
+    // caja específica), por eso no se filtra por origen.
+    await db.run(
+      `UPDATE gastos
+          SET cierre_id = ?
+        WHERE cierre_id IS NULL
+          AND negocio_id = ?
+          AND DATE(fecha) = ?`,
+      [cierreId, negocio, fechaOperacion]
+    );
   }
 
   return {
@@ -11529,7 +11545,10 @@ app.get('/api/caja/cierres/:id/ticket', (req, res) => {
 
       const totalVentas = todosPedidos.reduce((acc, p) => acc + (Number(p.total) || 0), 0);
 
-      // 7) Gastos registrados en la fecha de operación del cierre
+      // 7) Gastos que pertenecen a ESTE cierre. Se filtran por cierre_id (que se
+      // estampa al registrar el cuadre), NO por fecha: así cada cuadre muestra
+      // solo sus gastos, sin duplicar los del cuadre anterior del mismo día y
+      // sin fallar por desajustes de fecha.
       let gastos = [];
       let totalGastos = 0;
       try {
@@ -11537,9 +11556,9 @@ app.get('/api/caja/cierres/:id/ticket', (req, res) => {
           `SELECT id, fecha, monto, categoria, metodo_pago, proveedor, descripcion
              FROM gastos
             WHERE negocio_id = ?
-              AND DATE(fecha) = ?
+              AND cierre_id = ?
             ORDER BY fecha ASC, id ASC`,
-          [negocioId, fechaOperacionCierre]
+          [negocioId, cierreId]
         );
         totalGastos = (gastos || []).reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
       } catch (errGastos) {
@@ -11620,7 +11639,20 @@ app.delete('/api/admin/eliminar/cierre-caja/:id', (req, res) => {
                   updateFactErr?.message || updateFactErr
                 );
               }
-              res.json({ ok: true });
+              // Liberar los gastos para que puedan reasignarse a otro cierre.
+              db.run(
+                'UPDATE gastos SET cierre_id = NULL WHERE cierre_id = ? AND negocio_id = ?',
+                [cierreId, negocioId],
+                (updateGastoErr) => {
+                  if (updateGastoErr) {
+                    console.error(
+                      'Error al desasociar gastos del cierre eliminado:',
+                      updateGastoErr?.message || updateGastoErr
+                    );
+                  }
+                  res.json({ ok: true });
+                }
+              );
             }
           );
         }
@@ -16312,6 +16344,32 @@ app.post('/api/pedidos', (req, res) => {
     const origenFallback = usuarioSesion?.rol === 'vendedor' ? 'mostrador' : 'caja';
     const origenCaja = normalizarOrigenCaja(payload.origen_caja ?? payload.origen, origenFallback);
 
+    // --- Usuario compartido (mesera con varias personas): al enviar a cocina
+    // se exige el PIN de la persona que toma la orden. Solo aplica cuando la
+    // cuenta es compartida y el destino es cocina (segun lo configurado).
+    // El nombre de la persona queda guardado en el pedido para que cocina lo
+    // muestre y quede en el historial.
+    let meseraPinId = null;
+    let meseraNombre = null;
+    if (usuarioSesion?.es_compartido && destino === 'cocina') {
+      const pinIngresado = payload.pin ?? payload.mesera_pin ?? payload.meseraPin;
+      let personaPin = null;
+      try {
+        personaPin = await validarPinMesera(usuarioSesion.id, negocioId, pinIngresado);
+      } catch (pinErr) {
+        console.error('Error al validar PIN de mesera:', pinErr?.message || pinErr);
+        return res.status(500).json({ error: 'No se pudo validar el PIN. Intenta nuevamente.' });
+      }
+      if (!personaPin) {
+        return res.status(400).json({
+          error: 'PIN invalido. El pedido no fue enviado a cocina.',
+          pin_requerido: true,
+        });
+      }
+      meseraPinId = personaPin.id;
+      meseraNombre = personaPin.nombre;
+    }
+
     const itemsProcesados = [];
 
     try {
@@ -16523,8 +16581,8 @@ app.post('/api/pedidos', (req, res) => {
               cuenta_id, mesa, cliente, modo_servicio, nota, estado,
               subtotal, impuesto, total, fecha_listo, origen_caja, creado_por, negocio_id,
               delivery_estado, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas,
-              numero_cuenta_negocio
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              numero_cuenta_negocio, mesera_pin_id, mesera_nombre
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             cuentaReferencia,
@@ -16546,6 +16604,8 @@ app.post('/api/pedidos', (req, res) => {
             deliveryReferencia,
             deliveryNotas,
             numeroCuentaNegocio,
+            meseraPinId,
+            meseraNombre,
           ]
         );
 
@@ -20148,17 +20208,107 @@ app.put('/api/usuarios/mi-password', (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Helpers de "usuario compartido" (mesera con varias personas + PIN)
+// ---------------------------------------------------------------------------
+const MESERA_PINS_MAX = 50;
+
+// Valida y normaliza la lista de personas/PIN que llega del admin.
+// Devuelve { ok, error, lista } donde lista = [{ nombre, pin }].
+const normalizarPinsMesera = (pins) => {
+  if (!Array.isArray(pins)) {
+    return { ok: false, error: 'La lista de personas es invalida.' };
+  }
+  if (pins.length > MESERA_PINS_MAX) {
+    return { ok: false, error: `Maximo ${MESERA_PINS_MAX} personas por cuenta compartida.` };
+  }
+  const lista = [];
+  const pinsVistos = new Set();
+  for (const entrada of pins) {
+    const nombre = (entrada?.nombre ?? '').toString().trim();
+    const pin = (entrada?.pin ?? '').toString().trim();
+    if (!nombre) {
+      return { ok: false, error: 'Cada persona debe tener un nombre.' };
+    }
+    if (nombre.length > 255) {
+      return { ok: false, error: 'El nombre de la persona es demasiado largo.' };
+    }
+    if (!/^\d{4}$/.test(pin)) {
+      return { ok: false, error: `El PIN de "${nombre}" debe ser exactamente 4 digitos.` };
+    }
+    if (pinsVistos.has(pin)) {
+      return { ok: false, error: `El PIN ${pin} esta repetido. Cada persona necesita un PIN distinto.` };
+    }
+    pinsVistos.add(pin);
+    lista.push({ nombre, pin });
+  }
+  return { ok: true, lista };
+};
+
+// Reemplaza por completo el roster de PIN de una cuenta compartida.
+// La validacion se hace ANTES (normalizarPinsMesera), asi que aqui solo
+// borramos e insertamos. Sin transaccion cruzada para no interferir con el
+// watchdog de db.js; si algo falla, el admin puede volver a guardar.
+const guardarRosterMeseraPins = async (usuarioId, negocioId, lista) => {
+  await db.run('DELETE FROM mesera_pins WHERE usuario_id = ?', [usuarioId]);
+  for (const persona of lista) {
+    await db.run(
+      'INSERT INTO mesera_pins (usuario_id, negocio_id, nombre, pin, activo) VALUES (?, ?, ?, ?, 1)',
+      [usuarioId, negocioId, persona.nombre, persona.pin]
+    );
+  }
+};
+
+// Devuelve el roster (nombre + pin) de una cuenta compartida, para el admin.
+const obtenerRosterMeseraPins = async (usuarioId) => {
+  const rows = await db.all(
+    'SELECT id, nombre, pin, activo FROM mesera_pins WHERE usuario_id = ? ORDER BY id ASC',
+    [usuarioId]
+  );
+  return rows || [];
+};
+
+// Busca la persona activa cuyo PIN coincide dentro de una cuenta compartida.
+// Devuelve { id, nombre } o null si el PIN no existe.
+const validarPinMesera = async (usuarioId, negocioId, pin) => {
+  const pinNormalizado = (pin ?? '').toString().trim();
+  if (!/^\d{4}$/.test(pinNormalizado)) return null;
+  const row = await db.get(
+    'SELECT id, nombre FROM mesera_pins WHERE usuario_id = ? AND negocio_id = ? AND pin = ? AND activo = 1 LIMIT 1',
+    [usuarioId, negocioId, pinNormalizado]
+  );
+  return row || null;
+};
+
 app.post('/api/usuarios', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     if (!tienePermisoAdmin(usuarioSesion)) {
       return res.status(403).json({ error: 'Acceso restringido' });
     }
 
-    const { nombre, usuario, password, rol, activo = 1, negocio_id, es_super_admin } = req.body || {};
+    const { nombre, usuario, password, rol, activo = 1, negocio_id, es_super_admin, es_compartido, pins } =
+      req.body || {};
     const usuarioNormalizado = (usuario || '').trim();
 
     if (!nombre || !usuarioNormalizado || !password || !rol) {
       return res.status(400).json({ error: 'Nombre, usuario, contrase\u00f1a y rol son obligatorios' });
+    }
+
+    // "Usuario compartido" solo aplica a mesera. Si viene activo, validamos la
+    // lista de personas/PIN antes de crear nada.
+    const esCompartidoNuevo = rol === 'mesera' && !!es_compartido;
+    let pinsNormalizados = [];
+    if (esCompartidoNuevo) {
+      const validacionPins = normalizarPinsMesera(pins);
+      if (!validacionPins.ok) {
+        return res.status(400).json({ error: validacionPins.error });
+      }
+      if (!validacionPins.lista.length) {
+        return res.status(400).json({
+          error: 'Una cuenta compartida necesita al menos una persona con su PIN.',
+        });
+      }
+      pinsNormalizados = validacionPins.lista;
     }
 
     if (!usuarioRolesPermitidos.includes(rol)) {
@@ -20240,10 +20390,21 @@ app.post('/api/usuarios', (req, res) => {
         negocio_id: negocioDestino,
         empresa_id: empresaDestino,
         es_super_admin: flagSuperNuevo,
+        es_compartido: esCompartidoNuevo ? 1 : 0,
       });
 
       if (!creado) {
         return res.status(500).json({ error: 'Error al crear usuario' });
+      }
+
+      // Guardar el roster de personas/PIN de la cuenta compartida.
+      if (esCompartidoNuevo) {
+        try {
+          await guardarRosterMeseraPins(creado.id, negocioDestino, pinsNormalizados);
+        } catch (pinErr) {
+          console.error('Error al guardar PINs de mesera compartida:', pinErr?.message || pinErr);
+          // El usuario ya se creo; avisamos pero no fallamos por completo.
+        }
       }
 
       res.status(201).json({
@@ -20254,6 +20415,7 @@ app.post('/api/usuarios', (req, res) => {
         activo: creado.activo,
         negocio_id: creado.negocio_id,
         es_super_admin: creado.es_super_admin,
+        es_compartido: !!creado.es_compartido,
       });
     } catch (err) {
       console.error('Error al crear usuario:', err?.message || err);
@@ -20265,7 +20427,8 @@ app.post('/api/usuarios', (req, res) => {
 app.put('/api/usuarios/:id', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const { id } = req.params;
-    const { nombre, usuario, password, rol, activo, negocio_id, es_super_admin } = req.body || {};
+    const { nombre, usuario, password, rol, activo, negocio_id, es_super_admin, es_compartido, pins } =
+      req.body || {};
     const usuarioNormalizado = usuario?.trim();
 
     if (Number(id) === 1 || rol === 'admin') {
@@ -20339,11 +20502,53 @@ app.put('/api/usuarios/:id', (req, res) => {
         }
       }
 
+      // --- Usuario compartido (mesera con varias personas + PIN) ---
+      // Determinamos el estado destino. Si el rol final no es mesera, la cuenta
+      // NO puede ser compartida (se limpia el roster).
+      let esCompartidoDestino;
+      if (es_compartido !== undefined) {
+        esCompartidoDestino = rolDestino === 'mesera' && !!es_compartido;
+      } else {
+        esCompartidoDestino = rolDestino === 'mesera' && !!existente.es_compartido;
+      }
+      // Si mandan la lista de personas y la cuenta sera compartida, validamos.
+      let pinsDestino = null; // null = no tocar roster
+      if (esCompartidoDestino && Array.isArray(pins)) {
+        const validacionPins = normalizarPinsMesera(pins);
+        if (!validacionPins.ok) {
+          return res.status(400).json({ error: validacionPins.error });
+        }
+        if (!validacionPins.lista.length) {
+          return res.status(400).json({
+            error: 'Una cuenta compartida necesita al menos una persona con su PIN.',
+          });
+        }
+        pinsDestino = validacionPins.lista;
+      }
+      if (es_compartido !== undefined || rol !== undefined) {
+        payload.es_compartido = esCompartidoDestino ? 1 : 0;
+      }
+
       const actualizado = await usuariosRepo.update(id, payload);
 
       if (!actualizado) {
         return res.status(404).json({ error: 'Usuario no encontrado' });
       }
+
+      // Reconciliar el roster de PIN despues de actualizar el usuario.
+      try {
+        if (!esCompartidoDestino) {
+          // Ya no es compartida: limpiar cualquier PIN previo.
+          await db.run('DELETE FROM mesera_pins WHERE usuario_id = ?', [Number(id)]);
+        } else if (pinsDestino) {
+          await guardarRosterMeseraPins(Number(id), negocioDestino, pinsDestino);
+        }
+      } catch (pinErr) {
+        console.error('Error al reconciliar PINs de mesera compartida:', pinErr?.message || pinErr);
+      }
+
+      // Invalidar cache de sesion para que el cambio (compartido/rol) aplique ya.
+      invalidarSesionCachePorUsuarioId(Number(id));
 
       res.json({ message: 'Usuario actualizado correctamente' });
     } catch (err) {
@@ -20353,6 +20558,37 @@ app.put('/api/usuarios/:id', (req, res) => {
   });
 });
 
+
+// Roster de personas/PIN de una cuenta compartida (para el panel de admin).
+app.get('/api/usuarios/:id/pins', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ error: 'Acceso restringido' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'ID de usuario invalido' });
+    }
+    try {
+      const existente = await usuariosRepo.findById(id);
+      if (!existente) {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+      if (!esSuperAdmin(usuarioSesion) && existente.negocio_id !== usuarioSesion.negocio_id) {
+        return res.status(403).json({ error: 'Acceso restringido' });
+      }
+      const roster = await obtenerRosterMeseraPins(id);
+      res.json({
+        ok: true,
+        es_compartido: !!existente.es_compartido,
+        pins: roster.map((p) => ({ id: p.id, nombre: p.nombre, pin: p.pin, activo: !!p.activo })),
+      });
+    } catch (error) {
+      console.error('Error al obtener PINs de usuario:', error?.message || error);
+      res.status(500).json({ error: 'No se pudieron obtener los PINs del usuario' });
+    }
+  });
+});
 
 app.put('/api/usuarios/:id/activar', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
@@ -31115,6 +31351,145 @@ app.get('/api/admin/gastos', (req, res) => {
   });
 });
 
+// Resumen de gastos del periodo/filtros seleccionados, listo para imprimir en
+// ticket termico de 88mm. Usa exactamente los mismos filtros que el listado.
+app.get('/api/admin/gastos/ticket', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+
+    const desde = esFechaISOValida(req.query?.from) ? req.query.from : null;
+    const hasta = esFechaISOValida(req.query?.to) ? req.query.to : null;
+    const categoria = normalizarCampoTexto(req.query?.categoria, null);
+    const tipoGastoRaw = normalizarCampoTexto(req.query?.tipo_gasto ?? req.query?.tipoGasto, null);
+    const metodoPago = normalizarCampoTexto(req.query?.metodo_pago ?? req.query?.metodoPago, null);
+    const q = normalizarCampoTexto(req.query?.q, null);
+
+    const filtros = ['negocio_id = ?'];
+    const params = [negocioId];
+    let tipoGasto = null;
+
+    if (desde) {
+      filtros.push('DATE(fecha) >= ?');
+      params.push(desde);
+    }
+    if (hasta) {
+      filtros.push('DATE(fecha) <= ?');
+      params.push(hasta);
+    }
+    if (categoria) {
+      filtros.push('categoria = ?');
+      params.push(categoria);
+    }
+    if (tipoGastoRaw) {
+      const limpio = tipoGastoRaw.trim().toUpperCase();
+      tipoGasto = TIPOS_GASTO.includes(limpio) ? limpio : null;
+      if (tipoGasto) {
+        filtros.push("COALESCE(tipo_gasto, 'OPERATIVO') = ?");
+        params.push(tipoGasto);
+      }
+    }
+    if (metodoPago) {
+      filtros.push('metodo_pago = ?');
+      params.push(metodoPago);
+    }
+    if (q) {
+      const termino = `%${q.toLowerCase()}%`;
+      filtros.push(
+        '(LOWER(proveedor) LIKE ? OR LOWER(descripcion) LIKE ? OR LOWER(comprobante_ncf) LIKE ? OR LOWER(referencia) LIKE ? OR LOWER(categoria) LIKE ?)'
+      );
+      params.push(termino, termino, termino, termino, termino);
+    }
+
+    const whereClause = `WHERE ${filtros.join(' AND ')}`;
+
+    try {
+      const negocio = await db.get(
+        'SELECT id, nombre, titulo_sistema, rnc, telefono, direccion FROM negocios WHERE id = ?',
+        [negocioId]
+      );
+
+      // Totales del periodo.
+      const resumenRow = await db.get(
+        `SELECT SUM(monto) AS total, COUNT(1) AS cantidad, COUNT(DISTINCT DATE(fecha)) AS dias
+           FROM gastos ${whereClause}`,
+        params
+      );
+      const totalGastos = Number(resumenRow?.total) || 0;
+      const cantidad = Number(resumenRow?.cantidad) || 0;
+
+      let dias = Number(resumenRow?.dias) || 0;
+      if (desde && hasta) {
+        const inicio = parseFechaISO(desde);
+        const fin = parseFechaISO(hasta);
+        if (inicio && fin) {
+          dias = calcularDiasIncluidos(inicio, fin);
+        }
+      }
+      const promedioDiario = dias > 0 ? Number((totalGastos / dias).toFixed(2)) : 0;
+
+      // Desglose por categoria (todas).
+      const porCategoria = await db.all(
+        `SELECT COALESCE(NULLIF(TRIM(categoria), ''), 'Sin categoria') AS categoria,
+                SUM(monto) AS total, COUNT(1) AS cantidad
+           FROM gastos ${whereClause}
+          GROUP BY COALESCE(NULLIF(TRIM(categoria), ''), 'Sin categoria')
+          ORDER BY total DESC`,
+        params
+      );
+
+      // Desglose por metodo de pago.
+      const porMetodo = await db.all(
+        `SELECT COALESCE(NULLIF(TRIM(metodo_pago), ''), 'No especificado') AS metodo_pago,
+                SUM(monto) AS total, COUNT(1) AS cantidad
+           FROM gastos ${whereClause}
+          GROUP BY COALESCE(NULLIF(TRIM(metodo_pago), ''), 'No especificado')
+          ORDER BY total DESC`,
+        params
+      );
+
+      // Detalle (limitado para que el ticket no sea infinito).
+      const gastos = await db.all(
+        `SELECT fecha, monto, categoria, metodo_pago, proveedor, descripcion
+           FROM gastos ${whereClause}
+          ORDER BY fecha ASC, id ASC
+          LIMIT 500`,
+        params
+      );
+
+      res.json({
+        ok: true,
+        negocio: negocio || {},
+        periodo: { desde, hasta },
+        filtros: { categoria, tipo_gasto: tipoGasto, metodo_pago: metodoPago, q },
+        resumen: {
+          total: Number(totalGastos.toFixed(2)),
+          cantidad,
+          dias,
+          promedio_diario: promedioDiario,
+        },
+        por_categoria: (porCategoria || []).map((r) => ({
+          categoria: r.categoria,
+          total: Number(Number(r.total).toFixed(2)),
+          cantidad: Number(r.cantidad) || 0,
+        })),
+        por_metodo: (porMetodo || []).map((r) => ({
+          metodo_pago: r.metodo_pago,
+          total: Number(Number(r.total).toFixed(2)),
+          cantidad: Number(r.cantidad) || 0,
+        })),
+        gastos: gastos || [],
+      });
+    } catch (error) {
+      console.error('Error al generar ticket de gastos:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo generar el resumen de gastos.' });
+    }
+  });
+});
+
 app.post('/api/admin/gastos', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     if (!tienePermisoAdmin(usuarioSesion)) {
@@ -36787,37 +37162,50 @@ app.post('/api/login', async (req, res) => {
         .json({ ok: false, error: 'El modulo de Mostrador esta desactivado para este negocio.' });
     }
 
-  cerrarSesionesExpiradas(row.id, () => {
-    cerrarSesionesActivasDeUsuario(row.id, () => {
-      // Invalidar cache de sesion del usuario (las viejas quedaron muertas).
-      invalidarSesionCachePorUsuarioId(row.id);
-      const token = generarTokenSesion();
-      const esSuperAdminUsuario = !!row.es_super_admin;
-      db.run(
-        'INSERT INTO sesiones_usuarios (usuario_id, token, user_agent, ip, ultimo_uso, cerrado_en, negocio_id) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, NULL, ?)',
-        [row.id, token, req.get('user-agent') || '', req.ip || '', negocioId],
-        (insertErr) => {
-          if (insertErr) {
-            console.error('Error al registrar sesion:', insertErr.message);
-            return res.status(500).json({ ok: false, error: 'Error al iniciar sesion' });
-          }
+  // Cuentas compartidas (mesera con varias personas): NO se cierran las
+  // sesiones previas, para que la misma cuenta pueda estar abierta en varios
+  // dispositivos a la vez. En cuentas normales se mantiene el comportamiento
+  // de sesion unica (al entrar en un equipo se cierra el anterior).
+  const esCuentaCompartida = !!row.es_compartido;
 
-          res.json({
-            ok: true,
-            rol: row.rol,
-            id: row.id,
-            nombre: row.nombre,
-            usuario: row.usuario,
-            negocio_id: negocioId,
-            empresa_id: row.empresa_id ?? null,
-            es_super_admin: esSuperAdminUsuario,
-            activo: row.activo,
-            force_password_change: !!row.force_password_change,
-            token,
-          });
+  const emitirSesion = () => {
+    // Invalidar cache de sesion del usuario para que refleje el estado actual.
+    invalidarSesionCachePorUsuarioId(row.id);
+    const token = generarTokenSesion();
+    const esSuperAdminUsuario = !!row.es_super_admin;
+    db.run(
+      'INSERT INTO sesiones_usuarios (usuario_id, token, user_agent, ip, ultimo_uso, cerrado_en, negocio_id) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, NULL, ?)',
+      [row.id, token, req.get('user-agent') || '', req.ip || '', negocioId],
+      (insertErr) => {
+        if (insertErr) {
+          console.error('Error al registrar sesion:', insertErr.message);
+          return res.status(500).json({ ok: false, error: 'Error al iniciar sesion' });
         }
-      );
-    });
+
+        res.json({
+          ok: true,
+          rol: row.rol,
+          id: row.id,
+          nombre: row.nombre,
+          usuario: row.usuario,
+          negocio_id: negocioId,
+          empresa_id: row.empresa_id ?? null,
+          es_super_admin: esSuperAdminUsuario,
+          es_compartido: esCuentaCompartida,
+          activo: row.activo,
+          force_password_change: !!row.force_password_change,
+          token,
+        });
+      }
+    );
+  };
+
+  cerrarSesionesExpiradas(row.id, () => {
+    if (esCuentaCompartida) {
+      emitirSesion();
+    } else {
+      cerrarSesionesActivasDeUsuario(row.id, emitirSesion);
+    }
   });
 });
 

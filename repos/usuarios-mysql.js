@@ -1,9 +1,9 @@
 const { query } = require('../db-mysql');
 
 const authColumns =
-  'id, nombre, usuario, password, rol, activo, negocio_id, empresa_id, es_super_admin, force_password_change, password_reset_at';
+  'id, nombre, usuario, password, rol, activo, negocio_id, empresa_id, es_super_admin, force_password_change, password_reset_at, es_compartido';
 const publicColumns =
-  'id, nombre, usuario, rol, activo, negocio_id, empresa_id, es_super_admin, force_password_change, password_reset_at';
+  'id, nombre, usuario, rol, activo, negocio_id, empresa_id, es_super_admin, force_password_change, password_reset_at, es_compartido';
 
 async function findByUsuario(usuario) {
   try {
@@ -72,11 +72,12 @@ async function create(usuarioData) {
       es_super_admin = 0,
       force_password_change = 0,
       password_reset_at = null,
+      es_compartido = 0,
     } = usuarioData;
     const result = await query(
       `INSERT INTO usuarios (
-        nombre, usuario, password, rol, activo, negocio_id, empresa_id, es_super_admin, force_password_change, password_reset_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        nombre, usuario, password, rol, activo, negocio_id, empresa_id, es_super_admin, force_password_change, password_reset_at, es_compartido
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         nombre,
         usuario,
@@ -88,6 +89,7 @@ async function create(usuarioData) {
         es_super_admin ? 1 : 0,
         force_password_change ? 1 : 0,
         password_reset_at,
+        es_compartido ? 1 : 0,
       ]
     );
     const newId = result.insertId || result.lastInsertId;
@@ -142,6 +144,10 @@ async function update(id, usuarioData) {
     if (usuarioData.password_reset_at !== undefined) {
       fields.push('password_reset_at = ?');
       params.push(usuarioData.password_reset_at);
+    }
+    if (usuarioData.es_compartido !== undefined) {
+      fields.push('es_compartido = ?');
+      params.push(usuarioData.es_compartido ? 1 : 0);
     }
 
     if (!fields.length) {

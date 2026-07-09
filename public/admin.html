@@ -942,6 +942,26 @@
               <input type="checkbox" id="usuario-activo" checked />
             </div>
 
+            <!-- Usuario compartido (solo Mesera): varias personas con su PIN.
+                 El mismo login se puede abrir en varios dispositivos, y al enviar
+                 a cocina cada persona pone su PIN para registrar quien tomo la orden. -->
+            <div class="kanm-input-group kanm-input-group--inline" id="usuario-compartido-row" hidden>
+              <label for="usuario-compartido">Usuario compartido</label>
+              <input type="checkbox" id="usuario-compartido" />
+            </div>
+
+            <div id="usuario-compartido-panel" hidden>
+              <p class="kanm-help-text">
+                Agrega las personas que comparten esta cuenta. Cada una con un PIN
+                de 4 dígitos distinto. Al enviar un pedido a cocina, la mesera pondrá
+                su PIN y su nombre quedará registrado en la orden.
+              </p>
+              <div id="usuario-pins-lista" class="usuario-pins-lista"></div>
+              <button type="button" class="kanm-button ghost" id="usuario-pin-agregar">
+                + Agregar persona
+              </button>
+            </div>
+
             <div class="kanm-actions">
               <button type="submit" class="kanm-button">Guardar usuario</button>
               <button type="button" class="kanm-button ghost" id="usuario-limpiar">Limpiar</button>
@@ -2302,6 +2322,9 @@
             <div class="admin-report-actions">
               <button type="button" class="kanm-button secondary" id="gastos-consultar">Buscar</button>
               <button type="button" class="kanm-button ghost" id="gastos-limpiar">Limpiar</button>
+              <button type="button" class="kanm-button ghost" id="gastos-imprimir-resumen">
+                Imprimir resumen (88mm)
+              </button>
             </div>
           </div>
           <div id="gastos-mensaje-lista" class="kanm-message"></div>
@@ -5683,7 +5706,7 @@
       }
     })();
   </script>
-  <script src="/js/admin.js?v=20260615e"></script>
+  <script src="/js/admin.js?v=20260704b"></script>
   <script src="/js/admin-facturacion-posium.js?v=20260522a"></script>
   <script src="/js/admin-cotizaciones.js?v=20260522a"></script>
   <script src="/js/admin-clientes.js?v=20260522a"></script>

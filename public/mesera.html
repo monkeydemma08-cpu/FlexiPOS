@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="css/styles.css?v=20260425c" />
     <link rel="stylesheet" href="css/mesera-shell.css?v=20260424b" />
     <script src="js/auth.js" defer></script>
-    <script src="js/mesera.js?v=20260615" defer></script>
+    <script src="js/mesera.js?v=20260704a" defer></script>
   </head>
   <body data-role="mesera" class="mesera-shell-body">
     <!-- Header viejo escondido por CSS pero conservamos IDs por compatibilidad con tema/logo -->
@@ -419,6 +419,73 @@
     </div>
 
     <div id="toast-container"></div>
+
+    <!-- ===== Modal de PIN (cuentas de mesera compartidas) =====
+         Aparece al enviar a cocina cuando la cuenta es compartida: la persona
+         pone su PIN de 4 dígitos y su nombre queda registrado en el pedido. -->
+    <style>
+      .mesera-pin-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(15, 23, 42, 0.55);
+        padding: 16px;
+      }
+      .mesera-pin-modal[hidden] { display: none; }
+      .mesera-pin-card {
+        background: #fff;
+        border-radius: 16px;
+        padding: 24px 20px;
+        width: 100%;
+        max-width: 340px;
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.25);
+        text-align: center;
+      }
+      .mesera-pin-card h3 { margin: 0 0 4px; font-size: 20px; }
+      .mesera-pin-input {
+        width: 100%;
+        box-sizing: border-box;
+        margin: 14px 0 6px;
+        padding: 14px;
+        font-size: 32px;
+        letter-spacing: 12px;
+        text-align: center;
+        border: 2px solid #cbd5e1;
+        border-radius: 12px;
+        font-family: inherit;
+      }
+      .mesera-pin-input:focus { outline: none; border-color: #255bc7; }
+      .mesera-pin-acciones {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .mesera-pin-acciones .kanm-button { width: 100%; }
+    </style>
+    <div id="mesera-pin-modal" class="mesera-pin-modal" hidden>
+      <div class="mesera-pin-card" role="dialog" aria-modal="true" aria-labelledby="mesera-pin-titulo">
+        <h3 id="mesera-pin-titulo">Ingresa tu PIN</h3>
+        <p class="kanm-helper">Confirma quién envía el pedido a cocina.</p>
+        <input
+          type="password"
+          id="mesera-pin-input"
+          class="mesera-pin-input"
+          inputmode="numeric"
+          maxlength="4"
+          placeholder="••••"
+          autocomplete="off"
+        />
+        <div class="kanm-message" id="mesera-pin-mensaje"></div>
+        <div class="mesera-pin-acciones">
+          <button type="button" class="kanm-button" id="mesera-pin-confirmar">Enviar a cocina</button>
+          <button type="button" class="kanm-button ghost" id="mesera-pin-cancelar">Cancelar</button>
+        </div>
+      </div>
+    </div>
 
     <!-- ===== JS auxiliar para el shell de mesera (drawer carrito + sincroniza FAB con carrito) ===== -->
     <script>

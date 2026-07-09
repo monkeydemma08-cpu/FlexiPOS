@@ -881,6 +881,71 @@ const obtenerUsuarioActual = () => {
   return null;
 };
 
+// ¿La cuenta con la que inició sesión es compartida (varias personas + PIN)?
+const esCuentaCompartida = () => !!obtenerUsuarioActual()?.esCompartido;
+
+// Muestra el modal de PIN y resuelve con el PIN (4 díg.) o null si se cancela.
+const pedirPinMesera = (mensajeInicial = '') =>
+  new Promise((resolve) => {
+    const modal = document.getElementById('mesera-pin-modal');
+    const input = document.getElementById('mesera-pin-input');
+    const mensajeEl = document.getElementById('mesera-pin-mensaje');
+    const btnOk = document.getElementById('mesera-pin-confirmar');
+    const btnCancelar = document.getElementById('mesera-pin-cancelar');
+    if (!modal || !input) {
+      resolve(null);
+      return;
+    }
+
+    const setMensaje = (texto) => {
+      if (!mensajeEl) return;
+      mensajeEl.textContent = texto || '';
+      mensajeEl.dataset.type = texto ? 'error' : '';
+    };
+
+    input.value = '';
+    setMensaje(mensajeInicial);
+    modal.hidden = false;
+    setTimeout(() => input.focus(), 50);
+
+    const cerrar = () => {
+      btnOk?.removeEventListener('click', onOk);
+      btnCancelar?.removeEventListener('click', onCancel);
+      input.removeEventListener('keydown', onKey);
+      input.oninput = null;
+      modal.hidden = true;
+    };
+    const onOk = () => {
+      const pin = (input.value || '').trim();
+      if (!/^\d{4}$/.test(pin)) {
+        setMensaje('El PIN debe ser de 4 dígitos.');
+        return;
+      }
+      cerrar();
+      resolve(pin);
+    };
+    const onCancel = () => {
+      cerrar();
+      resolve(null);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        onOk();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+
+    input.oninput = () => {
+      input.value = input.value.replace(/\D/g, '').slice(0, 4);
+    };
+    btnOk?.addEventListener('click', onOk);
+    btnCancelar?.addEventListener('click', onCancel);
+    input.addEventListener('keydown', onKey);
+  });
+
 const authApi = window.kanmAuth;
 
 const obtenerAuthHeadersMesera = () => {
@@ -2283,6 +2348,19 @@ const enviarPedido = async (destino = 'cocina') => {
     delete payload.destino;
     delete payload.cuenta_id;
   }
+
+  // Cuenta compartida: al enviar a cocina se pide el PIN de la persona que toma
+  // la orden. Solo aplica a "cocina" y en pedidos nuevos (no al editar uno
+  // pendiente, que ya quedó atribuido al crearse).
+  if (destino === 'cocina' && !editandoPedidoPendiente && esCuentaCompartida()) {
+    const pin = await pedirPinMesera();
+    if (!pin) {
+      // Cancelado: no se envía el pedido.
+      mostrarMensaje('Pedido no enviado: se necesita el PIN.', 'info');
+      return;
+    }
+    payload.pin = pin;
+  }
   let botonActivo = botonEnviar;
   if (destino === 'caja') botonActivo = botonEnviarCaja;
   if (destino === 'delivery-prep') botonActivo = botonDeliveryPrep;
@@ -2299,7 +2377,7 @@ const enviarPedido = async (destino = 'cocina') => {
         }
       });
 
-    const respuesta = await fetchAutorizadoMesera(url, {
+    let respuesta = await fetchAutorizadoMesera(url, {
       method: metodo,
       headers: {
         'Content-Type': 'application/json',
@@ -2307,7 +2385,24 @@ const enviarPedido = async (destino = 'cocina') => {
       body: JSON.stringify(payload),
     });
 
-    const data = await respuesta.json().catch(() => ({}));
+    let data = await respuesta.json().catch(() => ({}));
+
+    // Si el servidor pide PIN pero no lo enviamos (p. ej. la cuenta se volvió
+    // compartida después de iniciar sesión), lo pedimos y reintentamos una vez.
+    if (!respuesta.ok && data?.pin_requerido && !payload.pin) {
+      const pin = await pedirPinMesera('Esta cuenta es compartida. Ingresa tu PIN.');
+      if (!pin) {
+        mostrarMensaje('Pedido no enviado: se necesita el PIN.', 'info');
+        return;
+      }
+      payload.pin = pin;
+      respuesta = await fetchAutorizadoMesera(url, {
+        method: metodo,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      data = await respuesta.json().catch(() => ({}));
+    }
 
     if (!respuesta.ok) {
       const mensaje = data?.error || 'No se pudo procesar el pedido. Intenta nuevamente.';

@@ -90,6 +90,7 @@ const handleSuccess = (payload) => {
     esSuperAdmin: payload.esSuperAdmin === true,
     forcePasswordChange: payload.forcePasswordChange === true || payload.force_password_change === true,
     impersonated: payload.impersonated === true,
+    esCompartido: payload.esCompartido === true || payload.es_compartido === true,
     token: payload.token,
   };
 
@@ -161,6 +162,7 @@ form?.addEventListener('submit', async (event) => {
       empresaId: payload.empresa_id ?? payload.empresaId,
       esSuperAdmin: payload.es_super_admin ?? payload.esSuperAdmin,
       forcePasswordChange: payload.force_password_change ?? payload.forcePasswordChange,
+      esCompartido: payload.es_compartido ?? payload.esCompartido,
     });
   } catch (error) {
     console.error('Error en el proceso de login:', error);

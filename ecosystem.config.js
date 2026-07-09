@@ -32,9 +32,12 @@ module.exports = {
       // alguna version lo respeta (poner el flag dos veces es inofensivo).
       node_args: '--max-old-space-size=512',
 
-      // Red de seguridad: si aun asi pasa de 700MB, PM2 lo reinicia solo.
-      // Esto automatiza el "pm2 restart all" que hacias a mano.
-      max_memory_restart: '700M',
+      // Red de seguridad: si el proceso pasa de 850MB, PM2 lo reinicia solo.
+      // Se deja en 850M (no 700M) para que el uso normal —Node ronda ~640MB con
+      // el cap de heap de 512MB— NO dispare reinicios innecesarios en horas pico.
+      // El control real del crecimiento es NODE_OPTIONS (512MB); esto es solo la
+      // malla de seguridad ante un leak verdadero. Hay RAM libre + 2GB de swap.
+      max_memory_restart: '850M',
 
       autorestart: true,
       // Evita bucles de reinicio si el proceso crashea al arrancar.

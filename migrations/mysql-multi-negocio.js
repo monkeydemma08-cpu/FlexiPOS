@@ -2453,7 +2453,42 @@ async function runMigrations() {
   await ensureAnalisisExtensionColumns();
   await ensureTableAnalisisAlertas();
   await ensureTablePresupuestosCategoriaGasto();
+  await ensureMeseraCompartida();
   await ensureIndicesRendimiento();
+}
+
+// ---------------------------------------------------------------------------
+// USUARIO COMPARTIDO (mesera): una sola cuenta de login usada por varias
+// personas, cada una con su PIN de 4 digitos. Al enviar un pedido a cocina la
+// mesera pone su PIN y el nombre de esa persona queda registrado en el pedido.
+// Todo aditivo: columnas nuevas + tabla nueva, sin tocar datos existentes.
+// ---------------------------------------------------------------------------
+async function ensureMeseraCompartida() {
+  // Marca la cuenta de usuario como compartida (multi-persona, multi-dispositivo).
+  await ensureColumn('usuarios', 'es_compartido TINYINT(1) NOT NULL DEFAULT 0');
+
+  // Roster de personas + PIN por cuenta compartida.
+  await query(`
+    CREATE TABLE IF NOT EXISTS mesera_pins (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      usuario_id INT NOT NULL,
+      negocio_id INT NOT NULL,
+      nombre VARCHAR(255) NOT NULL,
+      pin VARCHAR(4) NOT NULL,
+      activo TINYINT(1) NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_mesera_pins_usuario_pin (usuario_id, pin),
+      CONSTRAINT fk_mesera_pins_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+      CONSTRAINT fk_mesera_pins_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await ensureIndexByName('mesera_pins', 'idx_mesera_pins_usuario_activo', '(usuario_id, activo)');
+
+  // Quien tomo cada pedido (snapshot del nombre para que sobreviva aunque el
+  // PIN se renombre/elimine luego). mesera_pin_id NO lleva FK a proposito:
+  // asi se pueden reorganizar los PIN sin que la BD bloquee por pedidos viejos.
+  await ensureColumn('pedidos', 'mesera_pin_id INT NULL');
+  await ensureColumn('pedidos', 'mesera_nombre VARCHAR(255) NULL');
 }
 
 // Indices de rendimiento para las consultas mas calientes (polling cada 12-15s
@@ -2658,6 +2693,39 @@ async function ensureAnalisisExtensionColumns() {
     'idx_gastos_negocio_es_fijo',
     '(negocio_id, es_fijo)'
   );
+
+  // gastos: cierre al que pertenecen. Se estampa al registrar el cuadre (igual
+  // que pedidos/pagos/deudas). Permite que el ticket del cierre muestre EXACTA-
+  // mente los gastos de ESE cuadre, sin depender de la fecha (que duplicaba los
+  // gastos entre cuadres del mismo día y a veces no coincidía).
+  await ensureColumn('gastos', 'cierre_id INT NULL');
+  await ensureIndexByName('gastos', 'idx_gastos_cierre', '(cierre_id)');
+
+  // Backfill de UNA sola vez: asigna los gastos históricos (sin cierre) al PRIMER
+  // cuadre de su fecha, para que los cuadres ya existentes muestren sus gastos de
+  // forma consistente. Solo corre si aún ningún gasto tiene cierre_id (primera vez
+  // tras el deploy). Después NO vuelve a correr, así los gastos nuevos que esperan
+  // su próximo cuadre no se reasignan a un cierre pasado.
+  try {
+    const marca = await query('SELECT COUNT(*) AS n FROM gastos WHERE cierre_id IS NOT NULL');
+    const yaEstampado = Number(marca?.[0]?.n || 0) > 0;
+    if (!yaEstampado) {
+      await query(`
+        UPDATE gastos g
+        JOIN (
+          SELECT negocio_id, DATE(fecha_operacion) AS fop, MIN(id) AS primer_cierre
+          FROM cierres_caja
+          GROUP BY negocio_id, DATE(fecha_operacion)
+        ) primeros
+          ON primeros.negocio_id = g.negocio_id
+         AND primeros.fop = DATE(g.fecha)
+        SET g.cierre_id = primeros.primer_cierre
+        WHERE g.cierre_id IS NULL
+      `);
+    }
+  } catch (error) {
+    console.warn('No se pudo backfillear cierre_id en gastos:', error?.message || error);
+  }
 
   // Indices de performance para analytics
   await ensureIndexByName(
