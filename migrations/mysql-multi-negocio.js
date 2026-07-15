@@ -2361,6 +2361,10 @@ async function runMigrations() {
   await ensureColumn('detalle_pedido', 'sabor VARCHAR(120) NULL');
   await ensureColumn('pedidos', 'cliente_dispositivo_id VARCHAR(64) NULL');
   await ensureColumn('pedidos', 'cliente_alias VARCHAR(120) NULL');
+  // metodo_pago: usado por el cobro a crédito (marca 'credito') y leído por el
+  // ticket del cuadre para clasificar la venta. Faltaba en la BD y rompía el
+  // cobro a crédito con "Unknown column 'metodo_pago'".
+  await ensureColumn('pedidos', 'metodo_pago VARCHAR(20) NULL');
   await modifyColumn('productos', 'stock DECIMAL(12,4) NULL DEFAULT 0');
   await ensureColumn('pedidos', 'bartender_id INT NULL');
   await ensureColumn('pedidos', 'bartender_nombre VARCHAR(255) NULL');

@@ -10057,6 +10057,7 @@ const obtenerPedidosPendientesDeCierre = (fecha, negocioId, opcionesOrCallback, 
       SUM(COALESCE(pago_tarjeta, 0)) AS pago_tarjeta,
       SUM(COALESCE(pago_transferencia, 0)) AS pago_transferencia,
       SUM(COALESCE(pago_cambio, 0)) AS pago_cambio,
+      MAX(metodo_pago) AS metodo_pago,
       MAX(tipo_comprobante) AS tipo_comprobante,
       MAX(ecf_tipo) AS ecf_tipo,
       MAX(ecf_encf) AS ecf_encf
@@ -10774,6 +10775,7 @@ const obtenerCierresCaja = (desde, hasta, negocioId, origen, callback) => {
              SELECT SUM(COALESCE(d.monto_total, 0))
              FROM clientes_deudas d
              WHERE d.negocio_id = cc.negocio_id
+               AND d.pedido_id IS NULL
                AND (d.cierre_id = cc.id OR (d.cierre_id IS NULL AND DATE(d.fecha) = DATE(cc.fecha_operacion)))
                AND ${filtroOrigenFacturas}
            ), 0) AS total_ventas_facturas
@@ -10818,6 +10820,7 @@ const obtenerPedidosDetalleCierre = (cierreId, negocioId, origen, callback) => {
       SUM(COALESCE(pago_transferencia, 0)) AS pago_transferencia,
       SUM(COALESCE(pago_cambio, 0)) AS pago_cambio,
       SUM(${totalCalculadoSql}) AS total,
+      MAX(metodo_pago) AS metodo_pago,
       MIN(fecha_cierre) AS fecha_cierre,
       MIN(fecha_listo) AS fecha_listo
     FROM pedidos
@@ -10867,6 +10870,9 @@ const obtenerFacturasClientesDetalleCierre = (
   }
 
   const filtroOrigen = construirFiltroOrigenCaja(origen, params, 'd.origen_caja');
+  // d.pedido_id IS NULL: las deudas ligadas a un pedido (cobro a crédito desde
+  // caja/mostrador) ya aparecen en el detalle como su pedido etiquetado
+  // "Crédito"; listarlas aquí duplicaría la venta en el cuadre.
   const sql = `
     SELECT
       d.id,
@@ -10877,6 +10883,7 @@ const obtenerFacturasClientesDetalleCierre = (
     FROM clientes_deudas d
     LEFT JOIN clientes c ON c.id = d.cliente_id
     WHERE d.negocio_id = ?
+      AND d.pedido_id IS NULL
       AND ${filtroCierreFecha}
       AND ${filtroOrigen}
     ORDER BY fecha_cierre DESC, d.id ASC
@@ -11557,7 +11564,8 @@ app.get('/api/caja/cierres/:id/ticket', (req, res) => {
         return fa - fb;
       });
 
-      // 6) Totales por método de pago
+      // 6) Totales por método de pago. Los pedidos cobrados a crédito no tienen
+      // pagos en efectivo/tarjeta: su total va al renglón Crédito.
       let totalEfectivo = 0;
       let totalTarjeta = 0;
       let totalTransferencia = 0;
@@ -11566,6 +11574,9 @@ app.get('/api/caja/cierres/:id/ticket', (req, res) => {
         totalEfectivo += Number(p.pago_efectivo) || 0;
         totalTarjeta += Number(p.pago_tarjeta) || 0;
         totalTransferencia += Number(p.pago_transferencia) || 0;
+        if (String(p.metodo_pago || '').toLowerCase() === 'credito') {
+          totalCredito += Number(p.total) || 0;
+        }
       });
       (facturasCredito || []).forEach((f) => {
         totalCredito += Number(f.monto_total || f.total) || 0;
@@ -13799,7 +13810,9 @@ app.get('/api/caja/cuadre/:id/detalle', (req, res) => {
 
 const normalizarMetodoPagoCuadreServidor = (valor) => {
   const metodoRaw = (valor ?? '').toString().trim().toLowerCase();
-  return metodoRaw === 'efectivo' || metodoRaw === 'tarjeta' || metodoRaw === 'transferencia' ? metodoRaw : null;
+  return metodoRaw === 'efectivo' || metodoRaw === 'tarjeta' || metodoRaw === 'transferencia' || metodoRaw === 'credito'
+    ? metodoRaw
+    : null;
 };
 
 const construirCamposPagoCuadre = (pedido = {}, metodo = '') => {
@@ -13834,6 +13847,7 @@ const construirCamposPagoCuadre = (pedido = {}, metodo = '') => {
 
 const actualizarMetodoPagoPedidosCuadre = async (pedidos = [], negocioId, metodo) => {
   for (const pedido of pedidos) {
+    // Para crédito no entra dinero: construirCamposPagoCuadre deja todo en 0.
     const pagos = construirCamposPagoCuadre(pedido, metodo);
     await db.run(
       `UPDATE pedidos
@@ -13841,7 +13855,8 @@ const actualizarMetodoPagoPedidosCuadre = async (pedidos = [], negocioId, metodo
               pago_efectivo_entregado = ?,
               pago_tarjeta = ?,
               pago_transferencia = ?,
-              pago_cambio = ?
+              pago_cambio = ?,
+              metodo_pago = ?
         WHERE id = ? AND negocio_id = ?`,
       [
         pagos.pago_efectivo,
@@ -13849,8 +13864,141 @@ const actualizarMetodoPagoPedidosCuadre = async (pedidos = [], negocioId, metodo
         pagos.pago_tarjeta,
         pagos.pago_transferencia,
         pagos.pago_cambio,
+        metodo,
         Number(pedido.id),
         negocioId,
+      ]
+    );
+  }
+};
+
+// Sincroniza la cuenta por cobrar (clientes_deudas) al cambiar el método de
+// pago desde el cuadre:
+//   - Deja de ser crédito  -> se elimina la deuda ligada (queda "limpio": la
+//     venta queda pagada con el método nuevo y sale de las deudas del cliente).
+//     Si la deuda ya tiene abonos, se bloquea el cambio (habría que anular los
+//     abonos primero) para no perder registros de pagos.
+//   - Pasa a crédito       -> se crea la deuda con su detalle (igual que el
+//     cobro a crédito normal), ligada al pedido para no duplicar en reportes.
+const sincronizarDeudaCreditoCuadre = async ({ pedidos = [], negocioId, origenCaja, metodo }) => {
+  if (!pedidos.length) return;
+  const pedidoIds = pedidos.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0);
+  if (!pedidoIds.length) return;
+  const placeholders = pedidoIds.map(() => '?').join(',');
+
+  const deudasLigadas = await db.all(
+    `SELECT id, cliente_id, monto_total FROM clientes_deudas
+      WHERE negocio_id = ? AND pedido_id IN (${placeholders})`,
+    [negocioId, ...pedidoIds]
+  );
+
+  if (metodo !== 'credito') {
+    // Quitar la(s) deuda(s) ligadas: la venta ya no es crédito.
+    for (const deuda of deudasLigadas) {
+      const abonos = await db.get(
+        'SELECT COUNT(1) AS n FROM clientes_abonos WHERE deuda_id = ? AND negocio_id = ?',
+        [deuda.id, negocioId]
+      );
+      if (Number(abonos?.n) > 0) {
+        const err = new Error(
+          'La factura a crédito ya tiene abonos registrados. Elimina los abonos del cliente antes de cambiar el método de pago.'
+        );
+        err.status = 409;
+        throw err;
+      }
+      await db.run('DELETE FROM clientes_deudas_detalle WHERE deuda_id = ? AND negocio_id = ?', [deuda.id, negocioId]);
+      await db.run('DELETE FROM clientes_deudas WHERE id = ? AND negocio_id = ?', [deuda.id, negocioId]);
+    }
+    return;
+  }
+
+  // metodo === 'credito': crear la deuda si no existe ya.
+  if (deudasLigadas.length) return; // ya está como crédito
+
+  const base = pedidos[0] || {};
+  const clienteNombre = (base.cliente || '').toString().trim();
+  if (!clienteNombre) {
+    const err = new Error(
+      'Para pasar la venta a crédito debe tener un cliente. Edita la factura y asigna el cliente primero.'
+    );
+    err.status = 400;
+    throw err;
+  }
+
+  // Buscar o crear el cliente por nombre (mismo criterio que el cobro a crédito).
+  let cliente = await db.get(
+    `SELECT id, nombre FROM clientes
+      WHERE negocio_id = ? AND LOWER(TRIM(nombre)) = ? AND COALESCE(activo, 1) = 1
+      LIMIT 1`,
+    [negocioId, clienteNombre.toLowerCase()]
+  );
+  if (!cliente) {
+    const ins = await db.run(
+      'INSERT INTO clientes (negocio_id, nombre, documento, activo) VALUES (?, ?, ?, 1)',
+      [negocioId, clienteNombre, (base.cliente_documento || '').toString().trim() || null]
+    );
+    cliente = { id: ins?.lastID, nombre: clienteNombre };
+  }
+  if (!cliente?.id) {
+    const err = new Error('No se pudo asociar el cliente para la venta a crédito.');
+    err.status = 500;
+    throw err;
+  }
+
+  const totalCuenta = pedidos.reduce((acc, p) => {
+    const total =
+      (Number(p.subtotal) || 0) +
+      (Number(p.impuesto) || 0) -
+      (Number(p.descuento_monto) || 0) +
+      (Number(p.propina_monto) || 0);
+    return acc + Math.max(total, 0);
+  }, 0);
+
+  const cuentaRef = base.cuenta_id || base.id;
+  const descripcion = `Cobro a credito · Cuenta #${cuentaRef} (${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'})`;
+  const insDeuda = await db.run(
+    `INSERT INTO clientes_deudas
+      (cliente_id, negocio_id, fecha, descripcion, monto_total, origen_caja, tipo_comprobante, ncf, pedido_id)
+     VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?)`,
+    [
+      cliente.id,
+      negocioId,
+      descripcion,
+      Number(totalCuenta.toFixed(2)),
+      origenCaja || 'caja',
+      base.tipo_comprobante || null,
+      base.ncf || null,
+      pedidoIds[0],
+    ]
+  );
+  const deudaId = insDeuda?.lastID;
+  if (!deudaId) return;
+
+  const items = await db.all(
+    `SELECT dp.producto_id, dp.cantidad, dp.precio_unitario,
+            pr.nombre AS producto_nombre,
+            COALESCE(NULLIF(dp.costo_unitario_snapshot, 0), pr.costo_unitario_real, pr.costo_promedio_actual, 0) AS costo_snapshot
+       FROM detalle_pedido dp
+       LEFT JOIN productos pr ON pr.id = dp.producto_id
+      WHERE dp.pedido_id IN (${placeholders}) AND dp.negocio_id = ?`,
+    [...pedidoIds, negocioId]
+  );
+  for (const it of items || []) {
+    const cant = Number(it.cantidad) || 0;
+    const precio = Number(it.precio_unitario) || 0;
+    await db.run(
+      `INSERT INTO clientes_deudas_detalle
+        (deuda_id, producto_id, nombre_producto, cantidad, precio_unitario, total_linea, negocio_id, costo_unitario_snapshot)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        deudaId,
+        it.producto_id,
+        it.producto_nombre || `Producto ${it.producto_id}`,
+        cant,
+        precio,
+        Number((cant * precio).toFixed(2)),
+        negocioId,
+        Number(it.costo_snapshot) || 0,
       ]
     );
   }
@@ -14010,7 +14158,8 @@ app.put('/api/caja/cuadre/:id/metodo-pago', (req, res) => {
     try {
       const pedidos = await db.all(
         `
-          SELECT id, subtotal, impuesto, descuento_monto, propina_monto
+          SELECT id, cuenta_id, subtotal, impuesto, descuento_monto, propina_monto,
+                 cliente, cliente_documento, tipo_comprobante, ncf, metodo_pago
           FROM pedidos
           WHERE (cuenta_id = ? OR id = ?)
             AND estado = 'pagado'
@@ -14030,6 +14179,9 @@ app.put('/api/caja/cuadre/:id/metodo-pago', (req, res) => {
       }
 
       await db.run('BEGIN');
+      // Sincronizar deuda de cliente ANTES de tocar pagos: si el cambio no es
+      // válido (p. ej. la deuda ya tiene abonos) se aborta sin modificar nada.
+      await sincronizarDeudaCreditoCuadre({ pedidos, negocioId, origenCaja, metodo });
       await actualizarMetodoPagoPedidosCuadre(pedidos, negocioId, metodo);
       await actualizarMetodoPagoMovimientosCuenta({
         cuentaId,
@@ -14050,7 +14202,11 @@ app.put('/api/caja/cuadre/:id/metodo-pago', (req, res) => {
     } catch (error) {
       await db.run('ROLLBACK').catch(() => {});
       console.error('Error al actualizar metodo de pago del cuadre:', error?.message || error);
-      return res.status(500).json({ ok: false, error: 'No se pudo actualizar el metodo de pago.' });
+      const status = Number(error?.status) || 500;
+      return res.status(status).json({
+        ok: false,
+        error: status === 500 ? 'No se pudo actualizar el metodo de pago.' : error.message,
+      });
     }
   });
 });
@@ -14098,7 +14254,8 @@ app.put('/api/caja/cierres/:id/metodo-pago', (req, res) => {
       const filtroOrigen = construirFiltroOrigenCaja(origenCaja, params, 'origen_caja');
       const pedidos = await db.all(
         `
-          SELECT id, subtotal, impuesto, descuento_monto, propina_monto
+          SELECT id, cuenta_id, subtotal, impuesto, descuento_monto, propina_monto,
+                 cliente, cliente_documento, tipo_comprobante, ncf, metodo_pago
           FROM pedidos
           WHERE (cuenta_id = ? OR id = ?)
             AND cierre_id = ?
@@ -14118,6 +14275,8 @@ app.put('/api/caja/cierres/:id/metodo-pago', (req, res) => {
       }
 
       await db.run('BEGIN');
+      // Mantener la cuenta por cobrar del cliente en sintonía con el método.
+      await sincronizarDeudaCreditoCuadre({ pedidos, negocioId, origenCaja, metodo });
       await actualizarMetodoPagoPedidosCuadre(pedidos, negocioId, metodo);
       await actualizarMetodoPagoMovimientosCuenta({
         cuentaId,
@@ -16053,23 +16212,60 @@ app.post('/api/caja/cobrar-credito', (req, res) => {
     const descuentoPorcentaje = Math.max(Number(req.body?.descuento_porcentaje) || 0, 0);
     const propinaPorcentaje = Math.max(Number(req.body?.propina_porcentaje) || 0, 0);
     const comentariosNorm = normalizarCampoTexto(req.body?.comentarios, null);
+    // Origen del cobro (caja o mostrador): determina en qué cuadre aparece la
+    // venta a crédito. Fallback por rol (vendedor = mostrador), igual que el
+    // resto de flujos de venta.
+    const origenFallbackCredito = usuarioSesion?.rol === 'vendedor' ? 'mostrador' : 'caja';
+    const origenCajaCredito = normalizarOrigenCaja(
+      req.body?.origen_caja ?? req.body?.origen,
+      origenFallbackCredito
+    );
+    const clienteIdSolicitado = Number(req.body?.cliente_id ?? req.body?.clienteId);
+    const clienteDocumento = normalizarCampoTexto(req.body?.cliente_documento, null);
+    const clienteTelefono = normalizarCampoTexto(req.body?.cliente_telefono, null);
 
     try {
-      // 1) Buscar o crear cliente
-      let cliente = await db.get(
-        `SELECT id, nombre FROM clientes
-          WHERE negocio_id = ? AND LOWER(TRIM(nombre)) = ? AND COALESCE(activo, 1) = 1
-          LIMIT 1`,
-        [negocioId, clienteNombreRaw.toLowerCase()]
-      );
+      // 1) Buscar o crear cliente. Prioridad: id explícito (seleccionado del
+      // listado) > nombre exacto > crear nuevo con los datos aportados (así la
+      // persona queda guardada en Clientes).
+      let cliente = null;
+      if (Number.isInteger(clienteIdSolicitado) && clienteIdSolicitado > 0) {
+        cliente = await db.get(
+          `SELECT id, nombre FROM clientes
+            WHERE id = ? AND negocio_id = ? AND COALESCE(activo, 1) = 1
+            LIMIT 1`,
+          [clienteIdSolicitado, negocioId]
+        );
+      }
+      if (!cliente) {
+        cliente = await db.get(
+          `SELECT id, nombre FROM clientes
+            WHERE negocio_id = ? AND LOWER(TRIM(nombre)) = ? AND COALESCE(activo, 1) = 1
+            LIMIT 1`,
+          [negocioId, clienteNombreRaw.toLowerCase()]
+        );
+      }
       let clienteCreado = false;
       if (!cliente) {
         const ins = await db.run(
-          `INSERT INTO clientes (negocio_id, nombre, activo) VALUES (?, ?, 1)`,
-          [negocioId, clienteNombreRaw]
+          `INSERT INTO clientes (negocio_id, nombre, documento, telefono, activo) VALUES (?, ?, ?, ?, 1)`,
+          [negocioId, clienteNombreRaw, clienteDocumento, clienteTelefono]
         );
         cliente = { id: ins?.lastID, nombre: clienteNombreRaw };
         clienteCreado = true;
+      } else if (clienteDocumento || clienteTelefono) {
+        // Completar datos faltantes del cliente existente (sin pisar los que ya tiene).
+        try {
+          await db.run(
+            `UPDATE clientes
+                SET documento = COALESCE(NULLIF(documento, ''), ?),
+                    telefono = COALESCE(NULLIF(telefono, ''), ?)
+              WHERE id = ? AND negocio_id = ?`,
+            [clienteDocumento, clienteTelefono, cliente.id, negocioId]
+          );
+        } catch (updErr) {
+          console.warn('No se pudo completar datos del cliente en credito:', updErr?.message || updErr);
+        }
       }
       if (!cliente?.id) {
         return res.status(500).json({ ok: false, error: 'No se pudo crear o asociar el cliente.' });
@@ -16128,6 +16324,7 @@ app.post('/api/caja/cobrar-credito', (req, res) => {
                 SET estado = 'pagado',
                     fecha_cierre = ?,
                     cliente = COALESCE(NULLIF(?, ''), cliente),
+                    cliente_documento = COALESCE(NULLIF(?, ''), cliente_documento),
                     ncf = COALESCE(NULLIF(?, ''), ncf),
                     tipo_comprobante = ?,
                     metodo_pago = 'credito',
@@ -16140,6 +16337,7 @@ app.post('/api/caja/cobrar-credito', (req, res) => {
             [
               fechaCierre,
               clienteNombreRaw,
+              clienteDocumento || '',
               ncfAsignado || '',
               tipoCmpt,
               descuentoPorcentaje,
@@ -16164,13 +16362,16 @@ app.post('/api/caja/cobrar-credito', (req, res) => {
           console.warn('No se pudo cerrar la cuenta (tabla cuentas):', cuentaErr?.message || cuentaErr);
         }
 
-        // 7) Crear deuda en clientes_deudas
+        // 7) Crear deuda en clientes_deudas. El origen_caja (caja/mostrador)
+        // determina en qué cuadre aparece esta venta a crédito. pedido_id liga
+        // la deuda con el pedido: es la clave que usan analytics/607/cuadre para
+        // NO contar la venta dos veces (una como pedido y otra como deuda).
         const descripcion = `Cobro a credito · Cuenta #${cuentaId} (${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'})`;
         const insertDeuda = await db.run(
           `INSERT INTO clientes_deudas
-            (cliente_id, negocio_id, fecha, descripcion, monto_total, origen_caja, tipo_comprobante, ncf, notas)
-           VALUES (?, ?, ?, ?, ?, 'caja', ?, ?, ?)`,
-          [cliente.id, negocioId, fechaCierre, descripcion, totalCuenta, tipoCmpt, ncfAsignado, comentariosNorm]
+            (cliente_id, negocio_id, fecha, descripcion, monto_total, origen_caja, tipo_comprobante, ncf, notas, pedido_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [cliente.id, negocioId, fechaCierre, descripcion, totalCuenta, origenCajaCredito, tipoCmpt, ncfAsignado, comentariosNorm, pedidos[0].id]
         );
         const deudaId = insertDeuda?.lastID;
 
@@ -32943,6 +33144,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           WHERE estado = 'pagado'
             AND negocio_id = ?
             AND ${fechaBase} BETWEEN ? AND ?
+            AND COALESCE(metodo_pago, '') <> 'credito'
             AND id NOT IN (
               SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
               WHERE negocio_id = ? AND pedido_id IS NOT NULL
@@ -32969,6 +33171,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           WHERE estado = 'pagado'
             AND negocio_id = ?
             AND ${fechaBase} BETWEEN ? AND ?
+            AND COALESCE(metodo_pago, '') <> 'credito'
             AND id NOT IN (
               SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
               WHERE negocio_id = ? AND pedido_id IS NOT NULL
@@ -33501,6 +33704,9 @@ app.get('/api/admin/analytics/overview', (req, res) => {
                  ) AS total
           FROM clientes_deudas d
           WHERE d.negocio_id = ?
+            /* Deudas ligadas a un pedido (cobro a credito POS): su COGS ya esta
+               en pedidos.cogs_total; contarlo aqui lo duplicaria. */
+            AND d.pedido_id IS NULL
             AND DATE(d.fecha) BETWEEN ? AND ?
         `,
         paramsBase
@@ -33546,6 +33752,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           WHERE estado = 'pagado'
             AND negocio_id = ?
             AND ${fechaBase} BETWEEN ? AND ?
+            AND COALESCE(metodo_pago, '') <> 'credito'
             AND id NOT IN (
               SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
               WHERE negocio_id = ? AND pedido_id IS NOT NULL
@@ -34054,6 +34261,9 @@ app.get('/api/admin/analytics/advanced', (req, res) => {
                  ) AS total
           FROM clientes_deudas d
           WHERE d.negocio_id = ?
+            /* Deudas ligadas a un pedido (cobro a credito POS): su COGS ya esta
+               en pedidos.cogs_total; contarlo aqui lo duplicaria. */
+            AND d.pedido_id IS NULL
             AND DATE(d.fecha) BETWEEN ? AND ?
         `,
         paramsBase
@@ -34329,6 +34539,7 @@ app.get('/api/reportes/607', (req, res) => {
             AND DATE_FORMAT(${fechaMesRD}, '%Y') = ?
             AND DATE_FORMAT(${fechaMesRD}, '%m') = ?
             AND negocio_id = ?
+            AND COALESCE(metodo_pago, '') <> 'credito'
             AND id NOT IN (
               SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
               WHERE negocio_id = ? AND pedido_id IS NOT NULL

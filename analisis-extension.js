@@ -55,11 +55,14 @@ const limpiarCache = (negocioId) => {
 };
 
 const buildPedidoFilter = ({ alias = 'p', includeDeudas = false } = {}) => {
-  // Excluye pedidos pagados que ya esten registrados como deuda (evita doble conteo).
+  // Excluye pedidos pagados que ya esten registrados como deuda (evita doble
+  // conteo). Los pedidos cobrados a CREDITO tambien se excluyen: su venta la
+  // representa la deuda (cuenta por cobrar) que crea el cobro a credito.
   if (includeDeudas) {
     return `${alias}.estado = 'pagado' AND ${alias}.negocio_id = ?`;
   }
   return `${alias}.estado = 'pagado' AND ${alias}.negocio_id = ?
+          AND COALESCE(${alias}.metodo_pago, '') <> 'credito'
           AND ${alias}.id NOT IN (
             SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
             WHERE negocio_id = ? AND pedido_id IS NOT NULL

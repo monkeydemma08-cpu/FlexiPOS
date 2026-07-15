@@ -172,6 +172,7 @@ const METODOS_PAGO_CUADRE = [
   { value: 'efectivo', label: 'Efectivo' },
   { value: 'tarjeta', label: 'Tarjeta' },
   { value: 'transferencia', label: 'Transferencia/Deposito' },
+  { value: 'credito', label: 'Crédito' },
 ];
 
 
@@ -2048,7 +2049,12 @@ const actualizarEfectivoEsperado = () => {
 
 
 
+const esPedidoCreditoCuadre = (pedido = {}) =>
+  String(pedido.metodo_pago || '').trim().toLowerCase() === 'credito';
+
 const obtenerEfectivoAplicadoCuadre = (pedido = {}) => {
+  // Crédito: no entró dinero; nada de asumir efectivo por descarte.
+  if (esPedidoCreditoCuadre(pedido)) return 0;
   const efectivoRegistrado = Number(pedido.pago_efectivo) || 0;
   if (efectivoRegistrado > 0) return efectivoRegistrado;
 
@@ -2074,6 +2080,7 @@ const obtenerEfectivoAplicadoCuadre = (pedido = {}) => {
 };
 
 const obtenerMetodoPagoLabel = (pedido = {}) => {
+  if (esPedidoCreditoCuadre(pedido)) return 'Crédito';
 
   const efectivoAplicado = obtenerEfectivoAplicadoCuadre(pedido);
 
@@ -2098,6 +2105,7 @@ const obtenerMetodoPagoLabel = (pedido = {}) => {
 };
 
 const obtenerMetodoPagoValorCuadre = (pedido = {}) => {
+  if (esPedidoCreditoCuadre(pedido)) return 'credito';
   const efectivoAplicado = obtenerEfectivoAplicadoCuadre(pedido);
   const tarjeta = Number(pedido.pago_tarjeta) || 0;
   const transferencia = Number(pedido.pago_transferencia) || 0;

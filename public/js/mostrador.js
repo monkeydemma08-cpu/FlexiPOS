@@ -1197,6 +1197,11 @@ const obtenerPagosFormulario = () => {
   const metodo = selectMetodoPago?.value || 'efectivo';
   const total = calculo.total;
 
+  if (metodo === 'credito') {
+    // Crédito: no entra dinero ahora; la venta queda como cuenta por cobrar.
+    return { efectivo: 0, efectivoEntregado: 0, tarjeta: 0, transferencia: 0, metodo };
+  }
+
   if (metodo === 'tarjeta') {
     return { efectivo: 0, efectivoEntregado: 0, tarjeta: total, transferencia: 0, metodo };
   }
@@ -1626,11 +1631,22 @@ const buscarClientes = async (term = '') => {
   }
 };
 
+// Cliente elegido del listado (para crédito: enviar el id exacto y no depender
+// solo del nombre). Se limpia si el usuario edita el nombre a mano.
+let clienteSeleccionadoId = null;
+
 const aplicarClienteSeleccionado = (cliente) => {
   if (!cliente) return;
+  clienteSeleccionadoId = Number(cliente.id) || null;
   if (inputClienteNombre) inputClienteNombre.value = cliente.nombre || '';
   if (inputClienteDocumento) inputClienteDocumento.value = cliente.documento || '';
 };
+
+// Si el usuario edita el nombre a mano, ya no es el cliente seleccionado del
+// listado: el backend lo buscará/creará por nombre.
+inputClienteNombre?.addEventListener('input', () => {
+  clienteSeleccionadoId = null;
+});
 
 const setVentaActiva = (activa) => {
   estado.ventaActiva = activa;
@@ -1648,6 +1664,7 @@ const setVentaActiva = (activa) => {
 const limpiarFormularioCobro = () => {
   if (infoContainer) infoContainer.innerHTML = '';
   if (itemsContainer) itemsContainer.innerHTML = '';
+  clienteSeleccionadoId = null;
   if (inputClienteNombre) inputClienteNombre.value = '';
   if (inputClienteDocumento) inputClienteDocumento.value = '';
   if (inputClienteBuscar) inputClienteBuscar.value = '';
@@ -2264,6 +2281,18 @@ const confirmarPago = async () => {
   const toleranciaMinima = 0.05;
   const toleranciaExcesoNoEfectivo = 5;
 
+  // Crédito: exige identificar al cliente (guardado o nuevo) antes de facturar.
+  const esCreditoMostrador = pagos.metodo === 'credito';
+  const clienteCreditoNombre = (inputClienteNombre?.value || '').trim();
+  if (esCreditoMostrador && !clienteCreditoNombre) {
+    mostrarMensajeCobro(
+      'Para facturar a crédito selecciona un cliente guardado o escribe el nombre (y documento) de la persona.',
+      'error'
+    );
+    inputClienteBuscar?.focus();
+    return;
+  }
+
   if (pagos.metodo === 'tarjeta') {
     if (pagos.tarjeta < total - toleranciaMinima) {
       mostrarMensajeCobro('El monto en tarjeta no cubre el total a cobrar.', 'error');
@@ -2304,33 +2333,56 @@ const confirmarPago = async () => {
     const usuario = obtenerUsuarioActual();
     const detalleDescuentosPayload = expandirDescuentosPorDetalle();
 
-    const respuesta = await fetchAutorizado(`/api/cuentas/${estado.ventaActual.cuenta_id}/cerrar`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        descuento_porcentaje: calculo.descuentoPorcentaje,
-        descuento_monto: calculo.descuentoMonto,
-        propina_porcentaje: calculo.propinaPorcentaje,
-        cliente: inputClienteNombre?.value,
-        cliente_documento: inputClienteDocumento?.value,
-        tipo_comprobante: tipoComprobante || obtenerTipoComprobantePredeterminadoMostrador(),
-        ncf: ncfManual,
-        generar_ncf: !sinComprobante,
-        comentarios: inputComentarios?.value,
-        usuario_id: usuario?.id,
-        usuario_rol: usuario?.rol,
-        origen_caja: 'mostrador',
-        detalle_descuentos: detalleDescuentosPayload,
-        pagos: {
-          efectivo: pagos.efectivoAplicado ?? pagos.efectivo ?? calculo.total,
-          efectivo_entregado: pagos.efectivoEntregado,
-          tarjeta: pagos.tarjeta,
-          transferencia: pagos.transferencia,
+    let respuesta;
+    if (esCreditoMostrador) {
+      // Crédito: endpoint dedicado. Busca/crea el cliente (queda guardado en
+      // Clientes), asigna NCF, crea la cuenta por cobrar con origen mostrador
+      // (así aparece en ESTE cuadre) y marca la venta como pagada a crédito.
+      respuesta = await fetchAutorizado('/api/caja/cobrar-credito', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cuenta_id: estado.ventaActual.cuenta_id,
+          cliente_id: clienteSeleccionadoId,
+          cliente_nombre: clienteCreditoNombre,
+          cliente_documento: inputClienteDocumento?.value?.trim() || null,
+          tipo_comprobante: tipoComprobante || obtenerTipoComprobantePredeterminadoMostrador(),
+          descuento_porcentaje: calculo.descuentoPorcentaje,
+          propina_porcentaje: calculo.propinaPorcentaje,
+          comentarios: inputComentarios?.value,
+          ncf: ncfManual || null,
+          origen_caja: 'mostrador',
+        }),
+      });
+    } else {
+      respuesta = await fetchAutorizado(`/api/cuentas/${estado.ventaActual.cuenta_id}/cerrar`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
         },
-      }),
-    });
+        body: JSON.stringify({
+          descuento_porcentaje: calculo.descuentoPorcentaje,
+          descuento_monto: calculo.descuentoMonto,
+          propina_porcentaje: calculo.propinaPorcentaje,
+          cliente: inputClienteNombre?.value,
+          cliente_documento: inputClienteDocumento?.value,
+          tipo_comprobante: tipoComprobante || obtenerTipoComprobantePredeterminadoMostrador(),
+          ncf: ncfManual,
+          generar_ncf: !sinComprobante,
+          comentarios: inputComentarios?.value,
+          usuario_id: usuario?.id,
+          usuario_rol: usuario?.rol,
+          origen_caja: 'mostrador',
+          detalle_descuentos: detalleDescuentosPayload,
+          pagos: {
+            efectivo: pagos.efectivoAplicado ?? pagos.efectivo ?? calculo.total,
+            efectivo_entregado: pagos.efectivoEntregado,
+            tarjeta: pagos.tarjeta,
+            transferencia: pagos.transferencia,
+          },
+        }),
+      });
+    }
 
     const data = await respuesta.json().catch(() => ({ ok: false }));
     if (!respuesta.ok || !data.ok) {
@@ -2340,7 +2392,11 @@ const confirmarPago = async () => {
     const tipoCompFinal = tipoComprobante || '';
     const esEcf = /^E(31|32|33|34|41|43|44|45|46|47)$/i.test(tipoCompFinal);
     mostrarMensajeCobro(
-      esEcf ? 'Pago registrado. e-CF pendiente de emisión.' : 'Pago registrado correctamente.',
+      esCreditoMostrador
+        ? `Venta a crédito registrada a "${clienteCreditoNombre}". Quedó como cuenta por cobrar.`
+        : esEcf
+          ? 'Pago registrado. e-CF pendiente de emisión.'
+          : 'Pago registrado correctamente.',
       'info'
     );
     const facturaGenerada = data.factura;

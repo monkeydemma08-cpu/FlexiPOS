@@ -508,7 +508,12 @@
     setCampoCuadre('cuadre-efectivo-esperado', esperado);
   };
 
+  const esPedidoCredito = (pedido = {}) =>
+    String(pedido.metodo_pago || '').trim().toLowerCase() === 'credito';
+
   const obtenerEfectivoAplicadoCuadre = (pedido = {}) => {
+    // Crédito: no entró dinero; nada de asumir efectivo por descarte.
+    if (esPedidoCredito(pedido)) return 0;
     const efectivoRegistrado = Number(pedido.pago_efectivo) || 0;
     if (efectivoRegistrado > 0) return efectivoRegistrado;
 
@@ -534,6 +539,7 @@
   };
 
   const obtenerMetodoPagoLabel = (pedido = {}) => {
+    if (esPedidoCredito(pedido)) return 'Crédito';
     const efectivoAplicado = obtenerEfectivoAplicadoCuadre(pedido);
     const tarjeta = Number(pedido.pago_tarjeta) || 0;
     const transferencia = Number(pedido.pago_transferencia) || 0;
@@ -551,10 +557,12 @@
     { value: 'efectivo', label: 'Efectivo' },
     { value: 'tarjeta', label: 'Tarjeta' },
     { value: 'transferencia', label: 'Transferencia/Deposito' },
+    { value: 'credito', label: 'Crédito' },
   ];
 
   // Detecta el método "primario" del pedido para preseleccionar el select.
   const obtenerMetodoPagoValorCuadre = (pedido = {}) => {
+    if (esPedidoCredito(pedido)) return 'credito';
     const efectivoAplicado = obtenerEfectivoAplicadoCuadre(pedido);
     const tarjeta = Number(pedido.pago_tarjeta) || 0;
     const transferencia = Number(pedido.pago_transferencia) || 0;
