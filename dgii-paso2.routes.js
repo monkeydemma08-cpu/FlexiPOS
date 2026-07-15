@@ -3,12 +3,22 @@ const crypto = require('crypto');
 const fs = require('fs/promises');
 const path = require('path');
 const { buildEcfXml, buildResumenFcXml, cleanPayloadEntries } = require('./dgii-paso2.xml');
-let XLSX = null;
 let forge = null;
 let SignedXml = null;
 const dgiiPaso2MissingDeps = [];
+
+// xlsx pesa ~25MB en RAM y solo se usa al importar un archivo Excel en el flujo
+// batch de DGII Paso 2 (algo muy poco frecuente). Se carga de forma PEREZOSA
+// (getXLSX) para no ocupar esos 25MB de forma permanente. Aquí solo verificamos
+// que esté instalado —con require.resolve, que NO lo carga en memoria— para
+// mantener el aviso de dependencia faltante.
+let _xlsxMod = null;
+const getXLSX = () => {
+  if (!_xlsxMod) _xlsxMod = require('xlsx');
+  return _xlsxMod;
+};
 try {
-  XLSX = require('xlsx');
+  require.resolve('xlsx');
 } catch (error) {
   dgiiPaso2MissingDeps.push('xlsx');
 }
@@ -522,6 +532,7 @@ const computeCodigoSeguridadeCF = (signatureValue = '') => {
   return clean.slice(0, 6);
 };
 const parseXlsxCases = ({ fileBuffer, fileName }) => {
+  const XLSX = getXLSX(); // carga perezosa: solo aquí, al procesar un Excel real
   const workbook = XLSX.read(fileBuffer, {
     type: 'buffer',
     raw: false,

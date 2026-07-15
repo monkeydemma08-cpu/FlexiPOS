@@ -9,12 +9,21 @@ const { Server } = require('socket.io');
 const QRCode = require('qrcode');
 const compression = require('compression');
 
-let nodemailer = null;
-try {
-  nodemailer = require('nodemailer');
-} catch (error) {
-  console.warn('nodemailer no disponible. El envio de correos de registro quedara desactivado.');
-}
+// nodemailer (~7MB en RAM) solo se usa para enviar correos de registro (poco
+// frecuente). Se carga de forma PEREZOSA la primera vez que se necesita, no al
+// arrancar, para no ocupar esos 7MB de forma permanente.
+let _nodemailerMod;
+const getNodemailer = () => {
+  if (_nodemailerMod === undefined) {
+    try {
+      _nodemailerMod = require('nodemailer');
+    } catch (error) {
+      _nodemailerMod = null;
+      console.warn('nodemailer no disponible. El envio de correos de registro quedara desactivado.');
+    }
+  }
+  return _nodemailerMod;
+};
 
 const db = require('./db');
 const usuariosRepo = require('./repos/usuarios-mysql');
@@ -1118,6 +1127,7 @@ function getRegistroMailTransporter() {
   if (registroMailTransporterIntentado) return registroMailTransporter;
   registroMailTransporterIntentado = true;
 
+  const nodemailer = getNodemailer();
   if (!nodemailer) {
     registroMailTransporter = null;
     return registroMailTransporter;
@@ -10931,6 +10941,14 @@ const registrarCierreCaja = async (payload, negocioId) => {
     );
   });
 
+  // Momento del cuadre ANTERIOR (mismo origen) = inicio de este turno. Se captura
+  // ANTES de insertar el nuevo cierre; si no, el "último" sería este mismo. Sirve
+  // para atribuir a este cuadre exactamente las salidas del turno (las creadas
+  // después del cuadre anterior), aunque el turno cruce la medianoche.
+  const inicioTurnoGastos = await new Promise((resolve) => {
+    obtenerUltimoCierreCaja(negocio, origenCaja, (errUC, ts) => resolve(errUC ? null : ts || null));
+  });
+
   const totalEfectivo = Number(resumenDia.total_efectivo) || 0;
   const totalSalidas = Number(resumenDia.total_salidas) || 0;
   const esperado = Number((fondoInicial + totalEfectivo - totalSalidas).toFixed(2));
@@ -10992,19 +11010,29 @@ const registrarCierreCaja = async (payload, negocioId) => {
       paramsFacturas
     );
 
-    // Gastos: este cuadre reclama los gastos de su fecha de operación que aún no
-    // pertenecen a ningún cierre. Así cada cuadre muestra SOLO sus gastos: el
-    // primero del día toma los del día, y un cuadre posterior toma únicamente
-    // los agregados después del anterior. Sin duplicar y sin depender de fechas
-    // frágiles. Los gastos no tienen origen_caja (son del negocio, no de una
-    // caja específica), por eso no se filtra por origen.
+    // Gastos = salidas de caja del turno. Este cuadre reclama las salidas de su
+    // MISMO origen creadas DESPUÉS del cuadre anterior (la ventana del turno,
+    // igual que el cálculo de efectivo). Al acotar por created_at y no por fecha,
+    // el turno que cruza medianoche toma tanto lo de antes como lo de después de
+    // las 12, y NO barre salidas huérfanas de turnos viejos sin cuadrar. Se
+    // limita a SALIDA_CAJA (no arrastra gastos administrativos) y el origen real
+    // se toma de salidas_caja (el gasto espejo guarda 'caja' fijo, no sirve).
+    const paramsGastos = [cierreId, negocio];
+    const filtroOrigenGastos = construirFiltroOrigenCaja(origenCaja, paramsGastos, 's.origen_caja');
+    let filtroTurnoGastos = '';
+    if (inicioTurnoGastos) {
+      filtroTurnoGastos = ' AND s.created_at > ?';
+      paramsGastos.push(inicioTurnoGastos);
+    }
     await db.run(
-      `UPDATE gastos
-          SET cierre_id = ?
-        WHERE cierre_id IS NULL
-          AND negocio_id = ?
-          AND DATE(fecha) = ?`,
-      [cierreId, negocio, fechaOperacion]
+      `UPDATE gastos g
+          JOIN salidas_caja s ON s.id = g.referencia_id AND s.negocio_id = g.negocio_id
+          SET g.cierre_id = ?
+        WHERE g.cierre_id IS NULL
+          AND g.negocio_id = ?
+          AND g.referencia_tipo = 'SALIDA_CAJA'
+          AND ${filtroOrigenGastos}${filtroTurnoGastos}`,
+      paramsGastos
     );
   }
 
@@ -11545,19 +11573,23 @@ app.get('/api/caja/cierres/:id/ticket', (req, res) => {
 
       const totalVentas = todosPedidos.reduce((acc, p) => acc + (Number(p.total) || 0), 0);
 
-      // 7) Gastos que pertenecen a ESTE cierre. Se filtran por cierre_id (que se
-      // estampa al registrar el cuadre), NO por fecha: así cada cuadre muestra
-      // solo sus gastos, sin duplicar los del cuadre anterior del mismo día y
-      // sin fallar por desajustes de fecha.
+      // 7) Gastos (salidas de caja) que pertenecen a ESTE cierre. Se filtran por
+      // cierre_id, que se estampa al registrar el cuadre reclamando las salidas
+      // pendientes del turno (sin importar la fecha). Así cada cuadre muestra
+      // TODAS sus salidas —incluidas las de antes de medianoche— sin duplicar
+      // las del cuadre anterior. Se ordena por el momento real de la salida.
       let gastos = [];
       let totalGastos = 0;
       try {
         gastos = await db.all(
-          `SELECT id, fecha, monto, categoria, metodo_pago, proveedor, descripcion
-             FROM gastos
-            WHERE negocio_id = ?
-              AND cierre_id = ?
-            ORDER BY fecha ASC, id ASC`,
+          `SELECT g.id, COALESCE(s.fecha, g.fecha) AS fecha, g.monto, g.categoria,
+                  g.metodo_pago, g.proveedor, g.descripcion
+             FROM gastos g
+             LEFT JOIN salidas_caja s ON s.id = g.referencia_id AND s.negocio_id = g.negocio_id
+            WHERE g.negocio_id = ?
+              AND g.cierre_id = ?
+              AND g.referencia_tipo = 'SALIDA_CAJA'
+            ORDER BY COALESCE(s.created_at, s.fecha, g.fecha) ASC, g.id ASC`,
           [negocioId, cierreId]
         );
         totalGastos = (gastos || []).reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
@@ -20815,6 +20847,14 @@ app.get('/api/clientes', (req, res) => {
     const areaSolicitada = normalizarAreaPreparacion(
       req.body?.area_preparacion ?? req.body?.areaPreparacion ?? (esUsuarioBar(usuarioSesion) ? 'bar' : 'cocina')
     );
+    // Filtros opcionales (para el panel de admin). Si no vienen, se conserva el
+    // comportamiento previo (solo activos, tope 50) que usan caja/mostrador.
+    const estadoFiltro = (req.query.estado || '').toString().trim().toLowerCase();
+    const saldoFiltro = (req.query.saldo || '').toString().trim().toLowerCase();
+    const rutaFiltro = Number(req.query.ruta_id ?? req.query.rutaId);
+    const limitParam = Number(req.query.limit);
+    const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 1000) : 50;
+
     const params = [negocioId, negocioId, negocioId];
     let sql = `SELECT c.id,
                       c.nombre,
@@ -20824,11 +20864,23 @@ app.get('/api/clientes', (req, res) => {
                       c.email,
                       c.direccion,
                       c.notas,
+                      c.notas_internas,
                       c.activo,
+                      c.ruta_id,
+                      r.nombre AS ruta_nombre,
+                      r.color AS ruta_color,
+                      COALESCE(c.credito_activo, 0) AS credito_activo,
+                      COALESCE(c.credito_limite, 0) AS credito_limite,
+                      COALESCE(c.credito_dias, 0) AS credito_dias,
+                      COALESCE(c.credito_bloqueo_exceso, 0) AS credito_bloqueo_exceso,
+                      COALESCE(c.vip, 0) AS vip,
+                      c.segmento,
+                      c.whatsapp,
                       COALESCE(d.total_deuda, 0) AS deuda_total,
                       COALESCE(a.total_abonos, 0) AS abonos_total,
                       GREATEST(COALESCE(d.total_deuda, 0) - COALESCE(a.total_abonos, 0), 0) AS saldo_pendiente
                FROM clientes c
+               LEFT JOIN rutas r ON r.id = c.ruta_id
                LEFT JOIN (
                  SELECT cliente_id, SUM(monto_total) AS total_deuda
                  FROM clientes_deudas
@@ -20841,16 +20893,38 @@ app.get('/api/clientes', (req, res) => {
                  WHERE negocio_id = ?
                  GROUP BY cliente_id
                ) a ON a.cliente_id = c.id
-               WHERE c.negocio_id = ?
-                 AND c.activo = 1`;
+               WHERE c.negocio_id = ?`;
 
-    if (term) {
-      sql += ' AND (c.nombre LIKE ? OR c.documento LIKE ?)';
-      const like = `%${term}%`;
-      params.push(like, like);
+    // Estado: por defecto solo activos (compatibilidad). 'inactivos' o 'todos' lo cambian.
+    if (estadoFiltro === 'inactivos') {
+      sql += ' AND c.activo = 0';
+    } else if (estadoFiltro === 'todos') {
+      // sin filtro de activo
+    } else {
+      sql += ' AND c.activo = 1';
     }
 
-    sql += ' ORDER BY c.nombre ASC LIMIT 50';
+    if (Number.isInteger(rutaFiltro) && rutaFiltro > 0) {
+      sql += ' AND c.ruta_id = ?';
+      params.push(rutaFiltro);
+    } else if ((req.query.ruta_id ?? req.query.rutaId) === 'sin') {
+      sql += ' AND c.ruta_id IS NULL';
+    }
+
+    if (term) {
+      sql += ' AND (c.nombre LIKE ? OR c.documento LIKE ? OR c.telefono LIKE ?)';
+      const like = `%${term}%`;
+      params.push(like, like, like);
+    }
+
+    // Saldo se filtra sobre la expresión calculada.
+    if (saldoFiltro === 'pendiente') {
+      sql += ' HAVING saldo_pendiente > 0';
+    } else if (saldoFiltro === 'cero') {
+      sql += ' HAVING saldo_pendiente <= 0';
+    }
+
+    sql += ` ORDER BY c.nombre ASC LIMIT ${limit}`;
 
     db.all(sql, params, (err, rows) => {
       if (err) {
@@ -20862,15 +20936,33 @@ app.get('/api/clientes', (req, res) => {
   });
 });
 
+// Normaliza los campos extendidos de cliente (ruta + crédito) que llegan del form.
+const normalizarCamposClienteExtendido = (body = {}) => {
+  const rutaIdRaw = body.ruta_id ?? body.rutaId;
+  const rutaId = Number(rutaIdRaw);
+  return {
+    ruta_id: Number.isInteger(rutaId) && rutaId > 0 ? rutaId : null,
+    credito_activo: normalizarFlag(body.credito_activo ?? body.creditoActivo, 0) ? 1 : 0,
+    credito_limite: Math.max(Number(body.credito_limite ?? body.creditoLimite) || 0, 0),
+    credito_dias: Math.max(parseInt(body.credito_dias ?? body.creditoDias, 10) || 0, 0),
+    credito_bloqueo_exceso: normalizarFlag(body.credito_bloqueo_exceso ?? body.creditoBloqueoExceso, 0) ? 1 : 0,
+    whatsapp: (body.whatsapp || '').toString().trim() || null,
+    notas_internas: (body.notas_internas ?? body.notasInternas ?? '').toString().trim() || null,
+  };
+};
+
 app.post('/api/clientes', (req, res) => {
   requireUsuarioSesion(req, res, (usuarioSesion) => {
     const { nombre, documento, tipo_documento, telefono, email, direccion, notas, activo = 1 } = req.body || {};
     if (!nombre || !nombre.trim()) {
       return res.status(400).json({ ok: false, error: 'El nombre del cliente es obligatorio' });
     }
+    const ext = normalizarCamposClienteExtendido(req.body || {});
 
-    const sql = `INSERT INTO clientes (nombre, documento, tipo_documento, telefono, email, direccion, notas, activo, negocio_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const sql = `INSERT INTO clientes
+                 (nombre, documento, tipo_documento, telefono, email, direccion, notas, activo, negocio_id,
+                  ruta_id, credito_activo, credito_limite, credito_dias, credito_bloqueo_exceso, whatsapp, notas_internas)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     const params = [
       nombre.trim(),
       documento?.trim() || null,
@@ -20881,6 +20973,13 @@ app.post('/api/clientes', (req, res) => {
       notas || null,
       activo ? 1 : 0,
       usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT,
+      ext.ruta_id,
+      ext.credito_activo,
+      ext.credito_limite,
+      ext.credito_dias,
+      ext.credito_bloqueo_exceso,
+      ext.whatsapp,
+      ext.notas_internas,
     ];
 
     db.run(sql, params, function (err) {
@@ -20890,17 +20989,7 @@ app.post('/api/clientes', (req, res) => {
       }
       res.json({
         ok: true,
-        cliente: {
-          id: this.lastID,
-          nombre: nombre.trim(),
-          documento: documento?.trim() || null,
-          tipo_documento,
-          telefono,
-          email,
-          direccion,
-          notas,
-          activo: activo ? 1 : 0,
-        },
+        cliente: { id: this.lastID, nombre: nombre.trim(), activo: activo ? 1 : 0, ...ext },
       });
     });
   });
@@ -20917,8 +21006,11 @@ app.put('/api/clientes/:id', (req, res) => {
       return res.status(400).json({ ok: false, error: 'El nombre del cliente es obligatorio' });
     }
 
+    const ext = normalizarCamposClienteExtendido(req.body || {});
     const sql = `UPDATE clientes
-                 SET nombre = ?, documento = ?, tipo_documento = ?, telefono = ?, email = ?, direccion = ?, notas = ?, activo = ?, actualizado_en = CURRENT_TIMESTAMP
+                 SET nombre = ?, documento = ?, tipo_documento = ?, telefono = ?, email = ?, direccion = ?, notas = ?, activo = ?,
+                     ruta_id = ?, credito_activo = ?, credito_limite = ?, credito_dias = ?, credito_bloqueo_exceso = ?,
+                     whatsapp = ?, notas_internas = ?, actualizado_en = CURRENT_TIMESTAMP
                  WHERE id = ? AND negocio_id = ?`;
     const params = [
       nombre.trim(),
@@ -20929,6 +21021,13 @@ app.put('/api/clientes/:id', (req, res) => {
       direccion || null,
       notas || null,
       activo ? 1 : 0,
+      ext.ruta_id,
+      ext.credito_activo,
+      ext.credito_limite,
+      ext.credito_dias,
+      ext.credito_bloqueo_exceso,
+      ext.whatsapp,
+      ext.notas_internas,
       id,
       usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT,
     ];
@@ -20943,6 +21042,167 @@ app.put('/api/clientes/:id', (req, res) => {
       }
       res.json({ ok: true });
     });
+  });
+});
+
+// ===========================================================================
+// RUTAS DE CLIENTES (organización de la cartera)
+// ===========================================================================
+app.get('/api/rutas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const rutas = await db.all(
+        `SELECT r.id, r.nombre, r.descripcion, r.color, r.activo, r.orden,
+                COALESCE(c.total, 0) AS clientes_count
+           FROM rutas r
+           LEFT JOIN (
+             SELECT ruta_id, COUNT(*) AS total FROM clientes
+              WHERE negocio_id = ? AND ruta_id IS NOT NULL GROUP BY ruta_id
+           ) c ON c.ruta_id = r.id
+          WHERE r.negocio_id = ?
+          ORDER BY r.orden ASC, r.nombre ASC`,
+        [negocioId, negocioId]
+      );
+      res.json({ ok: true, rutas: rutas || [] });
+    } catch (error) {
+      console.error('Error al obtener rutas:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener las rutas' });
+    }
+  });
+});
+
+app.post('/api/rutas', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const nombre = (req.body?.nombre || '').toString().trim();
+    const descripcion = (req.body?.descripcion || '').toString().trim() || null;
+    const color = (req.body?.color || '').toString().trim() || null;
+    if (!nombre) {
+      return res.status(400).json({ ok: false, error: 'El nombre de la ruta es obligatorio.' });
+    }
+    try {
+      const result = await db.run(
+        'INSERT INTO rutas (negocio_id, nombre, descripcion, color) VALUES (?, ?, ?, ?)',
+        [negocioId, nombre, descripcion, color]
+      );
+      res.status(201).json({ ok: true, ruta: { id: result.lastID, nombre, descripcion, color, activo: 1 } });
+    } catch (error) {
+      if (error?.errno === 1062) {
+        return res.status(400).json({ ok: false, error: 'Ya existe una ruta con ese nombre.' });
+      }
+      console.error('Error al crear ruta:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo crear la ruta' });
+    }
+  });
+});
+
+app.put('/api/rutas/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const id = Number(req.params.id);
+    const nombre = (req.body?.nombre || '').toString().trim();
+    const descripcion = (req.body?.descripcion || '').toString().trim() || null;
+    const color = (req.body?.color || '').toString().trim() || null;
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de ruta inválido' });
+    }
+    if (!nombre) {
+      return res.status(400).json({ ok: false, error: 'El nombre de la ruta es obligatorio.' });
+    }
+    try {
+      const result = await db.run(
+        'UPDATE rutas SET nombre = ?, descripcion = ?, color = ? WHERE id = ? AND negocio_id = ?',
+        [nombre, descripcion, color, id, negocioId]
+      );
+      if ((result.changes || 0) === 0) {
+        return res.status(404).json({ ok: false, error: 'Ruta no encontrada' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      if (error?.errno === 1062) {
+        return res.status(400).json({ ok: false, error: 'Ya existe una ruta con ese nombre.' });
+      }
+      console.error('Error al actualizar ruta:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo actualizar la ruta' });
+    }
+  });
+});
+
+app.delete('/api/rutas/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de ruta inválido' });
+    }
+    try {
+      // Al borrar una ruta, los clientes quedan sin ruta (no se borran).
+      await db.run('UPDATE clientes SET ruta_id = NULL WHERE ruta_id = ? AND negocio_id = ?', [id, negocioId]);
+      const result = await db.run('DELETE FROM rutas WHERE id = ? AND negocio_id = ?', [id, negocioId]);
+      if ((result.changes || 0) === 0) {
+        return res.status(404).json({ ok: false, error: 'Ruta no encontrada' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al eliminar ruta:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo eliminar la ruta' });
+    }
+  });
+});
+
+// Historial de compras de un cliente (qué productos y cuánto ha comprado).
+app.get('/api/clientes/:id/historial-compras', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const clienteId = Number(req.params.id);
+    if (!Number.isInteger(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de cliente inválido' });
+    }
+    try {
+      const cliente = await db.get('SELECT id, documento FROM clientes WHERE id = ? AND negocio_id = ?', [
+        clienteId,
+        negocioId,
+      ]);
+      if (!cliente) {
+        return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
+      }
+      // Compras a crédito (facturas de cliente) por producto.
+      const porCredito = await db.all(
+        `SELECT p.nombre AS producto,
+                SUM(dd.cantidad) AS cantidad,
+                SUM(dd.cantidad * dd.precio_unitario) AS total
+           FROM clientes_deudas_detalle dd
+           JOIN clientes_deudas d ON d.id = dd.deuda_id
+           LEFT JOIN productos p ON p.id = dd.producto_id
+          WHERE d.cliente_id = ? AND d.negocio_id = ?
+          GROUP BY p.nombre
+          ORDER BY total DESC`,
+        [clienteId, negocioId]
+      );
+      const totalComprado = (porCredito || []).reduce((acc, r) => acc + (Number(r.total) || 0), 0);
+      res.json({
+        ok: true,
+        productos: (porCredito || []).map((r) => ({
+          producto: r.producto || 'Producto',
+          cantidad: Number(r.cantidad) || 0,
+          total: Number(Number(r.total).toFixed(2)),
+        })),
+        total_comprado: Number(totalComprado.toFixed(2)),
+      });
+    } catch (error) {
+      console.error('Error al obtener historial de compras:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo obtener el historial de compras' });
+    }
   });
 });
 
@@ -29379,6 +29639,110 @@ app.post('/api/productos', (req, res) => {
       await db.run('ROLLBACK').catch(() => {});
       console.error('Error al crear producto:', error?.message || error);
       return res.status(500).json({ error: 'Error al crear producto' });
+    }
+  });
+});
+
+// ¿El producto tiene historial de ventas o está en uso en otro lado? Si aparece
+// en cualquiera de estas tablas, borrarlo dañaría reportes/facturas, así que se
+// desactiva en vez de borrarse.
+const productoTieneHistorial = async (productoId) => {
+  const checks = [
+    ['detalle_pedido', 'producto_id'], // vendido en un pedido
+    ['clientes_deudas_detalle', 'producto_id'], // vendido a crédito
+    ['cotizacion_items', 'producto_id'], // en una cotización
+    ['compras_inventario_detalle', 'producto_id'], // en una compra
+    ['receta_detalle', 'insumo_id'], // usado como ingrediente de otro producto
+  ];
+  for (const [tabla, col] of checks) {
+    try {
+      const row = await db.get(`SELECT 1 AS x FROM ${tabla} WHERE ${col} = ? LIMIT 1`, [productoId]);
+      if (row) return true;
+    } catch (_) { /* tabla ausente en algún entorno: ignorar */ }
+  }
+  try {
+    const row = await db.get(
+      'SELECT 1 AS x FROM consumo_insumos WHERE producto_final_id = ? OR insumo_id = ? LIMIT 1',
+      [productoId, productoId]
+    );
+    if (row) return true;
+  } catch (_) {}
+  return false;
+};
+
+const esErrorLlaveForanea = (err) =>
+  !!err &&
+  (err.errno === 1451 ||
+    err.code === 'ER_ROW_IS_REFERENCED_2' ||
+    err.code === 'ER_ROW_IS_REFERENCED');
+
+// Borrado INTELIGENTE de producto:
+//   - Si nunca se usó (sin ventas/compras/recetas ajenas) -> se borra de verdad
+//     (limpiando su propia receta primero).
+//   - Si tiene historial -> se DESACTIVA (se oculta pero conserva los reportes).
+app.delete('/api/productos/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!tienePermisoAdmin(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de producto inválido' });
+    }
+
+    try {
+      const producto = await db.get(
+        'SELECT id, nombre FROM productos WHERE id = ? AND negocio_id = ?',
+        [id, negocioId]
+      );
+      if (!producto) {
+        return res.status(404).json({ ok: false, error: 'Producto no encontrado' });
+      }
+
+      const desactivar = async (motivo) => {
+        await db.run('UPDATE productos SET activo = 0 WHERE id = ? AND negocio_id = ?', [id, negocioId]);
+        return res.json({
+          ok: true,
+          modo: 'desactivado',
+          nombre: producto.nombre,
+          mensaje: `"${producto.nombre}" ${motivo}, así que se desactivó (se oculta pero conserva el historial).`,
+        });
+      };
+
+      // Con historial -> desactivar.
+      if (await productoTieneHistorial(id)) {
+        return desactivar('tiene historial de ventas u otros usos');
+      }
+
+      // Sin historial -> borrado real (limpiando su receta propia primero).
+      try {
+        await db.run('BEGIN');
+        await db.run(
+          'DELETE FROM receta_detalle WHERE receta_id IN (SELECT id FROM recetas WHERE producto_final_id = ? AND negocio_id = ?)',
+          [id, negocioId]
+        );
+        await db.run('DELETE FROM recetas WHERE producto_final_id = ? AND negocio_id = ?', [id, negocioId]);
+        await db.run('DELETE FROM productos WHERE id = ? AND negocio_id = ?', [id, negocioId]);
+        await db.run('COMMIT');
+      } catch (delErr) {
+        await db.run('ROLLBACK').catch(() => {});
+        // Red de seguridad: si aún está referenciado por algo, desactivamos.
+        if (esErrorLlaveForanea(delErr)) {
+          return desactivar('está referenciado en el sistema');
+        }
+        throw delErr;
+      }
+
+      return res.json({
+        ok: true,
+        modo: 'eliminado',
+        nombre: producto.nombre,
+        mensaje: `"${producto.nombre}" se eliminó permanentemente (no tenía historial).`,
+      });
+    } catch (error) {
+      console.error('Error al eliminar producto:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo eliminar el producto' });
     }
   });
 });

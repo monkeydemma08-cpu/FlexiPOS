@@ -12,7 +12,7 @@
     />
     <link rel="stylesheet" href="css/styles.css" />
     <script src="js/auth.js" defer></script>
-    <script src="js/mostrador.js?v=20260615c" defer></script>
+    <script src="js/mostrador.js?v=20260709a" defer></script>
     <script src="js/mostrador-cuadre.js?v=20260615b" defer></script>
   </head>
   <body data-role="vendedor">
@@ -130,6 +130,66 @@
                 <h2>Carrito</h2>
                 <p class="kanm-subtitle">Revisa cantidades y confirma antes de cobrar.</p>
               </div>
+
+              <!-- Ventas en espera: ventas guardadas para retomarlas después -->
+              <style>
+                .mostrador-espera-panel {
+                  border: 1px dashed rgba(37, 91, 199, 0.45);
+                  border-radius: 12px;
+                  padding: 10px 12px;
+                  margin-bottom: 10px;
+                  background: rgba(37, 91, 199, 0.05);
+                }
+                .mostrador-espera-panel h3 {
+                  margin: 0 0 8px;
+                  font-size: 0.92rem;
+                  font-weight: 700;
+                }
+                .mostrador-espera-lista {
+                  display: flex;
+                  flex-direction: column;
+                  gap: 6px;
+                }
+                .mostrador-espera-chip {
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  gap: 8px;
+                  background: #fff;
+                  border: 1px solid rgba(0, 0, 0, 0.08);
+                  border-radius: 10px;
+                  padding: 8px 10px;
+                }
+                .mostrador-espera-chip-info {
+                  min-width: 0;
+                  flex: 1;
+                }
+                .mostrador-espera-chip-info strong {
+                  display: block;
+                  font-size: 0.9rem;
+                  white-space: nowrap;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                }
+                .mostrador-espera-chip-info span {
+                  font-size: 0.78rem;
+                  color: #64748b;
+                }
+                .mostrador-espera-chip-acciones {
+                  display: flex;
+                  gap: 6px;
+                  flex-shrink: 0;
+                }
+                .mostrador-espera-chip-acciones .kanm-button {
+                  padding: 5px 10px;
+                  font-size: 0.8rem;
+                }
+              </style>
+              <div class="mostrador-espera-panel" id="mostrador-espera-panel" hidden>
+                <h3>⏸ Ventas en espera (<span id="mostrador-espera-count">0</span>)</h3>
+                <div class="mostrador-espera-lista" id="mostrador-espera-lista"></div>
+              </div>
+
               <div id="mostrador-carrito" class="lista-carrito"></div>
               <div class="carrito-resumen" id="mostrador-resumen-carrito">
                 <div class="resumen-item">
@@ -148,6 +208,9 @@
               <div class="mostrador-acciones">
                 <div id="mostrador-mensaje" class="kanm-message"></div>
                 <div class="acciones-pedido">
+                  <button id="mostrador-espera-guardar" type="button" class="kanm-button ghost" title="Guarda esta venta para retomarla después y empieza otra">
+                    ⏸ En espera
+                  </button>
                   <button id="mostrador-limpiar" type="button" class="kanm-button secondary">
                     Limpiar carrito
                   </button>

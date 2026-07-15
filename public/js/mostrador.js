@@ -1956,6 +1956,212 @@ const limpiarVenta = () => {
   mostrarDetalleVenta();
 };
 
+// ===========================================================================
+// VENTAS EN ESPERA: guarda la venta actual (carrito + datos) para retomarla
+// después, y permite trabajar varias ventas a la vez. Se persiste en
+// localStorage (por dispositivo), así sobrevive recargas de página.
+// ===========================================================================
+const esperaPanel = document.getElementById('mostrador-espera-panel');
+const esperaLista = document.getElementById('mostrador-espera-lista');
+const esperaCount = document.getElementById('mostrador-espera-count');
+const esperaGuardarBtn = document.getElementById('mostrador-espera-guardar');
+
+const ESPERA_STORAGE_KEY = `kanm:mostrador:ventas-espera:${window.APP_SESION?.negocioId || 'default'}`;
+let ventasEnEspera = [];
+
+const cargarVentasEsperaStorage = () => {
+  try {
+    const raw = localStorage.getItem(ESPERA_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    ventasEnEspera = Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    ventasEnEspera = [];
+  }
+};
+
+const persistirVentasEspera = () => {
+  try {
+    localStorage.setItem(ESPERA_STORAGE_KEY, JSON.stringify(ventasEnEspera));
+  } catch (error) {
+    console.warn('No se pudieron guardar las ventas en espera:', error);
+  }
+};
+
+const escapeHtmlEspera = (str) =>
+  String(str == null ? '' : str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
+const renderVentasEspera = () => {
+  if (!esperaPanel || !esperaLista) return;
+  if (esperaCount) esperaCount.textContent = String(ventasEnEspera.length);
+  esperaPanel.hidden = ventasEnEspera.length === 0;
+  esperaLista.innerHTML = ventasEnEspera
+    .map((v) => {
+      const totalEstimado = (v.items || []).reduce(
+        (acc, [, item]) => acc + (Number(item?.cantidad) || 0) * (Number(item?.precio_unitario) || 0),
+        0
+      );
+      const cuantos = (v.items || []).reduce((acc, [, item]) => acc + (Number(item?.cantidad) || 0), 0);
+      const hora = v.creadoAt
+        ? new Date(v.creadoAt).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })
+        : '';
+      return `
+        <div class="mostrador-espera-chip">
+          <div class="mostrador-espera-chip-info">
+            <strong>${escapeHtmlEspera(v.nombre || 'Venta en espera')}</strong>
+            <span>${cuantos} art. · DOP ${totalEstimado.toFixed(2)}${hora ? ` · ${hora}` : ''}</span>
+          </div>
+          <div class="mostrador-espera-chip-acciones">
+            <button type="button" class="kanm-button primary" data-espera-continuar="${v.id}">Continuar</button>
+            <button type="button" class="kanm-button ghost" data-espera-eliminar="${v.id}" title="Descartar esta venta">✕</button>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+};
+
+// Toma una "foto" de la venta actual (carrito + campos) para guardarla.
+const capturarVentaActual = (nombre) => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  nombre,
+  creadoAt: new Date().toISOString(),
+  items: Array.from(estado.carrito.entries()),
+  mesa: campoMesa?.value || '',
+  nota: notaInput?.value || '',
+  clienteNombre: inputClienteNombre?.value || '',
+  clienteDocumento: inputClienteDocumento?.value || '',
+  tipoComprobante: selectTipoComprobante?.value || '',
+  descuento: inputDescuento?.value || '0',
+  propina: inputPropina?.value || '',
+});
+
+const guardarVentaEnEspera = ({ silencioso = false } = {}) => {
+  if (estado.ventaActiva) {
+    mostrarMensajePedido('Esta venta ya fue creada. Cóbrala o cancélala; "En espera" es para ventas sin crear.', 'warning');
+    return false;
+  }
+  if (estado.carrito.size === 0) {
+    mostrarMensajePedido('El carrito está vacío: no hay nada que guardar en espera.', 'warning');
+    return false;
+  }
+
+  const sugerido =
+    inputClienteNombre?.value?.trim() ||
+    campoMesa?.value?.trim() ||
+    `Venta ${new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}`;
+  let nombre = sugerido;
+  if (!silencioso) {
+    const ingresado = window.prompt('Nombre para identificar esta venta en espera:', sugerido);
+    if (ingresado === null) return false; // canceló
+    nombre = ingresado.trim() || sugerido;
+  }
+
+  ventasEnEspera.unshift(capturarVentaActual(nombre));
+  persistirVentasEspera();
+  renderVentasEspera();
+  limpiarVenta();
+  mostrarMensajePedido(`Venta "${nombre}" guardada en espera. Puedes empezar otra.`, 'info');
+  return true;
+};
+
+const retomarVentaEnEspera = (id) => {
+  if (estado.ventaActiva) {
+    mostrarMensajePedido('Termina o cancela la venta creada actual antes de retomar otra.', 'warning');
+    return;
+  }
+  const venta = ventasEnEspera.find((v) => v.id === id);
+  if (!venta) return;
+
+  // Si hay algo en el carrito, lo guardamos automáticamente en espera para no
+  // perder nada (con nombre automático).
+  if (estado.carrito.size > 0) {
+    const guardado = guardarVentaEnEspera({ silencioso: true });
+    if (!guardado) return;
+  }
+
+  // Restaurar carrito, validando que los productos aún existan.
+  estado.carrito.clear();
+  const perdidos = [];
+  (venta.items || []).forEach(([key, item]) => {
+    const producto = estado.productos.find((p) => Number(p.id) === Number(item?.producto_id));
+    if (producto) {
+      estado.carrito.set(key, item);
+    } else {
+      perdidos.push(item?.producto_id);
+    }
+  });
+
+  if (campoMesa) campoMesa.value = venta.mesa || '';
+  if (notaInput) notaInput.value = venta.nota || '';
+  if (inputClienteNombre) inputClienteNombre.value = venta.clienteNombre || '';
+  if (inputClienteDocumento) inputClienteDocumento.value = venta.clienteDocumento || '';
+  if (selectTipoComprobante && venta.tipoComprobante) {
+    const existeOpcion = Array.from(selectTipoComprobante.options || []).some(
+      (o) => o.value === venta.tipoComprobante
+    );
+    if (existeOpcion) selectTipoComprobante.value = venta.tipoComprobante;
+  }
+  if (inputDescuento) inputDescuento.value = venta.descuento || '0';
+  if (inputPropina && venta.propina !== '') {
+    inputPropina.value = venta.propina;
+    inputPropina.dataset.dirty = '1';
+  }
+
+  // Sacarla de la lista de espera (ya está activa en el carrito).
+  ventasEnEspera = ventasEnEspera.filter((v) => v.id !== id);
+  persistirVentasEspera();
+  renderVentasEspera();
+  actualizarCarritoUI();
+
+  if (perdidos.length) {
+    mostrarMensajePedido(
+      `Venta "${venta.nombre}" retomada, pero ${perdidos.length} producto(s) ya no existen y se omitieron.`,
+      'warning'
+    );
+  } else {
+    mostrarMensajePedido(`Venta "${venta.nombre}" retomada. Puedes agregarle productos o cobrarla.`, 'info');
+  }
+};
+
+const eliminarVentaEnEspera = (id) => {
+  const venta = ventasEnEspera.find((v) => v.id === id);
+  if (!venta) return;
+  if (!window.confirm(`¿Descartar la venta en espera "${venta.nombre}"? Esta acción no se puede deshacer.`)) {
+    return;
+  }
+  ventasEnEspera = ventasEnEspera.filter((v) => v.id !== id);
+  persistirVentasEspera();
+  renderVentasEspera();
+  mostrarMensajePedido(`Venta "${venta.nombre}" descartada.`, 'info');
+};
+
+esperaGuardarBtn?.addEventListener('click', () => {
+  limpiarMensajePedido();
+  guardarVentaEnEspera();
+});
+
+esperaLista?.addEventListener('click', (event) => {
+  const btnContinuar = event.target.closest('[data-espera-continuar]');
+  if (btnContinuar) {
+    limpiarMensajePedido();
+    retomarVentaEnEspera(btnContinuar.dataset.esperaContinuar);
+    return;
+  }
+  const btnEliminar = event.target.closest('[data-espera-eliminar]');
+  if (btnEliminar) {
+    eliminarVentaEnEspera(btnEliminar.dataset.esperaEliminar);
+  }
+});
+
+// Cargar las ventas en espera guardadas (sobreviven recargas de página).
+cargarVentasEsperaStorage();
+renderVentasEspera();
+
 const crearVenta = async () => {
   if (estado.cargando || estado.ventaActiva) return;
   limpiarMensajePedido();

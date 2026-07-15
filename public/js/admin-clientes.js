@@ -34,6 +34,35 @@
   const btnFacturaNueva = document.getElementById('cliente-factura-nueva');
   const mensajeForm = document.getElementById('cliente-mensaje');
 
+  // --- Fase 2: rutas, crédito, historial, exportar ---
+  const selectRuta = document.getElementById('cliente-ruta');
+  const inputWhatsapp = document.getElementById('cliente-whatsapp');
+  const chkCreditoActivo = document.getElementById('cliente-credito-activo');
+  const inputCreditoLimite = document.getElementById('cliente-credito-limite');
+  const inputCreditoDias = document.getElementById('cliente-credito-dias');
+  const chkCreditoBloqueo = document.getElementById('cliente-credito-bloqueo');
+  const creditoDetalle = document.getElementById('cliente-credito-detalle');
+  const selectRutaFiltro = document.getElementById('clientes-ruta-filtro');
+  const btnGestionarRutas = document.getElementById('clientes-gestionar-rutas');
+  const btnExportar = document.getElementById('clientes-exportar');
+  const rutasModal = document.getElementById('rutas-modal');
+  const rutasModalCerrar = document.getElementById('rutas-modal-cerrar');
+  const rutasModalTabla = document.getElementById('rutas-modal-tabla');
+  const rutasModalMensaje = document.getElementById('rutas-modal-mensaje');
+  const inputRutaNueva = document.getElementById('ruta-nueva-nombre');
+  const btnRutaAgregar = document.getElementById('ruta-agregar');
+  const historialTotal = document.getElementById('cliente-historial-total');
+  const historialTabla = document.getElementById('cliente-historial-tabla');
+  let rutas = [];
+
+  const escapeHtml = (str) =>
+    String(str == null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
   const resumenDeudasTotal = document.getElementById('clientes-deudas-total');
   const resumenDeudasPagado = document.getElementById('clientes-deudas-pagado');
   const resumenDeudasSaldo = document.getElementById('clientes-deudas-saldo');
@@ -102,6 +131,12 @@
     }
     if (saldo === 'cero') {
       resultado = resultado.filter((cli) => Number(cli?.saldo_pendiente ?? 0) <= 0);
+    }
+    const rutaSel = selectRutaFiltro?.value || '';
+    if (rutaSel === 'sin') {
+      resultado = resultado.filter((cli) => !cli?.ruta_id);
+    } else if (rutaSel) {
+      resultado = resultado.filter((cli) => Number(cli?.ruta_id) === Number(rutaSel));
     }
     return resultado;
   };
@@ -524,11 +559,15 @@
         fila.classList.add('cliente-row--selected');
       }
       const saldo = Number(cli.saldo_pendiente ?? 0) || 0;
+      const nombreHtml = `${cli.nombre || ''}${Number(cli.credito_activo) ? ' <span class="cliente-badge cliente-badge--credito" title="Cliente con crédito">Crédito</span>' : ''}`;
+      const rutaHtml = cli.ruta_nombre
+        ? `<span class="cliente-ruta-chip">${cli.ruta_nombre}</span>`
+        : '<span class="kanm-subtitle">—</span>';
       fila.innerHTML = `
-        <td>${cli.nombre || ''}</td>
+        <td>${nombreHtml}</td>
         <td>${cli.documento || ''}</td>
         <td>${cli.telefono || ''}</td>
-        <td>${cli.email || ''}</td>
+        <td>${rutaHtml}</td>
         <td>${formatCurrency(saldo)}</td>
         <td>${cli.activo ? 'Activo' : 'Inactivo'}</td>
         <td><button type="button" class="kanm-button ghost" data-editar-cliente="${cli.id}">Editar</button></td>
@@ -563,7 +602,11 @@
     setMessage(mensajeLista, 'Cargando clientes...', 'info');
     try {
       const term = inputBuscar?.value?.trim() || '';
-      const resp = await fetchAutorizado(`/api/clientes?search=${encodeURIComponent(term)}`);
+      // Traemos TODOS (activos e inactivos) con los campos ricos; el filtrado
+      // fino (estado/saldo/ruta) se hace en el cliente con aplicarFiltrosClientes.
+      const resp = await fetchAutorizado(
+        `/api/clientes?search=${encodeURIComponent(term)}&estado=todos&limit=1000`
+      );
       const data = await resp.json();
       if (!resp.ok || data?.error) throw new Error(data?.error || 'No se pudo cargar clientes');
       clientes = data?.clientes || [];
@@ -754,6 +797,13 @@
     inputDireccion.value = cli.direccion || '';
     inputNotas.value = cli.notas || '';
     inputActivo.checked = cli.activo !== 0;
+    if (selectRuta) selectRuta.value = cli.ruta_id ? String(cli.ruta_id) : '';
+    if (inputWhatsapp) inputWhatsapp.value = cli.whatsapp || '';
+    if (chkCreditoActivo) chkCreditoActivo.checked = Number(cli.credito_activo) === 1;
+    if (inputCreditoLimite) inputCreditoLimite.value = Number(cli.credito_limite) || '';
+    if (inputCreditoDias) inputCreditoDias.value = Number(cli.credito_dias) || '';
+    if (chkCreditoBloqueo) chkCreditoBloqueo.checked = Number(cli.credito_bloqueo_exceso) === 1;
+    actualizarVisibilidadCredito();
     setMessage(mensajeForm, '');
     actualizarResumenCliente(cli);
     renderClientes();
@@ -761,6 +811,7 @@
     limpiarDeudaForm();
     limpiarAbonoForm();
     cargarDeudas();
+    cargarHistorialCompras(cli.id);
     // Cargar historial POS + estado de cuenta del cliente seleccionado.
     // Estas funciones son no-op si los elementos del DOM no existen.
     if (typeof cargarHistorialPosCliente === 'function') {
@@ -777,7 +828,17 @@
     direccion: inputDireccion.value.trim() || null,
     notas: inputNotas.value.trim() || null,
     activo: inputActivo.checked ? 1 : 0,
+    ruta_id: selectRuta?.value ? Number(selectRuta.value) : null,
+    whatsapp: inputWhatsapp?.value.trim() || null,
+    credito_activo: chkCreditoActivo?.checked ? 1 : 0,
+    credito_limite: Number(inputCreditoLimite?.value) || 0,
+    credito_dias: parseInt(inputCreditoDias?.value, 10) || 0,
+    credito_bloqueo_exceso: chkCreditoBloqueo?.checked ? 1 : 0,
   });
+
+  const actualizarVisibilidadCredito = () => {
+    if (creditoDetalle) creditoDetalle.style.display = chkCreditoActivo?.checked ? '' : 'none';
+  };
 
   const guardarCliente = async () => {
     const payload = obtenerPayload();
@@ -972,11 +1033,210 @@
     inputDireccion.value = '';
     inputNotas.value = '';
     inputActivo.checked = true;
+    if (selectRuta) selectRuta.value = '';
+    if (inputWhatsapp) inputWhatsapp.value = '';
+    if (chkCreditoActivo) chkCreditoActivo.checked = false;
+    if (inputCreditoLimite) inputCreditoLimite.value = '';
+    if (inputCreditoDias) inputCreditoDias.value = '';
+    if (chkCreditoBloqueo) chkCreditoBloqueo.checked = false;
+    actualizarVisibilidadCredito();
+    if (historialTabla) historialTabla.innerHTML = '';
+    if (historialTotal) historialTotal.textContent = 'Selecciona un cliente para ver qué ha comprado.';
     setMessage(mensajeForm, '');
     actualizarResumenCliente(null);
     resetDeudasUI();
     renderClientes();
   };
+
+  // =========================================================================
+  // Fase 2: rutas, historial de compras y exportación
+  // =========================================================================
+  const cargarRutas = async () => {
+    try {
+      const resp = await fetchAutorizado('/api/rutas');
+      const data = await resp.json().catch(() => ({}));
+      rutas = Array.isArray(data?.rutas) ? data.rutas : [];
+    } catch (error) {
+      console.warn('No se pudieron cargar las rutas:', error);
+      rutas = [];
+    }
+    poblarSelectsRutas();
+    renderRutasModal();
+  };
+
+  const poblarSelectsRutas = () => {
+    const opciones = rutas
+      .map((r) => `<option value="${r.id}">${escapeHtml(r.nombre)}</option>`)
+      .join('');
+    if (selectRuta) {
+      const actual = selectRuta.value;
+      selectRuta.innerHTML = `<option value="">Sin ruta</option>${opciones}`;
+      selectRuta.value = actual;
+    }
+    if (selectRutaFiltro) {
+      const actual = selectRutaFiltro.value;
+      selectRutaFiltro.innerHTML = `<option value="">Todas</option><option value="sin">Sin ruta</option>${opciones}`;
+      selectRutaFiltro.value = actual;
+    }
+  };
+
+  const renderRutasModal = () => {
+    if (!rutasModalTabla) return;
+    if (!rutas.length) {
+      rutasModalTabla.innerHTML = '<tr><td colspan="3" class="tabla-vacia">Aún no hay rutas. Crea la primera arriba.</td></tr>';
+      return;
+    }
+    rutasModalTabla.innerHTML = rutas
+      .map(
+        (r) => `
+        <tr>
+          <td>${escapeHtml(r.nombre)}</td>
+          <td class="text-right">${Number(r.clientes_count) || 0}</td>
+          <td class="text-right">
+            <button type="button" class="kanm-button ghost sm danger" data-ruta-eliminar="${r.id}" data-nombre="${escapeHtml(r.nombre)}">Eliminar</button>
+          </td>
+        </tr>`
+      )
+      .join('');
+  };
+
+  const agregarRuta = async () => {
+    const nombre = (inputRutaNueva?.value || '').trim();
+    if (!nombre) {
+      setMessage(rutasModalMensaje, 'Escribe un nombre para la ruta.', 'error');
+      return;
+    }
+    try {
+      const resp = await fetchJsonAutorizado('/api/rutas', {
+        method: 'POST',
+        body: JSON.stringify({ nombre }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.ok === false) throw new Error(data.error || 'No se pudo crear la ruta');
+      if (inputRutaNueva) inputRutaNueva.value = '';
+      setMessage(rutasModalMensaje, 'Ruta creada.', 'success');
+      await cargarRutas();
+    } catch (error) {
+      setMessage(rutasModalMensaje, error.message || 'No se pudo crear la ruta.', 'error');
+    }
+  };
+
+  const eliminarRuta = async (id, nombre) => {
+    if (!window.confirm(`¿Eliminar la ruta "${nombre}"? Los clientes de esa ruta quedarán sin ruta (no se borran).`)) return;
+    try {
+      const resp = await fetchAutorizado(`/api/rutas/${id}`, { method: 'DELETE' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.ok === false) throw new Error(data.error || 'No se pudo eliminar la ruta');
+      setMessage(rutasModalMensaje, 'Ruta eliminada.', 'success');
+      await cargarRutas();
+      await cargarClientes();
+    } catch (error) {
+      setMessage(rutasModalMensaje, error.message || 'No se pudo eliminar la ruta.', 'error');
+    }
+  };
+
+  const cargarHistorialCompras = async (clienteId) => {
+    if (!historialTabla) return;
+    historialTabla.innerHTML = '<tr><td colspan="3" class="kanm-subtitle">Cargando…</td></tr>';
+    try {
+      const resp = await fetchAutorizado(`/api/clientes/${clienteId}/historial-compras`);
+      const data = await resp.json().catch(() => ({}));
+      const productos = Array.isArray(data?.productos) ? data.productos : [];
+      if (historialTotal) {
+        historialTotal.textContent = productos.length
+          ? `Total comprado: ${formatCurrency(data.total_comprado || 0)} · ${productos.length} producto(s)`
+          : 'Este cliente aún no tiene compras registradas.';
+      }
+      historialTabla.innerHTML = productos.length
+        ? productos
+            .map(
+              (p) => `
+            <tr>
+              <td>${escapeHtml(p.producto)}</td>
+              <td class="text-right">${Number(p.cantidad) || 0}</td>
+              <td class="text-right">${formatCurrency(p.total)}</td>
+            </tr>`
+            )
+            .join('')
+        : '<tr><td colspan="3" class="tabla-vacia">Sin compras.</td></tr>';
+    } catch (error) {
+      console.warn('Error al cargar historial de compras:', error);
+      historialTabla.innerHTML = '<tr><td colspan="3" class="tabla-vacia">No se pudo cargar el historial.</td></tr>';
+    }
+  };
+
+  const exportarClientes = () => {
+    const lista = aplicarFiltrosClientes(clientes);
+    if (!lista.length) {
+      setMessage(mensajeLista, 'No hay clientes para exportar con los filtros actuales.', 'warning');
+      return;
+    }
+    const encabezados = ['Nombre', 'Documento', 'Teléfono', 'Email', 'Ruta', 'Crédito', 'Límite crédito', 'Saldo pendiente', 'Estado'];
+    const escaparCsv = (v) => {
+      const s = String(v == null ? '' : v).replace(/"/g, '""');
+      return /[",\n;]/.test(s) ? `"${s}"` : s;
+    };
+    const filas = lista.map((c) =>
+      [
+        c.nombre || '',
+        c.documento || '',
+        c.telefono || '',
+        c.email || '',
+        c.ruta_nombre || '',
+        Number(c.credito_activo) ? 'Sí' : 'No',
+        Number(c.credito_limite) || 0,
+        Number(c.saldo_pendiente) || 0,
+        c.activo ? 'Activo' : 'Inactivo',
+      ]
+        .map(escaparCsv)
+        .join(',')
+    );
+    const csv = '﻿' + [encabezados.join(','), ...filas].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `clientes_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    setMessage(mensajeLista, `Exportados ${lista.length} cliente(s).`, 'success');
+  };
+
+  // Eventos Fase 2
+  chkCreditoActivo?.addEventListener('change', actualizarVisibilidadCredito);
+  selectRutaFiltro?.addEventListener('change', renderClientes);
+  btnExportar?.addEventListener('click', (e) => {
+    e.preventDefault();
+    exportarClientes();
+  });
+  btnGestionarRutas?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (rutasModal) rutasModal.hidden = false;
+    setMessage(rutasModalMensaje, '');
+    renderRutasModal();
+  });
+  rutasModalCerrar?.addEventListener('click', () => {
+    if (rutasModal) rutasModal.hidden = true;
+  });
+  rutasModal?.addEventListener('click', (e) => {
+    if (e.target === rutasModal) rutasModal.hidden = true;
+  });
+  btnRutaAgregar?.addEventListener('click', (e) => {
+    e.preventDefault();
+    agregarRuta();
+  });
+  inputRutaNueva?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      agregarRuta();
+    }
+  });
+  rutasModalTabla?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-ruta-eliminar]');
+    if (btn) eliminarRuta(Number(btn.dataset.rutaEliminar), btn.dataset.nombre || 'esta ruta');
+  });
 
   tablaBody?.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-editar-cliente]');
@@ -1403,6 +1663,8 @@
 
   resetDeudasUI();
   actualizarResumenCliente(null);
+  actualizarVisibilidadCredito();
+  cargarRutas();
   cargarClientes();
   cargarProductos();
 })();

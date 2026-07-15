@@ -2454,7 +2454,32 @@ async function runMigrations() {
   await ensureTableAnalisisAlertas();
   await ensureTablePresupuestosCategoriaGasto();
   await ensureMeseraCompartida();
+  await ensureRutasClientes();
   await ensureIndicesRendimiento();
+}
+
+// Rutas de clientes: para organizar la cartera (ej. "Ruta Norte", "Lunes-Centro")
+// y asignar cada cliente a una ruta. Todo aditivo.
+async function ensureRutasClientes() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS rutas (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      negocio_id INT NOT NULL,
+      nombre VARCHAR(120) NOT NULL,
+      descripcion VARCHAR(255) NULL,
+      color VARCHAR(20) NULL,
+      activo TINYINT(1) NOT NULL DEFAULT 1,
+      orden INT NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_rutas_negocio_nombre (negocio_id, nombre),
+      CONSTRAINT fk_rutas_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await ensureIndexByName('rutas', 'idx_rutas_negocio', '(negocio_id, activo)');
+
+  // ruta_id en clientes (sin FK dura, para poder borrar una ruta sin bloquear).
+  await ensureColumn('clientes', 'ruta_id INT NULL');
+  await ensureIndexByName('clientes', 'idx_clientes_negocio_ruta', '(negocio_id, ruta_id)');
 }
 
 // ---------------------------------------------------------------------------
@@ -2701,30 +2726,40 @@ async function ensureAnalisisExtensionColumns() {
   await ensureColumn('gastos', 'cierre_id INT NULL');
   await ensureIndexByName('gastos', 'idx_gastos_cierre', '(cierre_id)');
 
-  // Backfill de UNA sola vez: asigna los gastos históricos (sin cierre) al PRIMER
-  // cuadre de su fecha, para que los cuadres ya existentes muestren sus gastos de
-  // forma consistente. Solo corre si aún ningún gasto tiene cierre_id (primera vez
-  // tras el deploy). Después NO vuelve a correr, así los gastos nuevos que esperan
-  // su próximo cuadre no se reasignan a un cierre pasado.
+  // Reconciliación del cierre_id de gastos = salidas de caja. Es idempotente y
+  // se auto-sana en cada arranque (no necesita guardas):
+  //
+  //  1) Solo las SALIDAS DE CAJA pertenecen a un cuadre. Cualquier otro gasto
+  //     (administrativo) NUNCA debe tener cierre_id — limpiamos los que quedaron
+  //     mal marcados por versiones anteriores.
+  //  2) Cada salida se atribuye al cuadre que la "cerró": el primer cuadre de su
+  //     mismo origen cuyo fecha_cierre es POSTERIOR al momento en que se creó la
+  //     salida (created_at). Esto respeta la ventana real del turno y funciona
+  //     aunque el turno cruce la medianoche. Una salida aún sin cuadre (turno
+  //     abierto) queda en NULL, esperando su próximo cuadre.
   try {
-    const marca = await query('SELECT COUNT(*) AS n FROM gastos WHERE cierre_id IS NOT NULL');
-    const yaEstampado = Number(marca?.[0]?.n || 0) > 0;
-    if (!yaEstampado) {
-      await query(`
-        UPDATE gastos g
-        JOIN (
-          SELECT negocio_id, DATE(fecha_operacion) AS fop, MIN(id) AS primer_cierre
-          FROM cierres_caja
-          GROUP BY negocio_id, DATE(fecha_operacion)
-        ) primeros
-          ON primeros.negocio_id = g.negocio_id
-         AND primeros.fop = DATE(g.fecha)
-        SET g.cierre_id = primeros.primer_cierre
-        WHERE g.cierre_id IS NULL
-      `);
-    }
+    await query(`
+      UPDATE gastos
+         SET cierre_id = NULL
+       WHERE cierre_id IS NOT NULL
+         AND (referencia_tipo IS NULL OR referencia_tipo <> 'SALIDA_CAJA')
+    `);
+    await query(`
+      UPDATE gastos g
+      JOIN salidas_caja s ON s.id = g.referencia_id AND s.negocio_id = g.negocio_id
+      SET g.cierre_id = (
+        SELECT cc.id
+          FROM cierres_caja cc
+         WHERE cc.negocio_id = g.negocio_id
+           AND COALESCE(cc.origen_caja, 'caja') = COALESCE(s.origen_caja, 'caja')
+           AND cc.fecha_cierre >= s.created_at
+         ORDER BY cc.fecha_cierre ASC, cc.id ASC
+         LIMIT 1
+      )
+      WHERE g.referencia_tipo = 'SALIDA_CAJA'
+    `);
   } catch (error) {
-    console.warn('No se pudo backfillear cierre_id en gastos:', error?.message || error);
+    console.warn('No se pudo reconciliar cierre_id en gastos:', error?.message || error);
   }
 
   // Indices de performance para analytics

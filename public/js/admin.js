@@ -3664,6 +3664,9 @@ const renderProductos = (lista = []) => {
                 Editar
               </button>
               ${botonLotesHtml}
+              <button type="button" class="kanm-button ghost sm danger" data-admin-inventario-action="eliminar" data-id="${producto.id}" data-nombre="${escapeHtmlSimple(producto.nombre || '')}">
+                Eliminar
+              </button>
             </div>
           </td>
         </tr>
@@ -3976,8 +3979,40 @@ productosLista?.addEventListener('click', (event) => {
   if (botonLotes) {
     const id = Number(botonLotes.dataset.id || 0);
     if (id > 0) abrirModalLotesProducto(id);
+    return;
+  }
+
+  const botonEliminar = event.target.closest('[data-admin-inventario-action="eliminar"]');
+  if (botonEliminar) {
+    const id = Number(botonEliminar.dataset.id || 0);
+    const nombre = botonEliminar.dataset.nombre || 'este producto';
+    if (id > 0) eliminarProductoInventario(id, nombre);
   }
 });
+
+// Borrado inteligente de producto: el backend decide si borra o desactiva según
+// si tiene historial. Aquí solo confirmamos y mostramos el resultado.
+const eliminarProductoInventario = async (id, nombre) => {
+  const confirmado = window.confirm(
+    `¿Eliminar "${nombre}"?\n\nSi el producto ya tiene ventas u otros usos, se DESACTIVARÁ (se oculta pero conserva el historial). Si nunca se usó, se borrará por completo.`
+  );
+  if (!confirmado) return;
+  try {
+    const resp = await fetch(`/api/productos/${id}`, {
+      method: 'DELETE',
+      headers: { ...(window.kanmAuth?.getAuthHeaders?.() || {}) },
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo eliminar el producto.');
+    }
+    setMessage(inventarioMensaje || mensajeProductos, data.mensaje || 'Producto eliminado.', 'success');
+    await cargarProductos();
+  } catch (error) {
+    console.error('Error al eliminar producto:', error);
+    setMessage(inventarioMensaje || mensajeProductos, error.message || 'No se pudo eliminar el producto.', 'error');
+  }
+};
 
 // ===========================================================================
 // Auditoria de consistencia: stock declarado vs stock en lotes (Bug D fix)
