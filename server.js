@@ -10469,9 +10469,14 @@ const calcularResumenCajaPorFecha = (
                     pago_tarjeta: 0,
                     pago_transferencia: 0,
                     pago_cambio: 0,
+                    metodo_pago: null,
                   });
                 }
                 const cuenta = mapa.get(clave);
+                // Propagar el método (clave para mostrar "Crédito" en el cuadre).
+                if (!cuenta.metodo_pago && pedido.metodo_pago) {
+                  cuenta.metodo_pago = pedido.metodo_pago;
+                }
                 const subtotal = Number(pedido.subtotal) || 0;
                 const impuesto = Number(pedido.impuesto) || 0;
                 const descuentoMonto = Number(pedido.descuento_monto) || 0;
