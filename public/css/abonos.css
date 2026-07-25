@@ -1,0 +1,220 @@
+/* Módulo "Abonos" (caja / mostrador). Usa los tokens de :root de styles.css. */
+
+.abonos-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.abonos-panel-head h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+.abonos-panel-head p {
+  margin: 4px 0 0;
+  color: var(--kanm-gray-600, #5d6779);
+  font-size: 0.9rem;
+}
+
+.abonos-toolbar {
+  margin: 16px 0;
+}
+.abonos-buscar-wrap {
+  position: relative;
+  max-width: 420px;
+}
+.abonos-buscar-wrap input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--kanm-gray-200, #e6ebf4);
+  border-radius: 14px;
+  font: inherit;
+  color: var(--color-texto, #24344a);
+  background: #fff;
+}
+.abonos-buscar-wrap input:focus {
+  outline: none;
+  border-color: var(--color-primario, #255bc7);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primario, #255bc7) 18%, transparent);
+}
+
+.abonos-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.abonos-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--kanm-gray-600, #5d6779);
+  background: color-mix(in srgb, var(--color-primario, #255bc7) 5%, #fff);
+  border-radius: 16px;
+}
+
+.abono-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: #fff;
+  border: 1px solid var(--kanm-gray-200, #e6ebf4);
+  border-radius: 16px;
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
+}
+.abono-row:hover {
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--color-primario, #255bc7) 12%, transparent);
+}
+.abono-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.abono-row-nombre {
+  font-weight: 600;
+  color: var(--color-texto, #24344a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.abono-row-tel {
+  font-size: 0.8rem;
+  color: var(--kanm-gray-600, #5d6779);
+}
+.abono-row-saldo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex: none;
+}
+.abono-row-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--kanm-gray-600, #5d6779);
+}
+.abono-row-monto {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--kanm-error, #d93050);
+}
+.abono-row-btn {
+  flex: none;
+  padding: 9px 18px !important;
+  font-size: 0.9rem !important;
+}
+
+/* ---- Modal ---- */
+.abono-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: color-mix(in srgb, #1f2d45 55%, transparent);
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+.abono-modal.is-visible {
+  opacity: 1;
+}
+.abono-modal[hidden] {
+  display: none;
+}
+.abono-modal-box {
+  width: 100%;
+  max-width: 420px;
+  position: relative;
+  gap: 14px !important;
+  transform: translateY(8px);
+  transition: transform 0.16s ease;
+}
+.abono-modal.is-visible .abono-modal-box {
+  transform: translateY(0);
+}
+.abono-modal-cerrar {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  border: none;
+  background: transparent;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--kanm-gray-600, #5d6779);
+  cursor: pointer;
+}
+.abono-modal-titulo {
+  margin: 0;
+  font-size: 1.2rem;
+}
+.abono-modal-sub {
+  margin: 0;
+  color: var(--kanm-gray-600, #5d6779);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.abono-saldo-valor {
+  color: var(--kanm-error, #d93050);
+  font-variant-numeric: tabular-nums;
+}
+.abono-modal-mensaje:empty {
+  display: none;
+}
+.abono-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.abono-field label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-texto, #24344a);
+}
+.abono-field input,
+.abono-field select {
+  padding: 11px 13px;
+  border: 1px solid var(--kanm-gray-200, #e6ebf4);
+  border-radius: 12px;
+  font: inherit;
+  color: var(--color-texto, #24344a);
+  background: #fff;
+}
+.abono-field input:focus,
+.abono-field select:focus {
+  outline: none;
+  border-color: var(--color-primario, #255bc7);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primario, #255bc7) 18%, transparent);
+}
+.abono-todo {
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  color: var(--color-primario, #255bc7);
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.abono-modal-acciones {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+@media (max-width: 560px) {
+  .abono-row {
+    flex-wrap: wrap;
+  }
+  .abono-row-btn {
+    width: 100%;
+  }
+}

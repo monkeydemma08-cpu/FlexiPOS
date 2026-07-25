@@ -2710,6 +2710,30 @@ async function ensureAnalisisExtensionColumns() {
   // clientes_abonos: usuario que registro el abono (auditoria)
   await ensureColumn('clientes_abonos', 'usuario_id INT NULL');
 
+  // clientes_abonos: origen_caja + cierre_id para que un abono cobrado en
+  // caja/mostrador entre al cuadre de ese turno (igual que pedidos y salidas).
+  //   - origen_caja: en qué caja se cobró (caja/mostrador). Default 'caja'.
+  //   - cierre_id: se estampa al registrar el cuadre; mientras es NULL el abono
+  //     pertenece al turno abierto y suma al efectivo esperado de ESE cuadre.
+  await ensureColumn('clientes_abonos', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
+  const abonosCierreYaExistia = await columnExists('clientes_abonos', 'cierre_id');
+  await ensureColumn('clientes_abonos', 'cierre_id INT NULL');
+  if (!abonosCierreYaExistia) {
+    // Backfill de UNA sola vez (solo la primera vez que se crea la columna):
+    // los abonos previos a esta funcionalidad no pertenecen a ningún turno vivo,
+    // así que se marcan con 0 (≠ NULL) para que NO aparezcan como pendientes en
+    // el próximo cuadre. Los abonos nuevos nacen con cierre_id NULL y se estampan
+    // al registrar el cuadre. El guard evita que en arranques futuros esto pise
+    // los abonos que sí están esperando su cuadre.
+    try {
+      await query('UPDATE clientes_abonos SET cierre_id = 0 WHERE cierre_id IS NULL');
+    } catch (error) {
+      console.warn('No se pudo backfillar cierre_id en clientes_abonos:', error?.message || error);
+    }
+  }
+  await ensureIndexByName('clientes_abonos', 'idx_clientes_abonos_origen', '(origen_caja)');
+  await ensureIndexByName('clientes_abonos', 'idx_clientes_abonos_cierre', '(cierre_id)');
+
   // productos: stock minimo y maximo para alertas inteligentes
   await ensureColumn('productos', 'stock_minimo DECIMAL(10,3) NULL');
   await ensureColumn('productos', 'stock_maximo DECIMAL(10,3) NULL');

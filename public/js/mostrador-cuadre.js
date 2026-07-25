@@ -1250,6 +1250,12 @@
     }
   });
 
+  // El módulo de Abonos (abonos.js) dispara este evento tras registrar un abono,
+  // para que el efectivo recién cobrado se refleje de inmediato en el cuadre.
+  window.addEventListener('posium:cuadre-refrescar', () => {
+    cargarResumenCuadre(false).catch(() => {});
+  });
+
   // ============================================================
   // Modal Editar factura (cuadre mostrador)
   // ============================================================

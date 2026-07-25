@@ -130,6 +130,15 @@
   };
 
   const normalizarMetodoPagoFactura = (pedido) => {
+    // Crédito primero: una venta a crédito queda como cuenta por cobrar, con los
+    // montos (efectivo/tarjeta/transferencia) en 0. Si dedujéramos el método solo
+    // de los montos, caería en el default "Efectivo". El backend guarda
+    // metodo_pago = 'credito' (detección: la cadena contiene "credito").
+    const metodoRegistrado = String(pedido?.metodo_pago || '').trim().toLowerCase();
+    if (metodoRegistrado.includes('credito') || metodoRegistrado.includes('crédito')) {
+      return 'Crédito';
+    }
+
     const efectivo = Number(pedido?.pago_efectivo) || 0;
     const tarjeta = Number(pedido?.pago_tarjeta) || 0;
     const transferencia = Number(pedido?.pago_transferencia) || 0;

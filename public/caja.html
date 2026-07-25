@@ -12,8 +12,10 @@
     />
     <link rel="stylesheet" href="css/styles.css" />
     <link rel="stylesheet" href="css/caja-shell.css?v=20260424a" />
+    <link rel="stylesheet" href="css/abonos.css" />
     <script src="js/auth.js?v=20260519d" defer></script>
     <script src="js/caja.js?v=20260716a" defer></script>
+    <script src="js/abonos.js?v=20260725a" defer></script>
     <!-- Módulo de cotizaciones (reusado de admin). Se activa al ver el panel "Cotizaciones". -->
     <script src="/js/admin-cotizaciones.js?v=20260519d" defer></script>
   </head>
@@ -75,6 +77,10 @@
           <button class="kanm-tab" data-tab="cuadre" id="tab-cuadre" type="button">
             <span class="caja-tab-icon" aria-hidden="true">📊</span>
             <span class="caja-tab-label">Cuadre de caja</span>
+          </button>
+          <button class="kanm-tab" data-tab="abonos" id="tab-abonos" type="button">
+            <span class="caja-tab-icon" aria-hidden="true">🤝</span>
+            <span class="caja-tab-label">Abonos</span>
           </button>
           <button class="kanm-tab" data-tab="cotizaciones" id="tab-cotizaciones" type="button">
             <span class="caja-tab-icon" aria-hidden="true">📋</span>
@@ -618,6 +624,25 @@
                 </table>
               </div>
             </div>
+          </div>
+        </section>
+
+        <!-- Panel: Abonos (clientes que deben + registrar abono al cuadre) -->
+        <section class="caja-panel hidden" id="panel-abonos" data-origen="caja">
+          <div class="kanm-card">
+            <div class="abonos-panel-head">
+              <div>
+                <h2>Abonos de clientes</h2>
+                <p>Clientes con saldo pendiente. Registra un abono y entra al cuadre de caja de hoy.</p>
+              </div>
+            </div>
+            <div id="abonos-mensaje" class="kanm-message"></div>
+            <div class="abonos-toolbar">
+              <div class="abonos-buscar-wrap">
+                <input type="text" id="abonos-buscar" placeholder="Buscar cliente por nombre, telefono o documento..." autocomplete="off" />
+              </div>
+            </div>
+            <div id="abonos-lista" class="abonos-lista"></div>
           </div>
         </section>
 

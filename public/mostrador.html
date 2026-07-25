@@ -11,9 +11,11 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/abonos.css" />
     <script src="js/auth.js" defer></script>
     <script src="js/mostrador.js?v=20260709b" defer></script>
     <script src="js/mostrador-cuadre.js?v=20260716a" defer></script>
+    <script src="js/abonos.js?v=20260725a" defer></script>
   </head>
   <body data-role="vendedor">
     <header class="kanm-header">
@@ -56,6 +58,7 @@
           Cuentas activas <span class="mostrador-kds-badge" id="mostrador-kds-badge" hidden>0</span>
         </button>
         <button class="kanm-tab" data-tab="cuadre" id="tab-cuadre" type="button">Cuadre de caja</button>
+        <button class="kanm-tab" data-tab="abonos" id="tab-abonos" type="button">Abonos</button>
       </div>
 
       <section class="caja-panel" id="panel-venta">
@@ -642,6 +645,24 @@
               </table>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section class="caja-panel hidden" id="panel-abonos" data-origen="mostrador">
+        <div class="kanm-card">
+          <div class="abonos-panel-head">
+            <div>
+              <h2>Abonos de clientes</h2>
+              <p>Clientes con saldo pendiente. Registra un abono y entra al cuadre de caja de hoy.</p>
+            </div>
+          </div>
+          <div id="abonos-mensaje" class="kanm-message"></div>
+          <div class="abonos-toolbar">
+            <div class="abonos-buscar-wrap">
+              <input type="text" id="abonos-buscar" placeholder="Buscar cliente por nombre, telefono o documento..." autocomplete="off" />
+            </div>
+          </div>
+          <div id="abonos-lista" class="abonos-lista"></div>
         </div>
       </section>
     </main>

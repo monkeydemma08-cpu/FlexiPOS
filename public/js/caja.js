@@ -6712,6 +6712,14 @@ window.addEventListener('DOMContentLoaded', () => {
 
   window.cambiarTabCaja = mostrarTab;
 
+  // El módulo de Abonos (abonos.js) dispara este evento tras registrar un abono,
+  // para que el efectivo recién cobrado se refleje de inmediato en el cuadre.
+  window.addEventListener('posium:cuadre-refrescar', () => {
+    if (typeof cargarResumenCuadre === 'function') {
+      cargarResumenCuadre(false).catch(() => {});
+    }
+  });
+
 });
 
 

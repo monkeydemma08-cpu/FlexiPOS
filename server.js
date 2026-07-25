@@ -9019,6 +9019,11 @@ const construirFacturaDesdePedido = async (pedidoId, negocioId) => {
         pedidoReferencia.fecha_creacion,
       total: totalFinal,
       total_final: totalFinal,
+      // metodo_pago viene del pedido principal (SELECT *). pedidoReferencia se
+      // arma con una lista de columnas acotada que NO lo incluye, por eso lo
+      // reponemos aqui: sin esto, una venta a credito (con pago_efectivo/tarjeta/
+      // transferencia en 0) se mostraba como "Efectivo" en la factura.
+      metodo_pago: pedido.metodo_pago,
       ecf_qr_data_url: ecfQrDataUrl,
       ecf_fecha_firma: ecfFechaFirma,
     },
@@ -10416,6 +10421,53 @@ const calcularResumenCajaPorFecha = (
       });
     };
 
+    // Abonos a cuentas por cobrar cobrados en ESTE turno/caja. Se filtran igual
+    // que los pedidos: por fecha (salvo turno abierto), por origen_caja y, si
+    // soloPendientes, por cierre_id IS NULL (aún no cerrados). El efectivo de los
+    // abonos es dinero físico que entró a la caja, así que suma al efectivo
+    // esperado del cuadre; tarjeta/transferencia se reportan aparte.
+    const cargarAbonos = () =>
+      new Promise((resolve, reject) => {
+        const filtros = ['a.negocio_id = ?'];
+        const params = [negocioId];
+        if (!ignorarFecha) {
+          filtros.push('DATE(a.fecha) = ?');
+          params.push(fecha);
+        }
+        filtros.push(construirFiltroOrigenCaja(origenCaja, params, 'a.origen_caja'));
+        if (soloPendientes) {
+          filtros.push('a.cierre_id IS NULL');
+        }
+        const sql = `
+          SELECT a.id, a.cliente_id, a.monto, a.metodo_pago, a.fecha, a.notas,
+                 c.nombre AS cliente
+            FROM clientes_abonos a
+            LEFT JOIN clientes c ON c.id = a.cliente_id
+           WHERE ${filtros.join('\n             AND ')}
+           ORDER BY a.id DESC
+        `;
+        db.all(sql, params, (abonosErr, rows) => {
+          if (abonosErr) return reject(abonosErr);
+          let efectivo = 0;
+          let tarjeta = 0;
+          let transferencia = 0;
+          (rows || []).forEach((r) => {
+            const monto = Number(r.monto) || 0;
+            const metodo = String(r.metodo_pago || 'efectivo').trim().toLowerCase();
+            if (metodo === 'tarjeta') tarjeta += monto;
+            else if (metodo === 'transferencia') transferencia += monto;
+            else efectivo += monto; // efectivo o método no especificado
+          });
+          resolve({
+            lista: rows || [],
+            efectivo: Number(efectivo.toFixed(2)),
+            tarjeta: Number(tarjeta.toFixed(2)),
+            transferencia: Number(transferencia.toFixed(2)),
+            total: Number((efectivo + tarjeta + transferencia).toFixed(2)),
+          });
+        });
+      });
+
     cargarSalidas((salidasErr, salidasData) => {
       if (salidasErr) {
         return callback(salidasErr);
@@ -10428,7 +10480,7 @@ const calcularResumenCajaPorFecha = (
 
         Promise.resolve()
           .then(() => cargarPagosCaja())
-          .then((movimientosPago) => {
+          .then(async (movimientosPago) => {
             let totalEfectivo = 0;
             let totalTarjeta = 0;
             let totalTransferencia = 0;
@@ -10551,6 +10603,12 @@ const calcularResumenCajaPorFecha = (
               totalTransferencia += Number(cuenta.pago_transferencia) || 0;
             });
 
+            // Abonos del turno: el efectivo entra al conteo físico de caja (suma
+            // al efectivo esperado). El detalle por método se expone aparte para
+            // que el cuadre lo muestre sin mezclarlo con las ventas.
+            const abonos = await cargarAbonos();
+            totalEfectivo += abonos.efectivo;
+
             const totalRedondeado = Number(total.toFixed(2));
             const efectivoRedondeado = Number(totalEfectivo.toFixed(2));
             const tarjetaRedondeado = Number(totalTarjeta.toFixed(2));
@@ -10568,6 +10626,12 @@ const calcularResumenCajaPorFecha = (
               total_transferencia: transferenciaRedondeado,
               total_salidas: totalSalidas,
               total_descuentos: totalDescuentosRedondeado,
+              // Abonos a cuentas por cobrar cobrados en este turno.
+              total_abonos: abonos.total,
+              total_abonos_efectivo: abonos.efectivo,
+              total_abonos_tarjeta: abonos.tarjeta,
+              total_abonos_transferencia: abonos.transferencia,
+              abonos: abonos.lista,
               pedidos: pedidosAgrupados,
               salidas: salidasData?.salidas || [],
             });
@@ -11020,6 +11084,22 @@ const registrarCierreCaja = async (payload, negocioId) => {
          AND negocio_id = ?
          AND ${filtroOrigenFacturas}`,
       paramsFacturas
+    );
+
+    // Abonos a cuentas por cobrar del turno: se estampan con este cierre igual
+    // que las facturas a crédito, para que su efectivo quede consolidado en ESTE
+    // cuadre y no reaparezca como pendiente en el próximo. Se filtra por origen y
+    // solo los aún no cerrados (cierre_id IS NULL). Los abonos previos a la
+    // funcionalidad quedaron en cierre_id = 0 (backfill), así que no se tocan.
+    const paramsAbonos = [cierreId, negocio];
+    const filtroOrigenAbonos = construirFiltroOrigenCaja(origenCaja, paramsAbonos, 'origen_caja');
+    await db.run(
+      `UPDATE clientes_abonos
+          SET cierre_id = ?
+        WHERE cierre_id IS NULL
+          AND negocio_id = ?
+          AND ${filtroOrigenAbonos}`,
+      paramsAbonos
     );
 
     // Gastos = salidas de caja del turno. Este cuadre reclama las salidas de su
@@ -13721,6 +13801,13 @@ app.get('/api/caja/resumen-dia', (req, res) => {
           total_descuentos: resumen.total_descuentos,
           cantidad_pedidos: resumen.cantidad_pedidos,
           salidas: resumen.salidas,
+          // Abonos a cuentas por cobrar cobrados en este turno. El efectivo ya
+          // está sumado en total_efectivo; esto es el desglose para mostrarlo.
+          total_abonos: resumen.total_abonos || 0,
+          total_abonos_efectivo: resumen.total_abonos_efectivo || 0,
+          total_abonos_tarjeta: resumen.total_abonos_tarjeta || 0,
+          total_abonos_transferencia: resumen.total_abonos_transferencia || 0,
+          abonos: resumen.abonos || [],
         };
 
         // Estado de la facturacion electronica del negocio. El cuadre lo usa para
@@ -16482,6 +16569,155 @@ app.post('/api/caja/cobrar-credito', (req, res) => {
     } catch (error) {
       console.error('Error en cobro a credito:', error?.message || error);
       return res.status(500).json({ ok: false, error: error?.message || 'No se pudo procesar el cobro a credito.' });
+    }
+  });
+});
+
+// ===========================================================================
+// Módulo "Abonos" (caja / mostrador): listar clientes que deben y registrar
+// abonos que entran al cuadre del día. Accesible a cualquier usuario con sesión
+// de negocio (caja y mostrador), no solo admin.
+// ===========================================================================
+
+// Lista de clientes con saldo pendiente (solo los que deben), con su saldo.
+app.get('/api/caja/deudores', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const term = normalizarCampoTexto(req.query?.q ?? req.query?.buscar, null);
+    try {
+      const params = [negocioId, negocioId, negocioId];
+      let sql = `
+        SELECT c.id AS cliente_id, c.nombre, c.telefono, c.documento,
+               COALESCE(d.total_deuda, 0) AS deuda_total,
+               COALESCE(a.total_abonos, 0) AS abonos_total,
+               GREATEST(COALESCE(d.total_deuda, 0) - COALESCE(a.total_abonos, 0), 0) AS saldo_pendiente
+          FROM clientes c
+          LEFT JOIN (
+            SELECT cliente_id, SUM(monto_total) AS total_deuda
+              FROM clientes_deudas WHERE negocio_id = ? GROUP BY cliente_id
+          ) d ON d.cliente_id = c.id
+          LEFT JOIN (
+            SELECT cliente_id, SUM(monto) AS total_abonos
+              FROM clientes_abonos WHERE negocio_id = ? GROUP BY cliente_id
+          ) a ON a.cliente_id = c.id
+         WHERE c.negocio_id = ? AND COALESCE(c.activo, 1) = 1`;
+      if (term) {
+        sql += ' AND (c.nombre LIKE ? OR c.telefono LIKE ? OR c.documento LIKE ?)';
+        const like = `%${term}%`;
+        params.push(like, like, like);
+      }
+      sql += ' HAVING saldo_pendiente > 0 ORDER BY c.nombre ASC LIMIT 200';
+      const rows = await db.all(sql, params);
+      res.json({ ok: true, deudores: rows || [] });
+    } catch (error) {
+      console.error('Error al listar deudores:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener los deudores.' });
+    }
+  });
+});
+
+// Registra un abono de cliente y lo integra al cuadre del día. El abono se
+// aplica a las deudas del cliente de la más antigua a la más nueva (FIFO),
+// creando un registro por cada deuda que toca, para que el saldo por factura
+// quede correcto. El efectivo entra al cuadre de ESTE turno vía origen_caja +
+// cierre_id NULL (ver calcularResumenCajaPorFecha / registrarCierre).
+app.post('/api/caja/abonos', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    const clienteId = Number(req.body?.cliente_id ?? req.body?.clienteId);
+    const monto = normalizarMonto(req.body?.monto);
+    const metodoPagoRaw = String(req.body?.metodo_pago ?? req.body?.metodoPago ?? 'efectivo').trim().toLowerCase();
+    const metodoPago = ['efectivo', 'tarjeta', 'transferencia'].includes(metodoPagoRaw)
+      ? metodoPagoRaw
+      : 'efectivo';
+    const notas = normalizarCampoTexto(req.body?.notas, null);
+    const origenFallback = usuarioSesion?.rol === 'vendedor' ? 'mostrador' : 'caja';
+    const origenCaja = normalizarOrigenCaja(req.body?.origen_caja ?? req.body?.origen, origenFallback);
+    const fecha = obtenerFechaLocalISO(new Date());
+
+    if (!Number.isInteger(clienteId) || clienteId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cliente inválido.' });
+    }
+    if (!monto || monto <= 0) {
+      return res.status(400).json({ ok: false, error: 'El monto del abono debe ser mayor a 0.' });
+    }
+
+    try {
+      const cliente = await db.get(
+        'SELECT id, nombre FROM clientes WHERE id = ? AND negocio_id = ? LIMIT 1',
+        [clienteId, negocioId]
+      );
+      if (!cliente) {
+        return res.status(404).json({ ok: false, error: 'Cliente no encontrado.' });
+      }
+
+      // Deudas del cliente con saldo pendiente, más antiguas primero.
+      const deudas = await db.all(
+        `SELECT d.id, d.monto_total,
+                COALESCE((SELECT SUM(a.monto) FROM clientes_abonos a WHERE a.deuda_id = d.id), 0) AS abonado
+           FROM clientes_deudas d
+          WHERE d.cliente_id = ? AND d.negocio_id = ?
+          ORDER BY d.fecha ASC, d.id ASC`,
+        [clienteId, negocioId]
+      );
+      const pendientes = (deudas || [])
+        .map((d) => ({ id: d.id, saldo: Number((Number(d.monto_total) - Number(d.abonado)).toFixed(2)) }))
+        .filter((d) => d.saldo > 0.009);
+      const saldoTotal = Number(pendientes.reduce((acc, d) => acc + d.saldo, 0).toFixed(2));
+
+      if (saldoTotal <= 0) {
+        return res.status(400).json({ ok: false, error: 'Este cliente no tiene saldo pendiente.' });
+      }
+      if (monto > saldoTotal + 0.5) {
+        return res.status(400).json({
+          ok: false,
+          error: `El abono (RD$${monto.toFixed(2)}) supera el saldo pendiente del cliente (RD$${saldoTotal.toFixed(2)}).`,
+        });
+      }
+
+      // Reparto FIFO. Cap al saldo total por si hubiera redondeos.
+      let restante = Math.min(monto, saldoTotal);
+      const abonosCreados = [];
+      await db.run('BEGIN');
+      try {
+        for (const deuda of pendientes) {
+          if (restante <= 0.009) break;
+          const aplicar = Number(Math.min(restante, deuda.saldo).toFixed(2));
+          if (aplicar <= 0) continue;
+          const ins = await db.run(
+            `INSERT INTO clientes_abonos
+              (deuda_id, cliente_id, negocio_id, fecha, monto, metodo_pago, notas, usuario_id, origen_caja)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [deuda.id, clienteId, negocioId, fecha, aplicar, metodoPago, notas, usuarioSesion.id || null, origenCaja]
+          );
+          await db.run(
+            'UPDATE clientes_deudas SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND negocio_id = ?',
+            [deuda.id, negocioId]
+          );
+          abonosCreados.push({ id: ins?.lastID, deuda_id: deuda.id, monto: aplicar });
+          restante = Number((restante - aplicar).toFixed(2));
+        }
+        await db.run('COMMIT');
+      } catch (txErr) {
+        await db.run('ROLLBACK').catch(() => {});
+        throw txErr;
+      }
+
+      limpiarCacheAnalitica(negocioId);
+
+      const aplicado = Number(abonosCreados.reduce((acc, a) => acc + a.monto, 0).toFixed(2));
+      res.status(201).json({
+        ok: true,
+        cliente: { id: cliente.id, nombre: cliente.nombre },
+        aplicado,
+        saldo_restante: Number((saldoTotal - aplicado).toFixed(2)),
+        metodo_pago: metodoPago,
+        origen_caja: origenCaja,
+        abonos: abonosCreados,
+      });
+    } catch (error) {
+      console.error('Error al registrar abono desde caja:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo registrar el abono.' });
     }
   });
 });
