@@ -6302,8 +6302,8 @@ const crearFilaAbastecimientoDetalle = (detalle = {}) => {
   insumoHeader.className = 'abast-line__insumo-header';
   insumoHeader.innerHTML =
     '<span class="abast-line__insumo-ico">📦</span>' +
-    '<strong>Cantidad real recibida</strong>' +
-    '<span class="abast-line__insumo-help">El insumo se acumula al stock en su unidad base.</span>';
+    '<strong>Contenido por unidad</strong>' +
+    '<span class="abast-line__insumo-help">El stock suma en paquetes (la cantidad comprada). Indica cuántas piezas trae cada paquete para actualizar el producto.</span>';
 
   const insumoFields = document.createElement('div');
   insumoFields.className = 'abast-line__insumo-fields';
@@ -6312,25 +6312,25 @@ const crearFilaAbastecimientoDetalle = (detalle = {}) => {
   cantidadInsumoGroup.className = 'abast-line__field';
   const cantidadInsumoLabel = document.createElement('label');
   cantidadInsumoLabel.innerHTML =
-    'Cantidad en <span class="abast-line__insumo-unidad-inline" data-unidad-inline>und</span>';
+    'Piezas por paquete <span class="abast-line__insumo-unidad-inline" data-unidad-inline></span>';
   const cantidadInsumo = document.createElement('input');
   cantidadInsumo.type = 'number';
   cantidadInsumo.min = '0';
   cantidadInsumo.step = '0.0001';
-  cantidadInsumo.placeholder = 'Ej: 100';
+  cantidadInsumo.placeholder = 'Ej: 30';
   cantidadInsumo.className = 'abastecimiento-detalle-cantidad-insumo';
-  cantidadInsumo.title = 'Cantidad real del insumo en su unidad base (ej: 100 onzas en 2 cajas).';
-  if (detalle.cantidad_insumo !== undefined && detalle.cantidad_insumo !== null) {
-    cantidadInsumo.value = detalle.cantidad_insumo;
+  cantidadInsumo.title = 'Cuántas piezas trae cada paquete/caja (ej: 30 conos por caja). Opcional; actualiza el producto.';
+  if (detalle.contenido_por_unidad !== undefined && detalle.contenido_por_unidad !== null) {
+    cantidadInsumo.value = detalle.contenido_por_unidad;
   }
   cantidadInsumoGroup.appendChild(cantidadInsumoLabel);
   cantidadInsumoGroup.appendChild(cantidadInsumo);
 
-  // Display del costo unitario real calculado en vivo
+  // Display del costo por pieza calculado en vivo (costo por paquete / piezas)
   const costoRealDisplay = document.createElement('div');
   costoRealDisplay.className = 'abast-line__costo-real';
   costoRealDisplay.innerHTML =
-    '<span class="abast-line__costo-real-label">Costo real por unidad</span>' +
+    '<span class="abast-line__costo-real-label">Costo por pieza</span>' +
     '<span class="abast-line__costo-real-value" data-costo-real>—</span>';
 
   insumoFields.appendChild(cantidadInsumoGroup);
@@ -6346,24 +6346,21 @@ const crearFilaAbastecimientoDetalle = (detalle = {}) => {
     recalcularAbastecimientoTotales();
   });
 
-  // Recalcula el costo real por unidad base del insumo en vivo: total_linea / cantidad_insumo
+  // Costo por pieza en vivo = costo por paquete / piezas por paquete.
   const actualizarCostoRealInsumo = () => {
     if (insumoBox.hidden) return;
-    const cantidadVal = Number(cantidad.value);
     const costoVal = parseMoneyValueAdmin(costo, { allowEmpty: false });
-    const cantInsumoVal = Number(cantidadInsumo.value);
+    const contenidoVal = Number(cantidadInsumo.value);
     const display = costoRealDisplay.querySelector('[data-costo-real]');
     if (
-      !Number.isFinite(cantidadVal) || cantidadVal <= 0 ||
       !Number.isFinite(costoVal) || costoVal < 0 ||
-      !Number.isFinite(cantInsumoVal) || cantInsumoVal <= 0
+      !Number.isFinite(contenidoVal) || contenidoVal <= 0
     ) {
       if (display) display.textContent = '—';
       return;
     }
-    const costoReal = (cantidadVal * costoVal) / cantInsumoVal;
-    const unidad = cantidadInsumoLabel.querySelector('[data-unidad-inline]')?.textContent || 'und';
-    if (display) display.textContent = `${formatearMonedaCorta(costoReal)} / ${unidad}`;
+    const costoPorPieza = costoVal / contenidoVal;
+    if (display) display.textContent = `${formatearMonedaCorta(costoPorPieza)} / pieza`;
   };
 
   // Sincroniza la visibilidad y la unidad mostrada del input "cantidad_insumo"
@@ -6388,10 +6385,15 @@ const crearFilaAbastecimientoDetalle = (detalle = {}) => {
 
     if (esInsumo) {
       insumoBox.hidden = false;
-      const unidad = String(productoData?.unidad_base || 'und').toLowerCase();
-      const unidadInline = cantidadInsumoLabel.querySelector('[data-unidad-inline]');
-      if (unidadInline) unidadInline.textContent = unidad;
       cantidadInsumo.dataset.esInsumo = '1';
+      // Pre-cargar el contenido por unidad actual del producto (si el campo está
+      // vacío), para que el usuario solo lo ajuste si cambió el tamaño del paquete.
+      if (!cantidadInsumo.value) {
+        const contenidoProducto = Number(productoData?.contenido_por_unidad);
+        if (Number.isFinite(contenidoProducto) && contenidoProducto > 0) {
+          cantidadInsumo.value = contenidoProducto;
+        }
+      }
       actualizarCostoRealInsumo();
     } else {
       insumoBox.hidden = true;
@@ -6504,20 +6506,19 @@ const obtenerDetallesAbastecimiento = () => {
       return;
     }
 
-    // Si el producto es INSUMO, cantidad_insumo es obligatoria (> 0). Para FINAL
-    // de reventa, el campo no se muestra y se envia null para que el backend ignore.
+    // Model B: el stock se lleva en PAQUETES (la "cantidad comprada"). Para insumos,
+    // el campo opcional "contenido por unidad" (piezas por paquete) actualiza esa
+    // propiedad del producto; no es obligatorio.
     const productoData = (productos || []).find((p) => Number(p.id) === productoId);
     const esInsumo =
       productoData && String(productoData.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
 
-    let cantidadInsumoFinal = null;
+    let contenidoPorUnidadFinal = null;
     if (esInsumo) {
-      const cantidadInsumoVal = Number(cantidadInsumoInput?.value ?? '');
-      if (!Number.isFinite(cantidadInsumoVal) || cantidadInsumoVal <= 0) {
-        invalido = true;
-        return;
+      const contenidoVal = Number(cantidadInsumoInput?.value ?? '');
+      if (Number.isFinite(contenidoVal) && contenidoVal > 0) {
+        contenidoPorUnidadFinal = Number(contenidoVal.toFixed(4));
       }
-      cantidadInsumoFinal = Number(cantidadInsumoVal.toFixed(4));
     }
 
     const totalLinea = Number((cantidad * costo).toFixed(2));
@@ -6525,7 +6526,7 @@ const obtenerDetallesAbastecimiento = () => {
     detalles.push({
       producto_id: productoId,
       cantidad,
-      cantidad_insumo: cantidadInsumoFinal,
+      contenido_por_unidad: contenidoPorUnidadFinal,
       costo_unitario: Number(costo.toFixed(2)),
       total_linea: totalLinea,
     });

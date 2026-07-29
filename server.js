@@ -31384,7 +31384,7 @@ app.post('/api/inventario/compras', (req, res) => {
       const productos = await db.all(
         `SELECT id, nombre, stock, stock_indefinido, costo_promedio_actual, ultimo_costo_sin_itbis,
                 costo_base_sin_itbis, actualiza_costo_con_compras,
-                COALESCE(tipo_producto, 'FINAL') AS tipo_producto, unidad_base
+                COALESCE(tipo_producto, 'FINAL') AS tipo_producto, unidad_base, contenido_por_unidad
            FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
         [negocioId, ...productoIds]
       );
@@ -31404,8 +31404,8 @@ app.post('/api/inventario/compras', (req, res) => {
         const esInsumo = String(productoActual?.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
 
         const cantidad = normalizarNumero(item?.cantidad, null);
-        const cantidadInsumoEntrada = normalizarNumero(
-          item?.cantidad_insumo ?? item?.cantidadInsumo,
+        const contenidoPorUnidadEntrada = normalizarNumero(
+          item?.contenido_por_unidad ?? item?.contenidoPorUnidad,
           null
         );
         const costoUnitario = normalizarNumero(
@@ -31420,19 +31420,23 @@ app.post('/api/inventario/compras', (req, res) => {
           return res.status(400).json({ error: 'El costo unitario debe ser mayor o igual a 0.' });
         }
 
-        // Para insumos exigimos "cantidad_insumo" (la cantidad real recibida en la unidad
-        // base del insumo, ej: 100 onzas dentro de 2 cajas de queso). Para productos FINAL
-        // que se compran para reventa, dejamos cantidad_insumo en null: el stock y el costo
-        // se calculan usando "cantidad" como hasta ahora.
-        let cantidadInsumoFinal = null;
-        if (esInsumo) {
-          if (cantidadInsumoEntrada === null || cantidadInsumoEntrada <= 0) {
-            return res.status(400).json({
-              error: `Indica la cantidad recibida del insumo "${productoActual?.nombre || productoId}" en su unidad base.`,
-            });
-          }
-          cantidadInsumoFinal = Number(cantidadInsumoEntrada.toFixed(4));
+        // Model B (stock en PAQUETES): el insumo se acumula al stock en la unidad
+        // que se compra (cajas/botellas), igual que un producto de reventa. La compra
+        // puede traer "contenido por unidad" (piezas por paquete, ej: 30 conos/caja)
+        // para actualizar esa propiedad del producto; NO cambia cuánto suma al stock.
+        let contenidoPorUnidadActualizar = null;
+        if (esInsumo && contenidoPorUnidadEntrada !== null && contenidoPorUnidadEntrada > 0) {
+          contenidoPorUnidadActualizar = Number(contenidoPorUnidadEntrada.toFixed(4));
         }
+        const contenidoEfectivoInsumo = esInsumo
+          ? (contenidoPorUnidadActualizar
+              || normalizarContenidoPorUnidad(productoActual?.contenido_por_unidad, 1))
+          : 1;
+        // cantidad_insumo se guarda solo como referencia (piezas totales recibidas =
+        // paquetes × contenido). No interviene en el stock ni en el costo.
+        const cantidadInsumoFinal = esInsumo
+          ? Number((cantidad * contenidoEfectivoInsumo).toFixed(4))
+          : null;
 
         const costoUnitarioSinItbis = Number(costoUnitario.toFixed(2));
         const costoUnitarioReal = resolverCostoUnitarioReal(costoUnitarioSinItbis, aplicaItbis);
@@ -31444,25 +31448,20 @@ app.post('/api/inventario/compras', (req, res) => {
         const totalLinea = Number((cantidad * costoUnitarioSinItbis).toFixed(2));
         subtotal += totalLinea;
 
-        // Cantidad y costo "por unidad de stock":
-        //   - INSUMO: cantidad_insumo (unidades reales) + costo real por unidad base
-        //   - FINAL:  cantidad         + costo unitario efectivo
-        const cantidadParaStock = esInsumo ? cantidadInsumoFinal : cantidad;
-        const costoEfectivoPorUnidadStock = esInsumo
-          ? Number(((cantidad * costoUnitarioEfectivo) / cantidadInsumoFinal).toFixed(4))
-          : costoUnitarioEfectivo;
-        const ultimoCostoStockSinItbis = esInsumo
-          ? Number(((cantidad * costoUnitarioSinItbis) / cantidadInsumoFinal).toFixed(4))
-          : costoUnitarioSinItbis;
-        const costoUnitarioRealStock = esInsumo
-          ? Number(((cantidad * costoUnitarioReal) / cantidadInsumoFinal).toFixed(4))
-          : costoUnitarioReal;
+        // Stock y costo por unidad de stock = por PAQUETE comprado (insumo y final se
+        // tratan igual). El costo por pieza se deriva en las recetas dividiendo entre
+        // contenido_por_unidad (ver obtenerCostosRecetaPorProductos).
+        const cantidadParaStock = cantidad;
+        const costoEfectivoPorUnidadStock = costoUnitarioEfectivo;
+        const ultimoCostoStockSinItbis = costoUnitarioSinItbis;
+        const costoUnitarioRealStock = costoUnitarioReal;
 
         detalles.push({
           producto_id: productoId,
           cantidad,
           cantidad_insumo: cantidadInsumoFinal,
           es_insumo: esInsumo,
+          contenido_por_unidad_actualizar: contenidoPorUnidadActualizar,
           costo_unitario: costoUnitarioSinItbis,
           costo_unitario_sin_itbis: costoUnitarioSinItbis,
           costo_unitario_efectivo: costoUnitarioEfectivo,
@@ -31557,6 +31556,17 @@ app.post('/api/inventario/compras', (req, res) => {
         const compraDetalleId = insertDetalle?.lastID || null;
 
         const producto = productosMap.get(detalle.producto_id);
+
+        // Si la compra trajo "contenido por unidad" (piezas por paquete), se
+        // actualiza como propiedad del insumo. Así, comprar 2 cajas confirmando
+        // "30 conos por caja" deja contenido_por_unidad = 30 en el producto.
+        if (detalle.contenido_por_unidad_actualizar && detalle.contenido_por_unidad_actualizar > 0) {
+          await db.run(
+            'UPDATE productos SET contenido_por_unidad = ? WHERE id = ? AND negocio_id = ?',
+            [detalle.contenido_por_unidad_actualizar, detalle.producto_id, negocioId]
+          );
+        }
+
         if (!esStockIndefinido(producto)) {
           const cantidadStockSumar = Number(detalle.cantidad_para_stock) || 0;
           if (cantidadStockSumar > 0) {
@@ -35218,7 +35228,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
       const productos = await db.all(
         `SELECT id, nombre, stock, stock_indefinido, costo_promedio_actual, ultimo_costo_sin_itbis,
                 costo_base_sin_itbis, actualiza_costo_con_compras,
-                COALESCE(tipo_producto, 'FINAL') AS tipo_producto, unidad_base
+                COALESCE(tipo_producto, 'FINAL') AS tipo_producto, unidad_base, contenido_por_unidad
            FROM productos WHERE negocio_id = ? AND id IN (${placeholders})`,
         [negocioId, ...productoIdsUnion]
       );
@@ -35238,8 +35248,8 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         const esInsumo = String(productoActual?.tipo_producto || 'FINAL').toUpperCase() === 'INSUMO';
 
         const cantidad = normalizarNumero(item?.cantidad, null);
-        const cantidadInsumoEntrada = normalizarNumero(
-          item?.cantidad_insumo ?? item?.cantidadInsumo,
+        const contenidoPorUnidadEntrada = normalizarNumero(
+          item?.contenido_por_unidad ?? item?.contenidoPorUnidad,
           null
         );
         const costoUnitario = normalizarNumero(
@@ -35292,6 +35302,7 @@ app.put('/api/inventario/compras/:id', (req, res) => {
           cantidad,
           cantidad_insumo: cantidadInsumoFinal,
           es_insumo: esInsumo,
+          contenido_por_unidad_actualizar: contenidoPorUnidadActualizar,
           costo_unitario: costoUnitarioSinItbis,
           costo_unitario_sin_itbis: costoUnitarioSinItbis,
           costo_unitario_efectivo: costoUnitarioEfectivo,
