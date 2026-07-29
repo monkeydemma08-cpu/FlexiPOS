@@ -8274,6 +8274,7 @@ const obtenerRecetasPorProductos = async (productoIds, negocioId) => {
              COALESCE(i.stock_indefinido, 0) AS stock_indefinido,
              COALESCE(i.contenido_por_unidad, 1) AS contenido_por_unidad,
              COALESCE(i.unidad_base, 'UND') AS unidad_base,
+             i.contenido_unidad,
              COALESCE(i.tipo_producto, 'FINAL') AS tipo_producto
       FROM recetas r
       JOIN receta_detalle rd ON rd.receta_id = r.id
@@ -8299,12 +8300,35 @@ const obtenerRecetasPorProductos = async (productoIds, negocioId) => {
       stock_indefinido: Number(row.stock_indefinido) || 0,
       contenido_por_unidad: normalizarContenidoPorUnidad(row.contenido_por_unidad, 1),
       unidad_base: normalizarUnidadBase(row.unidad_base, 'UND'),
+      contenido_unidad: row.contenido_unidad || null,
       tipo_producto: normalizarTipoProducto(row.tipo_producto, 'FINAL'),
     });
     recetasMap.set(productoId, lista);
   });
 
   return recetasMap;
+};
+
+// ¿La receta consume la "unidad de contenido" del insumo? Si sí, hay que aplicar
+// contenido_por_unidad para convertir entre la unidad de stock (caja/botella) y
+// la unidad que usa la receta (cono/ML).
+//
+// La unidad de contenido efectiva es contenido_unidad si está seteada, o la
+// unidad_base si no. Casos:
+//   - Cono: base UND, contenido NULL (→ efectiva UND), receta en UND → aplica
+//     (2 cajas × 30 = 60 conos).
+//   - Ron: base ML, contenido NULL (→ efectiva ML), receta en ML → aplica
+//     (stock en botellas × 750 = ML disponibles).
+//   - Chinola: base UND, contenido GR, receta en GR → aplica (÷30).
+//   - Chinola usada como UND entera: base UND, contenido GR, receta en UND →
+//     NO aplica (se usa la pieza entera, no el contenido).
+// Antes solo aplicaba cuando la unidad de la receta era DISTINTA de la base, lo
+// que dejaba fuera los insumos empaquetados en la misma unidad (cono, ron).
+const recetaAplicaContenido = (unidadConsumo, unidadBaseInsumo, contenidoUnidad) => {
+  const base = normalizarUnidadBase(unidadBaseInsumo, 'UND');
+  const consumo = normalizarUnidadBase(unidadConsumo, base);
+  const contenido = contenidoUnidad ? normalizarUnidadBase(contenidoUnidad, base) : base;
+  return consumo === contenido;
 };
 
 const calcularConsumoRecetaDetalle = (detalle = {}, cantidadProducto = 1) => {
@@ -8323,10 +8347,12 @@ const calcularConsumoRecetaDetalle = (detalle = {}, cantidadProducto = 1) => {
   }
 
   const contenido = normalizarContenidoPorUnidad(detalle?.contenido_por_unidad, 1);
-  const cantidadUnidades =
-    unidadConsumo === unidadBaseInsumo
-      ? cantidadBase
-      : (contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0);
+  // cantidadUnidades = cuánto descontar del stock (en la unidad de stock del insumo).
+  // Si la receta usa la unidad de contenido, dividimos entre contenido_por_unidad
+  // (ej: 1 cono = 1/30 de caja; 50 ML de ron = 50/750 de botella).
+  const cantidadUnidades = recetaAplicaContenido(unidadConsumo, unidadBaseInsumo, detalle?.contenido_unidad)
+    ? (contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0)
+    : cantidadBase;
 
   return {
     cantidadBase,
@@ -8340,14 +8366,15 @@ const convertirConsumoRegistradoAUnidades = (consumo = {}, insumo = {}) => {
   const cantidadBase = Number(consumo?.cantidad_base) || 0;
   if (!cantidadBase) return 0;
 
-  const unidadConsumo = normalizarUnidadBase(consumo?.unidad_base, insumo?.unidad_base || 'UND');
   const unidadBaseInsumo = normalizarUnidadBase(insumo?.unidad_base, 'UND');
-  if (unidadConsumo === unidadBaseInsumo) {
-    return Number(cantidadBase.toFixed(4));
-  }
-
+  const unidadConsumo = normalizarUnidadBase(consumo?.unidad_base, unidadBaseInsumo);
   const contenido = normalizarContenidoPorUnidad(insumo?.contenido_por_unidad, 1);
-  return contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
+  // Simétrico a calcularConsumoRecetaDetalle: si la receta usó la unidad de
+  // contenido, se dividió por contenido_por_unidad; para revertir hacemos igual.
+  if (recetaAplicaContenido(unidadConsumo, unidadBaseInsumo, insumo?.contenido_unidad)) {
+    return contenido > 0 ? Number((cantidadBase / contenido).toFixed(4)) : 0;
+  }
+  return Number(cantidadBase.toFixed(4));
 };
 
 const obtenerCostosRecetaPorProductos = async (productoIds, negocioId) => {
@@ -8400,14 +8427,16 @@ const obtenerCostosRecetaPorProductos = async (productoIds, negocioId) => {
     if (!Number.isFinite(productoId)) return;
     const cantidadReceta = Number(row.cantidad) || 0;
 
-    // Si la unidad de la receta NO coincide con la unidad_base del insumo,
-    // asumimos que la receta usa la "contenido_unidad" del insumo y necesitamos
-    // convertir el costo (que esta por unidad_base) al costo por contenido_unidad.
-    // Ej: chinola lote $50/UND, contenido=30 GR/UND. Receta "30 GR" → 30 * (50/30) = $50.
+    // Si la receta usa la "unidad de contenido" del insumo, el costo (que está por
+    // unidad_base = caja/botella) se divide entre contenido_por_unidad para obtener
+    // el costo por unidad de contenido.
+    //   - Chinola lote $50/UND, contenido=30 GR/UND. Receta "30 GR" → 30·(50/30)=$50.
+    //   - Ron lote $900/botella, contenido=750 ML. Receta "50 ML" → 50·(900/750)=$60.
+    //   - Cono lote $300/caja, contenido=30. Receta "1 cono" → 1·(300/30)=$10.
     const contenido = normalizarContenidoPorUnidad(row.contenido_por_unidad, 1);
     const unidadReceta = String(row.unidad_receta || '').toUpperCase();
     const unidadBase = String(row.unidad_base || 'UND').toUpperCase();
-    const recetaEnUnidadBase = unidadReceta === unidadBase;
+    const recetaEnUnidadBase = !recetaAplicaContenido(unidadReceta, unidadBase, row.contenido_unidad);
 
     // 1) Preferimos el costo del lote FIFO actual del insumo (por unidad_base).
     const costoLote = Number(row.costo_lote_actual);
@@ -8459,7 +8488,7 @@ const revertirConsumoInsumosPorPedido = async (pedidoId, negocioId) => {
 
   const placeholders = insumoIds.map(() => '?').join(', ');
   const insumos = await db.all(
-    `SELECT id, stock_indefinido, contenido_por_unidad, unidad_base
+    `SELECT id, stock_indefinido, contenido_por_unidad, unidad_base, contenido_unidad
        FROM productos
       WHERE negocio_id = ? AND id IN (${placeholders})`,
     [negocioId, ...insumoIds]
@@ -13327,19 +13356,21 @@ app.get('/api/productos', (req, res) => {
       // Solo cuentan insumos con stock_indefinido = 0 (los infinitos no limitan).
       let stockReceta = new Map();
       try {
-        // Si la receta usa unidad_base del insumo (ej: "1 UND de chinola"),
-        // FLOOR(stock / cantidad) basta. Si usa contenido_unidad (ej: "30 GR de chinola"),
-        // multiplicamos el stock por contenido_por_unidad para llevarlo a la unidad
-        // de la receta antes de dividir.
+        // Si la receta usa la unidad de contenido del insumo (contenido_unidad, o
+        // la unidad_base cuando no hay contenido_unidad), multiplicamos el stock por
+        // contenido_por_unidad para llevarlo a la unidad de la receta antes de dividir.
+        //   - Cono: stock 2 cajas × 30 = 60 conos → barquilla (1 cono) = 60.
+        //   - Ron: stock 27.7 botellas × 750 = ML disponibles.
+        //   - Chinola usada como UND entera (contenido en GR): FLOOR(stock/cantidad).
         const filasStock = await db.all(
           `SELECT r.producto_final_id,
                   MIN(
                     FLOOR(
                       CASE
-                        WHEN UPPER(rd.unidad) = UPPER(i.unidad_base)
-                          THEN COALESCE(i.stock, 0) / NULLIF(rd.cantidad, 0)
-                        ELSE (COALESCE(i.stock, 0) * COALESCE(i.contenido_por_unidad, 1))
-                             / NULLIF(rd.cantidad, 0)
+                        WHEN UPPER(rd.unidad) = UPPER(COALESCE(i.contenido_unidad, i.unidad_base))
+                          THEN (COALESCE(i.stock, 0) * COALESCE(i.contenido_por_unidad, 1))
+                               / NULLIF(rd.cantidad, 0)
+                        ELSE COALESCE(i.stock, 0) / NULLIF(rd.cantidad, 0)
                       END
                     )
                   ) AS stock_calc
@@ -15271,7 +15302,7 @@ app.post('/api/cuentas/:id/detalles/eliminar', (req, res) => {
                    ci.unidad_base,
                    COALESCE(pi.stock_indefinido, 0) AS stock_indefinido,
                    COALESCE(pi.contenido_por_unidad, 1) AS contenido_por_unidad,
-                   COALESCE(pi.unidad_base, 'UND') AS unidad_base_producto
+                   COALESCE(pi.unidad_base, 'UND') AS unidad_base_producto, pi.contenido_unidad AS contenido_unidad_producto
               FROM consumo_insumos ci
               LEFT JOIN productos pi ON pi.id = ci.insumo_id AND pi.negocio_id = ci.negocio_id
              WHERE ci.detalle_pedido_id = ?
@@ -15290,6 +15321,7 @@ app.post('/api/cuentas/:id/detalles/eliminar', (req, res) => {
           const cantidadUnidades = convertirConsumoRegistradoAUnidades(consumo, {
             contenido_por_unidad: consumo.contenido_por_unidad,
             unidad_base: consumo.unidad_base_producto,
+            contenido_unidad: consumo.contenido_unidad_producto,
           });
           const acumulado = reposicionInsumos.get(insumoId) || 0;
           reposicionInsumos.set(insumoId, Number((acumulado + cantidadUnidades).toFixed(4)));
@@ -15359,7 +15391,7 @@ app.post('/api/cuentas/:id/detalles/eliminar', (req, res) => {
                      ci.cantidad_base,
                      ci.unidad_base,
                      COALESCE(pi.contenido_por_unidad, 1) AS contenido_por_unidad,
-                     COALESCE(pi.unidad_base, 'UND') AS unidad_base_producto
+                     COALESCE(pi.unidad_base, 'UND') AS unidad_base_producto, pi.contenido_unidad AS contenido_unidad_producto
                 FROM consumo_insumos ci
                 LEFT JOIN productos pi ON pi.id = ci.insumo_id AND pi.negocio_id = ci.negocio_id
                WHERE ci.pedido_id = ?
@@ -15376,6 +15408,7 @@ app.post('/api/cuentas/:id/detalles/eliminar', (req, res) => {
             const cantidadUnidades = convertirConsumoRegistradoAUnidades(consumo, {
               contenido_por_unidad: consumo.contenido_por_unidad,
               unidad_base: consumo.unidad_base_producto,
+              contenido_unidad: consumo.contenido_unidad_producto,
             });
             if (!cantidadUnidades) continue;
             const acumulado = cantidadesRestantesPorInsumo.get(insumoId) || 0;
