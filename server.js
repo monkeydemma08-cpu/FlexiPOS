@@ -8331,6 +8331,28 @@ const recetaAplicaContenido = (unidadConsumo, unidadBaseInsumo, contenidoUnidad)
   return consumo === contenido;
 };
 
+// Conjunto de producto_final_id que tienen una receta ACTIVA con al menos un
+// insumo. Se usa para NO validar el stock PROPIO de un producto que se prepara
+// (su disponibilidad viene de los insumos, que se validan aparte). Sin esto, un
+// producto con receta y stock propio 0 se rechazaba con "Stock insuficiente".
+const obtenerProductosConRecetaActiva = async (productoIds, negocioId) => {
+  const ids = Array.from(
+    new Set((productoIds || []).map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0))
+  );
+  if (!ids.length) return new Set();
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = await db.all(
+    `SELECT DISTINCT r.producto_final_id
+       FROM recetas r
+       INNER JOIN receta_detalle rd ON rd.receta_id = r.id
+      WHERE r.negocio_id = ?
+        AND COALESCE(r.activo, 1) = 1
+        AND r.producto_final_id IN (${placeholders})`,
+    [negocioId, ...ids]
+  );
+  return new Set((rows || []).map((row) => Number(row.producto_final_id)));
+};
+
 const calcularConsumoRecetaDetalle = (detalle = {}, cantidadProducto = 1) => {
   const factorProducto = Number(cantidadProducto) || 0;
   const cantidadDetalle = Number(detalle?.cantidad) || 0;
@@ -14771,6 +14793,15 @@ app.put('/api/pedidos/:id', (req, res) => {
       await revertirConsumosFIFO({ negocioId, origen: 'produccion', origenId: pedidoId });
       await db.run('DELETE FROM detalle_pedido WHERE pedido_id = ? AND negocio_id = ?', [pedidoId, negocioId]);
 
+      // Productos con receta activa: se saltan la validación de stock PROPIO (su
+      // disponibilidad la dan los insumos, que se validan más abajo).
+      const productosConRecetaActiva = usaRecetas
+        ? await obtenerProductosConRecetaActiva(
+            itemsEntrada.map((it) => Number(it?.producto_id)),
+            negocioId
+          )
+        : new Set();
+
       for (const item of itemsEntrada) {
         const productoId = Number(item?.producto_id);
         const cantidad = Number(item?.cantidad);
@@ -14806,7 +14837,8 @@ app.put('/api/pedidos/:id', (req, res) => {
         }
 
         const stockIndefinido = esStockIndefinido(producto);
-        if (!stockIndefinido) {
+        const tieneRecetaActiva = productosConRecetaActiva.has(Number(productoId));
+        if (!stockIndefinido && !tieneRecetaActiva) {
           const stockDisponible = Number(producto.stock) || 0;
           if (cantidad > stockDisponible) {
             throw errorEstado(
@@ -14939,7 +14971,8 @@ app.put('/api/pedidos/:id', (req, res) => {
           });
         }
 
-        if (!item.stock_indefinido) {
+        // Productos con receta no descuentan stock PROPIO: se consumen sus insumos.
+        if (!item.stock_indefinido && !productosConRecetaActiva.has(Number(item.producto_id))) {
           const stockResult = await db.run(
             'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
             [item.cantidad, item.producto_id, negocioId, item.cantidad]
@@ -16880,6 +16913,15 @@ app.post('/api/pedidos', (req, res) => {
     const itemsProcesados = [];
 
     try {
+      // Productos con receta activa: se saltan la validación de stock PROPIO (su
+      // disponibilidad la dan los insumos, que se validan más abajo).
+      const productosConRecetaActiva = usaRecetas
+        ? await obtenerProductosConRecetaActiva(
+            itemsEntrada.map((it) => Number(it?.producto_id)),
+            negocioId
+          )
+        : new Set();
+
       for (const item of itemsEntrada) {
         const productoId = Number(item?.producto_id);
         const cantidad = Number(item?.cantidad);
@@ -16914,7 +16956,8 @@ app.post('/api/pedidos', (req, res) => {
         }
 
         const stockIndefinido = esStockIndefinido(producto);
-        if (!stockIndefinido) {
+        const tieneRecetaActiva = productosConRecetaActiva.has(Number(productoId));
+        if (!stockIndefinido && !tieneRecetaActiva) {
           const stockDisponible = Number(producto.stock) || 0;
           if (cantidad > stockDisponible) {
             return res
@@ -17148,7 +17191,9 @@ app.post('/api/pedidos', (req, res) => {
             });
           });
         }
-        if (!item.stock_indefinido) {
+        // Productos con receta no descuentan stock PROPIO: se consumen sus insumos
+        // (más abajo). Solo productos de reventa/stock directo descuentan aquí.
+        if (!item.stock_indefinido && !productosConRecetaActiva.has(Number(item.producto_id))) {
           const stockResult = await db.run(
             'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
             [item.cantidad, item.producto_id, negocioId, item.cantidad]
