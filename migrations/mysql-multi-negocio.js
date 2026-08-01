@@ -2381,6 +2381,33 @@ async function runMigrations() {
   await ensureColumn('pedidos', 'delivery_notas TEXT NULL');
   await ensureColumn('cierres_caja', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
   await ensureColumn('salidas_caja', "origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja'");
+
+  // Turnos de caja: "Iniciar operaciones" abre un turno (con su fondo inicial) por
+  // caja/mostrador, y el cuadre de caja lo cierra. Da un ciclo explícito
+  // apertura -> cierre, y la fecha de operación se toma de la apertura (sin
+  // depender de medianoche ni de la zona horaria del servidor).
+  await query(`
+    CREATE TABLE IF NOT EXISTS turnos_caja (
+      id INT NOT NULL AUTO_INCREMENT,
+      negocio_id INT NOT NULL,
+      origen_caja VARCHAR(50) NOT NULL DEFAULT 'caja',
+      usuario VARCHAR(120) NULL,
+      usuario_rol VARCHAR(40) NULL,
+      usuario_id INT NULL,
+      fondo_inicial DECIMAL(12,2) NOT NULL DEFAULT 0,
+      estado ENUM('abierto','cerrado') NOT NULL DEFAULT 'abierto',
+      fecha_apertura DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      fecha_cierre DATETIME NULL,
+      cierre_id INT NULL,
+      auto_abierto TINYINT(1) NOT NULL DEFAULT 0,
+      PRIMARY KEY (id),
+      KEY idx_turnos_caja_neg_origen_estado (negocio_id, origen_caja, estado),
+      KEY idx_turnos_caja_cierre (cierre_id),
+      CONSTRAINT fk_turnos_caja_negocio FOREIGN KEY (negocio_id) REFERENCES negocios(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  `);
+  await ensureColumn('cierres_caja', 'turno_id INT NULL');
+  await ensureIndexByName('cierres_caja', 'idx_cierres_caja_turno', '(turno_id)');
   await ensureColumn('detalle_pedido', 'costo_unitario_snapshot DECIMAL(12,2) NOT NULL DEFAULT 0');
   await ensureColumn('detalle_pedido', 'cogs_linea DECIMAL(12,2) NOT NULL DEFAULT 0');
   await ensureColumn(

@@ -10861,6 +10861,72 @@ app.post('/api/caja/cierres', (req, res) => {
   });
 });
 
+// Estado del turno de caja/mostrador: ¿está abierto? desde cuándo, con qué fondo.
+app.get('/api/caja/turnos/estado', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const origenFallback = usuarioSesion?.rol === 'vendedor' ? 'mostrador' : 'caja';
+    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, origenFallback);
+    try {
+      const turno = await obtenerTurnoAbierto(negocioId, origenCaja);
+      res.json({
+        ok: true,
+        origen_caja: origenCaja,
+        abierto: !!turno,
+        turno: turno
+          ? {
+              id: turno.id,
+              fondo_inicial: Number(turno.fondo_inicial) || 0,
+              fecha_apertura: turno.fecha_apertura,
+              fecha_apertura_dia: turno.fecha_apertura_dia,
+              usuario: turno.usuario,
+              auto_abierto: Number(turno.auto_abierto) === 1,
+            }
+          : null,
+      });
+    } catch (error) {
+      console.error('Error al consultar estado de turno:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo consultar el estado del turno.' });
+    }
+  });
+});
+
+// Abre un turno ("Iniciar operaciones") con su fondo inicial. Si ya hay uno
+// abierto para ese origen, lo devuelve tal cual (no duplica).
+app.post('/api/caja/turnos/abrir', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    const origenFallback = usuarioSesion?.rol === 'vendedor' ? 'mostrador' : 'caja';
+    const origenCaja = normalizarOrigenCaja(req.body?.origen_caja ?? req.body?.origen, origenFallback);
+    const fondoInicial = Math.max(Number(req.body?.fondo_inicial ?? req.body?.fondoInicial) || 0, 0);
+    try {
+      const yaAbierto = await obtenerTurnoAbierto(negocioId, origenCaja);
+      const turno = await abrirTurnoCaja(negocioId, origenCaja, {
+        usuario: usuarioSesion?.nombre || usuarioSesion?.usuario || null,
+        usuarioRol: usuarioSesion?.rol || null,
+        usuarioId: usuarioSesion?.id || null,
+        fondoInicial,
+        auto: false,
+      });
+      res.status(yaAbierto ? 200 : 201).json({
+        ok: true,
+        ya_estaba_abierto: !!yaAbierto,
+        turno: turno
+          ? {
+              id: turno.id,
+              fondo_inicial: Number(turno.fondo_inicial) || 0,
+              fecha_apertura: turno.fecha_apertura,
+              fecha_apertura_dia: turno.fecha_apertura_dia,
+            }
+          : null,
+      });
+    } catch (error) {
+      console.error('Error al abrir turno de caja:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo iniciar operaciones.' });
+    }
+  });
+});
+
 const obtenerCierresCaja = (desde, hasta, negocioId, origen, callback) => {
   const negocio = negocioId || NEGOCIO_ID_DEFAULT;
   const params = [negocio, desde, hasta];
@@ -11027,9 +11093,63 @@ const obtenerFacturasClientesDetalleCierre = (
   });
 };
 
+// ===== Turnos de caja ("Iniciar operaciones") =====
+// Devuelve el turno ABIERTO de una caja/mostrador (o null). Incluye la fecha de
+// apertura como día (DATE_FORMAT) para fijar la fecha de operación sin desfase
+// de zona horaria.
+const obtenerTurnoAbierto = async (negocioId, origen) => {
+  const origenCaja = normalizarOrigenCaja(origen, 'caja');
+  const params = [negocioId || NEGOCIO_ID_DEFAULT];
+  const filtroOrigen = construirFiltroOrigenCaja(origenCaja, params, 'origen_caja');
+  const row = await db.get(
+    `SELECT id, negocio_id, origen_caja, usuario, usuario_rol, usuario_id,
+            fondo_inicial, estado, fecha_apertura,
+            DATE_FORMAT(fecha_apertura, '%Y-%m-%d') AS fecha_apertura_dia,
+            auto_abierto
+       FROM turnos_caja
+      WHERE negocio_id = ? AND ${filtroOrigen} AND estado = 'abierto'
+      ORDER BY fecha_apertura DESC, id DESC
+      LIMIT 1`,
+    params
+  );
+  return row || null;
+};
+
+// Abre un turno. Si ya hay uno abierto para ese origen, lo devuelve (no duplica).
+const abrirTurnoCaja = async (
+  negocioId,
+  origen,
+  { usuario = null, usuarioRol = null, usuarioId = null, fondoInicial = 0, auto = false } = {}
+) => {
+  const origenCaja = normalizarOrigenCaja(origen, 'caja');
+  const existente = await obtenerTurnoAbierto(negocioId, origenCaja);
+  if (existente) return existente;
+  const fondo = Math.max(Number(fondoInicial) || 0, 0);
+  await db.run(
+    `INSERT INTO turnos_caja
+       (negocio_id, origen_caja, usuario, usuario_rol, usuario_id, fondo_inicial, estado, fecha_apertura, auto_abierto)
+     VALUES (?, ?, ?, ?, ?, ?, 'abierto', NOW(), ?)`,
+    [negocioId || NEGOCIO_ID_DEFAULT, origenCaja, usuario, usuarioRol, usuarioId, fondo, auto ? 1 : 0]
+  );
+  return obtenerTurnoAbierto(negocioId, origenCaja);
+};
+
+// Garantiza un turno abierto: si no hay, lo auto-abre con fondo 0. Se llama al
+// vender (modo "avisar": no bloquea, pero deja el turno registrado).
+const asegurarTurnoAbierto = async (negocioId, origen, datosUsuario = {}) => {
+  const abierto = await obtenerTurnoAbierto(negocioId, origen);
+  if (abierto) return abierto;
+  try {
+    return await abrirTurnoCaja(negocioId, origen, { ...datosUsuario, fondoInicial: 0, auto: true });
+  } catch (error) {
+    console.warn('No se pudo auto-abrir turno de caja:', error?.message || error);
+    return null;
+  }
+};
+
 const registrarCierreCaja = async (payload, negocioId) => {
   const negocio = negocioId || NEGOCIO_ID_DEFAULT;
-  const fechaOperacion = normalizarFechaOperacion(payload?.fecha_operacion);
+  let fechaOperacion = normalizarFechaOperacion(payload?.fecha_operacion);
   if (!fechaOperacion) {
     const err = new Error('Fecha de operacion invalida.');
     err.status = 400;
@@ -11050,11 +11170,25 @@ const registrarCierreCaja = async (payload, negocioId) => {
     throw err;
   }
 
-  const fondoInicial = Number(payload?.fondo_inicial) || 0;
   const usuarioRol = payload?.usuario_rol || null;
   const observaciones = (payload?.observaciones || '').toString();
   const origenFallback = usuarioRol === 'vendedor' ? 'mostrador' : 'caja';
   const origenCaja = normalizarOrigenCaja(payload?.origen_caja ?? payload?.origen, origenFallback);
+
+  // Turno abierto de esta caja (si "Iniciar operaciones" se usó). Su apertura fija
+  // la fecha de operación (sin depender de la zona horaria del servidor) y su
+  // fondo inicial. Al cerrar el cuadre, más abajo, se marca el turno como cerrado.
+  const turnoAbierto = await obtenerTurnoAbierto(negocio, origenCaja);
+  if (turnoAbierto?.fecha_apertura_dia) {
+    fechaOperacion = turnoAbierto.fecha_apertura_dia;
+  }
+  const fondoPayloadPresente =
+    payload?.fondo_inicial !== undefined && payload?.fondo_inicial !== null && payload?.fondo_inicial !== '';
+  const fondoInicial = fondoPayloadPresente
+    ? Number(payload.fondo_inicial) || 0
+    : turnoAbierto
+    ? Number(turnoAbierto.fondo_inicial) || 0
+    : 0;
 
   const resumenDia = await new Promise((resolve, reject) => {
     calcularResumenCajaPorFecha(
@@ -11072,9 +11206,11 @@ const registrarCierreCaja = async (payload, negocioId) => {
   // ANTES de insertar el nuevo cierre; si no, el "último" sería este mismo. Sirve
   // para atribuir a este cuadre exactamente las salidas del turno (las creadas
   // después del cuadre anterior), aunque el turno cruce la medianoche.
-  const inicioTurnoGastos = await new Promise((resolve) => {
-    obtenerUltimoCierreCaja(negocio, origenCaja, (errUC, ts) => resolve(errUC ? null : ts || null));
-  });
+  const inicioTurnoGastos = turnoAbierto?.fecha_apertura
+    ? turnoAbierto.fecha_apertura
+    : await new Promise((resolve) => {
+        obtenerUltimoCierreCaja(negocio, origenCaja, (errUC, ts) => resolve(errUC ? null : ts || null));
+      });
 
   const totalEfectivo = Number(resumenDia.total_efectivo) || 0;
   const totalSalidas = Number(resumenDia.total_salidas) || 0;
@@ -11083,8 +11219,8 @@ const registrarCierreCaja = async (payload, negocioId) => {
 
   const insert = await db.run(
     `INSERT INTO cierres_caja
-      (fecha_operacion, usuario, usuario_rol, origen_caja, fondo_inicial, total_sistema, total_declarado, diferencia, observaciones, negocio_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (fecha_operacion, usuario, usuario_rol, origen_caja, fondo_inicial, total_sistema, total_declarado, diferencia, observaciones, negocio_id, turno_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       fechaOperacion,
       usuario,
@@ -11096,6 +11232,7 @@ const registrarCierreCaja = async (payload, negocioId) => {
       diferencia,
       observaciones,
       negocio,
+      turnoAbierto?.id || null,
     ]
   );
 
@@ -11177,6 +11314,16 @@ const registrarCierreCaja = async (payload, negocioId) => {
           AND ${filtroOrigenGastos}${filtroTurnoGastos}`,
       paramsGastos
     );
+
+    // Cierra el turno abierto (si lo hay): "Iniciar operaciones" -> cuadre.
+    if (turnoAbierto?.id) {
+      await db.run(
+        `UPDATE turnos_caja
+            SET estado = 'cerrado', fecha_cierre = NOW(), cierre_id = ?
+          WHERE id = ? AND estado = 'abierto'`,
+        [cierreId, turnoAbierto.id]
+      );
+    }
   }
 
   return {
@@ -17257,6 +17404,14 @@ app.post('/api/pedidos', (req, res) => {
       }
 
       await db.run('COMMIT');
+
+      // Auto-abrir turno con la primera venta (modo "avisar"): si no hay turno
+      // abierto para esta caja/mostrador, se abre uno con fondo 0. No bloquea.
+      await asegurarTurnoAbierto(negocioId, origenCaja, {
+        usuario: usuarioSesion?.nombre || usuarioSesion?.usuario || null,
+        usuarioRol: usuarioSesion?.rol || null,
+        usuarioId: usuarioSesion?.id || null,
+      });
 
       return res.status(201).json({
         ok: true,

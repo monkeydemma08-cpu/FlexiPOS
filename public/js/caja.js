@@ -4668,6 +4668,9 @@ const registrarCuadre = async () => {
 
     setCuadreMensaje('Cuadre registrado correctamente. Abriendo ticket para imprimir...', 'info');
 
+    // El cuadre cierra el turno: avisar al banner de "Iniciar operaciones".
+    window.dispatchEvent(new CustomEvent('posium:turno-cambiado'));
+
     resetFormularioCuadre();
 
     limpiarSeleccion();
