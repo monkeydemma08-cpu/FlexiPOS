@@ -10881,7 +10881,7 @@ const obtenerCierresCaja = (desde, hasta, negocioId, origen, callback) => {
     filtros.push(construirFiltroOrigenCaja(origenCaja, params, 'cc.origen_caja'));
   }
   const sql = `
-    SELECT cc.id, cc.fecha_operacion, cc.fecha_cierre, cc.usuario, cc.usuario_rol, cc.origen_caja,
+    SELECT cc.id, DATE_FORMAT(cc.fecha_operacion, '%Y-%m-%d') AS fecha_operacion, cc.fecha_cierre, cc.usuario, cc.usuario_rol, cc.origen_caja,
            cc.fondo_inicial, cc.total_sistema, cc.total_declarado, cc.diferencia, cc.observaciones,
            COALESCE((
              SELECT SUM(${totalPedidoSql})
@@ -11530,15 +11530,15 @@ app.get('/api/caja/cierres/:id/detalle', (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID de cierre invalido' });
     }
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
-    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
 
-    const params = [corteId, negocioId];
-    const filtroOrigen = construirFiltroOrigenCaja(origenCaja, params, 'origen_caja');
+    // Se busca el cierre solo por id + negocio (sin filtrar por origen) y se usa
+    // SU PROPIO origen_caja para el detalle. Antes se asumía 'caja' por defecto,
+    // por lo que los cuadres de MOSTRADOR daban 404 ("Cierre no encontrado").
     db.get(
-      `SELECT id, fecha_operacion, fecha_cierre
+      `SELECT id, DATE_FORMAT(fecha_operacion, '%Y-%m-%d') AS fecha_operacion, fecha_cierre, origen_caja
          FROM cierres_caja
-        WHERE id = ? AND negocio_id = ? AND ${filtroOrigen}`,
-      params,
+        WHERE id = ? AND negocio_id = ?`,
+      [corteId, negocioId],
       (cierreErr, cierreRow) => {
         if (cierreErr) {
           console.error('Error al consultar el cierre de caja:', cierreErr?.message || cierreErr);
@@ -11547,6 +11547,7 @@ app.get('/api/caja/cierres/:id/detalle', (req, res) => {
         if (!cierreRow) {
           return res.status(404).json({ ok: false, error: 'Cierre no encontrado' });
         }
+        const origenCaja = normalizarOrigenCaja(cierreRow.origen_caja, 'caja');
 
         obtenerPedidosDetalleCierre(corteId, negocioId, origenCaja, (detalleErr, pedidos) => {
           if (detalleErr) {
@@ -11607,12 +11608,11 @@ app.get('/api/caja/cierres/:id/ticket', (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID de cierre invalido' });
     }
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
-    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
 
     try {
       // 1) Datos del cierre
       const cierre = await db.get(
-        `SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol, origen_caja,
+        `SELECT id, DATE_FORMAT(fecha_operacion, '%Y-%m-%d') AS fecha_operacion, fecha_cierre, usuario, usuario_rol, origen_caja,
                 fondo_inicial, total_sistema, total_declarado, diferencia, observaciones
            FROM cierres_caja
           WHERE id = ? AND negocio_id = ?`,
@@ -11621,6 +11621,9 @@ app.get('/api/caja/cierres/:id/ticket', (req, res) => {
       if (!cierre) {
         return res.status(404).json({ ok: false, error: 'Cierre no encontrado' });
       }
+      // Usar el origen del PROPIO cierre (no el query), para que el ticket de un
+      // cuadre de mostrador traiga sus pedidos correctos.
+      const origenCaja = normalizarOrigenCaja(cierre.origen_caja, 'caja');
 
       // 2) Datos del negocio
       const negocio = await db.get(
@@ -11848,7 +11851,6 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
     }
 
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
-    const origenCaja = normalizarOrigenCaja(req.query?.origen ?? req.query?.origen_caja, 'caja');
 
     const normalizarClaveCompra = (valor) => {
       if (!valor) return '';
@@ -11858,19 +11860,20 @@ app.get('/api/caja/cierres/:id/hoja-detalle', (req, res) => {
     const normalizarFechaConsulta = (valor) => normalizarFechaOperacion(valor);
 
     try {
-      const paramsCierre = [cierreId, negocioId];
-      const filtroOrigen = construirFiltroOrigenCaja(origenCaja, paramsCierre, 'origen_caja');
+      // Se busca por id + negocio (sin filtrar por origen) y se usa el origen del
+      // PROPIO cierre; así los cuadres de mostrador no dan 404.
       const cierre = await db.get(
-        `SELECT id, fecha_operacion, fecha_cierre, usuario, usuario_rol, origen_caja,
+        `SELECT id, DATE_FORMAT(fecha_operacion, '%Y-%m-%d') AS fecha_operacion, fecha_cierre, usuario, usuario_rol, origen_caja,
                 fondo_inicial, total_sistema, total_declarado, diferencia
          FROM cierres_caja
-         WHERE id = ? AND negocio_id = ? AND ${filtroOrigen}`,
-        paramsCierre
+         WHERE id = ? AND negocio_id = ?`,
+        [cierreId, negocioId]
       );
 
       if (!cierre) {
         return res.status(404).json({ ok: false, error: 'Cierre no encontrado' });
       }
+      const origenCaja = normalizarOrigenCaja(cierre.origen_caja, 'caja');
 
       const fechaOperacion = normalizarFechaConsulta(cierre.fecha_operacion || cierre.fecha_cierre);
       const cierreAdmin = {
