@@ -33882,13 +33882,19 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         return (Number(a?.hora) || 0) - (Number(b?.hora) || 0);
       });
 
+      // Se agrupa tambien por precio_unitario para desglosar la venta de un
+      // mismo producto a sus distintos precios (precio base, precios extra,
+      // precios editados en caja). El descuento por linea se suma aparte.
       const ventasProductosPedidos = await db.all(
         `
           SELECT p.id,
                  p.nombre,
                  COALESCE(c.nombre, 'Sin categoria') AS categoria,
+                 dp.precio_unitario AS precio_unitario,
                  SUM(dp.cantidad) AS cantidad,
-                 SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos
+                 SUM(dp.cantidad * dp.precio_unitario) AS ingresos_bruto,
+                 SUM(dp.cantidad * dp.precio_unitario - COALESCE(dp.descuento_monto, 0)) AS ingresos,
+                 SUM(COALESCE(dp.descuento_monto, 0)) AS descuento
           FROM detalle_pedido dp
           JOIN pedidos pe ON pe.id = dp.pedido_id AND pe.negocio_id = ?
           JOIN productos p ON p.id = dp.producto_id AND p.negocio_id = ?
@@ -33896,7 +33902,7 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           WHERE dp.negocio_id = ?
             AND pe.estado = 'pagado'
             AND ${fechaBase} BETWEEN ? AND ?
-          GROUP BY p.id, p.nombre, categoria
+          GROUP BY p.id, p.nombre, categoria, dp.precio_unitario
         `,
         [negocioId, negocioId, negocioId, negocioId, rango.desde, rango.hasta]
       );
@@ -33905,15 +33911,18 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           SELECT p.id,
                  p.nombre,
                  COALESCE(c.nombre, 'Sin categoria') AS categoria,
+                 dd.precio_unitario AS precio_unitario,
                  SUM(dd.cantidad) AS cantidad,
-                 SUM(dd.total_linea) AS ingresos
+                 SUM(dd.total_linea) AS ingresos_bruto,
+                 SUM(dd.total_linea) AS ingresos,
+                 0 AS descuento
           FROM clientes_deudas_detalle dd
           JOIN clientes_deudas d ON d.id = dd.deuda_id AND d.negocio_id = ?
           JOIN productos p ON p.id = dd.producto_id AND p.negocio_id = ?
           LEFT JOIN categorias c ON c.id = p.categoria_id AND c.negocio_id = ?
           WHERE dd.negocio_id = ?
             AND DATE(d.fecha) BETWEEN ? AND ?
-          GROUP BY p.id, p.nombre, categoria
+          GROUP BY p.id, p.nombre, categoria, dd.precio_unitario
         `,
         [negocioId, negocioId, negocioId, negocioId, rango.desde, rango.hasta]
       );
@@ -33941,9 +33950,33 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           categoria: row?.categoria || 'Sin categoria',
           cantidad: 0,
           ingresos: 0,
+          ingresos_bruto: 0,
+          descuento: 0,
+          // Desglose por precio unitario (mismo producto vendido a distintos precios)
+          preciosMap: new Map(),
         };
-        actual.cantidad += Number(row?.cantidad) || 0;
-        actual.ingresos += Number(row?.ingresos) || 0;
+        const cantidad = Number(row?.cantidad) || 0;
+        const ingresos = Number(row?.ingresos) || 0;
+        const ingresosBruto = Number(row?.ingresos_bruto) || 0;
+        const descuento = Number(row?.descuento) || 0;
+        actual.cantidad += cantidad;
+        actual.ingresos += ingresos;
+        actual.ingresos_bruto += ingresosBruto;
+        actual.descuento += descuento;
+        // Fusiona pedidos + deudas del mismo precio en una sola entrada
+        const precioUnit = Number((Number(row?.precio_unitario) || 0).toFixed(2));
+        const precioActual = actual.preciosMap.get(precioUnit) || {
+          precio_unitario: precioUnit,
+          cantidad: 0,
+          ingresos: 0,
+          ingresos_bruto: 0,
+          descuento: 0,
+        };
+        precioActual.cantidad += cantidad;
+        precioActual.ingresos += ingresos;
+        precioActual.ingresos_bruto += ingresosBruto;
+        precioActual.descuento += descuento;
+        actual.preciosMap.set(precioUnit, precioActual);
         if (!actual.nombre && row?.nombre) {
           actual.nombre = row.nombre;
         }
@@ -33959,6 +33992,18 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         categoria: item.categoria || 'Sin categoria',
         cantidad: Number((Number(item.cantidad) || 0).toFixed(2)),
         ingresos: Number((Number(item.ingresos) || 0).toFixed(2)),
+        ingresos_bruto: Number((Number(item.ingresos_bruto) || 0).toFixed(2)),
+        descuento: Number((Number(item.descuento) || 0).toFixed(2)),
+        // Precios de mayor a menor cantidad vendida
+        precios: Array.from(item.preciosMap.values())
+          .map((p) => ({
+            precio_unitario: Number((Number(p.precio_unitario) || 0).toFixed(2)),
+            cantidad: Number((Number(p.cantidad) || 0).toFixed(2)),
+            ingresos: Number((Number(p.ingresos) || 0).toFixed(2)),
+            ingresos_bruto: Number((Number(p.ingresos_bruto) || 0).toFixed(2)),
+            descuento: Number((Number(p.descuento) || 0).toFixed(2)),
+          }))
+          .sort((a, b) => (b.cantidad - a.cantidad) || (b.precio_unitario - a.precio_unitario)),
       }));
 
       const topProductosCantidad = [...ventasProductosLista]

@@ -7882,20 +7882,66 @@ const renderVentasProductosTabla = () => {
     }
   });
 
+  const numDO = (v, dec = 2) =>
+    Number(v || 0).toLocaleString('es-DO', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+
   const fragment = document.createDocumentFragment();
   let totalCantidad = 0;
   let totalIngresos = 0;
+  let totalDescuento = 0;
   lista.forEach((p, i) => {
+    const precios = Array.isArray(p.precios) ? p.precios : [];
+    // Solo se puede expandir si el producto se vendio a mas de un precio o tuvo descuento
+    const tieneDesglose = precios.length > 1 || (Number(p.descuento) || 0) > 0;
+    const descuento = Number(p.descuento) || 0;
+
     const tr = document.createElement('tr');
+    if (tieneDesglose) {
+      tr.className = 'venta-producto-fila';
+      tr.dataset.idx = String(i);
+      tr.style.cursor = 'pointer';
+    }
+    const caret = tieneDesglose
+      ? `<span class="venta-producto-caret" aria-hidden="true" style="display:inline-block;width:14px;color:var(--kanm-primary,#255bc7)">▸</span>`
+      : `<span style="display:inline-block;width:14px"></span>`;
     tr.innerHTML =
       `<td>${i + 1}</td>` +
-      `<td>${p.nombre || ''}</td>` +
+      `<td>${caret}${p.nombre || ''}${precios.length > 1 ? ` <span style="color:#888;font-size:.85em">(${precios.length} precios)</span>` : ''}</td>` +
       `<td>${p.categoria || ''}</td>` +
-      `<td style="text-align:right">${Number(p.cantidad || 0).toLocaleString('es-DO', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</td>` +
-      `<td style="text-align:right">${Number(p.ingresos || 0).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>`;
+      `<td style="text-align:right">${numDO(p.cantidad, 0)}</td>` +
+      `<td style="text-align:right">${descuento > 0 ? `-${numDO(descuento)}` : '—'}</td>` +
+      `<td style="text-align:right">${numDO(p.ingresos)}</td>`;
     fragment.appendChild(tr);
+
+    if (tieneDesglose) {
+      const trDetalle = document.createElement('tr');
+      trDetalle.className = 'venta-producto-detalle';
+      trDetalle.dataset.idx = String(i);
+      trDetalle.hidden = true;
+      const filasPrecios = precios
+        .map((pr) => {
+          const desc = Number(pr.descuento) || 0;
+          return (
+            `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-bottom:1px dashed #e5e7eb">` +
+            `<span>${numDO(pr.cantidad, 0)} uds &times; <strong>${numDO(pr.precio_unitario)}</strong></span>` +
+            `<span style="color:#888">${desc > 0 ? `desc. -${numDO(desc)}` : ''}</span>` +
+            `<span style="min-width:90px;text-align:right"><strong>${numDO(pr.ingresos)}</strong></span>` +
+            `</div>`
+          );
+        })
+        .join('');
+      trDetalle.innerHTML =
+        `<td></td>` +
+        `<td colspan="5" style="background:#f8fafc;padding:8px 12px">` +
+        `<div style="font-size:.85em;color:#555;margin-bottom:4px">Desglose por precio de venta</div>` +
+        filasPrecios +
+        `</td>`;
+      fragment.appendChild(trDetalle);
+    }
+
     totalCantidad += Number(p.cantidad || 0);
     totalIngresos += Number(p.ingresos || 0);
+    totalDescuento += descuento;
   });
   ventasProductosTbody.appendChild(fragment);
 
@@ -7903,7 +7949,8 @@ const renderVentasProductosTabla = () => {
     ventasProductosResumen.textContent =
       `${lista.length} producto${lista.length !== 1 ? 's' : ''} | ` +
       `Cantidad total: ${totalCantidad.toLocaleString('es-DO', { maximumFractionDigits: 2 })} | ` +
-      `Ingresos total: ${totalIngresos.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      `Descuentos: ${numDO(totalDescuento)} | ` +
+      `Ingresos total: ${numDO(totalIngresos)}`;
   }
 };
 
@@ -7933,6 +7980,18 @@ if (modalVentasProductos) {
 }
 if (ventasProductosBuscar) ventasProductosBuscar.addEventListener('input', renderVentasProductosTabla);
 if (ventasProductosOrden) ventasProductosOrden.addEventListener('change', renderVentasProductosTabla);
+if (ventasProductosTbody) {
+  ventasProductosTbody.addEventListener('click', (e) => {
+    const fila = e.target.closest('.venta-producto-fila');
+    if (!fila) return;
+    const idx = fila.dataset.idx;
+    const detalle = ventasProductosTbody.querySelector(`.venta-producto-detalle[data-idx="${idx}"]`);
+    if (!detalle) return;
+    detalle.hidden = !detalle.hidden;
+    const caret = fila.querySelector('.venta-producto-caret');
+    if (caret) caret.textContent = detalle.hidden ? '▸' : '▾';
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Modal: Ventas por metodo de pago (efectivo / tarjeta / transferencia)
@@ -9438,15 +9497,32 @@ const construirCSVAnalisisCompleto = (basico = {}, avanzado = {}, desde = '', ha
   addSpacer();
 
   addRow('Ventas por producto (todos)');
-  addRow('Producto', 'Categoria', 'Cantidad', 'Ingresos');
+  addRow('Producto', 'Categoria', 'Precio unitario', 'Cantidad', 'Descuento', 'Ingresos');
   const todosOrdenados = [...(rankings.todos_productos || [])].sort((a, b) => (b.ingresos || 0) - (a.ingresos || 0));
   todosOrdenados.forEach((row) => {
+    const precios = Array.isArray(row?.precios) ? row.precios : [];
+    // Fila resumen del producto (todos sus precios sumados)
     addRow(
       row?.nombre || '',
       row?.categoria || '',
+      precios.length > 1 ? 'Varios' : Number(precios[0]?.precio_unitario || 0).toFixed(2),
       Number(row?.cantidad || 0).toFixed(2),
+      Number(row?.descuento || 0).toFixed(2),
       Number(row?.ingresos || 0).toFixed(2)
     );
+    // Si se vendio a mas de un precio, una fila por cada precio
+    if (precios.length > 1) {
+      precios.forEach((pr) => {
+        addRow(
+          `  ${row?.nombre || ''} (a ${Number(pr?.precio_unitario || 0).toFixed(2)})`,
+          row?.categoria || '',
+          Number(pr?.precio_unitario || 0).toFixed(2),
+          Number(pr?.cantidad || 0).toFixed(2),
+          Number(pr?.descuento || 0).toFixed(2),
+          Number(pr?.ingresos || 0).toFixed(2)
+        );
+      });
+    }
   });
   addSpacer();
 
