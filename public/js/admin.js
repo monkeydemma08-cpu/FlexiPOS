@@ -331,6 +331,7 @@ const cierresHastaInput = document.getElementById('cierres-hasta');
 const cierresBuscarBtn = document.getElementById('cierres-buscar');
 const cierresExportarBtn = document.getElementById('cierres-exportar');
 const cierresCuadreMesBtn = document.getElementById('cierres-cuadre-mes');
+const cierresCuadreMes88Btn = document.getElementById('cierres-cuadre-mes-88');
 const cierresMensaje = document.getElementById('cierres-mensaje');
 const cierresTabla = document.getElementById('cierres-tabla');
 const cierresDetalleWrapper = document.getElementById('cierres-detalle-wrapper');
@@ -9992,6 +9993,24 @@ const abrirCuadreDelMes = () => {
   window.open(url, '_blank', 'noopener');
 };
 
+// Cuadre del mes en formato ticket térmico 88mm (solo lo esencial: fecha
+// operación, total de ventas, efectivo esperado y declarado por cierre).
+const abrirCuadreDelMes88 = () => {
+  const fechaReferencia = cierresHastaInput?.value || cierresDesdeInput?.value || getLocalDateISO();
+  const match = String(fechaReferencia || '').trim().match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!match) {
+    setMessage(cierresMensaje, 'Selecciona una fecha valida para el cuadre del mes.', 'error');
+    return;
+  }
+  const anio = Number(match[1]);
+  const mes = Number(match[2]);
+  const desde = `${anio}-${String(mes).padStart(2, '0')}-01`;
+  const hasta = getLocalDateISO(new Date(anio, mes, 0));
+  const url = `/cuadre-mes-ticket.html?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}&origen=todos`;
+  setMessage(cierresMensaje, '', 'info');
+  window.open(url, '_blank', 'noopener');
+};
+
 const renderHistorialCocina = (items = []) => {
   if (!histCocinaTabla) return;
 
@@ -13236,6 +13255,11 @@ cierresExportarBtn?.addEventListener('click', (event) => {
 cierresCuadreMesBtn?.addEventListener('click', (event) => {
   event.preventDefault();
   abrirCuadreDelMes();
+});
+
+cierresCuadreMes88Btn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  abrirCuadreDelMes88();
 });
 
 cierresTabla?.addEventListener('click', (event) => {

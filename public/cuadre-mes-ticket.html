@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cuadre del mes — 88mm</title>
+    <script src="/js/auth.js" defer></script>
+    <script src="/js/cuadre-mes-ticket.js?v=20260801a" defer></script>
+    <style>
+      /* Ticket optimizado para impresora térmica de 88mm. */
+      :root { --ticket-ancho: 80mm; }
+      html, body {
+        margin: 0; padding: 0; background: #f5f5f5;
+        font-family: 'Courier New', 'Consolas', monospace;
+        font-size: 11px; color: #000; line-height: 1.35;
+      }
+      .barra {
+        display: flex; gap: 8px; justify-content: center;
+        padding: 10px; background: #fff; position: sticky; top: 0;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+      }
+      .barra button {
+        border: none; border-radius: 8px; padding: 8px 16px;
+        font-weight: 700; cursor: pointer; font-family: inherit; font-size: 12px;
+      }
+      .barra .imprimir { background: #255bc7; color: #fff; }
+      .barra .cerrar { background: #e6ebf4; color: #24344a; }
+      .ticket {
+        width: var(--ticket-ancho); max-width: 100%;
+        margin: 10px auto; background: #fff; padding: 8px 6px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1); box-sizing: border-box;
+      }
+      .ticket h1 { margin: 0; text-align: center; font-size: 14px; font-weight: 700; }
+      .ticket .sub { text-align: center; font-size: 10px; margin: 2px 0 0; }
+      .sep { border: none; border-top: 1px dashed #000; margin: 6px 0; }
+      .sep-solid { border: none; border-top: 2px solid #000; margin: 6px 0; }
+      .cierre { margin: 6px 0; }
+      .cierre .fecha { font-weight: 700; font-size: 12px; }
+      .cierre .origen { font-size: 9px; text-transform: uppercase; color: #333; }
+      .linea { display: flex; justify-content: space-between; gap: 6px; }
+      .linea .lbl { color: #000; }
+      .linea .val { font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .totales { margin-top: 4px; }
+      .totales .linea { font-weight: 700; }
+      .totales .grande { font-size: 12px; }
+      .vacio { text-align: center; padding: 20px 8px; }
+      .dif-ok { }
+      .dif-mal { font-weight: 700; }
+      @media print {
+        .barra { display: none; }
+        html, body { background: #fff; }
+        .ticket { box-shadow: none; margin: 0; width: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="barra">
+      <button type="button" class="imprimir" id="btn-imprimir">Imprimir</button>
+      <button type="button" class="cerrar" id="btn-cerrar">Cerrar</button>
+    </div>
+    <div class="ticket" id="ticket-mes">
+      <p class="vacio">Cargando cuadre del mes…</p>
+    </div>
+  </body>
+</html>
