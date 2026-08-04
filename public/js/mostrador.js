@@ -1648,6 +1648,27 @@ inputClienteNombre?.addEventListener('input', () => {
   clienteSeleccionadoId = null;
 });
 
+// El nombre escrito en "Mesa o cliente" (datos del pedido) se copia automatico al
+// campo "Cliente / Razon social" para que salga en la factura. Se respeta lo que
+// el cajero edite a mano o elija de DGII/clientes (solo autocompleta si el campo
+// fiscal esta vacio o si su valor vino justamente de la mesa).
+let clienteAutoDesdeMesa = '';
+campoMesa?.addEventListener('input', () => {
+  if (!inputClienteNombre) return;
+  const actual = inputClienteNombre.value.trim();
+  if (actual === '' || actual === clienteAutoDesdeMesa) {
+    const nuevo = campoMesa.value.trim();
+    inputClienteNombre.value = nuevo;
+    clienteAutoDesdeMesa = nuevo;
+  }
+});
+// Si el cajero edita el nombre fiscal a mano, dejamos de sincronizar desde la mesa.
+inputClienteNombre?.addEventListener('input', () => {
+  if (inputClienteNombre.value.trim() !== clienteAutoDesdeMesa) {
+    clienteAutoDesdeMesa = '';
+  }
+});
+
 const setVentaActiva = (activa) => {
   estado.ventaActiva = activa;
   if (botonCrearVenta) botonCrearVenta.disabled = activa || estado.cargando;
@@ -1666,6 +1687,7 @@ const limpiarFormularioCobro = () => {
   if (itemsContainer) itemsContainer.innerHTML = '';
   clienteSeleccionadoId = null;
   if (inputClienteNombre) inputClienteNombre.value = '';
+  clienteAutoDesdeMesa = '';
   if (inputClienteDocumento) inputClienteDocumento.value = '';
   if (inputClienteBuscar) inputClienteBuscar.value = '';
   reiniciarLookupDgii();
@@ -2043,6 +2065,9 @@ const renderVentasEspera = () => {
 };
 
 // Toma una "foto" de la venta actual (carrito + campos) para guardarla.
+// El nombre con que se identifica la venta en espera tambien se usa como nombre
+// de la factura (clienteNombre) si el cajero no puso un cliente fiscal aparte, para
+// que al retomarla salga automatico en la factura (editable al facturar).
 const capturarVentaActual = (nombre) => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
   nombre,
@@ -2050,7 +2075,7 @@ const capturarVentaActual = (nombre) => ({
   items: Array.from(estado.carrito.entries()),
   mesa: campoMesa?.value || '',
   nota: notaInput?.value || '',
-  clienteNombre: inputClienteNombre?.value || '',
+  clienteNombre: (inputClienteNombre?.value?.trim() || nombre || ''),
   clienteDocumento: inputClienteDocumento?.value || '',
   tipoComprobante: selectTipoComprobante?.value || '',
   descuento: inputDescuento?.value || '0',
@@ -3015,6 +3040,13 @@ window.addEventListener('DOMContentLoaded', async () => {
       estado.ventaActual = data.pedido || data;
       estado.detalleCuentaCargado = false;
       estado.cargandoDetalleCuenta = false;
+      // Prellenar el nombre de la factura con el que trae el pedido (datos del
+      // pedido: nombre puesto en mesera/mostrador/QR), si el cajero no puso otro.
+      if (inputClienteNombre && !inputClienteNombre.value.trim()) {
+        const nombrePedido =
+          (estado.ventaActual.cliente || estado.ventaActual.mesa || '').toString().trim();
+        if (nombrePedido) inputClienteNombre.value = nombrePedido;
+      }
       if (typeof setVentaActiva === 'function') setVentaActiva(true);
       if (typeof mostrarDetalleVenta === 'function') mostrarDetalleVenta();
       if (typeof mostrarMensajePedido === 'function') {

@@ -9135,10 +9135,16 @@ const cerrarCuentaYRegistrarPago = async (pedidosEntrada, opciones, callback) =>
     });
   }
 
-  const clienteFinal = normalizarCampoTexto(
+  // Nombre para la factura. Si no viene uno explicito del cobro, se usa el nombre
+  // que quedo en el pedido (datos del pedido: la mesera/mostrador lo escribio al
+  // crear la orden), para que aparezca automatico en la factura. El cajero siempre
+  // puede sobreescribirlo al facturar.
+  const clienteExplicito = normalizarCampoTexto(
     clienteNombre !== undefined ? clienteNombre : cliente_nombre,
     null
   );
+  const clienteFinal =
+    clienteExplicito || normalizarCampoTexto(pedidosActivos[0]?.cliente, null) || null;
   const documentoFinal = normalizarCampoTexto(cliente_documento, null);
   const comentariosFinal = normalizarCampoTexto(comentarios, null);
   const ncfManualNormalizado = normalizarCampoTexto(ncfManual, null);
