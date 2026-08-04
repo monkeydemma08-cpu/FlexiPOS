@@ -2755,6 +2755,109 @@ window.addEventListener('DOMContentLoaded', async () => {
   let kdsPollingId = null;
   let kdsTabActivo = false;
 
+  // --- Alarma sonora para pedidos entrantes por QR directo ---
+  // Los pedidos QR-directo llegan al panel como "listos" (es_qr_directo = 1). Cuando
+  // aparece uno nuevo, sonamos una alarma y avisamos (como una orden nueva de mesera).
+  const KDS_QR_STORAGE = 'mostrador-qr-directo-alertados';
+  let qrDirectoAlertados = new Set();
+  try {
+    const guardado = JSON.parse(sessionStorage.getItem(KDS_QR_STORAGE) || '[]');
+    if (Array.isArray(guardado)) qrDirectoAlertados = new Set(guardado.map(Number));
+  } catch (_) {}
+  let kdsPrimerCargaQr = true;
+  let kdsAudioCtx = null;
+
+  const persistirQrAlertados = () => {
+    try {
+      // Acotamos a los ultimos 200 para no crecer sin limite.
+      const arr = Array.from(qrDirectoAlertados).slice(-200);
+      qrDirectoAlertados = new Set(arr);
+      sessionStorage.setItem(KDS_QR_STORAGE, JSON.stringify(arr));
+    } catch (_) {}
+  };
+
+  const obtenerAudioCtxKds = () => {
+    if (kdsAudioCtx) return kdsAudioCtx;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    kdsAudioCtx = new AudioCtx();
+    return kdsAudioCtx;
+  };
+  const habilitarAudioKds = () => {
+    const ctx = obtenerAudioCtxKds();
+    if (ctx && ctx.state !== 'running') {
+      ctx.resume().catch(() => {});
+    }
+  };
+  // Desbloquear el audio con la primera interaccion del cajero (los navegadores
+  // no dejan sonar sin un gesto previo del usuario).
+  ['click', 'keydown', 'touchstart'].forEach((ev) =>
+    document.addEventListener(ev, habilitarAudioKds, { passive: true })
+  );
+  const beepKds = () => {
+    const ctx = obtenerAudioCtxKds();
+    if (!ctx || ctx.state !== 'running') return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.27);
+  };
+  const sonarAlarmaQr = () => {
+    beepKds();
+    setTimeout(beepKds, 300);
+    setTimeout(beepKds, 600);
+  };
+  const avisarQrDirecto = (cantidad) => {
+    const msg = cantidad === 1
+      ? '🔔 Nuevo pedido por QR listo para cobrar. Revisa "Cuentas activas".'
+      : `🔔 ${cantidad} nuevos pedidos por QR listos para cobrar. Revisa "Cuentas activas".`;
+    if (typeof mostrarMensajePedido === 'function') {
+      try { mostrarMensajePedido(msg, 'info'); } catch (_) {}
+    }
+    if (kdsMensaje) {
+      kdsMensaje.textContent = msg;
+      kdsMensaje.className = 'kanm-message info';
+    }
+  };
+  // Revisa la lista de "listos" y dispara la alarma por cada pedido QR nuevo.
+  // Keyeamos por id de PEDIDO (no de cuenta): en mesas, varias ordenes del QR se
+  // agrupan en una misma cuenta y queremos avisar por cada orden que entra.
+  const revisarAlarmaQrDirecto = (listaListo) => {
+    const pedidosQr = [];
+    (listaListo || []).forEach((cuenta) => {
+      const peds = Array.isArray(cuenta.pedidos) ? cuenta.pedidos : [];
+      peds.forEach((p) => {
+        if (Number(p.es_qr_directo) === 1) pedidosQr.push(Number(p.id));
+      });
+      // Fallback: cuenta marcada pero sin pedidos desglosados.
+      if (!peds.length && Number(cuenta.es_qr_directo) === 1) {
+        pedidosQr.push(Number(cuenta.cuenta_id || cuenta.id));
+      }
+    });
+    const nuevos = pedidosQr.filter((id) => Number.isFinite(id) && !qrDirectoAlertados.has(id));
+    pedidosQr.forEach((id) => {
+      if (Number.isFinite(id)) qrDirectoAlertados.add(id);
+    });
+    persistirQrAlertados();
+    // En la primera carga (al abrir mostrador) solo registramos los que ya estaban,
+    // sin sonar, para no alarmar por pedidos viejos.
+    if (kdsPrimerCargaQr) {
+      kdsPrimerCargaQr = false;
+      return;
+    }
+    if (!nuevos.length) return;
+    habilitarAudioKds();
+    sonarAlarmaQr();
+    avisarQrDirecto(nuevos.length);
+  };
+
   const tabCuentas = document.getElementById('tab-cuentas');
   const panelCuentas = document.getElementById('panel-cuentas');
   const kdsBadge = document.getElementById('mostrador-kds-badge');
@@ -2867,12 +2970,15 @@ window.addEventListener('DOMContentLoaded', async () => {
       const dataPend = await respPend.json().catch(() => ({ pedidos: [] }));
       const dataPrep = await respPrep.json().catch(() => ({ pedidos: [] }));
       const dataListo = await respListo.json().catch(() => ({ pedidos: [] }));
+      const listaListo = dataListo?.pedidos || dataListo?.data || (Array.isArray(dataListo) ? dataListo : []);
       renderCuentasKds({
         pendiente: dataPend?.pedidos || dataPend?.data || (Array.isArray(dataPend) ? dataPend : []),
         preparando: dataPrep?.pedidos || dataPrep?.data || (Array.isArray(dataPrep) ? dataPrep : []),
-        listo: dataListo?.pedidos || dataListo?.data || (Array.isArray(dataListo) ? dataListo : []),
+        listo: listaListo,
       });
-      if (kdsMensaje) {
+      // Alarma para pedidos entrantes por QR directo (solo suena por los nuevos).
+      revisarAlarmaQrDirecto(listaListo);
+      if (kdsMensaje && !(listaListo || []).some((c) => Number(c.es_qr_directo) === 1)) {
         kdsMensaje.textContent = '';
       }
     } catch (error) {

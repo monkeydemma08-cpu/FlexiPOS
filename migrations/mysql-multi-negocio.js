@@ -1693,6 +1693,12 @@ async function ensureNegocioThemeAndModulesColumns() {
   //    en preparacion y listos aparecen al lado de "Cuadre de caja".
   await ensureColumn('negocios', 'impresion_directa TINYINT(1) NOT NULL DEFAULT 0');
   await ensureColumn('negocios', 'mostrador_kds TINYINT(1) NOT NULL DEFAULT 0');
+  //  - qr_directo: cuando esta activo (y mostrador_kds tambien), los pedidos del
+  //    menu QR NO pasan por cocina: entran directo a mostrador como "listos" para
+  //    cobrar y disparan una alarma con sonido (como una orden nueva de mesera).
+  await ensureColumn('negocios', 'qr_directo TINYINT(1) NOT NULL DEFAULT 0');
+  // Marca en el pedido para saber que entro por QR-directo (dispara la alarma en mostrador).
+  await ensureColumn('pedidos', 'es_qr_directo TINYINT(1) NOT NULL DEFAULT 0');
   // Backfill defensivo: cualquier registro sin plan queda como 'full' (no se bloquea nada).
   try {
     await query(`UPDATE negocios SET plan_id = 'full' WHERE plan_id IS NULL OR plan_id = ''`);

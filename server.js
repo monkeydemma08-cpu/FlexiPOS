@@ -2164,6 +2164,7 @@ function mapNegocioWithDefaults(row = {}) {
   // Caracteristicas adicionales (toggles funcionales)
   const impresionDirecta = Number(row.impresion_directa ?? row.impresionDirecta ?? 0) === 1 ? 1 : 0;
   const mostradorKds = Number(row.mostrador_kds ?? row.mostradorKds ?? 0) === 1 ? 1 : 0;
+  const qrDirecto = Number(row.qr_directo ?? row.qrDirecto ?? 0) === 1 ? 1 : 0;
 
   return {
     ...row,
@@ -2171,6 +2172,8 @@ function mapNegocioWithDefaults(row = {}) {
     impresionDirecta,
     mostrador_kds: mostradorKds,
     mostradorKds,
+    qr_directo: qrDirecto,
+    qrDirecto,
     colorPrimario,
     colorSecundario,
     color_header: colorHeader,
@@ -6364,11 +6367,15 @@ const agruparPedidosEnCuentas = (pedidos = [], itemsMap = new Map()) => {
         estadoCocina: null,
         estadoBar: null,
         estadoCuentaMesera: null,
+        es_qr_directo: Number(pedido.es_qr_directo) === 1 ? 1 : 0,
         pedidos: [],
       });
     }
 
     const cuenta = cuentasMap.get(clave);
+    if (Number(pedido.es_qr_directo) === 1) {
+      cuenta.es_qr_directo = 1;
+    }
     if (!cuenta.numero_cuenta_negocio && pedido.numero_cuenta_negocio) {
       cuenta.numero_cuenta_negocio = Number(pedido.numero_cuenta_negocio) || null;
     }
@@ -6641,6 +6648,7 @@ const obtenerCuentasPorEstados = async (estados, negocioId, opciones = {}) => {
              cocinero_id, cocinero_nombre, bartender_id, bartender_nombre, negocio_id,
              cliente_documento, ncf, tipo_comprobante, comentarios,
              cliente_dispositivo_id, cliente_alias, mesera_pin_id, mesera_nombre,
+             COALESCE(es_qr_directo, 0) AS es_qr_directo,
              COALESCE(descuento_porcentaje, 0) AS descuento_porcentaje,
              COALESCE(descuento_monto, 0) AS descuento_monto,
              COALESCE(propina_porcentaje, 0) AS propina_porcentaje,
@@ -19605,6 +19613,11 @@ app.put('/api/negocios/:id', (req, res) => {
       fields.push('mostrador_kds = ?');
       params.push(v === 1 || v === true || v === '1' ? 1 : 0);
     }
+    if (payload.qr_directo !== undefined || payload.qrDirecto !== undefined) {
+      const v = payload.qr_directo ?? payload.qrDirecto;
+      fields.push('qr_directo = ?');
+      params.push(v === 1 || v === true || v === '1' ? 1 : 0);
+    }
 
     if (!fields.length) {
       return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
@@ -19918,7 +19931,7 @@ app.get('/api/negocios/mi-tema', (req, res) => {
         `SELECT id, slug, nombre, titulo_sistema, color_primario, color_secundario, color_texto, color_header,
                 color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos, admin_principal_usuario_id,
                 logo_url, permitir_b01, permitir_b02, permitir_b14, activo,
-                impresion_directa, mostrador_kds
+                impresion_directa, mostrador_kds, qr_directo
          FROM negocios
          WHERE id = ?`,
       [negocioId],
@@ -19962,6 +19975,8 @@ app.get('/api/negocios/mi-tema', (req, res) => {
               impresion_directa: Number(negocioTema.impresion_directa) === 1 ? 1 : 0,
               mostradorKds: Number(negocioTema.mostrador_kds) === 1 ? 1 : 0,
               mostrador_kds: Number(negocioTema.mostrador_kds) === 1 ? 1 : 0,
+              qrDirecto: Number(negocioTema.qr_directo) === 1 ? 1 : 0,
+              qr_directo: Number(negocioTema.qr_directo) === 1 ? 1 : 0,
               permitirE31: facturacionElectronica.permitir_e31,
               permitirE32: facturacionElectronica.permitir_e32,
               permitirE33: facturacionElectronica.permitir_e33,
@@ -28794,7 +28809,17 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
   const subtotal = totalesPedido.subtotal;
   const impuesto = totalesPedido.impuesto;
   const total = totalesPedido.total;
-  const estadoInicial = resultadoItems.tienePreparacion ? 'pendiente' : 'listo';
+  // QR directo: si el negocio lo tiene activo (y ademas mostrador_kds), el pedido
+  // del QR NO pasa por cocina. Entra directo a mostrador como "listo" para cobrar y
+  // dispara la alarma con sonido en mostrador (se marca es_qr_directo = 1).
+  const negocioFlagsQr = await db
+    .get('SELECT qr_directo, mostrador_kds FROM negocios WHERE id = ? LIMIT 1', [negocioId])
+    .catch(() => null);
+  const qrDirectoActivo =
+    Number(negocioFlagsQr?.qr_directo) === 1 && Number(negocioFlagsQr?.mostrador_kds) === 1;
+  const estadoInicial = qrDirectoActivo ? 'listo' : resultadoItems.tienePreparacion ? 'pendiente' : 'listo';
+  const origenPedido = qrDirectoActivo ? 'mostrador' : 'caja';
+  const esQrDirecto = qrDirectoActivo ? 1 : 0;
   const fechaListo = estadoInicial === 'listo' ? new Date() : null;
   const consumoRegistros = [];
   let transaccionIniciada = false;
@@ -28830,8 +28855,8 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
           cuenta_id, mesa, cliente, modo_servicio, nota, estado,
           subtotal, impuesto, total, fecha_listo, origen_caja, creado_por, negocio_id,
           delivery_estado, delivery_telefono, delivery_direccion, delivery_referencia, delivery_notas,
-          cliente_dispositivo_id, cliente_alias
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          cliente_dispositivo_id, cliente_alias, es_qr_directo
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         cuentaReferencia,
@@ -28844,7 +28869,7 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
         impuesto,
         total,
         fechaListo,
-        'caja',
+        origenPedido,
         null,
         negocioId,
         null,
@@ -28854,6 +28879,7 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
         null,
         clienteDispositivoId,
         clienteAlias,
+        esQrDirecto,
       ]
     );
 
