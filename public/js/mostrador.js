@@ -2930,20 +2930,40 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   };
 
-  const renderItemKds = (pedido, estado) => {
-    const detalles = Array.isArray(pedido.detalles)
-      ? pedido.detalles.map((d) => `${d.cantidad}× ${d.producto_nombre || d.nombre || '—'}`).join(', ')
-      : '';
-    const total = Number(pedido.total ?? pedido.total_final ?? 0);
-    const mesa = pedido.mesa || pedido.cliente || `#${pedido.id}`;
-    const numero = pedido.numero_cuenta_negocio || pedido.cuenta_id || pedido.id;
-    const fecha = pedido.fecha_creacion || pedido.fecha_listo;
+  const renderItemKds = (cuenta, estado) => {
+    // "cuenta" viene del endpoint /api/pedidos: trae total e items dentro de
+    // cuenta.pedidos[], no a nivel superior. Aplanamos para mostrar el detalle.
+    const pedidosCuenta = Array.isArray(cuenta.pedidos) ? cuenta.pedidos : [];
+    const itemsPlano = [];
+    pedidosCuenta.forEach((p) => {
+      (Array.isArray(p.items) ? p.items : []).forEach((it) => itemsPlano.push(it));
+    });
+    const detalles = itemsPlano.length
+      ? itemsPlano.map((d) => `${Number(d.cantidad) || 0}× ${d.nombre || d.producto_nombre || '—'}`).join(', ')
+      : Array.isArray(cuenta.detalles)
+        ? cuenta.detalles.map((d) => `${d.cantidad}× ${d.producto_nombre || d.nombre || '—'}`).join(', ')
+        : '';
+    // Total = suma de los totales de los pedidos; si no, se calcula desde los items.
+    let total = pedidosCuenta.reduce((s, p) => s + (Number(p.total) || 0), 0);
+    if (!total && itemsPlano.length) {
+      total = itemsPlano.reduce(
+        (s, it) => s + (Number(it.total_linea) || (Number(it.cantidad) || 0) * (Number(it.precio_unitario) || 0)),
+        0
+      );
+    }
+    if (!total) total = Number(cuenta.total ?? cuenta.total_final ?? 0);
+    const mesa = cuenta.mesa || cuenta.cliente || `#${cuenta.id}`;
+    const numero = cuenta.numero_cuenta_negocio || cuenta.cuenta_id || cuenta.id;
+    const fecha =
+      (pedidosCuenta[0] && (pedidosCuenta[0].fecha_creacion || pedidosCuenta[0].fecha_listo)) ||
+      cuenta.fecha_creacion ||
+      cuenta.fecha_listo;
     const esListo = estado === 'listo';
     const acciones = esListo
-      ? `<button type="button" class="kanm-button primary" data-kds-cobrar="${pedido.id}">Cobrar ahora</button>`
+      ? `<button type="button" class="kanm-button primary" data-kds-cobrar="${cuenta.id}">Cobrar ahora</button>`
       : `<span style="font-size:0.78rem;color:var(--kanm-gray-600,#6b7280);font-style:italic;">Esperando cocina...</span>`;
     return `
-      <div class="mostrador-kds-item ${esListo ? 'mostrador-kds-item--listo' : ''}" data-pedido-id="${pedido.id}">
+      <div class="mostrador-kds-item ${esListo ? 'mostrador-kds-item--listo' : ''}" data-pedido-id="${cuenta.id}">
         <div class="mostrador-kds-item__header">
           <span class="mostrador-kds-item__num">Cuenta #${numero}</span>
           <span class="mostrador-kds-item__tiempo">${formatearTiempoTranscurrido(fecha)}</span>
