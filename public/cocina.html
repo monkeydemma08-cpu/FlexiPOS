@@ -46,6 +46,20 @@
         <h1 class="kanm-page-title">Pedidos en cocina</h1>
         <p class="kanm-page-subtitle">Gestiona y actualiza el estado de cada pedido.</p>
       </section>
+      <!-- Pedidos del menu QR por aceptar (caracteristica "Aprobar pedidos QR").
+           No entran a cocina hasta que se aceptan. -->
+      <section class="kanm-card kanm-card--panel" id="cocina-por-aceptar" hidden
+               style="border:2px solid #f59e0b;background:#fffbeb;margin-bottom:14px;">
+        <div class="kanm-card-header" style="display:flex;align-items:center;gap:8px;">
+          <h2 style="margin:0;display:flex;align-items:center;gap:8px;">
+            🔔 Pedidos QR por aceptar
+            <span id="cocina-por-aceptar-count" style="background:#f59e0b;color:#fff;border-radius:999px;padding:2px 10px;font-size:0.85rem;">0</span>
+          </h2>
+        </div>
+        <p class="kanm-page-subtitle" style="margin:4px 0 8px;">Llegaron por el menú QR. Acéptalos para que entren a cocina (o recházalos).</p>
+        <div id="cocina-por-aceptar-mensaje" class="kanm-message"></div>
+        <div id="cocina-por-aceptar-lista" class="cocina-grid"></div>
+      </section>
       <div class="kanm-tabs cocina-tabs" role="tablist">
         <button class="kanm-tab active" data-tab="activos" type="button" role="tab" aria-selected="true">
           🔥 Activos
