@@ -3180,3 +3180,129 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   }, 500);
 })();
+
+// ===========================================================================
+// PEDIDOS QR POR ACEPTAR ("Aprobar pedidos QR")
+// Muestra los pedidos del menu QR que esperan aprobacion. Aceptar consume stock y
+// los enruta (a cocina o mostrador/listo); Rechazar los cancela. Solo aparece si
+// el negocio tiene la caracteristica qr_aprobar activa.
+// ===========================================================================
+(() => {
+  const card = document.getElementById('mostrador-por-aceptar');
+  const lista = document.getElementById('por-aceptar-lista');
+  const countEl = document.getElementById('por-aceptar-count');
+  const mensajeEl = document.getElementById('por-aceptar-mensaje');
+  if (!card || !lista) return;
+
+  const aprobarActivo = () => {
+    const tema = window.APP_TEMA_NEGOCIO || {};
+    return Number(tema.qrAprobar ?? tema.qr_aprobar ?? 0) === 1;
+  };
+  const fmtMoneda = (v) => {
+    const n = Number(v) || 0;
+    try {
+      return new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP', minimumFractionDigits: 2 }).format(n);
+    } catch (_) {
+      return `DOP ${n.toFixed(2)}`;
+    }
+  };
+  const esc = (s) =>
+    String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  const render = (pedidos) => {
+    const n = pedidos.length;
+    if (countEl) countEl.textContent = String(n);
+    if (!n) {
+      card.hidden = true;
+      lista.innerHTML = '';
+      return;
+    }
+    card.hidden = false;
+    lista.innerHTML = pedidos
+      .map((p) => {
+        const items = (p.items || []).map((i) => `${Number(i.cantidad) || 0}× ${esc(i.nombre || '—')}`).join(', ');
+        const quien = esc(p.cliente || p.cliente_alias || p.mesa || `#${p.id}`);
+        return `
+          <div class="mostrador-kds-item" data-por-aceptar-id="${p.id}" style="border-left:4px solid #f59e0b;margin-bottom:8px;">
+            <div class="mostrador-kds-item__header">
+              <span class="mostrador-kds-item__num">${quien}${p.mesa ? ` · ${esc(p.mesa)}` : ''}</span>
+              <span class="mostrador-kds-item__total">${fmtMoneda(p.total)}</span>
+            </div>
+            ${items ? `<div class="mostrador-kds-item__items">${items}</div>` : ''}
+            ${p.nota ? `<div style="font-size:.8rem;color:#666;">Nota: ${esc(p.nota)}</div>` : ''}
+            <div class="mostrador-kds-item__acciones" style="display:flex;gap:8px;margin-top:6px;">
+              <button type="button" class="kanm-button primary" data-aceptar="${p.id}">Aceptar</button>
+              <button type="button" class="kanm-button ghost danger" data-rechazar="${p.id}">Rechazar</button>
+            </div>
+          </div>`;
+      })
+      .join('');
+  };
+
+  const cargar = async () => {
+    if (!aprobarActivo()) {
+      card.hidden = true;
+      return;
+    }
+    try {
+      const resp = await fetchAutorizado('/api/pedidos-por-aceptar');
+      const data = await resp.json().catch(() => ({}));
+      if (data && data.ok) render(data.pedidos || []);
+    } catch (_) {
+      // silencioso: reintenta en el proximo poll
+    }
+  };
+
+  const accion = async (id, tipo) => {
+    const url = `/api/pedidos/${id}/${tipo === 'aceptar' ? 'aceptar-qr' : 'rechazar-qr'}`;
+    try {
+      const resp = await fetchAutorizado(url, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) {
+        if (mensajeEl) {
+          mensajeEl.textContent = data.error || 'No se pudo procesar el pedido.';
+          mensajeEl.className = 'kanm-message error';
+        }
+        cargar();
+        return;
+      }
+      if (mensajeEl) {
+        mensajeEl.textContent = tipo === 'aceptar' ? 'Pedido aceptado.' : 'Pedido rechazado.';
+        mensajeEl.className = 'kanm-message info';
+      }
+      cargar();
+    } catch (_) {
+      if (mensajeEl) {
+        mensajeEl.textContent = 'Ocurrio un error al procesar el pedido.';
+        mensajeEl.className = 'kanm-message error';
+      }
+    }
+  };
+
+  lista.addEventListener('click', (e) => {
+    const bAcc = e.target.closest('[data-aceptar]');
+    const bRec = e.target.closest('[data-rechazar]');
+    if (bAcc) {
+      bAcc.disabled = true;
+      accion(Number(bAcc.dataset.aceptar), 'aceptar');
+    } else if (bRec) {
+      bRec.disabled = true;
+      accion(Number(bRec.dataset.rechazar), 'rechazar');
+    }
+  });
+
+  // Arranque cuando el tema del negocio este disponible.
+  let intentos = 0;
+  const t = setInterval(() => {
+    intentos += 1;
+    if (window.APP_TEMA_NEGOCIO) {
+      clearInterval(t);
+      if (aprobarActivo()) {
+        cargar();
+        setInterval(cargar, 10000);
+      }
+    } else if (intentos >= 20) {
+      clearInterval(t);
+    }
+  }, 500);
+})();

@@ -63,6 +63,20 @@
       </div>
 
       <section class="caja-panel" id="panel-venta">
+        <!-- Pedidos del menu QR por aceptar (caracteristica "Aprobar pedidos QR").
+             No tocan inventario ni cocina hasta que el personal los acepta. -->
+        <div class="kanm-card" id="mostrador-por-aceptar" hidden
+             style="border:2px solid #f59e0b;background:#fffbeb;margin-bottom:14px;">
+          <div class="kanm-card-header">
+            <h2 style="display:flex;align-items:center;gap:8px;">
+              🔔 Pedidos QR por aceptar
+              <span id="por-aceptar-count" style="background:#f59e0b;color:#fff;border-radius:999px;padding:2px 10px;font-size:0.85rem;">0</span>
+            </h2>
+            <p class="kanm-subtitle">Llegaron por el menú QR. No descuentan inventario hasta que los aceptes.</p>
+          </div>
+          <div id="por-aceptar-mensaje" class="kanm-message"></div>
+          <div id="por-aceptar-lista"></div>
+        </div>
         <div class="mostrador-grid">
           <div class="mostrador-col">
             <section class="kanm-card datos-mesa">
