@@ -12242,6 +12242,13 @@ app.get('/admin/cotizaciones/:id/imprimir', (req, res) => {
 const MENU_PUBLICO_PEDIDOS_WINDOW_MS = 15 * 60 * 1000;
 const MENU_PUBLICO_PEDIDOS_MAXIMO = 8;
 const MENU_PUBLICO_PEDIDOS_COOLDOWN_MS = 20 * 1000;
+// Limite por IP REAL (req.ip, no falsificable detras de nginx). Se aplica SIEMPRE,
+// aparte del limite por client_id: asi rotar client_id no salta el rate-limit. Es
+// un tope generoso porque muchos clientes legitimos comparten IP (wifi del local,
+// CGNAT de datos moviles); su fin es cortar floods automatizados (un script manda
+// decenas por segundo; una multitud humana no). Ajustable aqui.
+const MENU_PUBLICO_IP_WINDOW_MS = 60 * 1000;
+const MENU_PUBLICO_IP_MAXIMO = 40;
 const menuPublicoPedidosRateMap = new Map();
 const MENU_PUBLICO_SESION_EXPIRADA_ERROR = 'Esta mesa fue reiniciada. Vuelve a escanear el QR para seguir pidiendo.';
 
@@ -12264,12 +12271,12 @@ const construirClienteMenuPublicoKey = (req = {}) => {
     return `client:${clientId.slice(0, 120)}`;
   }
 
-  const forwardedFor = String(req.headers?.['x-forwarded-for'] || req.ip || '')
-    .split(',')[0]
-    .trim();
+  // req.ip respeta `trust proxy` (1): detras de nginx es la IP real del cliente,
+  // no la que el cliente pueda inyectar en el header X-Forwarded-For.
+  const ipReal = String(req.ip || '').trim();
   const userAgent = String(req.get?.('user-agent') || '').trim().toLowerCase();
-  const digest = crypto.createHash('sha1').update(`${forwardedFor}|${userAgent}`).digest('hex').slice(0, 16);
-  return `ip:${forwardedFor || 'desconocido'}:${digest}`;
+  const digest = crypto.createHash('sha1').update(`${ipReal}|${userAgent}`).digest('hex').slice(0, 16);
+  return `ip:${ipReal || 'desconocido'}:${digest}`;
 };
 
 const obtenerSesionPedidosRequest = (req = {}) =>
@@ -12403,6 +12410,24 @@ const validarRateLimitMenuPublicoPedidos = (req, token) => {
       }
     }
   }
+};
+
+// Limite por IP real: se aplica SIEMPRE, sin depender del client_id (que el
+// navegador puede rotar). Corta floods automatizados desde una misma conexion.
+const validarRateLimitIpMenuPublico = (req) => {
+  const ip = String(req?.ip || '').trim() || 'desconocido';
+  const now = Date.now();
+  const rateKey = `ip-flood:${ip}`;
+  const registro = menuPublicoPedidosRateMap.get(rateKey) || { eventos: [], ultimoPedidoAt: 0 };
+  registro.eventos = registro.eventos.filter((timestamp) => now - timestamp < MENU_PUBLICO_IP_WINDOW_MS);
+  if (registro.eventos.length >= MENU_PUBLICO_IP_MAXIMO) {
+    const error = new Error('Demasiados pedidos desde tu conexion. Espera un momento e intenta de nuevo.');
+    error.status = 429;
+    throw error;
+  }
+  registro.eventos.push(now);
+  registro.ultimoPedidoAt = now;
+  menuPublicoPedidosRateMap.set(rateKey, registro);
 };
 
 app.get('/admin/menu-publico/qr', (req, res) => {
@@ -12614,6 +12639,7 @@ app.post('/api/public/menu/:token/pedidos', async (req, res) => {
     const sesionPedidos = obtenerSesionPedidosRequest(req);
     validarSesionPedidosMenuPublico(sesionPedidos, acceso);
     const clienteDispositivoId = validarTtlClienteMenuPublico(req, acceso);
+    validarRateLimitIpMenuPublico(req);
     validarRateLimitMenuPublicoPedidos(req, token);
     validarRateLimitMesaMenuPublico(acceso);
     const resultado = await crearPedidoMenuPublico(acceso, req.body || {}, {
