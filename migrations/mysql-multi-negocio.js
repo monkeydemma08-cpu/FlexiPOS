@@ -1699,6 +1699,10 @@ async function ensureNegocioThemeAndModulesColumns() {
   await ensureColumn('negocios', 'qr_directo TINYINT(1) NOT NULL DEFAULT 0');
   // Marca en el pedido para saber que entro por QR-directo (dispara la alarma en mostrador).
   await ensureColumn('pedidos', 'es_qr_directo TINYINT(1) NOT NULL DEFAULT 0');
+  //  - qr_aprobar: si esta activo, los pedidos del menu QR entran en estado
+  //    'por_aceptar' (no descuentan stock ni suenan alarma ni van a cocina) hasta
+  //    que el personal los acepta. Protege contra pedidos falsos / abuso.
+  await ensureColumn('negocios', 'qr_aprobar TINYINT(1) NOT NULL DEFAULT 0');
   // Backfill defensivo: cualquier registro sin plan queda como 'full' (no se bloquea nada).
   try {
     await query(`UPDATE negocios SET plan_id = 'full' WHERE plan_id IS NULL OR plan_id = ''`);

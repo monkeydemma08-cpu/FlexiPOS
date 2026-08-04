@@ -2165,6 +2165,7 @@ function mapNegocioWithDefaults(row = {}) {
   const impresionDirecta = Number(row.impresion_directa ?? row.impresionDirecta ?? 0) === 1 ? 1 : 0;
   const mostradorKds = Number(row.mostrador_kds ?? row.mostradorKds ?? 0) === 1 ? 1 : 0;
   const qrDirecto = Number(row.qr_directo ?? row.qrDirecto ?? 0) === 1 ? 1 : 0;
+  const qrAprobar = Number(row.qr_aprobar ?? row.qrAprobar ?? 0) === 1 ? 1 : 0;
 
   return {
     ...row,
@@ -2174,6 +2175,8 @@ function mapNegocioWithDefaults(row = {}) {
     mostradorKds,
     qr_directo: qrDirecto,
     qrDirecto,
+    qr_aprobar: qrAprobar,
+    qrAprobar,
     colorPrimario,
     colorSecundario,
     color_header: colorHeader,
@@ -19650,6 +19653,11 @@ app.put('/api/negocios/:id', (req, res) => {
       fields.push('qr_directo = ?');
       params.push(v === 1 || v === true || v === '1' ? 1 : 0);
     }
+    if (payload.qr_aprobar !== undefined || payload.qrAprobar !== undefined) {
+      const v = payload.qr_aprobar ?? payload.qrAprobar;
+      fields.push('qr_aprobar = ?');
+      params.push(v === 1 || v === true || v === '1' ? 1 : 0);
+    }
 
     if (!fields.length) {
       return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
@@ -19963,7 +19971,7 @@ app.get('/api/negocios/mi-tema', (req, res) => {
         `SELECT id, slug, nombre, titulo_sistema, color_primario, color_secundario, color_texto, color_header,
                 color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos, admin_principal_usuario_id,
                 logo_url, permitir_b01, permitir_b02, permitir_b14, activo,
-                impresion_directa, mostrador_kds, qr_directo
+                impresion_directa, mostrador_kds, qr_directo, qr_aprobar
          FROM negocios
          WHERE id = ?`,
       [negocioId],
@@ -20009,6 +20017,8 @@ app.get('/api/negocios/mi-tema', (req, res) => {
               mostrador_kds: Number(negocioTema.mostrador_kds) === 1 ? 1 : 0,
               qrDirecto: Number(negocioTema.qr_directo) === 1 ? 1 : 0,
               qr_directo: Number(negocioTema.qr_directo) === 1 ? 1 : 0,
+              qrAprobar: Number(negocioTema.qr_aprobar) === 1 ? 1 : 0,
+              qr_aprobar: Number(negocioTema.qr_aprobar) === 1 ? 1 : 0,
               permitirE31: facturacionElectronica.permitir_e31,
               permitirE32: facturacionElectronica.permitir_e32,
               permitirE33: facturacionElectronica.permitir_e33,
@@ -28448,7 +28458,7 @@ const obtenerCuentaActivaMenuPublico = async (negocioId, mesa) => {
        FROM pedidos
       WHERE negocio_id = ?
         AND mesa = ?
-        AND estado NOT IN ('pagado', 'cancelado')
+        AND estado NOT IN ('pagado', 'cancelado', 'por_aceptar')
         AND fecha_cierre IS NULL
       ORDER BY fecha_creacion ASC, id ASC
       LIMIT 1`,
@@ -28841,17 +28851,28 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
   const subtotal = totalesPedido.subtotal;
   const impuesto = totalesPedido.impuesto;
   const total = totalesPedido.total;
-  // QR directo: si el negocio lo tiene activo (y ademas mostrador_kds), el pedido
-  // del QR NO pasa por cocina. Entra directo a mostrador como "listo" para cobrar y
-  // dispara la alarma con sonido en mostrador (se marca es_qr_directo = 1).
+  // Flags del negocio para rutear el pedido del QR:
+  //  - qr_aprobar: el pedido entra "por_aceptar" y NO toca stock/cocina/alarma
+  //    hasta que el personal lo acepta (se rutea en ese momento).
+  //  - qr_directo (+ mostrador_kds): el pedido NO pasa por cocina; va directo a
+  //    mostrador como "listo" para cobrar y dispara la alarma (es_qr_directo = 1).
   const negocioFlagsQr = await db
-    .get('SELECT qr_directo, mostrador_kds FROM negocios WHERE id = ? LIMIT 1', [negocioId])
+    .get('SELECT qr_directo, mostrador_kds, qr_aprobar FROM negocios WHERE id = ? LIMIT 1', [negocioId])
     .catch(() => null);
+  const requiereAprobacion = Number(negocioFlagsQr?.qr_aprobar) === 1;
   const qrDirectoActivo =
     Number(negocioFlagsQr?.qr_directo) === 1 && Number(negocioFlagsQr?.mostrador_kds) === 1;
-  const estadoInicial = qrDirectoActivo ? 'listo' : resultadoItems.tienePreparacion ? 'pendiente' : 'listo';
-  const origenPedido = qrDirectoActivo ? 'mostrador' : 'caja';
-  const esQrDirecto = qrDirectoActivo ? 1 : 0;
+  // Si requiere aprobacion, el ruteo (cocina vs mostrador/listo) se decide al
+  // ACEPTAR, no ahora. Aqui solo lo dejamos "por_aceptar" sin consumir nada.
+  const estadoInicial = requiereAprobacion
+    ? 'por_aceptar'
+    : qrDirectoActivo
+      ? 'listo'
+      : resultadoItems.tienePreparacion
+        ? 'pendiente'
+        : 'listo';
+  const origenPedido = !requiereAprobacion && qrDirectoActivo ? 'mostrador' : 'caja';
+  const esQrDirecto = !requiereAprobacion && qrDirectoActivo ? 1 : 0;
   const fechaListo = estadoInicial === 'listo' ? new Date() : null;
   const consumoRegistros = [];
   let transaccionIniciada = false;
@@ -28869,8 +28890,12 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
     }
     validarSesionPedidosMenuPublico(normalizarCampoTexto(opciones?.sesionPedidos, null), accesoBloqueado);
 
+    // Los pedidos "por_aceptar" NO se agrupan en la cuenta activa de la mesa: quedan
+    // sueltos hasta que el personal los acepta (ahi se enrutan/agrupan).
     const cuentaReferencia =
-      accesoBloqueado.tipo === 'mesa' ? await obtenerCuentaActivaMenuPublico(negocioId, accesoBloqueado.mesa) : null;
+      !requiereAprobacion && accesoBloqueado.tipo === 'mesa'
+        ? await obtenerCuentaActivaMenuPublico(negocioId, accesoBloqueado.mesa)
+        : null;
 
     const clienteDispositivoId = normalizarCampoTexto(opciones?.clienteDispositivoId, null);
     const clienteAlias = await calcularAliasComensalMenuPublico({
@@ -28947,7 +28972,7 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
           });
         });
       }
-      if (!item.stock_indefinido) {
+      if (!requiereAprobacion && !item.stock_indefinido) {
         const stockResult = await db.run(
           'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
           [item.cantidad, item.producto_id, negocioId, item.cantidad]
@@ -28966,7 +28991,7 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
       }
     }
 
-    if (usaRecetas && resultadoItems.consumoPorInsumo.size > 0) {
+    if (!requiereAprobacion && usaRecetas && resultadoItems.consumoPorInsumo.size > 0) {
       for (const [insumoId, cantidadUnidades] of resultadoItems.consumoPorInsumo.entries()) {
         if (!cantidadUnidades) continue;
         const insumo = resultadoItems.insumosMap.get(insumoId);
@@ -29035,6 +29060,261 @@ const crearPedidoMenuPublico = async (acceso, payload = {}, opciones = {}) => {
     throw error;
   }
 };
+
+// ===========================================================================
+// APROBACION DE PEDIDOS QR ("Aprobar pedidos QR")
+// Los pedidos del menu QR entran en estado 'por_aceptar' (sin tocar stock, cocina
+// ni alarma). El personal (mostrador o cocina) los acepta o rechaza. Al aceptar se
+// consume el stock (revalidado) y se enruta como cualquier pedido QR.
+// ===========================================================================
+const ROLES_APROBAR_QR = new Set(['admin', 'vendedor', 'cocina', 'mesera', 'caja', 'supervisor', 'bar']);
+const puedeAprobarPedidosQr = (usuarioSesion) =>
+  tienePermisoAdmin(usuarioSesion) ||
+  ROLES_APROBAR_QR.has(String(usuarioSesion?.rol || '').toLowerCase());
+
+const aceptarPedidoQrPorAceptar = async (pedidoId, negocioId) => {
+  const crearErrorEstado = (status, message) => {
+    const e = new Error(message);
+    e.status = status;
+    return e;
+  };
+  const pedido = await db.get(
+    `SELECT id, cuenta_id, mesa, cliente, modo_servicio, estado
+       FROM pedidos WHERE id = ? AND negocio_id = ? LIMIT 1`,
+    [pedidoId, negocioId]
+  );
+  if (!pedido) throw crearErrorEstado(404, 'Pedido no encontrado.');
+  if ((pedido.estado || '') !== 'por_aceptar') {
+    throw crearErrorEstado(409, 'Este pedido ya fue procesado.');
+  }
+
+  const detalle = await db.all(
+    `SELECT id, producto_id, cantidad, sabor FROM detalle_pedido WHERE pedido_id = ? AND negocio_id = ?`,
+    [pedidoId, negocioId]
+  );
+  const itemsEntrada = (detalle || []).map((d) => ({
+    producto_id: d.producto_id,
+    cantidad: d.cantidad,
+    sabor: d.sabor || null,
+  }));
+  if (!itemsEntrada.length) throw crearErrorEstado(400, 'El pedido no tiene productos.');
+
+  const modoInventario = await obtenerModoInventarioCostos(negocioId);
+  const usaRecetas = modoInventario === 'PREPARACION';
+  const bloquearInsumosSinStock = usaRecetas ? await obtenerConfigBloqueoInsumos(negocioId) : false;
+  // Revalida stock AHORA (pudo cambiar desde que el cliente pidio).
+  const resultadoItems = await prepararItemsPedidoMenuPublico(itemsEntrada, negocioId, {
+    validarStock: true,
+    usaRecetas,
+    bloquearInsumosSinStock,
+  });
+
+  // Ruteo al aceptar (igual que en la creacion sin aprobacion).
+  const flags = await db
+    .get('SELECT qr_directo, mostrador_kds FROM negocios WHERE id = ? LIMIT 1', [negocioId])
+    .catch(() => null);
+  const qrDirectoActivo = Number(flags?.qr_directo) === 1 && Number(flags?.mostrador_kds) === 1;
+  const estadoFinal = qrDirectoActivo ? 'listo' : resultadoItems.tienePreparacion ? 'pendiente' : 'listo';
+  const origenFinal = qrDirectoActivo ? 'mostrador' : 'caja';
+  const esQrDirecto = qrDirectoActivo ? 1 : 0;
+  const fechaListo = estadoFinal === 'listo' ? new Date() : null;
+
+  // Para mesa: al aceptar se agrupa en la cuenta activa (si existe); si no, la propia.
+  const cuentaActiva = pedido.mesa ? await obtenerCuentaActivaMenuPublico(negocioId, pedido.mesa) : null;
+  const cuentaFinal = cuentaActiva || pedido.cuenta_id || pedidoId;
+
+  const detalleIdPorProducto = new Map();
+  (detalle || []).forEach((d) => {
+    const pid = Number(d.producto_id);
+    if (!detalleIdPorProducto.has(pid)) detalleIdPorProducto.set(pid, Number(d.id));
+  });
+
+  const consumoRegistros = [];
+  let transaccionIniciada = false;
+  try {
+    await db.run('BEGIN');
+    transaccionIniciada = true;
+
+    for (const item of resultadoItems.itemsProcesados) {
+      const detalleId = detalleIdPorProducto.get(Number(item.producto_id)) || null;
+      if (detalleId && Array.isArray(item.consumos) && item.consumos.length) {
+        item.consumos.forEach((consumo) => {
+          consumoRegistros.push({
+            detalle_pedido_id: detalleId,
+            producto_final_id: item.producto_id,
+            insumo_id: consumo.insumo_id,
+            cantidad_base: consumo.cantidad_base,
+            unidad_base: consumo.unidad_consumo,
+          });
+        });
+      }
+      if (!item.stock_indefinido) {
+        const stockResult = await db.run(
+          'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+          [item.cantidad, item.producto_id, negocioId, item.cantidad]
+        );
+        if (stockResult.changes === 0) {
+          throw crearErrorEstado(
+            400,
+            `Ya no hay stock suficiente de ${item.nombre || `producto ${item.producto_id}`}.`
+          );
+        }
+        await consumirStockFIFO({
+          productoId: item.producto_id,
+          cantidad: item.cantidad,
+          negocioId,
+          origen: 'venta',
+          origenId: pedidoId,
+        });
+      }
+    }
+
+    if (usaRecetas && resultadoItems.consumoPorInsumo.size > 0) {
+      for (const [insumoId, cantidadUnidades] of resultadoItems.consumoPorInsumo.entries()) {
+        if (!cantidadUnidades) continue;
+        const insumo = resultadoItems.insumosMap.get(insumoId);
+        if (!insumo || esStockIndefinido(insumo)) continue;
+        const stockResult = await db.run(
+          'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+          [cantidadUnidades, insumoId, negocioId, cantidadUnidades]
+        );
+        if (stockResult.changes === 0) {
+          throw crearErrorEstado(400, `Ya no hay stock suficiente del insumo ${insumoId}.`);
+        }
+        await consumirStockFIFO({
+          productoId: insumoId,
+          cantidad: cantidadUnidades,
+          negocioId,
+          origen: 'produccion',
+          origenId: pedidoId,
+        });
+      }
+      for (const consumo of consumoRegistros) {
+        await db.run(
+          `INSERT INTO consumo_insumos
+            (pedido_id, detalle_pedido_id, producto_final_id, insumo_id, cantidad_base, unidad_base, negocio_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            pedidoId,
+            consumo.detalle_pedido_id,
+            consumo.producto_final_id,
+            consumo.insumo_id,
+            consumo.cantidad_base,
+            consumo.unidad_base,
+            negocioId,
+          ]
+        );
+      }
+    }
+
+    await db.run(
+      `UPDATE pedidos SET estado = ?, origen_caja = ?, es_qr_directo = ?, cuenta_id = ?, fecha_listo = ?
+        WHERE id = ? AND negocio_id = ?`,
+      [estadoFinal, origenFinal, esQrDirecto, cuentaFinal, fechaListo, pedidoId, negocioId]
+    );
+    if (estadoFinal === 'listo') {
+      await db.run(
+        `UPDATE detalle_pedido SET estado_preparacion = 'listo', cantidad_lista = cantidad
+          WHERE pedido_id = ? AND negocio_id = ?`,
+        [pedidoId, negocioId]
+      );
+    }
+
+    await db.run('COMMIT');
+    transaccionIniciada = false;
+    return { id: pedidoId, estado: estadoFinal, es_qr_directo: esQrDirecto, cuenta_id: cuentaFinal };
+  } catch (error) {
+    if (transaccionIniciada) await db.run('ROLLBACK').catch(() => {});
+    throw error;
+  }
+};
+
+// Lista de pedidos por aceptar (mostrador y cocina la consultan).
+app.get('/api/pedidos-por-aceptar', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!puedeAprobarPedidosQr(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const pedidos = await db.all(
+        `SELECT id, cuenta_id, mesa, cliente, cliente_alias, modo_servicio, nota,
+                subtotal, impuesto, total, fecha_creacion
+           FROM pedidos
+          WHERE negocio_id = ? AND estado = 'por_aceptar'
+          ORDER BY fecha_creacion ASC, id ASC`,
+        [negocioId]
+      );
+      if (!pedidos.length) return res.json({ ok: true, pedidos: [] });
+      const ids = pedidos.map((p) => p.id);
+      const detalle = await obtenerDetallePedidosPorIds(ids, negocioId);
+      const resultado = pedidos.map((p) => ({
+        ...p,
+        items: (detalle.get(p.id) || []).map((it) => ({
+          producto_id: it.producto_id,
+          nombre: it.nombre,
+          cantidad: it.cantidad,
+          precio_unitario: it.precio_unitario,
+          sabor: it.sabor || null,
+        })),
+      }));
+      res.json({ ok: true, pedidos: resultado });
+    } catch (error) {
+      console.error('Error al listar pedidos por aceptar:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudieron obtener los pedidos por aceptar.' });
+    }
+  });
+});
+
+// Aceptar un pedido QR: consume stock (revalidado) y lo enruta.
+app.post('/api/pedidos/:id/aceptar-qr', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!puedeAprobarPedidosQr(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const pedidoId = Number(req.params.id);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Pedido no valido.' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const resultado = await aceptarPedidoQrPorAceptar(pedidoId, negocioId);
+      res.json({ ok: true, pedido: resultado });
+    } catch (error) {
+      const status = error?.status || 500;
+      if (status >= 500) console.error('Error al aceptar pedido QR:', error?.message || error);
+      res.status(status).json({ ok: false, error: error?.message || 'No se pudo aceptar el pedido.' });
+    }
+  });
+});
+
+// Rechazar un pedido QR: se cancela (no consumio nada).
+app.post('/api/pedidos/:id/rechazar-qr', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    if (!puedeAprobarPedidosQr(usuarioSesion)) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido.' });
+    }
+    const pedidoId = Number(req.params.id);
+    if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+      return res.status(400).json({ ok: false, error: 'Pedido no valido.' });
+    }
+    const negocioId = usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT;
+    try {
+      const r = await db.run(
+        `UPDATE pedidos SET estado = 'cancelado'
+          WHERE id = ? AND negocio_id = ? AND estado = 'por_aceptar'`,
+        [pedidoId, negocioId]
+      );
+      if (!r.changes) {
+        return res.status(404).json({ ok: false, error: 'El pedido no esta por aceptar o no existe.' });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error al rechazar pedido QR:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo rechazar el pedido.' });
+    }
+  });
+});
 
 // Deudas de clientes
 app.get('/api/clientes/:id/deudas', (req, res) => {

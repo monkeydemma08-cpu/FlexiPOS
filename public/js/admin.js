@@ -11872,9 +11872,11 @@ const abrirModalNegocio = async (id = null) => {
     const chkImpresionDirecta = document.getElementById('kanm-negocios-impresion-directa');
     const chkMostradorKds = document.getElementById('kanm-negocios-mostrador-kds');
     const chkQrDirecto = document.getElementById('kanm-negocios-qr-directo');
+    const chkQrAprobar = document.getElementById('kanm-negocios-qr-aprobar');
     if (chkImpresionDirecta) chkImpresionDirecta.checked = Number(negocioSeleccionado?.impresion_directa ?? 0) === 1;
     if (chkMostradorKds) chkMostradorKds.checked = Number(negocioSeleccionado?.mostrador_kds ?? 0) === 1;
     if (chkQrDirecto) chkQrDirecto.checked = Number(negocioSeleccionado?.qr_directo ?? 0) === 1;
+    if (chkQrAprobar) chkQrAprobar.checked = Number(negocioSeleccionado?.qr_aprobar ?? 0) === 1;
 
     if (planInfoTexto) {
       const activado = negocioSeleccionado?.plan_activado_en
@@ -12009,9 +12011,11 @@ const guardarNegocio = async (event) => {
     const chkImpresionDirecta = document.getElementById('kanm-negocios-impresion-directa');
     const chkMostradorKds = document.getElementById('kanm-negocios-mostrador-kds');
     const chkQrDirecto = document.getElementById('kanm-negocios-qr-directo');
+    const chkQrAprobar = document.getElementById('kanm-negocios-qr-aprobar');
     if (chkImpresionDirecta) payload.impresion_directa = chkImpresionDirecta.checked ? 1 : 0;
     if (chkMostradorKds) payload.mostrador_kds = chkMostradorKds.checked ? 1 : 0;
     if (chkQrDirecto) payload.qr_directo = chkQrDirecto.checked ? 1 : 0;
+    if (chkQrAprobar) payload.qr_aprobar = chkQrAprobar.checked ? 1 : 0;
   }
 
   const id = dom.inputId?.value;
