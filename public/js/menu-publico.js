@@ -938,6 +938,12 @@ const applyTheme = () => {
   if (tema.colorTexto) {
     root.style.setProperty('--menu-ink', tema.colorTexto);
   }
+  // Tema oscuro por negocio: activa el bloque [data-tema="oscuro"] de menu-publico.css.
+  if (Number(tema.temaOscuro ?? tema.tema_oscuro ?? 0) === 1) {
+    root.dataset.tema = 'oscuro';
+  } else if (root.dataset.tema === 'oscuro') {
+    delete root.dataset.tema;
+  }
 };
 
 const renderLogo = () => {

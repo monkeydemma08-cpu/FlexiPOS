@@ -2062,3 +2062,89 @@ body.menu-publico-body::after {
     line-height: 1.25;
   }
 }
+
+/* ==========================================================================
+   TEMA OSCURO POR NEGOCIO (menu publico)  —  :root[data-tema="oscuro"]
+   "Cafeteria nocturna": fondo oscuro calido con acentos rojo/amarillo. El menu es
+   variable-driven, asi que basta con voltear las variables + el fondo del body.
+   Solo se activa si el negocio tiene tema_oscuro=1.
+   ========================================================================== */
+:root[data-tema="oscuro"] {
+  --menu-bg: #1c1614;
+  --menu-paper: #2a211d;
+  --menu-paper-strong: #33281f;
+  --menu-card: #2a211d;
+  --menu-ink: #f3ece4;
+  --menu-muted: rgba(243, 236, 228, 0.66);
+  --menu-line: rgba(245, 184, 32, 0.22);
+  --menu-brand: #e5484d;
+  --menu-brand-strong: #ff6166;
+  --menu-brand-soft: rgba(229, 72, 77, 0.18);
+  --menu-accent: #f5b820;
+  --menu-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+}
+:root[data-tema="oscuro"] body.menu-publico-body {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(229, 72, 77, 0.14), transparent 34%),
+    radial-gradient(circle at 85% 8%, rgba(245, 184, 32, 0.10), transparent 32%),
+    linear-gradient(180deg, #211814 0%, #1c1614 55%, #17110f 100%);
+}
+:root[data-tema="oscuro"] body.menu-publico-body::before { background: rgba(229, 72, 77, 0.14); }
+:root[data-tema="oscuro"] body.menu-publico-body::after  { background: rgba(245, 184, 32, 0.10); }
+
+/* Elementos con fondo claro hardcodeado -> superficies/acentos oscuros */
+:root[data-tema="oscuro"] .menu-publico-item-media,
+:root[data-tema="oscuro"] .menu-publico-item-media-fallback {
+  background: var(--menu-paper-strong);
+}
+:root[data-tema="oscuro"] .menu-publico-icon-button,
+:root[data-tema="oscuro"] .menu-publico-item-favorite,
+:root[data-tema="oscuro"] .menu-publico-nav-chip,
+:root[data-tema="oscuro"] .menu-publico-category-count,
+:root[data-tema="oscuro"] .menu-publico-item-cart-chip,
+:root[data-tema="oscuro"] .menu-publico-logo {
+  background: var(--menu-paper-strong);
+  color: var(--menu-ink);
+  border-color: var(--menu-line);
+}
+:root[data-tema="oscuro"] .menu-publico-nav-chip.is-home,
+:root[data-tema="oscuro"] .menu-publico-nav-chip.is-active {
+  background: var(--menu-brand-soft);
+  color: var(--menu-accent);
+}
+/* Boton principal de agregar: acento de marca (rojo) */
+:root[data-tema="oscuro"] .menu-publico-item-button {
+  background: var(--menu-brand);
+  color: #fff;
+  border-color: transparent;
+}
+:root[data-tema="oscuro"] .menu-publico-item-cart-chip.is-off {
+  background: var(--menu-paper);
+  color: var(--menu-muted);
+}
+:root[data-tema="oscuro"] .menu-publico-badge {
+  background: var(--menu-brand-soft);
+  color: var(--menu-accent);
+  border-color: var(--menu-line);
+}
+:root[data-tema="oscuro"] .menu-publico-badge-soft {
+  background: var(--menu-paper-strong);
+  color: var(--menu-ink);
+}
+:root[data-tema="oscuro"] .menu-publico-order-card {
+  background: var(--menu-card);
+  color: var(--menu-ink);
+}
+:root[data-tema="oscuro"] input,
+:root[data-tema="oscuro"] textarea {
+  background: var(--menu-paper-strong);
+  color: var(--menu-ink);
+  border-color: var(--menu-line);
+}
+:root[data-tema="oscuro"] select {
+  background: var(--menu-paper-strong); color: var(--menu-ink); border-color: var(--menu-line);
+}
+:root[data-tema="oscuro"] .menu-publico-cart-empty,
+:root[data-tema="oscuro"] .menu-publico-totales {
+  background: var(--menu-paper); color: var(--menu-ink);
+}

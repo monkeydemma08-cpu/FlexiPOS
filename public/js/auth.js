@@ -337,6 +337,16 @@ const applyTemaNegocio = (tema) => {
   root.style.setProperty('--kanm-pink-dark', colorBotonPrimario);
   root.style.setProperty('--kanm-pink-light', colorBotonPrimario);
 
+  // Tema oscuro por negocio: marca el <html> para que el CSS [data-tema="oscuro"]
+  // aplique las superficies oscuras. Los acentos (rojo/amarillo) llegan por las
+  // variables de arriba desde los colores del negocio.
+  const temaOscuro = Number(tema?.temaOscuro ?? tema?.tema_oscuro ?? 0) === 1;
+  if (temaOscuro) {
+    root.dataset.tema = 'oscuro';
+  } else if (root.dataset.tema === 'oscuro') {
+    delete root.dataset.tema;
+  }
+
   if (titulo) {
     document.title = titulo;
   }

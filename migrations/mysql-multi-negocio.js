@@ -1703,6 +1703,27 @@ async function ensureNegocioThemeAndModulesColumns() {
   //    'por_aceptar' (no descuentan stock ni suenan alarma ni van a cocina) hasta
   //    que el personal los acepta. Protege contra pedidos falsos / abuso.
   await ensureColumn('negocios', 'qr_aprobar TINYINT(1) NOT NULL DEFAULT 0');
+  //  - tema_oscuro: activa el tema oscuro (fondo oscuro + acentos del negocio) en
+  //    toda la app y el menu publico. Es por-negocio; los demas siguen en claro.
+  await ensureColumn('negocios', 'tema_oscuro TINYINT(1) NOT NULL DEFAULT 0');
+  // Tema oscuro "Cafeteria nocturna" para el negocio 7 (Cafeteria Dariel): fondo
+  // oscuro calido con acentos rojo/amarillo. Se aplica UNA sola vez (si aun no lo
+  // tiene) para no pisar ajustes manuales posteriores del negocio.
+  try {
+    await query(
+      `UPDATE negocios
+          SET tema_oscuro = 1,
+              color_primario = '#e5484d',
+              color_secundario = '#f5b820',
+              color_texto = '#f3ece4',
+              color_header = '#241a17',
+              color_boton_primario = '#e5484d',
+              color_boton_secundario = '#f5b820'
+        WHERE id = 7 AND COALESCE(tema_oscuro, 0) = 0`
+    );
+  } catch (error) {
+    console.warn('No se pudo aplicar el tema oscuro al negocio 7:', error?.message || error);
+  }
   // Backfill defensivo: cualquier registro sin plan queda como 'full' (no se bloquea nada).
   try {
     await query(`UPDATE negocios SET plan_id = 'full' WHERE plan_id IS NULL OR plan_id = ''`);

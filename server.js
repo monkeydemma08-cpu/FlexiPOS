@@ -2166,6 +2166,7 @@ function mapNegocioWithDefaults(row = {}) {
   const mostradorKds = Number(row.mostrador_kds ?? row.mostradorKds ?? 0) === 1 ? 1 : 0;
   const qrDirecto = Number(row.qr_directo ?? row.qrDirecto ?? 0) === 1 ? 1 : 0;
   const qrAprobar = Number(row.qr_aprobar ?? row.qrAprobar ?? 0) === 1 ? 1 : 0;
+  const temaOscuro = Number(row.tema_oscuro ?? row.temaOscuro ?? 0) === 1 ? 1 : 0;
 
   return {
     ...row,
@@ -2177,6 +2178,8 @@ function mapNegocioWithDefaults(row = {}) {
     qrDirecto,
     qr_aprobar: qrAprobar,
     qrAprobar,
+    tema_oscuro: temaOscuro,
+    temaOscuro,
     colorPrimario,
     colorSecundario,
     color_header: colorHeader,
@@ -12589,6 +12592,7 @@ app.get('/api/public/menu/:token', async (req, res) => {
         colorTexto: negocioTema.colorTexto,
         colorBotonPrimario: negocioTema.colorBotonPrimario,
         colorBotonSecundario: negocioTema.colorBotonSecundario,
+        temaOscuro: Number(negocioTema.tema_oscuro ?? negocioTema.temaOscuro ?? 0) === 1 ? 1 : 0,
       },
       configuracion: {
         moneda: 'RD$',
@@ -19943,7 +19947,7 @@ app.get('/api/negocios/mi-tema', (req, res) => {
         `SELECT id, slug, nombre, titulo_sistema, color_primario, color_secundario, color_texto, color_header,
                 color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos, admin_principal_usuario_id,
                 logo_url, permitir_b01, permitir_b02, permitir_b14, activo,
-                impresion_directa, mostrador_kds, qr_directo, qr_aprobar
+                impresion_directa, mostrador_kds, qr_directo, qr_aprobar, tema_oscuro
          FROM negocios
          WHERE id = ?`,
       [negocioId],
@@ -19991,6 +19995,8 @@ app.get('/api/negocios/mi-tema', (req, res) => {
               qr_directo: Number(negocioTema.qr_directo) === 1 ? 1 : 0,
               qrAprobar: Number(negocioTema.qr_aprobar) === 1 ? 1 : 0,
               qr_aprobar: Number(negocioTema.qr_aprobar) === 1 ? 1 : 0,
+              temaOscuro: Number(negocioTema.tema_oscuro) === 1 ? 1 : 0,
+              tema_oscuro: Number(negocioTema.tema_oscuro) === 1 ? 1 : 0,
               permitirE31: facturacionElectronica.permitir_e31,
               permitirE32: facturacionElectronica.permitir_e32,
               permitirE33: facturacionElectronica.permitir_e33,
@@ -28328,7 +28334,7 @@ const obtenerTemaNegocioPublico = async (negocioId) => {
   const row = await db.get(
     `SELECT id, slug, nombre, titulo_sistema, color_primario, color_secundario, color_texto, color_header,
             color_boton_primario, color_boton_secundario, color_boton_peligro, config_modulos,
-            logo_url, activo
+            logo_url, activo, tema_oscuro
        FROM negocios
       WHERE id = ?
       LIMIT 1`,

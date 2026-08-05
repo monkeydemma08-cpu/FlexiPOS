@@ -9317,3 +9317,222 @@ body[data-role='mesera'] .kanm-main {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   TEMA OSCURO POR NEGOCIO  —  :root[data-tema="oscuro"]
+   "Cafeteria nocturna": fondo oscuro calido, superficies un tono mas claro,
+   texto claro. Los acentos (rojo/amarillo) llegan por las variables de color del
+   negocio (--color-primario/secundario). Solo se activa cuando el negocio tiene
+   tema_oscuro=1; los demas negocios siguen en claro (sin este bloque).
+   ========================================================================== */
+:root[data-tema="oscuro"] {
+  --kanm-gray-100: #1c1614;   /* lienzo / fondo de pagina */
+  --kanm-gray-200: #3a2e29;   /* bordes y divisores */
+  --kanm-gray-600: #c2b3a8;   /* texto secundario / labels */
+  --kanm-gray-900: #f3ece4;   /* titulos fuertes (claro) */
+  --surface: #2a211d;         /* tarjetas / paneles */
+  --surface-strong: #33281f;  /* elementos elevados */
+  --surface-soft: #241c18;    /* fondos suaves */
+  --surface-soft-strong: #322620;
+  --kanm-gray-050: #1c1614;
+  --kanm-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+:root[data-tema="oscuro"] body {
+  background: #1c1614;
+  color: var(--color-texto);
+}
+
+/* Superficies blancas -> superficie oscura */
+:root[data-tema="oscuro"] .kanm-card,
+:root[data-tema="oscuro"] .kanm-modal,
+:root[data-tema="oscuro"] .kanm-modal-content,
+:root[data-tema="oscuro"] .kanm-panel,
+:root[data-tema="oscuro"] section.kanm-card,
+:root[data-tema="oscuro"] .caja-panel,
+:root[data-tema="oscuro"] .caja-card,
+:root[data-tema="oscuro"] .cocina-card,
+:root[data-tema="oscuro"] .producto-vista-card {
+  background: var(--surface);
+  color: var(--color-texto);
+  border-color: var(--kanm-gray-200);
+}
+
+:root[data-tema="oscuro"] .kanm-modal-body,
+:root[data-tema="oscuro"] .kanm-modal-header,
+:root[data-tema="oscuro"] .kanm-modal-section {
+  background: var(--surface);
+  color: var(--color-texto);
+}
+
+/* Titulos y textos */
+:root[data-tema="oscuro"] h1,
+:root[data-tema="oscuro"] h2,
+:root[data-tema="oscuro"] h3,
+:root[data-tema="oscuro"] h4,
+:root[data-tema="oscuro"] h5,
+:root[data-tema="oscuro"] label,
+:root[data-tema="oscuro"] p,
+:root[data-tema="oscuro"] span,
+:root[data-tema="oscuro"] td,
+:root[data-tema="oscuro"] th,
+:root[data-tema="oscuro"] li,
+:root[data-tema="oscuro"] div {
+  color: inherit;
+}
+:root[data-tema="oscuro"] .kanm-subtitle,
+:root[data-tema="oscuro"] .kanm-helper,
+:root[data-tema="oscuro"] .kanm-page-subtitle,
+:root[data-tema="oscuro"] small {
+  color: var(--kanm-gray-600);
+}
+
+/* Inputs / selects / textareas */
+:root[data-tema="oscuro"] .kanm-input,
+:root[data-tema="oscuro"] input[type="text"],
+:root[data-tema="oscuro"] input[type="number"],
+:root[data-tema="oscuro"] input[type="email"],
+:root[data-tema="oscuro"] input[type="password"],
+:root[data-tema="oscuro"] input[type="search"],
+:root[data-tema="oscuro"] input[type="date"],
+:root[data-tema="oscuro"] input[type="tel"],
+:root[data-tema="oscuro"] select,
+:root[data-tema="oscuro"] textarea {
+  background: var(--surface-soft);
+  color: var(--color-texto);
+  border-color: var(--kanm-gray-200);
+}
+:root[data-tema="oscuro"] ::placeholder { color: #9a8b80; }
+
+/* Tablas */
+:root[data-tema="oscuro"] .kanm-table thead th,
+:root[data-tema="oscuro"] .kanm-table th {
+  background: var(--surface-soft);
+  color: var(--kanm-gray-900);
+}
+:root[data-tema="oscuro"] .kanm-table td,
+:root[data-tema="oscuro"] .kanm-table tr { border-color: var(--kanm-gray-200); }
+
+/* Botones ghost / secundarios con borde */
+:root[data-tema="oscuro"] .kanm-button.ghost {
+  background: transparent;
+  color: var(--color-secundario);
+  border-color: var(--kanm-gray-200);
+}
+:root[data-tema="oscuro"] .kanm-tab {
+  color: var(--kanm-gray-600);
+}
+:root[data-tema="oscuro"] .kanm-tab.active {
+  color: var(--color-texto);
+}
+
+/* Divisores, chips neutros */
+:root[data-tema="oscuro"] hr,
+:root[data-tema="oscuro"] .kanm-divider { border-color: var(--kanm-gray-200); background: var(--kanm-gray-200); }
+
+/* Estructura de shell en tema oscuro (admin / caja / kds / mesera) */
+:root[data-tema="oscuro"] .kanm-shell,
+:root[data-tema="oscuro"] .caja-shell,
+:root[data-tema="oscuro"] .kds-shell,
+:root[data-tema="oscuro"] .mesera-shell,
+:root[data-tema="oscuro"] .cocina-shell,
+:root[data-tema="oscuro"] .mostrador-shell {
+  background: #1c1614;
+  color: var(--color-texto);
+}
+:root[data-tema="oscuro"] .kanm-sidebar,
+:root[data-tema="oscuro"] .kanm-topbar,
+:root[data-tema="oscuro"] .caja-topbar,
+:root[data-tema="oscuro"] .kanm-header,
+:root[data-tema="oscuro"] header.kanm-header {
+  background: #241a17;
+  border-color: var(--kanm-gray-200);
+  color: var(--color-texto);
+}
+:root[data-tema="oscuro"] .kanm-sidebar-item,
+:root[data-tema="oscuro"] .kanm-tab.kanm-sidebar-item {
+  color: #d8cabf;
+}
+:root[data-tema="oscuro"] .kanm-sidebar-item:hover {
+  background: color-mix(in srgb, var(--color-primario) 14%, transparent);
+  color: #fff;
+}
+:root[data-tema="oscuro"] .kanm-sidebar-item.active,
+:root[data-tema="oscuro"] .kanm-tab.kanm-sidebar-item.active {
+  background: color-mix(in srgb, var(--color-primario) 26%, transparent);
+  color: #fff;
+}
+/* Stat tiles / mini stats */
+:root[data-tema="oscuro"] .empresa-mini-stat,
+:root[data-tema="oscuro"] .kanm-stat,
+:root[data-tema="oscuro"] .stat-tile,
+:root[data-tema="oscuro"] .kanm-kpi,
+:root[data-tema="oscuro"] .analisis-kpi {
+  background: var(--surface-soft);
+  color: var(--color-texto);
+  border-color: var(--kanm-gray-200);
+}
+/* Chips de rol / etiquetas neutras */
+:root[data-tema="oscuro"] .tag-rol {
+  background: var(--surface-soft-strong);
+  color: var(--color-secundario);
+}
+
+/* Badges de estado y cabeceras de tabla sueltas en tema oscuro */
+:root[data-tema="oscuro"] thead th,
+:root[data-tema="oscuro"] table th {
+  background: var(--surface-soft);
+  color: var(--kanm-gray-900);
+}
+:root[data-tema="oscuro"] .inventario-stock-badge { color: #f3ece4; }
+:root[data-tema="oscuro"] .inventario-stock-badge.stock-ok {
+  background: color-mix(in srgb, #3cb179 26%, #241c18); color: #8ff0c0;
+}
+:root[data-tema="oscuro"] .inventario-stock-badge.stock-bajo {
+  background: color-mix(in srgb, #f7b733 26%, #241c18); color: #ffd98a;
+}
+:root[data-tema="oscuro"] .inventario-stock-badge.stock-critico {
+  background: color-mix(in srgb, #d93050 26%, #241c18); color: #ff9db0;
+}
+:root[data-tema="oscuro"] .inventario-stock-badge.stock-indef {
+  background: var(--surface-soft-strong); color: var(--kanm-gray-600);
+}
+:root[data-tema="oscuro"] .kanm-sidebar-brand-logo,
+:root[data-tema="oscuro"] .kanm-input-group--inline { background: transparent; }
+:root[data-tema="oscuro"] .kanm-mesera-productos-top,
+:root[data-tema="oscuro"] .caja-productos-top,
+:root[data-tema="oscuro"] .mostrador-productos-top {
+  background: var(--surface);
+  color: var(--color-texto);
+}
+
+/* Caja shell en tema oscuro */
+:root[data-tema="oscuro"] .caja-topbar,
+:root[data-tema="oscuro"] .caja-tabsbar,
+:root[data-tema="oscuro"] .caja-tabs,
+:root[data-tema="oscuro"] .caja-topbar-action,
+:root[data-tema="oscuro"] .caja-topbar-action.chat-link,
+:root[data-tema="oscuro"] .caja-toggle-inline,
+:root[data-tema="oscuro"] .kanm-card-header.sticky-header,
+:root[data-tema="oscuro"] .sticky-header {
+  background: var(--surface);
+  color: var(--color-texto);
+  border-color: var(--kanm-gray-200);
+}
+:root[data-tema="oscuro"] .caja-lista-card,
+:root[data-tema="oscuro"] .caja-detalle-card,
+:root[data-tema="oscuro"] .kanm-card.caja-lista-card,
+:root[data-tema="oscuro"] .kanm-card.caja-detalle-card {
+  background: var(--surface);
+  color: var(--color-texto);
+}
+:root[data-tema="oscuro"] .kanm-message {
+  background: var(--surface-soft);
+  color: var(--color-texto);
+  border-color: var(--kanm-gray-200);
+}
+:root[data-tema="oscuro"] .kanm-empty-message {
+  background: var(--surface-soft);
+  color: var(--kanm-gray-600);
+}
