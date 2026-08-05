@@ -19674,20 +19674,8 @@ app.put('/api/negocios/:id', (req, res) => {
       if (this.changes === 0) {
         return res.status(404).json({ ok: false, error: 'Negocio no encontrado' });
       }
-      // Si se cambio el plan a uno con FE incluida (full), asegurar habilitada=1
-      // en facturacion_electronica_config (sin tocar credenciales / P12).
-      if (planNuevo && PLANES_POSIUM[planNuevo]?.fe_incluida) {
-        try {
-          await db.run(
-            `INSERT INTO facturacion_electronica_config (negocio_id, habilitada, ambiente, proveedor)
-             VALUES (?, 1, 'certificacion', 'DGII')
-             ON DUPLICATE KEY UPDATE habilitada = 1, updated_at = CURRENT_TIMESTAMP`,
-            [id]
-          );
-        } catch (feErr) {
-          console.warn('No se pudo sincronizar FE en PUT negocios:', feErr?.message || feErr);
-        }
-      }
+      // La FE NO se activa sola por estar en un plan que la incluye (Full). Queda
+      // disponible pero apagada hasta que el negocio la active a mano (certificado).
       // Si el plan no permite KDS, apagar el modulo en config_modulos.
       if (planNuevo && PLANES_POSIUM[planNuevo] && !PLANES_POSIUM[planNuevo].kds_disponible) {
         try {
@@ -19893,24 +19881,8 @@ app.patch('/api/negocios/:id/plan', (req, res) => {
       await db.run(`UPDATE negocios SET ${fields.join(', ')} WHERE id = ?`, params);
       invalidarCachePlanNegocio(id);
 
-      // Si pasa a Full o se solicita, sincronizar habilitacion FE en
-      // facturacion_electronica_config (pero SIN tocar el certificado P12 ni
-      // credenciales — solo el flag). Esto es seguro para FE.
-      // NOTA: solo activa, nunca desactiva (para no romper si ya esta funcionando).
-      try {
-        const planFinalInfo = PLANES_POSIUM[planFinal];
-        if (planFinalInfo?.fe_incluida) {
-          await db.run(
-            `INSERT INTO facturacion_electronica_config (negocio_id, habilitada, ambiente, proveedor)
-             VALUES (?, 1, 'certificacion', 'DGII')
-             ON DUPLICATE KEY UPDATE habilitada = 1, updated_at = CURRENT_TIMESTAMP`,
-            [id]
-          );
-        }
-      } catch (feErr) {
-        // No bloquear: si falla este paso, el plan ya quedo guardado.
-        console.warn('No se pudo sincronizar FE tras cambio de plan:', feErr?.message || feErr);
-      }
+      // La FE NO se activa sola por el plan (aunque Full la incluya). Queda
+      // disponible pero apagada hasta que el negocio la active a mano.
 
       // Si el plan no permite KDS, apagar el modulo en config_modulos para
       // que la UI lo refleje (los endpoints ya quedan gateados aparte).
@@ -38356,42 +38328,12 @@ app.post('/api/public/registro', async (req, res) => {
         [adminUsuarioId, email || null, negocioId]
       );
 
-      // Si se solicito facturacion electronica, dejar pre-creada la fila de
-      // facturacion_electronica_config con habilitada=1 (el cliente debera
-      // luego subir su P12 desde Certificacion DGII).
-      if (ecfSolicitado || plan.fe_incluida) {
-        try {
-          await db.run(
-            `INSERT INTO facturacion_electronica_config (
-               negocio_id, habilitada, ambiente, proveedor, rnc_emisor, razon_social, nombre_comercial, correo, telefono
-             ) VALUES (?, 1, 'certificacion', 'DGII', ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-               habilitada = VALUES(habilitada),
-               rnc_emisor = COALESCE(VALUES(rnc_emisor), rnc_emisor),
-               razon_social = COALESCE(VALUES(razon_social), razon_social),
-               nombre_comercial = COALESCE(VALUES(nombre_comercial), nombre_comercial),
-               correo = COALESCE(VALUES(correo), correo),
-               telefono = COALESCE(VALUES(telefono), telefono),
-               updated_at = CURRENT_TIMESTAMP`,
-            [
-              negocioId,
-              rnc || null,
-              razonSocial || negocioNombre || null,
-              negocioNombre || null,
-              email || null,
-              telefono || null,
-            ]
-          );
-
-          // Cuando el negocio es facturador electronico, apagamos B0X legacy
-          await db.run(
-            `UPDATE negocios SET permitir_b01 = 0, permitir_b02 = 0, permitir_b14 = 0 WHERE id = ?`,
-            [negocioId]
-          ).catch(() => {});
-        } catch (feError) {
-          console.warn('No se pudo pre-configurar facturacion_electronica_config:', feError?.message || feError);
-        }
-      }
+      // NOTA: la facturacion electronica NO se activa automaticamente aunque el
+      // plan la incluya (Full) o se marque en el registro. Queda disponible pero
+      // APAGADA (habilitada=0) y sin tocar B01/B02/B14, para que el negocio pueda
+      // facturar normal desde el dia uno. La FE solo se prende cuando el negocio la
+      // activa a mano (subiendo su certificado / configurando e-CF en Certificacion
+      // DGII). Asi no queda forzado a e-CF sin certificado.
 
       const solicitudInsert = await db.run(
         `INSERT INTO registro_solicitudes (
