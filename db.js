@@ -1,27 +1,58 @@
-﻿const { query, pool, poolStats } = require('./db-mysql');
+const { query, pool, poolStats } = require('./db-mysql');
+const { AsyncLocalStorage } = require('async_hooks');
 
-let activeTransaction = null;
-let activeTransactionStartedAt = 0; // timestamp para watchdog
+// ---------------------------------------------------------------------------
+// Aislamiento de transacciones POR REQUEST (fix de estabilidad).
+//
+// ANTES: habia UNA sola variable global `activeTransaction`. Mientras CUALQUIER
+// request tenia una transaccion abierta, TODAS las consultas de TODOS los demas
+// requests se iban por esa unica conexion (en vez de usar el pool). Bajo carga
+// real (varios usuarios + el polling de mesera/cocina/caja/mostrador), todo se
+// embotellaba en una sola conexion -> lentitud, "error de sesion" (la consulta
+// que valida la sesion quedaba en cola), la RAM se acumulaba y habia que hacer
+// `pm2 restart` para destrabar.
+//
+// AHORA: cada request corre dentro de su propio contexto (AsyncLocalStorage) con
+// su propia transaccion. Las consultas de un request SIN transaccion usan el
+// pool normal; solo las del request que abrio la tx usan su conexion dedicada.
+// Codigo fuera de una request (migraciones al arranque, tareas de fondo) usa un
+// contexto global de fallback — ahi no hay concurrencia de requests, es seguro.
+// ---------------------------------------------------------------------------
+const txStore = new AsyncLocalStorage();
+
+// Contexto de fallback para codigo sin request (migraciones/arranque/tareas).
+const _globalCtx = { tx: null, startedAt: 0 };
+
+// Registro de contextos con transaccion activa (para el watchdog).
+const _ctxsConTx = new Set();
 
 // SAFETY NET: si una transaccion lleva mas de TX_WATCHDOG_MS sin commit/rollback,
-// la liberamos automaticamente. Esto evita que un error inesperado deje la
-// conexion pegada y todo el sistema esperando esa connection del pool.
-// La transaccion se aborta con rollback (no se confirma data inconsistente).
-const TX_WATCHDOG_MS = 30_000; // 30 segundos es mas que suficiente para cualquier tx normal
+// la liberamos automaticamente para no dejar la conexion pegada. Se aborta con
+// rollback (nunca se confirma data inconsistente).
+const TX_WATCHDOG_MS = 30_000;
 
-const _liberarTxColgada = async (motivo = 'watchdog') => {
-  const tx = activeTransaction;
+function _ctxActual() {
+  return txStore.getStore() || _globalCtx;
+}
+
+function _txActiva() {
+  return _ctxActual().tx;
+}
+
+const _liberarTxColgada = async (ctx, motivo = 'watchdog') => {
+  const tx = ctx && ctx.tx;
   if (!tx) return;
   console.warn(
-    `[db.js] Transaccion colgada detectada (${motivo}). Liberando connection para no bloquear el pool. PoolStats:`,
+    `[db.js] Transaccion colgada (${motivo}). Liberando connection para no bloquear el pool. PoolStats:`,
     poolStats?.() || 'n/a'
   );
-  activeTransaction = null;
-  activeTransactionStartedAt = 0;
+  ctx.tx = null;
+  ctx.startedAt = 0;
+  _ctxsConTx.delete(ctx);
   try {
     await tx.rollback();
   } catch (e) {
-    // ignore — la connection esta corrupta
+    // ignore — la connection puede estar corrupta
   }
   try {
     tx.release();
@@ -30,14 +61,22 @@ const _liberarTxColgada = async (motivo = 'watchdog') => {
   }
 };
 
-// Cada 10 segundos verifica si activeTransaction lleva demasiado.
+// Cada 10 segundos revisa si algun contexto tiene una tx demasiado vieja.
 setInterval(() => {
-  if (!activeTransaction) return;
-  const edad = Date.now() - activeTransactionStartedAt;
-  if (edad > TX_WATCHDOG_MS) {
-    _liberarTxColgada(`edad=${edad}ms`);
+  if (!_ctxsConTx.size) return;
+  const ahora = Date.now();
+  for (const ctx of _ctxsConTx) {
+    if (ctx.tx && ahora - ctx.startedAt > TX_WATCHDOG_MS) {
+      _liberarTxColgada(ctx, `edad=${ahora - ctx.startedAt}ms`);
+    }
   }
 }, 10_000).unref?.();
+
+// Middleware de Express: envuelve cada request en su propio contexto de tx, para
+// que las transacciones de un usuario no afecten las consultas de los demas.
+function transactionContextMiddleware(req, res, next) {
+  txStore.run({ tx: null, startedAt: 0 }, () => next());
+}
 
 const normalizeParamsAndCallback = (args) => {
   const clone = [...args];
@@ -70,7 +109,7 @@ const transformSql = (sql = '') => {
 };
 
 const executeSql = async (sql, params = []) => {
-  const executor = activeTransaction || pool;
+  const executor = _txActiva() || pool;
   return executor.execute(transformSql(sql), params);
 };
 
@@ -122,40 +161,46 @@ async function run(sql, ...args) {
 
   try {
     if (normalized.startsWith('BEGIN')) {
-      // Si ya hay una tx activa muy vieja, liberarla antes de empezar otra
-      // (defensive: nunca debería pasar en flujo normal, pero por si acaso).
-      if (activeTransaction && Date.now() - activeTransactionStartedAt > TX_WATCHDOG_MS) {
-        await _liberarTxColgada('BEGIN sobre tx vieja');
+      const ctx = _ctxActual();
+      // Defensive: si este contexto ya tuviera una tx muy vieja, liberarla.
+      if (ctx.tx && Date.now() - ctx.startedAt > TX_WATCHDOG_MS) {
+        await _liberarTxColgada(ctx, 'BEGIN sobre tx vieja');
       }
-      if (!activeTransaction) {
-        activeTransaction = await pool.getConnection();
-        activeTransactionStartedAt = Date.now();
-        await activeTransaction.beginTransaction();
+      if (!ctx.tx) {
+        const conn = await pool.getConnection();
+        await conn.beginTransaction();
+        ctx.tx = conn;
+        ctx.startedAt = Date.now();
+        _ctxsConTx.add(ctx);
       }
       return finish(null);
     }
 
     if (normalized.startsWith('COMMIT')) {
-      if (activeTransaction) {
-        await activeTransaction.commit();
-        activeTransaction.release();
-        activeTransaction = null;
-        activeTransactionStartedAt = 0;
+      const ctx = _ctxActual();
+      if (ctx.tx) {
+        await ctx.tx.commit();
+        ctx.tx.release();
+        ctx.tx = null;
+        ctx.startedAt = 0;
+        _ctxsConTx.delete(ctx);
       }
       return finish(null);
     }
 
     if (normalized.startsWith('ROLLBACK')) {
-      if (activeTransaction) {
-        await activeTransaction.rollback();
-        activeTransaction.release();
-        activeTransaction = null;
-        activeTransactionStartedAt = 0;
+      const ctx = _ctxActual();
+      if (ctx.tx) {
+        await ctx.tx.rollback();
+        ctx.tx.release();
+        ctx.tx = null;
+        ctx.startedAt = 0;
+        _ctxsConTx.delete(ctx);
       }
       return finish(null);
     }
 
-    const executor = activeTransaction || pool;
+    const executor = _txActiva() || pool;
     const [result] = await executor.execute(transformSql(sql), params);
 
     if (result && typeof result === 'object' && !Array.isArray(result)) {
@@ -168,10 +213,12 @@ async function run(sql, ...args) {
     return finish(null);
   } catch (err) {
     if (normalized.startsWith('COMMIT') || normalized.startsWith('ROLLBACK')) {
-      if (activeTransaction) {
-        try { activeTransaction.release(); } catch (_) {}
-        activeTransaction = null;
-        activeTransactionStartedAt = 0;
+      const ctx = _ctxActual();
+      if (ctx.tx) {
+        try { ctx.tx.release(); } catch (_) {}
+        ctx.tx = null;
+        ctx.startedAt = 0;
+        _ctxsConTx.delete(ctx);
       }
     }
     return finish(err);
@@ -224,4 +271,5 @@ module.exports = {
   serialize,
   each,
   query,
+  transactionContextMiddleware,
 };

@@ -79,6 +79,12 @@ let io = null;
 
 app.set('trust proxy', 1);
 
+// Aislamiento de transacciones por request: envuelve cada request en su propio
+// contexto (AsyncLocalStorage) para que una transaccion de un usuario NO acapare
+// la conexion de las consultas de los demas. Debe ir de primero, antes de las
+// rutas, para que el contexto cubra todo el ciclo del request. (Ver db.js.)
+app.use(db.transactionContextMiddleware);
+
 // Compresion gzip/brotli para todas las respuestas. Reduce 60-80% el tamano
 // de JSON/JS/CSS en transit. Threshold 1KB para no gastar CPU en responses
 // pequenos. Level 6 es el sweet spot entre ratio y CPU. NO comprime si el
