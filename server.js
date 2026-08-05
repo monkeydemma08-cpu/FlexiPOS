@@ -19022,7 +19022,7 @@ app.get('/api/negocios', (req, res) => {
              n.creado_en,
              n.plan_id, n.plan_activado_en, n.plan_vence_en, n.limite_usuarios, n.limite_menu_qr,
              n.permitir_b01, n.permitir_b02, n.permitir_b14,
-             n.impresion_directa, n.mostrador_kds
+             n.impresion_directa, n.mostrador_kds, n.qr_directo, n.qr_aprobar, n.tema_oscuro
         FROM negocios n
         LEFT JOIN usuarios u ON u.id = n.admin_principal_usuario_id
         LEFT JOIN empresas e ON e.id = n.empresa_id

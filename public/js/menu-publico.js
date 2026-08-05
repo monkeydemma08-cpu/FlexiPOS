@@ -935,14 +935,16 @@ const applyTheme = () => {
   if (tema.colorSecundario) {
     root.style.setProperty('--menu-accent', tema.colorSecundario);
   }
-  if (tema.colorTexto) {
-    root.style.setProperty('--menu-ink', tema.colorTexto);
-  }
   // Tema oscuro por negocio: activa el bloque [data-tema="oscuro"] de menu-publico.css.
-  if (Number(tema.temaOscuro ?? tema.tema_oscuro ?? 0) === 1) {
+  const esOscuro = Number(tema.temaOscuro ?? tema.tema_oscuro ?? 0) === 1;
+  if (esOscuro) {
     root.dataset.tema = 'oscuro';
-  } else if (root.dataset.tema === 'oscuro') {
-    delete root.dataset.tema;
+    // En tema oscuro el texto SIEMPRE va claro, sin importar el color_texto que
+    // tenga el negocio (si quedara oscuro por error, el texto seria invisible).
+    root.style.setProperty('--menu-ink', '#f3ece4');
+  } else {
+    if (root.dataset.tema === 'oscuro') delete root.dataset.tema;
+    if (tema.colorTexto) root.style.setProperty('--menu-ink', tema.colorTexto);
   }
 };
 

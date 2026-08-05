@@ -343,6 +343,9 @@ const applyTemaNegocio = (tema) => {
   const temaOscuro = Number(tema?.temaOscuro ?? tema?.tema_oscuro ?? 0) === 1;
   if (temaOscuro) {
     root.dataset.tema = 'oscuro';
+    // En tema oscuro el texto SIEMPRE va claro, aunque el negocio tenga un
+    // color_texto oscuro mal configurado (si no, el texto queda invisible).
+    root.style.setProperty('--color-texto', '#f3ece4');
   } else if (root.dataset.tema === 'oscuro') {
     delete root.dataset.tema;
   }
