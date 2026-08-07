@@ -34085,6 +34085,10 @@ app.get('/api/admin/analytics/overview', (req, res) => {
         `,
         [negocioId, negocioId]
       );
+      // Excluye los pedidos a credito y los que ya tienen una deuda ligada, porque
+      // esas ventas se cuentan aparte via clientes_deudas. Sin esto, cada venta a
+      // credito se contaria DOS veces (como pedido pagado + como deuda) e inflaria
+      // los dias con ventas a credito. Mismo criterio que el total principal.
       const ventasSeriePedidos = await db.all(
         `
           SELECT ${fechaBase} AS fecha,
@@ -34093,10 +34097,15 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM pedidos
           WHERE estado = 'pagado'
             AND negocio_id = ?
+            AND COALESCE(metodo_pago, '') <> 'credito'
+            AND id NOT IN (
+              SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
+              WHERE negocio_id = ? AND pedido_id IS NOT NULL
+            )
             AND ${fechaBase} BETWEEN ? AND ?
           GROUP BY fecha
         `,
-        paramsBase
+        [negocioId, negocioId, rango.desde, rango.hasta]
       );
       const ventasSerieDeudas = await db.all(
         `
@@ -34132,10 +34141,15 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM pedidos
           WHERE estado = 'pagado'
             AND negocio_id = ?
+            AND COALESCE(metodo_pago, '') <> 'credito'
+            AND id NOT IN (
+              SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
+              WHERE negocio_id = ? AND pedido_id IS NOT NULL
+            )
             AND ${fechaBase} BETWEEN ? AND ?
           GROUP BY dia_semana
         `,
-        paramsBase
+        [negocioId, negocioId, rango.desde, rango.hasta]
       );
       const ventasPorDiaSemanaDeudas = await db.all(
         `
@@ -34172,10 +34186,15 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM pedidos
           WHERE estado = 'pagado'
             AND negocio_id = ?
+            AND COALESCE(metodo_pago, '') <> 'credito'
+            AND id NOT IN (
+              SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
+              WHERE negocio_id = ? AND pedido_id IS NOT NULL
+            )
             AND ${fechaBase} BETWEEN ? AND ?
           GROUP BY hora
         `,
-        paramsBase
+        [negocioId, negocioId, rango.desde, rango.hasta]
       );
       const ventasPorHoraDeudas = await db.all(
         `
@@ -34223,10 +34242,15 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           LEFT JOIN categorias c ON c.id = p.categoria_id AND c.negocio_id = ?
           WHERE dp.negocio_id = ?
             AND pe.estado = 'pagado'
+            AND COALESCE(pe.metodo_pago, '') <> 'credito'
+            AND pe.id NOT IN (
+              SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
+              WHERE negocio_id = ? AND pedido_id IS NOT NULL
+            )
             AND ${fechaBase} BETWEEN ? AND ?
           GROUP BY p.id, p.nombre, categoria, dp.precio_unitario
         `,
-        [negocioId, negocioId, negocioId, negocioId, rango.desde, rango.hasta]
+        [negocioId, negocioId, negocioId, negocioId, negocioId, rango.desde, rango.hasta]
       );
       const ventasProductosDeudas = await db.all(
         `
@@ -34396,10 +34420,15 @@ app.get('/api/admin/analytics/overview', (req, res) => {
           FROM pedidos
           WHERE estado = 'pagado'
             AND negocio_id = ?
+            AND COALESCE(metodo_pago, '') <> 'credito'
+            AND id NOT IN (
+              SELECT COALESCE(pedido_id, 0) FROM clientes_deudas
+              WHERE negocio_id = ? AND pedido_id IS NOT NULL
+            )
             AND ${fechaBase} BETWEEN ? AND ?
           GROUP BY dia_mes
         `,
-        paramsBase
+        [negocioId, negocioId, rango.desde, rango.hasta]
       );
       const ventasPorDiaMesDeudas = await db.all(
         `
