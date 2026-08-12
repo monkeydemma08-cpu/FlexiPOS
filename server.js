@@ -8277,6 +8277,39 @@ const ajustarStockPorPedido = async (pedidoId, negocioId, signo = 1) => {
   }
 };
 
+// Bug B: al cancelar/eliminar un pedido, tambien se debe eliminar la cuenta por
+// cobrar (clientes_deudas) que ese pedido genero. Antes NO se hacia: la deuda
+// quedaba viva aunque el pedido se cancelara (solo salia del cuadre), obligando
+// a editar la deuda a mano. IMPORTANTE: solo borramos deudas SIN abonos; si el
+// cliente ya pago algo contra la deuda, la conservamos para no perder ese
+// historial de dinero (esos casos se resuelven manualmente). Se llama DENTRO de
+// la transaccion de cancelacion ya abierta.
+const eliminarDeudaPorPedidoCancelado = async (pedidoId, negocioId) => {
+  const deudas = await db.all(
+    'SELECT id FROM clientes_deudas WHERE pedido_id = ? AND negocio_id = ?',
+    [pedidoId, negocioId]
+  );
+  let eliminadas = 0;
+  let conservadasConAbono = 0;
+  for (const deuda of deudas || []) {
+    const abono = await db.get(
+      'SELECT COUNT(*) AS n FROM clientes_abonos WHERE deuda_id = ? AND negocio_id = ?',
+      [deuda.id, negocioId]
+    );
+    if (Number(abono?.n) > 0) {
+      conservadasConAbono += 1;
+      console.warn(
+        `[deuda] Pedido ${pedidoId} cancelado, pero la deuda ${deuda.id} tiene abonos: se conserva para no perder el historial de pagos.`
+      );
+      continue;
+    }
+    await db.run('DELETE FROM clientes_deudas_detalle WHERE deuda_id = ? AND negocio_id = ?', [deuda.id, negocioId]);
+    await db.run('DELETE FROM clientes_deudas WHERE id = ? AND negocio_id = ?', [deuda.id, negocioId]);
+    eliminadas += 1;
+  }
+  return { eliminadas, conservadasConAbono };
+};
+
 const obtenerRecetasPorProductos = async (productoIds, negocioId) => {
   if (!Array.isArray(productoIds) || productoIds.length === 0) {
     return new Map();
@@ -15398,6 +15431,8 @@ app.post('/api/cuentas/:id/eliminar', (req, res) => {
         // FIFO (Bug C): revertir consumos de lotes al cancelar masivamente.
         await revertirConsumosFIFO({ negocioId, origen: 'venta', origenId: pedidoId });
         await revertirConsumosFIFO({ negocioId, origen: 'produccion', origenId: pedidoId });
+        // Bug B: eliminar la cuenta por cobrar generada por este pedido (si no tiene abonos).
+        await eliminarDeudaPorPedidoCancelado(pedidoId, negocioId);
       }
       await db.run('COMMIT');
 
@@ -17761,6 +17796,8 @@ app.put('/api/pedidos/:pedidoId/detalles/:detalleId/estado', (req, res) => {
       // FIFO (Bug C): revertir consumos de lotes al cancelar pedido individual.
       await revertirConsumosFIFO({ negocioId, origen: 'venta', origenId: pedidoId });
       await revertirConsumosFIFO({ negocioId, origen: 'produccion', origenId: pedidoId });
+      // Bug B: eliminar la cuenta por cobrar generada por este pedido (si no tiene abonos).
+      await eliminarDeudaPorPedidoCancelado(pedidoId, negocioId);
       await db.run('COMMIT');
     } catch (error) {
       await db.run('ROLLBACK').catch(() => {});
@@ -18071,9 +18108,30 @@ const aplicarEdicionFacturaCuenta = async ({
         deltaStock.set(pid, (deltaStock.get(pid) || 0) + (Number(n.cantidad) || 0));
       }
 
-      // Aplicar ajustes. Solo afectamos productos NO indefinidos.
+      // Bug A: los productos CON receta activa (Model B, ej. "Cono Barquito" que
+      // consume de "Caja de conos barquitos") NO descuentan su stock propio -que
+      // es ~0- sino el de sus INSUMOS. Antes esta ruta aplicaba el delta al stock
+      // propio del producto final y tiraba un falso "Stock insuficiente" al editar
+      // conos por unidad. Ahora, igual que la creacion y la edicion de pedido:
+      // los productos con receta se enrutan a sus insumos (consumo NETO), y solo
+      // los productos SIN receta ajustan su propio stock.
+      const idsDelta = Array.from(deltaStock.keys());
+      const productosConRecetaActivaEdit = await obtenerProductosConRecetaActiva(idsDelta, negocioId);
+      const recetaConsumir = new Map(); // producto con receta -> cantidad a consumir (delta>0)
+      const recetaDevolver = new Map(); // producto con receta -> cantidad a devolver (delta<0)
+
+      // Aplicar ajustes de productos SIN receta; acumular los de CON receta.
       for (const [productoId, delta] of deltaStock.entries()) {
         if (Math.abs(delta) < 0.0001) continue; // sin cambio
+
+        if (productosConRecetaActivaEdit.has(Number(productoId))) {
+          // No tocamos el stock propio; se resuelve por insumos mas abajo.
+          if (delta > 0) recetaConsumir.set(Number(productoId), delta);
+          else recetaDevolver.set(Number(productoId), Math.abs(delta));
+          stockAjustes.push({ producto_id: productoId, nombre: null, delta, accion: 'receta_insumos' });
+          continue;
+        }
+
         const prod = await db.get(
           `SELECT id, nombre, stock, stock_indefinido FROM productos WHERE id = ? AND negocio_id = ? LIMIT 1`,
           [productoId, negocioId]
@@ -18117,6 +18175,57 @@ const aplicarEdicionFacturaCuenta = async ({
             [Math.abs(delta), productoId, negocioId]
           );
           stockAjustes.push({ producto_id: productoId, nombre: prod.nombre, delta, accion: 'devuelto' });
+        }
+      }
+
+      // Bug A (cont.): ajuste NETO de INSUMOS de los productos con receta. Expandimos
+      // cada producto con receta a sus insumos (cajas) y netificamos consumo vs
+      // devolucion, para no descontar de mas ni de menos al editar.
+      const insumoNeto = new Map(); // insumo_id -> cantidad neta (>0 consumir, <0 devolver)
+      const insumoInfo = new Map(); // insumo_id -> detalle (para el nombre en errores)
+      if (recetaConsumir.size) {
+        const r = await calcularConsumoInsumosPorProductos(recetaConsumir, negocioId);
+        for (const [insumoId, cant] of r.consumoPorInsumo.entries()) {
+          insumoNeto.set(insumoId, (insumoNeto.get(insumoId) || 0) + cant);
+          if (r.insumosMap.has(insumoId)) insumoInfo.set(insumoId, r.insumosMap.get(insumoId));
+        }
+      }
+      if (recetaDevolver.size) {
+        const r = await calcularConsumoInsumosPorProductos(recetaDevolver, negocioId);
+        for (const [insumoId, cant] of r.consumoPorInsumo.entries()) {
+          insumoNeto.set(insumoId, (insumoNeto.get(insumoId) || 0) - cant);
+          if (r.insumosMap.has(insumoId)) insumoInfo.set(insumoId, r.insumosMap.get(insumoId));
+        }
+      }
+      for (const [insumoId, neto] of insumoNeto.entries()) {
+        if (Math.abs(neto) < 0.0001) continue;
+        const insumoProd = await db.get(
+          `SELECT id, nombre, stock, stock_indefinido FROM productos WHERE id = ? AND negocio_id = ? LIMIT 1`,
+          [insumoId, negocioId]
+        );
+        if (!insumoProd || esStockIndefinido(insumoProd)) continue;
+        if (neto > 0) {
+          const r = await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) - ? WHERE id = ? AND negocio_id = ? AND COALESCE(stock, 0) >= ?',
+            [neto, insumoId, negocioId, neto]
+          );
+          if (r.changes === 0) {
+            const info = insumoInfo.get(insumoId);
+            throw error(
+              400,
+              `Stock insuficiente para insumo "${insumoProd.nombre || info?.insumo_nombre || `insumo ${insumoId}`}". Disponible: ${Number(insumoProd.stock) || 0}, requerido: ${neto}.`
+            );
+          }
+          try {
+            await consumirStockFIFO({ productoId: insumoId, cantidad: neto, negocioId, origen: 'produccion', origenId: pedidoId });
+          } catch (fifoErr) {
+            console.warn('FIFO best-effort fallo al consumir insumo en edicion:', fifoErr?.message || fifoErr);
+          }
+        } else {
+          await db.run(
+            'UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ? AND negocio_id = ?',
+            [Math.abs(neto), insumoId, negocioId]
+          );
         }
       }
 
