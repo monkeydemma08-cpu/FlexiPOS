@@ -18626,7 +18626,7 @@ const eliminarFacturaCuenta = async ({ pedidoId, negocioId }) => {
 
   const cuentaId = pedidoBase.cuenta_id || pedidoBase.id;
   const pedidosCuenta = await db.all(
-    `SELECT id, ecf_tipo, ecf_encf, tipo_comprobante, ncf, estado
+    `SELECT id, ecf_tipo, ecf_encf, tipo_comprobante, ncf, estado, fecha_factura, fecha_creacion
        FROM pedidos WHERE (cuenta_id = ? OR id = ?) AND negocio_id = ? ORDER BY id ASC`,
     [cuentaId, cuentaId, negocioId]
   );
@@ -18753,18 +18753,37 @@ const eliminarFacturaCuenta = async ({ pedidoId, negocioId }) => {
         );
       }
     }
+    // Candado fiscal: solo reutilizar NCF del PERIODO ACTUAL (mes en curso). El
+    // 607 se declara por mes; meses pasados ya/pronto se reportaron y reutilizar
+    // duplicaria un NCF declarado. Ademas se respeta periodoEstaCerrado (modulo
+    // contabilidad) por si el mes actual ya fue cerrado.
+    const periodoActual = parseFechaContable(new Date());
+    let empresaIdNcf = null;
+    try {
+      const negRow = await db.get('SELECT empresa_id FROM negocios WHERE id = ?', [negocioId]);
+      empresaIdNcf = negRow?.empresa_id || null;
+    } catch (_) {}
+
     const ncfCandidatos = ncfLegacy
       .map((p) => {
         const tipo = String(p.tipo_comprobante || '').toUpperCase();
         const seq = seqPorTipo.get(tipo);
         const digitos = seq ? Number(seq.digitos) || 8 : 8;
         const numero = Number(String(p.ncf).trim().slice(-digitos));
-        return { tipo, numero, ncf: String(p.ncf).trim() };
+        return { tipo, numero, ncf: String(p.ncf).trim(), fecha: p.fecha_factura || p.fecha_creacion };
       })
       .filter((x) => Number.isFinite(x.numero))
       .sort((a, b) => b.numero - a.numero);
 
     for (const cand of ncfCandidatos) {
+      // Candado fiscal: mismo mes que hoy y periodo no cerrado.
+      const per = parseFechaContable(cand.fecha);
+      if (!per || !periodoActual || per.anio !== periodoActual.anio || per.mes !== periodoActual.mes) {
+        continue;
+      }
+      if (empresaIdNcf && (await periodoEstaCerrado(empresaIdNcf, cand.fecha))) {
+        continue;
+      }
       const seq = await db.get(
         'SELECT correlativo FROM secuencias_ncf WHERE tipo = ? AND negocio_id = ?',
         [cand.tipo, negocioId]
