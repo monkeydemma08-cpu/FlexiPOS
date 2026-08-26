@@ -18626,7 +18626,7 @@ const eliminarFacturaCuenta = async ({ pedidoId, negocioId }) => {
 
   const cuentaId = pedidoBase.cuenta_id || pedidoBase.id;
   const pedidosCuenta = await db.all(
-    `SELECT id, ecf_tipo, ecf_encf, tipo_comprobante, estado
+    `SELECT id, ecf_tipo, ecf_encf, tipo_comprobante, ncf, estado
        FROM pedidos WHERE (cuenta_id = ? OR id = ?) AND negocio_id = ? ORDER BY id ASC`,
     [cuentaId, cuentaId, negocioId]
   );
@@ -18670,6 +18670,7 @@ const eliminarFacturaCuenta = async ({ pedidoId, negocioId }) => {
     : [];
 
   const stockAjustes = [];
+  const ncfReutilizados = [];
   await db.run('BEGIN');
   try {
     for (const it of itemsCuenta) {
@@ -18725,6 +18726,58 @@ const eliminarFacturaCuenta = async ({ pedidoId, negocioId }) => {
       await eliminarDeudaPorPedidoCancelado(p.id, negocioId);
     }
 
+    // Reutilizar la secuencia NCF legacy (B01/B02/B14/B15) cuando la factura
+    // eliminada tenia el ULTIMO numero emitido de su tipo: retrocedemos el
+    // correlativo para que la PROXIMA factura reuse ese numero (evita huecos en
+    // la secuencia). Si NO era el ultimo (ya se emitieron facturas despues), NO
+    // se toca — retroceder duplicaria un NCF ya usado (problema con DGII). Los
+    // e-CF (E31/E32) no aplican. Se procesa en orden descendente para reutilizar
+    // varios NCF consecutivos de una misma cuenta.
+    const ncfLegacy = pedidosCuenta.filter((p) => {
+      const tipo = String(p.tipo_comprobante || '').toUpperCase();
+      return p.ncf && /^B\d{2}$/.test(tipo) && !p.ecf_tipo && !p.ecf_encf;
+    });
+    // Cache de la secuencia por tipo (para saber cuantos digitos tiene el NCF y
+    // extraer el numero correctamente: los ultimos `digitos` del NCF, NO todos
+    // los digitos finales — el prefijo "B02" tambien contiene digitos).
+    const seqPorTipo = new Map();
+    for (const p of ncfLegacy) {
+      const tipo = String(p.tipo_comprobante || '').toUpperCase();
+      if (!seqPorTipo.has(tipo)) {
+        seqPorTipo.set(
+          tipo,
+          await db.get(
+            'SELECT prefijo, digitos, correlativo FROM secuencias_ncf WHERE tipo = ? AND negocio_id = ?',
+            [tipo, negocioId]
+          )
+        );
+      }
+    }
+    const ncfCandidatos = ncfLegacy
+      .map((p) => {
+        const tipo = String(p.tipo_comprobante || '').toUpperCase();
+        const seq = seqPorTipo.get(tipo);
+        const digitos = seq ? Number(seq.digitos) || 8 : 8;
+        const numero = Number(String(p.ncf).trim().slice(-digitos));
+        return { tipo, numero, ncf: String(p.ncf).trim() };
+      })
+      .filter((x) => Number.isFinite(x.numero))
+      .sort((a, b) => b.numero - a.numero);
+
+    for (const cand of ncfCandidatos) {
+      const seq = await db.get(
+        'SELECT correlativo FROM secuencias_ncf WHERE tipo = ? AND negocio_id = ?',
+        [cand.tipo, negocioId]
+      );
+      if (seq && Number(seq.correlativo) === cand.numero + 1) {
+        await db.run(
+          'UPDATE secuencias_ncf SET correlativo = ?, actualizado_en = CURRENT_TIMESTAMP WHERE tipo = ? AND negocio_id = ?',
+          [cand.numero, cand.tipo, negocioId]
+        );
+        ncfReutilizados.push(cand.ncf);
+      }
+    }
+
     await db.run('COMMIT');
   } catch (txErr) {
     await db.run('ROLLBACK').catch(() => {});
@@ -18735,7 +18788,12 @@ const eliminarFacturaCuenta = async ({ pedidoId, negocioId }) => {
     if (typeof limpiarCacheAnalitica === 'function') limpiarCacheAnalitica(negocioId);
   } catch (_) {}
 
-  return { cuenta_id: cuentaId, pedidos_afectados: idsPedidos, stock_ajustes: stockAjustes };
+  return {
+    cuenta_id: cuentaId,
+    pedidos_afectados: idsPedidos,
+    stock_ajustes: stockAjustes,
+    ncf_reutilizados: ncfReutilizados,
+  };
 };
 
 // ===========================================================================
