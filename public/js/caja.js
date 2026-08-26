@@ -4183,6 +4183,11 @@ const renderDetalleCuadreActual = () => {
       ? `<button type="button" class="kanm-button ghost" data-editar-factura="1" data-pedido-id="${facturaId}" style="margin-left:6px;" title="${tituloBotonEditar}">Editar factura</button>`
       : '';
 
+    // Boton "Eliminar factura" (igual que mostrador): mismo criterio que editar.
+    const botonEliminarFacturaHtml = puedeEditarFactura
+      ? `<button type="button" class="kanm-button ghost" data-eliminar-factura="1" data-pedido-id="${facturaId}" style="margin-left:6px;color:#c0392b;" title="Eliminar/anular factura (requiere password admin)">Eliminar factura</button>`
+      : '';
+
     fila.dataset.cuadreId = pedido.id;
     fila.style.cursor = 'pointer';
     fila.setAttribute('aria-expanded', 'false');
@@ -4209,6 +4214,7 @@ const renderDetalleCuadreActual = () => {
           Ver factura
         </button>
         ${botonEditarHtml}
+        ${botonEliminarFacturaHtml}
       </td>
 
     `;
@@ -5477,6 +5483,50 @@ const eliminarCuentaSeleccionada = async () => {
   }
 };
 
+// Eliminar/anular una factura YA cuadrada desde la vista de Cuadre (igual que
+// mostrador). Pide password admin y llama al endpoint compartido eliminar-con-admin.
+// El backend devuelve el stock, quita los pagos del cuadre, cancela los pedidos
+// y borra la deuda asociada (si no tiene abonos).
+const eliminarFacturaConAdmin = async (pedidoId) => {
+  const id = Number(pedidoId);
+  if (!Number.isFinite(id) || id <= 0) {
+    setCuadreMensaje('Factura invalida para eliminar.', 'error');
+    return;
+  }
+
+  const confirmar = window.confirm(
+    `Esta accion ELIMINARA/anulara la factura #${id}, devolvera su stock y borrara su deuda (si la tiene). Deseas continuar?`
+  );
+  if (!confirmar) return;
+
+  const passwordAdmin = await solicitarPasswordAdmin(`eliminar la factura #${id}`);
+  if (!passwordAdmin) {
+    setCuadreMensaje('Debes ingresar la contrasena de admin.', 'error');
+    return;
+  }
+
+  try {
+    setCuadreMensaje('Eliminando factura...', 'info');
+    const respuesta = await fetchAutorizadoCaja(`/api/caja/facturas/${id}/eliminar-con-admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ admin_password: passwordAdmin }),
+    });
+    const data = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo eliminar la factura.');
+    }
+    await cargarResumenCuadre(false);
+    setCuadreMensaje(`Factura #${id} eliminada correctamente.`, 'info');
+    try {
+      notificarActualizacionGlobal('pedido-actualizado', { pedidoId: id });
+    } catch (_) {}
+  } catch (error) {
+    console.error('Error al eliminar factura:', error);
+    setCuadreMensaje(error?.message || 'No se pudo eliminar la factura.', 'error');
+  }
+};
+
 const actualizarPrecioProductoCuenta = async (itemIndex, boton = null) => {
   if (!cuentaSeleccionada) {
     setMensajeDetalle('Selecciona una cuenta.', 'error');
@@ -6296,6 +6346,19 @@ const inicializarCuadre = () => {
     }
     if (esOpcionMetodo) {
       event.stopPropagation();
+      return;
+    }
+
+    const botonEliminarFactura = event.target.closest('[data-eliminar-factura]');
+    if (botonEliminarFactura) {
+      event.preventDefault();
+      event.stopPropagation();
+      const pedidoId = Number(botonEliminarFactura.dataset.pedidoId);
+      if (!Number.isFinite(pedidoId) || pedidoId <= 0) {
+        setCuadreMensaje('Factura invalida para eliminar.', 'error');
+        return;
+      }
+      eliminarFacturaConAdmin(pedidoId);
       return;
     }
 

@@ -55,6 +55,9 @@
     return fechaDMY(desde);
   };
 
+  const linea = (lbl, val, extraClass = '') =>
+    `<div class="linea ${extraClass}"><span class="lbl">${lbl}</span><span class="val">${money(val)}</span></div>`;
+
   const render = (cierres) => {
     if (!Array.isArray(cierres) || !cierres.length) {
       ticketEl.innerHTML = `
@@ -70,32 +73,44 @@
       String(a.fecha_operacion || '').localeCompare(String(b.fecha_operacion || ''))
     );
 
-    let totVentas = 0;
-    let totEsperado = 0;
-    let totDeclarado = 0;
+    let totEfectivo = 0;
+    let totTransfer = 0;
+    let totTarjeta = 0;
+    let totCredito = 0;
+    let totGastos = 0;
 
     const bloques = lista
       .map((c) => {
-        const ventas = Number(c.total_ventas) || 0;
-        const esperado = Number(c.total_sistema) || 0; // efectivo esperado
-        const declarado = Number(c.total_declarado) || 0;
-        const dif = Number((declarado - esperado).toFixed(2));
-        totVentas += ventas;
-        totEsperado += esperado;
-        totDeclarado += declarado;
+        const efectivo = Number(c.ventas_efectivo) || 0;
+        const transfer = Number(c.ventas_transferencia) || 0;
+        const tarjeta = Number(c.ventas_tarjeta) || 0;
+        const credito = Number(c.ventas_credito) || 0;
+        const gastos = Number(c.gastos_total) || 0;
+        const ventas = efectivo + transfer + tarjeta + credito;
+        totEfectivo += efectivo;
+        totTransfer += transfer;
+        totTarjeta += tarjeta;
+        totCredito += credito;
+        totGastos += gastos;
         const origenTxt = String(c.origen_caja || 'caja').toUpperCase();
+        const filas = [
+          linea('Efectivo', efectivo),
+          transfer ? linea('Transferencia', transfer) : '',
+          tarjeta ? linea('Tarjeta', tarjeta) : '',
+          credito ? linea('Crédito', credito) : '',
+          linea('Total ventas', ventas, 'subtotal'),
+          gastos ? linea('Gastos', gastos) : '',
+        ].join('');
         return `
           <div class="cierre">
             <div class="fecha">${escapar(fechaDMY(c.fecha_operacion))} <span class="origen">· ${escapar(origenTxt)}</span></div>
-            <div class="linea"><span class="lbl">Total ventas</span><span class="val">${money(ventas)}</span></div>
-            <div class="linea"><span class="lbl">Efectivo esperado</span><span class="val">${money(esperado)}</span></div>
-            <div class="linea"><span class="lbl">Efectivo declarado</span><span class="val">${money(declarado)}</span></div>
-            <div class="linea ${dif === 0 ? 'dif-ok' : 'dif-mal'}"><span class="lbl">Diferencia</span><span class="val">${money(dif)}</span></div>
+            ${filas}
           </div>`;
       })
       .join('<hr class="sep" />');
 
-    const difTotal = Number((totDeclarado - totEsperado).toFixed(2));
+    const totVentas = totEfectivo + totTransfer + totTarjeta + totCredito;
+    const neto = Number((totVentas - totGastos).toFixed(2));
 
     ticketEl.innerHTML = `
       <h1>CUADRE DEL MES</h1>
@@ -104,12 +119,17 @@
       <hr class="sep-solid" />
       ${bloques}
       <hr class="sep-solid" />
-      <div class="totales">
-        <div class="linea grande"><span class="lbl">TOTAL VENTAS</span><span class="val">${money(totVentas)}</span></div>
-        <div class="linea"><span class="lbl">Efectivo esperado</span><span class="val">${money(totEsperado)}</span></div>
-        <div class="linea"><span class="lbl">Efectivo declarado</span><span class="val">${money(totDeclarado)}</span></div>
-        <div class="linea ${difTotal === 0 ? 'dif-ok' : 'dif-mal'}"><span class="lbl">Diferencia total</span><span class="val">${money(difTotal)}</span></div>
-      </div>
+      <div class="seccion">INGRESOS (VENTAS)</div>
+      ${linea('Efectivo', totEfectivo)}
+      ${totTransfer ? linea('Transferencia', totTransfer) : ''}
+      ${totTarjeta ? linea('Tarjeta', totTarjeta) : ''}
+      ${totCredito ? linea('Crédito', totCredito) : ''}
+      ${linea('TOTAL VENTAS', totVentas, 'grande')}
+      <hr class="sep" />
+      <div class="seccion">GASTOS</div>
+      ${linea('Total gastos', totGastos)}
+      <hr class="sep" />
+      ${linea('NETO (ventas − gastos)', neto, 'grande')}
       <hr class="sep" />
       <p class="sub">Generado ${new Date().toLocaleString('es-DO', { timeZone: 'America/Santo_Domingo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>`;
   };

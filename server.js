@@ -11023,7 +11023,38 @@ const obtenerCierresCaja = (desde, hasta, negocioId, origen, callback) => {
                AND d.pedido_id IS NULL
                AND (d.cierre_id = cc.id OR (d.cierre_id IS NULL AND DATE(d.fecha) = DATE(cc.fecha_operacion)))
                AND ${filtroOrigenFacturas}
-           ), 0) AS total_ventas_facturas
+           ), 0) AS total_ventas_facturas,
+           COALESCE((
+             SELECT SUM(COALESCE(pc.pago_efectivo, 0))
+             FROM pagos_cuenta pc
+             WHERE pc.cierre_id = cc.id AND pc.negocio_id = cc.negocio_id
+           ), 0) AS ventas_efectivo,
+           COALESCE((
+             SELECT SUM(COALESCE(pc.pago_transferencia, 0))
+             FROM pagos_cuenta pc
+             WHERE pc.cierre_id = cc.id AND pc.negocio_id = cc.negocio_id
+           ), 0) AS ventas_transferencia,
+           COALESCE((
+             SELECT SUM(COALESCE(pc.pago_tarjeta, 0))
+             FROM pagos_cuenta pc
+             WHERE pc.cierre_id = cc.id AND pc.negocio_id = cc.negocio_id
+           ), 0) AS ventas_tarjeta,
+           COALESCE((
+             SELECT SUM(${totalPedidoSql})
+             FROM pedidos p
+             WHERE p.cierre_id = cc.id
+               AND p.negocio_id = cc.negocio_id
+               AND p.estado = 'pagado'
+               AND p.metodo_pago = 'credito'
+               AND ${filtroOrigenPedidos}
+           ), 0) AS ventas_credito,
+           COALESCE((
+             SELECT SUM(COALESCE(g.monto, 0))
+             FROM gastos g
+             WHERE g.negocio_id = cc.negocio_id
+               AND UPPER(COALESCE(g.estado, '')) = 'PAGADO'
+               AND (g.cierre_id = cc.id OR (g.cierre_id IS NULL AND DATE(g.fecha) = DATE(cc.fecha_operacion)))
+           ), 0) AS gastos_total
     FROM cierres_caja cc
     WHERE ${filtros.join('\n      AND ')}
     ORDER BY cc.fecha_operacion DESC, cc.fecha_cierre DESC
@@ -11035,6 +11066,12 @@ const obtenerCierresCaja = (desde, hasta, negocioId, origen, callback) => {
     const cierres = (rows || []).map((row) => ({
       ...normalizarCierreCajaAdmin(row),
       fecha_operacion: normalizarFechaOperacion(row?.fecha_operacion),
+      // Desglose por metodo + gastos (para el ticket del cuadre del mes).
+      ventas_efectivo: Number(row?.ventas_efectivo) || 0,
+      ventas_transferencia: Number(row?.ventas_transferencia) || 0,
+      ventas_tarjeta: Number(row?.ventas_tarjeta) || 0,
+      ventas_credito: Number(row?.ventas_credito) || 0,
+      gastos_total: Number(row?.gastos_total) || 0,
     }));
     callback(null, cierres);
   });
@@ -18677,6 +18714,15 @@ const eliminarFacturaCuenta = async ({ pedidoId, negocioId }) => {
         `UPDATE pedidos SET estado = 'cancelado' WHERE id = ? AND negocio_id = ?`,
         [p.id, negocioId]
       );
+    }
+
+    // Bug B: eliminar la(s) cuenta(s) por cobrar (clientes_deudas) generadas por
+    // estos pedidos. Antes NO se hacia aqui (este es el camino de "Eliminar
+    // factura" de mostrador/caja): la factura se anulaba pero la deuda quedaba
+    // viva. Solo se borran deudas SIN abonos (si el cliente ya pago algo, se
+    // conserva para no perder ese historial). Ver eliminarDeudaPorPedidoCancelado.
+    for (const p of pedidosCuenta) {
+      await eliminarDeudaPorPedidoCancelado(p.id, negocioId);
     }
 
     await db.run('COMMIT');

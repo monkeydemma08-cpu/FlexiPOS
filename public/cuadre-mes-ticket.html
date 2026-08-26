@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cuadre del mes — 88mm</title>
     <script src="/js/auth.js?v=20260805c" defer></script>
-    <script src="/js/cuadre-mes-ticket.js?v=20260801a" defer></script>
+    <script src="/js/cuadre-mes-ticket.js?v=20260815a" defer></script>
     <style>
       /* Ticket optimizado para impresora térmica de 88mm. */
       :root { --ticket-ancho: 80mm; }
@@ -43,6 +43,9 @@
       .totales { margin-top: 4px; }
       .totales .linea { font-weight: 700; }
       .totales .grande { font-size: 12px; }
+      .seccion { font-weight: 700; font-size: 11px; margin: 5px 0 2px; text-transform: uppercase; }
+      .linea.subtotal { font-weight: 700; border-top: 1px dotted #000; margin-top: 2px; padding-top: 2px; }
+      .linea.grande { font-size: 13px; font-weight: 700; margin-top: 2px; }
       .vacio { text-align: center; padding: 20px 8px; }
       .dif-ok { }
       .dif-mal { font-weight: 700; }
