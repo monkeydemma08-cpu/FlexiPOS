@@ -37715,6 +37715,49 @@ app.put('/api/cotizaciones/:id/estado', (req, res) => {
   });
 });
 
+// Eliminar una cotizacion que ya no se necesita (borrador, enviada, aceptada,
+// rechazada o expirada). Borra la cotizacion y sus items. BLOQUEA las ya
+// FACTURADAS: esas se convirtieron en una venta real (pedido_id) y su factura
+// debe conservarse — para revertir esa venta se elimina la factura, no la
+// cotizacion.
+app.delete('/api/cotizaciones/:id', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    const id = Number(req.params.id);
+    const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'Cotización no válida.' });
+    }
+    try {
+      const cot = await db.get(
+        'SELECT id, estado, pedido_id FROM cotizaciones WHERE id = ? AND negocio_id = ? LIMIT 1',
+        [id, negocioId]
+      );
+      if (!cot) {
+        return res.status(404).json({ ok: false, error: 'Cotización no encontrada.' });
+      }
+      if (cot.pedido_id || String(cot.estado || '').toLowerCase() === 'facturada') {
+        return res.status(400).json({
+          ok: false,
+          error: 'No se puede eliminar una cotización ya facturada. Su factura queda como venta; elimina la factura si necesitas revertirla.',
+        });
+      }
+      await db.run('BEGIN');
+      try {
+        await db.run('DELETE FROM cotizacion_items WHERE cotizacion_id = ? AND negocio_id = ?', [id, negocioId]);
+        await db.run('DELETE FROM cotizaciones WHERE id = ? AND negocio_id = ?', [id, negocioId]);
+        await db.run('COMMIT');
+      } catch (txErr) {
+        await db.run('ROLLBACK').catch(() => {});
+        throw txErr;
+      }
+      res.json({ ok: true, id });
+    } catch (error) {
+      console.error('Error al eliminar cotización:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo eliminar la cotización.' });
+    }
+  });
+});
+
 app.post('/api/cotizaciones/:id/facturar', (req, res) => {
   const { id } = req.params;
 

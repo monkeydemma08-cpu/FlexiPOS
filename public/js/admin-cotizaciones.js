@@ -502,10 +502,16 @@ const cargarProductos = async () => {
       card.dataset.abrirCotizacion = cot.id;
       card.tabIndex = 0;
       const estadoTexto = obtenerEstadoTexto(cot.estado);
+      // Las facturadas NO se pueden borrar (son una venta real).
+      const puedeEliminar = String(cot.estado || '').toLowerCase() !== 'facturada' && !cot.pedido_id;
+      const botonEliminar = puedeEliminar
+        ? `<button type="button" class="cotizacion-eliminar-btn" data-eliminar-cotizacion="${cot.id}" title="Eliminar cotización" style="margin-left:8px;border:none;background:transparent;color:#c0392b;cursor:pointer;font-size:16px;line-height:1;">🗑️</button>`
+        : '';
       card.innerHTML = `
         <div class="cotizacion-card-head">
           <div class="cotizacion-card-code">${cot.codigo || `#${cot.id}`}</div>
           <span class="cotizacion-estado-badge" data-estado="${cot.estado || 'borrador'}">${estadoTexto}</span>
+          ${botonEliminar}
         </div>
         <div class="cotizacion-card-info">
           <div>
@@ -548,6 +554,30 @@ const cargarProductos = async () => {
     } catch (error) {
       console.error('Error al cargar cotizaciones:', error);
       setMessage(mensajeListado, 'No fue posible cargar las cotizaciones.', 'error');
+    }
+  };
+
+  const eliminarCotizacion = async (id) => {
+    const cot = cotizaciones.find((c) => Number(c.id) === Number(id));
+    const etiqueta = cot?.codigo || `#${id}`;
+    if (!window.confirm(`¿Eliminar la cotización ${etiqueta}? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+    try {
+      const resp = await fetchAutorizado(`/api/cotizaciones/${id}`, { method: 'DELETE' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.ok === false) {
+        throw new Error(data?.error || 'No se pudo eliminar la cotización.');
+      }
+      // Si la cotización eliminada estaba abierta en el editor, limpiarlo.
+      if (cotizacionActual && Number(cotizacionActual.id) === Number(id) && typeof limpiarFormulario === 'function') {
+        limpiarFormulario();
+      }
+      setMessage(mensajeListado, `Cotización ${etiqueta} eliminada.`, 'info');
+      await cargarCotizaciones();
+    } catch (error) {
+      console.error('Error al eliminar cotización:', error);
+      setMessage(mensajeListado, error.message || 'No se pudo eliminar la cotización.', 'error');
     }
   };
 
@@ -775,6 +805,16 @@ const cargarCotizacionDetalle = async (id) => {
   inputDescGlobalMonto?.addEventListener('input', recalcularTotales);
 
   listaCotizaciones?.addEventListener('click', (event) => {
+    const btnEliminar = event.target.closest('[data-eliminar-cotizacion]');
+    if (btnEliminar) {
+      event.preventDefault();
+      event.stopPropagation();
+      const idEliminar = Number(btnEliminar.dataset.eliminarCotizacion);
+      if (Number.isInteger(idEliminar)) {
+        eliminarCotizacion(idEliminar);
+      }
+      return;
+    }
     const trigger = event.target.closest('[data-abrir-cotizacion]');
     if (!trigger) return;
     event.preventDefault();
