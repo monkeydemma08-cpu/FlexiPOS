@@ -49,6 +49,10 @@ let cotizaciones = [];
   let productos = [];
   let clientesSugeridos = [];
   let impuestoPorcentaje = 0;
+  // Modo "ITBIS incluido en el precio": los precios ya traen el impuesto y se
+  // DESGLOSA (base = total/(1+tasa)) en vez de agregarlo encima.
+  let productosConImpuesto = false;
+  let impuestoIncluidoValor = 0;
   const estadosTexto = {
     borrador: 'Borrador',
     enviada: 'Enviada',
@@ -161,6 +165,8 @@ const cargarImpuesto = async () => {
       const data = await resp.json().catch(() => null);
       if (data?.ok) {
         impuestoPorcentaje = Number(data.valor) || 0;
+        productosConImpuesto = Number(data.productos_con_impuesto) === 1;
+        impuestoIncluidoValor = Number(data.impuesto_incluido_valor) || 0;
       }
     } catch (error) {
       console.warn('No se pudo cargar el impuesto configurado', error);
@@ -353,20 +359,42 @@ const cargarProductos = async () => {
     const descPct = Math.max(Number(inputDescGlobalPct?.value) || 0, 0);
     const descMonto = Math.max(parseMoneyValue(inputDescGlobalMonto), 0);
     const descuentoGlobal = Math.min(subtotalBase * (descPct / 100) + descMonto, subtotalBase);
-    const subtotal = Math.max(subtotalBase - descuentoGlobal, 0);
-    const impuesto = subtotal * Math.max(impuestoPorcentaje, 0) * 0.01;
-    const total = subtotal + impuesto;
+    const subtotalNeto = Math.max(subtotalBase - descuentoGlobal, 0);
+    const modoIncluido = productosConImpuesto && impuestoIncluidoValor > 0;
+    let subtotal;
+    let impuesto;
+    let total;
+    if (modoIncluido) {
+      // Los precios ya incluyen ITBIS: el neto es el total y se desglosa.
+      const baseSinImp = subtotalNeto / (1 + impuestoIncluidoValor / 100);
+      subtotal = baseSinImp;
+      impuesto = subtotalNeto - baseSinImp;
+      total = subtotalNeto;
+    } else {
+      subtotal = subtotalNeto;
+      impuesto = subtotalNeto * Math.max(impuestoPorcentaje, 0) * 0.01;
+      total = subtotalNeto + impuesto;
+    }
 
     const itemsCalculados = itemsBase.map((item) => {
       const propor = subtotalBase > 0 ? item.base_linea / subtotalBase : 0;
       const descAsignado = descuentoGlobal * propor;
-      const subtotalLinea = Math.max(item.base_linea - descAsignado, 0);
-      const impuestoLinea = subtotalLinea * Math.max(impuestoPorcentaje, 0) * 0.01;
+      const netoLinea = Math.max(item.base_linea - descAsignado, 0);
+      if (modoIncluido) {
+        const baseLinea = netoLinea / (1 + impuestoIncluidoValor / 100);
+        return {
+          ...item,
+          subtotal_linea: baseLinea,
+          impuesto_linea: netoLinea - baseLinea,
+          total_linea: netoLinea,
+        };
+      }
+      const impuestoLinea = netoLinea * Math.max(impuestoPorcentaje, 0) * 0.01;
       return {
         ...item,
-        subtotal_linea: subtotalLinea,
+        subtotal_linea: netoLinea,
         impuesto_linea: impuestoLinea,
-        total_linea: subtotalLinea + impuestoLinea,
+        total_linea: netoLinea + impuestoLinea,
       };
     });
 

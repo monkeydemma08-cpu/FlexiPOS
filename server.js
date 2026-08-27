@@ -3837,6 +3837,19 @@ const obtenerImpuestoConfigurado = (negocioId, callback) => {
     .catch((err) => callback(err));
 };
 
+// Igual que obtenerImpuestoConfigurado pero devuelve la CONFIG completa (con
+// productosConImpuesto e impuestoIncluidoValor), necesaria para desglosar el
+// ITBIS incluido en las cotizaciones.
+const obtenerConfigImpuestoCb = (negocioId, callback) => {
+  if (typeof negocioId === 'function') {
+    callback = negocioId;
+    negocioId = 1;
+  }
+  obtenerConfiguracionImpuestoNegocio(negocioId || 1)
+    .then((config) => callback(null, config))
+    .catch((err) => callback(err));
+};
+
 const padNumber = (valor, digitos) => {
   const numero = Number(valor) || 0;
   return numero.toString().padStart(digitos, '0');
@@ -5916,11 +5929,26 @@ const marcarVencidaSiAplica = (cotizacion, done) => {
 
 const calcularTotalesCotizacion = (
   itemsEntrada,
-  impuestoPorcentaje,
+  impuestoConfig,
   descuentoPorcentajeGlobal = 0,
   descuentoMontoGlobal = 0
 ) => {
-  const impuestoTasa = Math.max(normalizarNumero(impuestoPorcentaje, 0), 0) / 100;
+  // impuestoConfig puede ser un numero (tasa AGREGADA, legacy) o el objeto de
+  // configuracion completo de obtenerConfiguracionImpuestoNegocio. Si el negocio
+  // usa "productos con impuesto incluido", los precios ya traen el ITBIS y hay
+  // que DESGLOSARLO (base = total/(1+tasa)); si no, el impuesto se AGREGA encima.
+  const cfg = impuestoConfig && typeof impuestoConfig === 'object' ? impuestoConfig : null;
+  const productosConImpuesto = cfg
+    ? normalizarFlag(cfg.productosConImpuesto ?? cfg.productos_con_impuesto, 0) === 1
+    : false;
+  const tasaIncluida = cfg
+    ? Math.max(normalizarNumero(cfg.impuestoIncluidoValor ?? cfg.impuesto_incluido_valor, 0), 0)
+    : 0;
+  const tasaAgregada = cfg
+    ? Math.max(normalizarNumero(cfg.valor, 0), 0)
+    : Math.max(normalizarNumero(impuestoConfig, 0), 0);
+  const modoIncluido = productosConImpuesto && tasaIncluida > 0;
+  const impuestoTasa = modoIncluido ? 0 : tasaAgregada / 100;
   const porcentajeGlobal = Math.max(normalizarNumero(descuentoPorcentajeGlobal, 0), 0);
   const montoGlobal = Math.max(normalizarNumero(descuentoMontoGlobal, 0), 0);
 
@@ -5966,8 +5994,20 @@ const calcularTotalesCotizacion = (
     subtotalBase
   );
   const subtotalNeto = Math.max(subtotalBase - descuentoGlobalCalculado, 0);
-  const impuesto = Number((subtotalNeto * impuestoTasa).toFixed(2));
-  const total = Number((subtotalNeto + impuesto).toFixed(2));
+  let impuesto;
+  let total;
+  let subtotalMostrar;
+  if (modoIncluido) {
+    // Los precios YA incluyen el ITBIS: el neto es el total y se desglosa.
+    const baseSinImpuesto = subtotalNeto / (1 + tasaIncluida / 100);
+    subtotalMostrar = Number(baseSinImpuesto.toFixed(2));
+    impuesto = Number((subtotalNeto - baseSinImpuesto).toFixed(2));
+    total = Number(subtotalNeto.toFixed(2));
+  } else {
+    subtotalMostrar = Number(subtotalNeto.toFixed(2));
+    impuesto = Number((subtotalNeto * impuestoTasa).toFixed(2));
+    total = Number((subtotalNeto + impuesto).toFixed(2));
+  }
 
   if (total < 0) {
     return { error: 'El total de la cotizaci\u00f3n no puede ser negativo' };
@@ -5976,19 +6016,28 @@ const calcularTotalesCotizacion = (
   const itemsCalculados = itemsLimpios.map((item) => {
     const proporcion = subtotalBase > 0 ? item.base_linea / subtotalBase : 0;
     const descuentoAsignado = descuentoGlobalCalculado * proporcion;
-    const subtotalLinea = Math.max(item.base_linea - descuentoAsignado, 0);
-    const impuestoLinea = Number((subtotalLinea * impuestoTasa).toFixed(2));
+    const netoLinea = Math.max(item.base_linea - descuentoAsignado, 0);
+    if (modoIncluido) {
+      const baseLinea = netoLinea / (1 + tasaIncluida / 100);
+      return {
+        ...item,
+        subtotal_linea: Number(baseLinea.toFixed(2)),
+        impuesto_linea: Number((netoLinea - baseLinea).toFixed(2)),
+        total_linea: Number(netoLinea.toFixed(2)),
+      };
+    }
+    const impuestoLinea = Number((netoLinea * impuestoTasa).toFixed(2));
     return {
       ...item,
-      subtotal_linea: Number(subtotalLinea.toFixed(2)),
+      subtotal_linea: Number(netoLinea.toFixed(2)),
       impuesto_linea: impuestoLinea,
-      total_linea: Number((subtotalLinea + impuestoLinea).toFixed(2)),
+      total_linea: Number((netoLinea + impuestoLinea).toFixed(2)),
     };
   });
 
   return {
     subtotal_base: Number(subtotalBase.toFixed(2)),
-    subtotal: Number(subtotalNeto.toFixed(2)),
+    subtotal: subtotalMostrar,
     descuento_global: Number(descuentoGlobalCalculado.toFixed(2)),
     descuento_porcentaje: porcentajeGlobal,
     impuesto,
@@ -37313,7 +37362,7 @@ app.post('/api/cotizaciones', (req, res) => {
     const creadaPor = usuarioSesion?.id || null;
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
 
-    obtenerImpuestoConfigurado(negocioId, (configErr, impuestoAplicado) => {
+    obtenerConfigImpuestoCb(negocioId, (configErr, configImp) => {
       if (configErr) {
         console.error('Error al obtener impuesto configurado:', configErr.message);
         return res.status(500).json({ error: 'Error al crear la cotizaci\u00f3n' });
@@ -37321,7 +37370,7 @@ app.post('/api/cotizaciones', (req, res) => {
 
       const totales = calcularTotalesCotizacion(
         itemsEntrada,
-        impuestoAplicado,
+        configImp,
         payload.descuento_porcentaje,
         payload.descuento_monto
       );
@@ -37504,7 +37553,7 @@ app.put('/api/cotizaciones/:id', (req, res) => {
     const itemsEntrada = Array.isArray(payload.items) ? payload.items : [];
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
 
-    obtenerImpuestoConfigurado(negocioId, (configErr, impuestoAplicado) => {
+    obtenerConfigImpuestoCb(negocioId, (configErr, configImp) => {
       if (configErr) {
         console.error('Error al obtener impuesto configurado:', configErr.message);
         return res.status(500).json({ error: 'Error al actualizar la cotizaci\u00f3n' });
@@ -37512,7 +37561,7 @@ app.put('/api/cotizaciones/:id', (req, res) => {
 
       const totales = calcularTotalesCotizacion(
         itemsEntrada,
-        impuestoAplicado,
+        configImp,
         payload.descuento_porcentaje,
         payload.descuento_monto
       );
@@ -37813,10 +37862,10 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
         }
       }
 
-      const impuestoAplicado = Number(await obtenerImpuestoConfiguradoAsync(negocioIdFactura)) || 0;
+      const configImpFactura = await obtenerConfiguracionImpuestoNegocio(negocioIdFactura);
       const totales = calcularTotalesCotizacion(
         items,
-        impuestoAplicado,
+        configImpFactura,
         cotizacion.descuento_porcentaje,
         cotizacion.descuento_monto
       );
