@@ -59,7 +59,9 @@ let cotizaciones = [];
     aceptada: 'Aceptada',
     rechazada: 'Rechazada',
     vencida: 'Vencida',
+    en_caja: 'En caja',
     facturada: 'Facturada',
+    cancelada: 'Cancelada',
   };
 
   const getAuthHeaders = () => {
@@ -502,8 +504,11 @@ const cargarProductos = async () => {
       card.dataset.abrirCotizacion = cot.id;
       card.tabIndex = 0;
       const estadoTexto = obtenerEstadoTexto(cot.estado);
-      // Las facturadas NO se pueden borrar (son una venta real).
-      const puedeEliminar = String(cot.estado || '').toLowerCase() !== 'facturada' && !cot.pedido_id;
+      // En caja (cuenta abierta) y facturada (venta real) NO se pueden borrar;
+      // canceladas y las que nunca fueron a caja SÍ. El estado ya viene derivado
+      // del backend.
+      const estadoLc = String(cot.estado || '').toLowerCase();
+      const puedeEliminar = estadoLc !== 'en_caja' && estadoLc !== 'facturada';
       const botonEliminar = puedeEliminar
         ? `<button type="button" class="cotizacion-eliminar-btn" data-eliminar-cotizacion="${cot.id}" title="Eliminar cotización" style="margin-left:8px;border:none;background:transparent;color:#c0392b;cursor:pointer;font-size:16px;line-height:1;">🗑️</button>`
         : '';

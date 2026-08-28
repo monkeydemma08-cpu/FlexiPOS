@@ -5856,7 +5856,20 @@ const resolverComprobanteVentaCliente = async ({
 
 const esStockIndefinido = (producto) => Number(producto?.stock_indefinido) === 1;
 
-const ESTADOS_COTIZACION = ['borrador', 'enviada', 'aceptada', 'rechazada', 'facturada', 'vencida'];
+const ESTADOS_COTIZACION = ['borrador', 'enviada', 'aceptada', 'rechazada', 'facturada', 'vencida', 'en_caja', 'cancelada'];
+
+// El estado REAL de una cotizacion que ya se mando a caja se deriva del pedido
+// que genero: mientras el pedido este abierto en caja -> 'en_caja'; si se cobro
+// -> 'facturada'; si se anulo/borro en caja -> 'cancelada'. Asi el estado nunca
+// queda "facturada" por error cuando en realidad la cuenta sigue abierta o se
+// borro. Si no tiene pedido asociado, se usa el estado almacenado.
+const derivarEstadoCotizacionConPedido = (pedidoId, pedidoEstado) => {
+  if (!pedidoId) return null;
+  const pe = String(pedidoEstado || '').toLowerCase();
+  if (pe === 'pagado') return 'facturada';
+  if (pe === 'cancelado') return 'cancelada';
+  return 'en_caja';
+};
 
 const normalizarEstadoCotizacion = (valor, original = 'borrador') => {
   if (typeof valor !== 'string') {
@@ -37169,40 +37182,53 @@ app.get('/api/cotizaciones', (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query?.limit, 10) || 50, 1), 200);
     const offset = (page - 1) * limit;
 
-    const filtros = ['negocio_id = ?'];
+    const filtros = ['c.negocio_id = ?'];
     const params = [usuarioSesion.negocio_id || NEGOCIO_ID_DEFAULT];
 
     if (fecha_desde) {
-      filtros.push('date(fecha_creacion) >= date(?)');
+      filtros.push('date(c.fecha_creacion) >= date(?)');
       params.push(fecha_desde);
     }
 
     if (fecha_hasta) {
-      filtros.push('date(fecha_creacion) <= date(?)');
+      filtros.push('date(c.fecha_creacion) <= date(?)');
       params.push(fecha_hasta);
     }
 
     if (estado && estado !== 'todos') {
-      const estadoNormalizado = normalizarEstadoCotizacion(estado);
-      filtros.push('estado = ?');
-      params.push(estadoNormalizado);
+      // Los estados 'en_caja'/'facturada'/'cancelada' se DERIVAN del pedido, no
+      // del campo almacenado; se filtran por el estado del pedido asociado.
+      const est = String(estado).trim().toLowerCase();
+      if (est === 'facturada') {
+        filtros.push("(c.pedido_id IS NOT NULL AND p.estado = 'pagado')");
+      } else if (est === 'cancelada') {
+        filtros.push("(c.pedido_id IS NOT NULL AND p.estado = 'cancelado')");
+      } else if (est === 'en_caja') {
+        filtros.push("(c.pedido_id IS NOT NULL AND p.estado NOT IN ('pagado','cancelado'))");
+      } else {
+        filtros.push('c.estado = ? AND c.pedido_id IS NULL');
+        params.push(normalizarEstadoCotizacion(est));
+      }
     }
 
     if (q) {
       const termino = `%${q.toLowerCase()}%`;
       filtros.push(
-        '(LOWER(cliente_nombre) LIKE ? OR LOWER(codigo) LIKE ? OR LOWER(cliente_contacto) LIKE ? OR LOWER(cliente_documento) LIKE ?)'
+        '(LOWER(c.cliente_nombre) LIKE ? OR LOWER(c.codigo) LIKE ? OR LOWER(c.cliente_contacto) LIKE ? OR LOWER(c.cliente_documento) LIKE ?)'
       );
       params.push(termino, termino, termino, termino);
     }
 
     const whereClause = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
+    const joinPedido = 'LEFT JOIN pedidos p ON p.id = c.pedido_id AND p.negocio_id = c.negocio_id';
     const listadoSql = `
-    SELECT id, codigo, cliente_nombre, cliente_documento, cliente_contacto, fecha_creacion, fecha_validez,
-           estado, subtotal, impuesto, descuento_monto, descuento_porcentaje, total, pedido_id
-    FROM cotizaciones
+    SELECT c.id, c.codigo, c.cliente_nombre, c.cliente_documento, c.cliente_contacto, c.fecha_creacion, c.fecha_validez,
+           c.estado, c.subtotal, c.impuesto, c.descuento_monto, c.descuento_porcentaje, c.total, c.pedido_id,
+           p.estado AS pedido_estado
+    FROM cotizaciones c
+    ${joinPedido}
     ${whereClause}
-    ORDER BY fecha_creacion DESC
+    ORDER BY c.fecha_creacion DESC
     LIMIT ${limit} OFFSET ${offset}
   `;
 
@@ -37215,10 +37241,13 @@ app.get('/api/cotizaciones', (req, res) => {
       const procesadas = (rows || []).map((row) => {
         const copia = { ...row };
         marcarVencidaSiAplica(copia);
+        const derivado = derivarEstadoCotizacionConPedido(row.pedido_id, row.pedido_estado);
+        if (derivado) copia.estado = derivado;
+        delete copia.pedido_estado;
         return copia;
       });
 
-      const conteoSql = `SELECT COUNT(1) AS total FROM cotizaciones ${whereClause}`;
+      const conteoSql = `SELECT COUNT(1) AS total FROM cotizaciones c ${joinPedido} ${whereClause}`;
       db.get(conteoSql, params, (countErr, countRow) => {
         if (countErr) {
           console.error('Error al obtener cotizaciones:', countErr.message);
@@ -37243,11 +37272,12 @@ app.get('/api/cotizaciones/:id', (req, res) => {
     const negocioId = usuarioSesion?.negocio_id || NEGOCIO_ID_DEFAULT;
 
     db.get(
-      `SELECT id, codigo, cliente_nombre, cliente_documento, cliente_contacto, fecha_creacion, fecha_validez,
-            estado, subtotal, impuesto, descuento_monto, descuento_porcentaje, total, notas_internas,
-            notas_cliente, creada_por, pedido_id
-     FROM cotizaciones
-     WHERE id = ? AND negocio_id = ?`,
+      `SELECT c.id, c.codigo, c.cliente_nombre, c.cliente_documento, c.cliente_contacto, c.fecha_creacion, c.fecha_validez,
+            c.estado, c.subtotal, c.impuesto, c.descuento_monto, c.descuento_porcentaje, c.total, c.notas_internas,
+            c.notas_cliente, c.creada_por, c.pedido_id, p.estado AS pedido_estado
+     FROM cotizaciones c
+     LEFT JOIN pedidos p ON p.id = c.pedido_id AND p.negocio_id = c.negocio_id
+     WHERE c.id = ? AND c.negocio_id = ?`,
       [id, negocioId],
       (err, cotizacion) => {
         if (err) {
@@ -37260,6 +37290,9 @@ app.get('/api/cotizaciones/:id', (req, res) => {
         }
 
         marcarVencidaSiAplica(cotizacion, () => {});
+        const derivadoDet = derivarEstadoCotizacionConPedido(cotizacion.pedido_id, cotizacion.pedido_estado);
+        if (derivadoDet) cotizacion.estado = derivadoDet;
+        delete cotizacion.pedido_estado;
 
         const itemsSql = `
         SELECT ci.id, ci.producto_id, ci.descripcion, ci.cantidad, ci.precio_unitario,
@@ -37729,13 +37762,25 @@ app.delete('/api/cotizaciones/:id', (req, res) => {
     }
     try {
       const cot = await db.get(
-        'SELECT id, estado, pedido_id FROM cotizaciones WHERE id = ? AND negocio_id = ? LIMIT 1',
+        `SELECT c.id, c.estado, c.pedido_id, p.estado AS pedido_estado
+           FROM cotizaciones c
+           LEFT JOIN pedidos p ON p.id = c.pedido_id AND p.negocio_id = c.negocio_id
+          WHERE c.id = ? AND c.negocio_id = ? LIMIT 1`,
         [id, negocioId]
       );
       if (!cot) {
         return res.status(404).json({ ok: false, error: 'Cotización no encontrada.' });
       }
-      if (cot.pedido_id || String(cot.estado || '').toLowerCase() === 'facturada') {
+      // Estado real derivado del pedido: en_caja/facturada NO se pueden borrar;
+      // cancelada (se borró en caja) SÍ, y las que nunca se mandaron a caja también.
+      const estadoReal = derivarEstadoCotizacionConPedido(cot.pedido_id, cot.pedido_estado);
+      if (estadoReal === 'en_caja') {
+        return res.status(400).json({
+          ok: false,
+          error: 'Esta cotización está abierta en caja. Cóbrala o cancélala/bórrala desde caja antes de eliminarla.',
+        });
+      }
+      if (estadoReal === 'facturada') {
         return res.status(400).json({
           ok: false,
           error: 'No se puede eliminar una cotización ya facturada. Su factura queda como venta; elimina la factura si necesitas revertirla.',
@@ -38059,7 +38104,7 @@ app.post('/api/cotizaciones/:id/facturar', (req, res) => {
         }
       }
 
-      await db.run("UPDATE cotizaciones SET estado = 'facturada', pedido_id = ? WHERE id = ? AND negocio_id = ?", [
+      await db.run("UPDATE cotizaciones SET estado = 'en_caja', pedido_id = ? WHERE id = ? AND negocio_id = ?", [
         pedidoId,
         id,
         negocioIdFactura,
