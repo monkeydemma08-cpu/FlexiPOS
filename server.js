@@ -18766,10 +18766,41 @@ const eliminarFacturaCuenta = async ({ pedidoId, negocioId }) => {
       }
     }
 
+    // Antes de borrar los pagos: capturar el efectivo por cierre. Si la factura
+    // pertenece a un cuadre YA CERRADO, su efectivo debe salir del "efectivo
+    // esperado" (total_sistema) para que el cuadre reimpreso quede correcto sin
+    // esa factura. El "total ventas" del cuadre se calcula en vivo (por pedidos),
+    // asi que ese ya se actualiza solo al cancelar el pedido.
+    let efectivoPorCierre = [];
+    try {
+      efectivoPorCierre = await db.all(
+        `SELECT cierre_id, COALESCE(SUM(pago_efectivo), 0) AS efectivo
+           FROM pagos_cuenta
+          WHERE cuenta_id = ? AND negocio_id = ? AND cierre_id IS NOT NULL
+          GROUP BY cierre_id`,
+        [cuentaId, negocioId]
+      );
+    } catch (_) {
+      efectivoPorCierre = [];
+    }
+
     // Quitar los pagos de la cuenta (salen del cuadre y de los totales de caja).
     try {
       await db.run('DELETE FROM pagos_cuenta WHERE cuenta_id = ? AND negocio_id = ?', [cuentaId, negocioId]);
     } catch (_) {}
+
+    // Ajustar el efectivo esperado (y la diferencia) de los cierres afectados.
+    for (const fila of efectivoPorCierre || []) {
+      const efectivo = Number(fila.efectivo) || 0;
+      if (!fila.cierre_id || efectivo <= 0) continue;
+      await db.run(
+        `UPDATE cierres_caja
+            SET diferencia = COALESCE(total_declarado, 0) - GREATEST(COALESCE(total_sistema, 0) - ?, 0),
+                total_sistema = GREATEST(COALESCE(total_sistema, 0) - ?, 0)
+          WHERE id = ? AND negocio_id = ?`,
+        [efectivo, efectivo, fila.cierre_id, negocioId]
+      );
+    }
 
     // Cancelar todos los pedidos de la cuenta.
     for (const p of pedidosCuenta) {

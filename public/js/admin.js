@@ -9835,6 +9835,17 @@ const renderDetalleCierre = (pedidos, cierreId) => {
       botonEditar.dataset.editarFacturaCliente = pedido.cliente || '';
       botonEditar.dataset.editarFacturaDocumento = pedido.cliente_documento || '';
       celdaFactura.appendChild(botonEditar);
+
+      // Eliminar factura (tambien en cuadres ya cerrados): devuelve stock, borra
+      // pagos/deuda y ajusta el efectivo esperado del cuadre. Requiere password admin.
+      const botonEliminar = document.createElement('button');
+      botonEliminar.type = 'button';
+      botonEliminar.className = 'kanm-button ghost';
+      botonEliminar.textContent = 'Eliminar';
+      botonEliminar.style.marginLeft = '6px';
+      botonEliminar.style.color = '#c0392b';
+      botonEliminar.dataset.eliminarFacturaPedido = String(facturaPedidoId);
+      celdaFactura.appendChild(botonEliminar);
     }
 
     fila.appendChild(celdaFactura);
@@ -9850,6 +9861,44 @@ const limpiarDetalleCierre = () => {
   detalleCierreActivo = null;
   if (cierresDetalleTabla) cierresDetalleTabla.innerHTML = '';
   if (cierresDetalleWrapper) cierresDetalleWrapper.hidden = true;
+};
+
+// Eliminar/anular una factura desde el detalle de un cuadre (incluye cuadres ya
+// CERRADOS). Devuelve stock, borra deuda y ajusta el efectivo esperado del
+// cuadre; luego recarga el detalle y la lista para ver los totales actualizados.
+const eliminarFacturaCierreAdmin = async (pedidoId) => {
+  const id = Number(pedidoId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  const confirmar = window.confirm(
+    `¿Eliminar/anular la factura #${id}? Devuelve el stock, borra su deuda y actualiza el cuadre. Esta acción no se puede deshacer.`
+  );
+  if (!confirmar) return;
+  const password = window.prompt('Contraseña de administrador para eliminar la factura:');
+  if (!password) return;
+  try {
+    const resp = await fetchConAutorizacion(`/api/caja/facturas/${id}/eliminar-con-admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ admin_password: password }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo eliminar la factura.');
+    }
+    window.alert(`Factura #${id} eliminada. El cuadre quedó actualizado.`);
+    const cierreActivo = detalleCierreActivo;
+    try {
+      await consultarCierresCaja(false);
+    } catch (_) {}
+    if (cierreActivo) {
+      try {
+        await cargarDetalleCierre(cierreActivo);
+      } catch (_) {}
+    }
+  } catch (error) {
+    console.error('Error al eliminar factura del cierre:', error);
+    window.alert(error?.message || 'No se pudo eliminar la factura.');
+  }
 };
 
 const cargarDetalleCierre = async (cierreId) => {
@@ -13761,6 +13810,16 @@ cierresDetalleTabla?.addEventListener('change', (event) => {
 });
 
 cierresDetalleTabla?.addEventListener('click', (event) => {
+  const botonEliminarPed = event.target.closest('[data-eliminar-factura-pedido]');
+  if (botonEliminarPed) {
+    event.preventDefault();
+    const pedidoId = Number(botonEliminarPed.dataset.eliminarFacturaPedido);
+    if (Number.isFinite(pedidoId) && pedidoId > 0) {
+      eliminarFacturaCierreAdmin(pedidoId);
+    }
+    return;
+  }
+
   const botonEditar = event.target.closest('[data-editar-factura-pedido]');
   if (botonEditar) {
     event.preventDefault();
