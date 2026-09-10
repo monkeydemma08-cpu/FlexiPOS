@@ -56,12 +56,21 @@ const abrirOImprimirFactura = (url, options = {}) => {
       };
 
       iframe.addEventListener('load', () => {
-        setTimeout(() => {
+        const inicioEspera = Date.now();
+        const ejecutarImpresion = () => {
           try {
             const printWindow = iframe.contentWindow;
             const doc = iframe.contentDocument || printWindow?.document;
             if (!printWindow || !doc?.body) {
               throw new Error('No se pudo acceder al documento de impresion.');
+            }
+
+            // Esperar a que factura.js termine de cargar los datos
+            // (window.__facturaLista === true) para NO imprimir la factura en
+            // blanco. Si la senal no llega en 8s, imprimimos igual como fallback.
+            if (printWindow.__facturaLista !== true && Date.now() - inicioEspera < 8000) {
+              setTimeout(ejecutarImpresion, 150);
+              return;
             }
 
             const onAfterPrint = () => {
@@ -82,7 +91,9 @@ const abrirOImprimirFactura = (url, options = {}) => {
             console.error('Error al imprimir factura, fallback a ventana:', err);
             fallback();
           }
-        }, 450);
+        };
+        // Pequeno respiro para que arranque el fetch y luego esperamos la senal.
+        setTimeout(ejecutarImpresion, 250);
       }, { once: true });
 
       iframe.addEventListener('error', fallback, { once: true });

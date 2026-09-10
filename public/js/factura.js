@@ -542,11 +542,30 @@
     }
   };
 
-  const cargarFactura = async () => {
+  // Señal de "factura lista" para que la impresión directa (mostrador) NO imprima
+  // antes de que carguen los datos (evita la copia en blanco). Empieza en false.
+  window.__facturaLista = false;
+  const marcarFacturaLista = () => {
+    window.__facturaLista = true;
+    try { window.dispatchEvent(new Event('factura-lista')); } catch (_) {}
+  };
+
+  const cargarFactura = async (intento = 0) => {
     if (!pedidoId) {
       alert('No se encontró el identificador de la factura.');
       return;
     }
+
+    const reintentarOFallar = (error) => {
+      // La venta puede tardar un instante en quedar disponible tras crearse:
+      // reintentamos unas veces antes de rendirnos (así no imprime en blanco).
+      if (intento < 4) {
+        setTimeout(() => cargarFactura(intento + 1), 450);
+        return;
+      }
+      console.error('Error al cargar la factura:', error);
+      alert('Ocurrió un error al cargar la factura. Intenta nuevamente.');
+    };
 
     try {
       const [facturaResp, configResp] = await Promise.all([
@@ -566,7 +585,7 @@
       ]);
 
       if (!facturaResp.ok) {
-        throw new Error('No se pudo obtener la factura.');
+        return reintentarOFallar(new Error(`Factura no disponible (HTTP ${facturaResp.status}).`));
       }
       const facturaData = await facturaResp.json();
       renderFactura(facturaData);
@@ -581,9 +600,11 @@
       } else {
         aplicarIdentidadFactura();
       }
+
+      // Datos ya renderizados: recién ahora es seguro imprimir.
+      marcarFacturaLista();
     } catch (error) {
-      console.error('Error al cargar la factura:', error);
-      alert('Ocurrió un error al cargar la factura. Intenta nuevamente.');
+      reintentarOFallar(error);
     }
   };
 
