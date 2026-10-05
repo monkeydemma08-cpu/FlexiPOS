@@ -14055,6 +14055,360 @@ dgiiCasosTabla?.addEventListener('click', (event) => {
   }
 });
 
+// ===========================================================================
+// Operar como usuario: el admin del negocio asume temporalmente la sesion de
+// uno de sus usuarios (caja, mostrador, mesera, etc.) sin cerrar su sesion.
+// Reutiliza el token de impersonacion del backend; la sesion original se guarda
+// para volver desde el banner superior ("Volver a mi usuario", en auth.js).
+// ===========================================================================
+const operarComoTablaBody = document.getElementById('operar-como-tabla');
+const operarComoMensaje = document.getElementById('operar-como-mensaje');
+const operarComoBuscarInput = document.getElementById('operar-como-buscar');
+const operarComoRefrescarBtn = document.getElementById('operar-como-refrescar');
+const operarComoTabBtn = document.querySelector('[data-admin-tab="operarComo"]');
+const operarComoSection = document.getElementById('admin-section-operar-como');
+
+let operarComoUsuariosCache = [];
+
+// Solo el admin REAL del negocio (no supervisor, no empresa, no super-admin, y
+// no cuando ya se esta operando como otro usuario) puede usar esta seccion.
+const puedeOperarComo = () =>
+  usuarioActual?.rol === 'admin' &&
+  !usuarioActual?.impersonated &&
+  !(usuarioActual?.esSuperAdmin || usuarioActual?.es_super_admin);
+
+const aplicarVisibilidadOperarComo = () => {
+  const permitido = puedeOperarComo();
+  if (operarComoTabBtn) {
+    operarComoTabBtn.classList.toggle('hidden', !permitido);
+    if (!permitido) {
+      operarComoTabBtn.setAttribute('tabindex', '-1');
+    } else {
+      operarComoTabBtn.removeAttribute('tabindex');
+    }
+  }
+  if (operarComoSection && !permitido) {
+    operarComoSection.classList.add('hidden');
+  }
+};
+
+const OPERAR_COMO_ROL_ETIQUETAS = {
+  admin: 'Administrador',
+  supervisor: 'Supervisor',
+  caja: 'Caja',
+  vendedor: 'Mostrador',
+  mesera: 'Mesera',
+  cocina: 'Cocina',
+  bar: 'Bar',
+  delivery: 'Delivery',
+  empresa: 'Empresa',
+};
+
+const OPERAR_COMO_ROL_RUTAS = {
+  mesera: '/mesera.html',
+  cocina: '/cocina.html',
+  bar: '/bar.html',
+  caja: '/caja.html',
+  vendedor: '/mostrador.html',
+  delivery: '/delivery.html',
+  admin: '/admin.html',
+  supervisor: '/supervisor.html',
+};
+
+const renderOperarComo = () => {
+  if (!operarComoTablaBody) return;
+  const filtro = (operarComoBuscarInput?.value || '').trim().toLowerCase();
+  const lista = operarComoUsuariosCache.filter((u) => {
+    if (!filtro) return true;
+    return (
+      String(u.nombre || '').toLowerCase().includes(filtro) ||
+      String(u.usuario || '').toLowerCase().includes(filtro)
+    );
+  });
+
+  if (!lista.length) {
+    operarComoTablaBody.innerHTML =
+      '<tr><td colspan="5" style="text-align:center;opacity:.7;padding:18px;">No hay usuarios para mostrar.</td></tr>';
+    return;
+  }
+
+  const miId = Number(usuarioActual?.id ?? usuarioActual?.usuarioId);
+  operarComoTablaBody.innerHTML = lista
+    .map((u) => {
+      const id = Number(u.id);
+      const nombre = escapeHtmlSimple(u.nombre || u.usuario || '-');
+      const usuario = escapeHtmlSimple(u.usuario || '');
+      const rolEtq = escapeHtmlSimple(OPERAR_COMO_ROL_ETIQUETAS[u.rol] || u.rol || '-');
+      const activo = Number(u.activo) !== 0;
+      const esYo = id === miId;
+      const cambioClave = Boolean(u.force_password_change);
+      const noOperable =
+        !activo || u.rol === 'empresa' || u.es_super_admin || esYo || cambioClave;
+
+      let estadoTxt;
+      if (!activo) estadoTxt = 'Inactivo';
+      else if (u.en_linea) estadoTxt = '<span style="color:#16a34a;font-weight:600;">● En línea</span>';
+      else estadoTxt = 'Activo';
+
+      let ultimaTxt = '-';
+      if (u.en_linea && u.conectado_en) ultimaTxt = `Desde ${escapeHtmlSimple(formatFechaCorta(u.conectado_en))}`;
+      else if (u.desconectado_en) ultimaTxt = escapeHtmlSimple(formatFechaCorta(u.desconectado_en));
+
+      let accion;
+      if (esYo) accion = '<span style="opacity:.6;">Tu usuario</span>';
+      else if (cambioClave) accion = '<span style="opacity:.6;">Cambio de clave pendiente</span>';
+      else if (noOperable) accion = '<span style="opacity:.6;">No disponible</span>';
+      else
+        accion = `<button type="button" class="kanm-button primary operar-como-btn" data-operar-id="${id}" data-operar-nombre="${nombre}">Operar como</button>`;
+
+      return `<tr>
+        <td><strong>${nombre}</strong>${usuario ? `<br><small style="opacity:.7;">${usuario}</small>` : ''}</td>
+        <td>${rolEtq}</td>
+        <td>${estadoTxt}</td>
+        <td>${ultimaTxt}</td>
+        <td>${accion}</td>
+      </tr>`;
+    })
+    .join('');
+};
+
+const cargarOperarComo = async () => {
+  if (!puedeOperarComo() || !operarComoTablaBody) return;
+  setMessage(operarComoMensaje, 'Cargando usuarios...', 'info');
+  try {
+    const resp = await fetchConAutorizacion('/api/usuarios');
+    if (!resp.ok) throw new Error('No se pudieron obtener los usuarios');
+    const data = await resp.json();
+    operarComoUsuariosCache = Array.isArray(data) ? data : data?.usuarios || [];
+    renderOperarComo();
+    setMessage(operarComoMensaje, '', 'info');
+  } catch (error) {
+    console.error('Error cargando usuarios para operar-como:', error);
+    setMessage(operarComoMensaje, 'No se pudieron cargar los usuarios.', 'error');
+  }
+};
+
+const iniciarSesionOperarComo = (data = {}) => {
+  const sessionApi = window.KANMSession;
+  const usuarioId = data.usuario_id ?? data.id ?? null;
+  // Guardar la sesion original del admin para poder volver sin re-login.
+  const original = sessionApi?.getUser?.() || usuarioActual;
+  try {
+    localStorage.setItem('kanmOperarComoOrigen', JSON.stringify(original));
+  } catch (error) {
+    console.warn('No se pudo guardar la sesion original:', error);
+  }
+  const sesion = {
+    usuario: data.usuario,
+    nombre: data.nombre,
+    rol: data.rol || 'caja',
+    id: usuarioId,
+    usuarioId,
+    negocioId: data.negocio_id ?? data.negocioId,
+    esSuperAdmin: false,
+    forcePasswordChange: false,
+    impersonated: true,
+    impersonated_by_role: 'admin',
+    impersonatedByRole: 'admin',
+    token: data.token,
+  };
+  if (sessionApi?.setUser) {
+    sessionApi.setUser(sesion);
+  } else {
+    try {
+      sessionStorage.setItem('kanmUser', JSON.stringify(sesion));
+      localStorage.setItem('sesionApp', JSON.stringify(sesion));
+    } catch (error) {
+      console.warn('No se pudo guardar la sesion operada:', error);
+    }
+  }
+  window.APP_SESION = sesion;
+  window.location.href = OPERAR_COMO_ROL_RUTAS[data.rol] || '/admin.html';
+};
+
+const operarComoUsuario = async (id, nombre) => {
+  if (!id) return;
+  const confirmar = window.confirm(
+    `¿Operar como "${nombre}"?\n\nEntrarás a su pantalla y podrás regresar a tu usuario desde el banner superior.`
+  );
+  if (!confirmar) return;
+  setMessage(operarComoMensaje, 'Iniciando sesión...', 'info');
+  try {
+    const resp = await fetchJsonAutorizado(`/api/negocio/usuarios/${id}/operar-como`, { method: 'POST' });
+    const data = await leerRespuestaApi(resp);
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || 'No se pudo operar como ese usuario');
+    }
+    iniciarSesionOperarComo(data);
+  } catch (error) {
+    console.error('Error al operar como usuario:', error);
+    setMessage(operarComoMensaje, error.message || 'No se pudo operar como ese usuario.', 'error');
+  }
+};
+
+operarComoTablaBody?.addEventListener('click', (event) => {
+  const btn = event.target.closest('.operar-como-btn');
+  if (!btn) return;
+  operarComoUsuario(Number(btn.dataset.operarId), btn.dataset.operarNombre || 'usuario');
+});
+operarComoBuscarInput?.addEventListener('input', () => renderOperarComo());
+operarComoRefrescarBtn?.addEventListener('click', () => cargarOperarComo());
+
+// ===========================================================================
+// Descarga de Inventario y Análisis en PDF (ventana imprimible -> Guardar PDF).
+// Sigue el patron del sistema: se abre una ventana con HTML propio y se dispara
+// window.print(); el usuario elige "Guardar como PDF".
+// ===========================================================================
+const inventarioPdfBtn = document.getElementById('admin-inventario-pdf');
+const analisisPdfBtn = document.getElementById('analisis-exportar-pdf');
+
+const obtenerTemaParaPdf = () => {
+  const tema = window.KANM_TEMA || {};
+  return {
+    titulo: tema.titulo || tema.nombre || 'POSIUM',
+    logoUrl: tema.logoUrl || tema.logo_url || '',
+  };
+};
+
+const abrirVentanaImpresion = (tituloDoc, cuerpoHtml) => {
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('Tu navegador bloqueó la ventana de impresión. Permite las ventanas emergentes e inténtalo de nuevo.');
+    return;
+  }
+  const rootStyle = document.documentElement.getAttribute('style') || '';
+  const doc = `<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>${escapeHtmlSimple(tituloDoc)}</title>
+<link rel="stylesheet" href="/css/styles.css?v=20261004a" />
+<link rel="stylesheet" href="/css/admin-shell.css?v=20261004a" />
+<style>
+  html{${rootStyle}}
+  body{background:#fff;color:#1f2937;padding:24px;font-family:'Poppins',system-ui,sans-serif;}
+  .pdf-header{display:flex;align-items:center;gap:16px;border-bottom:3px solid #1f2937;padding-bottom:12px;margin-bottom:20px;}
+  .pdf-header img{height:64px;width:auto;object-fit:contain;}
+  .pdf-header h1{margin:0;font-size:1.4rem;}
+  .pdf-header .pdf-sub{margin:4px 0 0;font-size:.9rem;opacity:.75;}
+  .pdf-tabla{width:100%;border-collapse:collapse;font-size:.82rem;}
+  .pdf-tabla th,.pdf-tabla td{border:1px solid #d1d5db;padding:6px 8px;text-align:left;vertical-align:top;}
+  .pdf-tabla th{background:#f3f4f6;}
+  .pdf-tabla td.num,.pdf-tabla th.num{text-align:right;white-space:nowrap;}
+  .pdf-tabla tfoot td{font-weight:700;background:#f9fafb;}
+  .admin-panel,.admin-panel.hidden{display:block!important;}
+  canvas,img{max-width:100%!important;}
+  @media print{ @page{margin:12mm;} body{padding:0;} }
+</style>
+</head><body>${cuerpoHtml}
+<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},600);});<\/script>
+</body></html>`;
+  win.document.open();
+  win.document.write(doc);
+  win.document.close();
+};
+
+const construirEncabezadoPdf = (subtitulo) => {
+  const { titulo, logoUrl } = obtenerTemaParaPdf();
+  const ahora = new Date();
+  const fecha = ahora.toLocaleDateString('es-DO', { day: '2-digit', month: 'long', year: 'numeric' });
+  const hora = ahora.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' });
+  const logo = logoUrl ? `<img src="${escapeHtmlSimple(logoUrl)}" alt="logo" />` : '';
+  return `<div class="pdf-header">${logo}<div>
+    <h1>${escapeHtmlSimple(titulo)}</h1>
+    <p class="pdf-sub">${escapeHtmlSimple(subtitulo)} &middot; ${fecha} ${hora}</p>
+  </div></div>`;
+};
+
+const descargarInventarioPdf = () => {
+  const lista = Array.isArray(productos) ? productos.slice() : [];
+  if (!lista.length) {
+    setMessage(inventarioMensaje, 'No hay productos para exportar.', 'error');
+    return;
+  }
+  lista.sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es'));
+  let totalCosto = 0;
+  let totalVenta = 0;
+  const filas = lista
+    .map((p) => {
+      // Mismo criterio que el KPI "Valor inventario" (actualizarResumenInventario):
+      // los productos indefinidos y los que calculan stock por receta no suman valor.
+      const sinValor = esProductoStockIndefinido(p) || usaStockReceta(p);
+      const stockNum = obtenerStockDisponibleAdmin(p);
+      const costoUnit = obtenerCostoProducto(p);
+      const precio = Number(p.precio) || 0;
+
+      let valor = 0;
+      if (!sinValor) {
+        const valorLotes = Number(p?.valor_inventario_lotes);
+        valor = Number.isFinite(valorLotes) && valorLotes > 0 ? valorLotes : stockNum * costoUnit;
+        totalCosto += valor;
+        if (Number.isFinite(stockNum)) totalVenta += stockNum * precio;
+      }
+
+      return `<tr>
+        <td>${escapeHtmlSimple(p.nombre || '')}</td>
+        <td>${escapeHtmlSimple(p.categoria_nombre || '-')}</td>
+        <td class="num">${escapeHtmlSimple(obtenerTextoStockAdmin(p))}</td>
+        <td class="num">${formatCurrency(costoUnit)}</td>
+        <td class="num">${formatCurrency(precio)}</td>
+        <td class="num">${sinValor ? '-' : formatCurrency(valor)}</td>
+      </tr>`;
+    })
+    .join('');
+
+  const cuerpo = `${construirEncabezadoPdf('Reporte de inventario')}
+    <table class="pdf-tabla">
+      <thead><tr>
+        <th>Producto</th><th>Categoría</th><th class="num">Existencia</th>
+        <th class="num">Costo unit.</th><th class="num">Precio</th><th class="num">Valor inventario</th>
+      </tr></thead>
+      <tbody>${filas}</tbody>
+      <tfoot>
+        <tr><td colspan="5">Total (${lista.length} productos) — Costo de inventario</td><td class="num">${formatCurrency(totalCosto)}</td></tr>
+        <tr><td colspan="5">Venta esperada (a precio de venta)</td><td class="num">${formatCurrency(totalVenta)}</td></tr>
+      </tfoot>
+    </table>`;
+  abrirVentanaImpresion('Inventario', cuerpo);
+};
+
+const descargarAnalisisPdf = () => {
+  const seccion = document.getElementById('admin-section-analisis');
+  if (!seccion) return;
+  const clone = seccion.cloneNode(true);
+  clone.classList.remove('hidden');
+  // Reemplazar los graficos (canvas) por imagenes PNG para que salgan en el PDF.
+  const origCanvases = seccion.querySelectorAll('canvas');
+  const cloneCanvases = clone.querySelectorAll('canvas');
+  cloneCanvases.forEach((c, i) => {
+    try {
+      const src = origCanvases[i]?.toDataURL('image/png') || '';
+      if (src) {
+        const img = document.createElement('img');
+        img.src = src;
+        img.style.maxWidth = '100%';
+        c.replaceWith(img);
+      } else {
+        c.remove();
+      }
+    } catch (e) {
+      c.remove();
+    }
+  });
+  // Quitar controles interactivos que no aportan al PDF.
+  clone
+    .querySelectorAll('button, input, select, .analisis-periodo-actions, .admin-report-actions, .kanm-message')
+    .forEach((el) => el.remove());
+
+  const desde = analisisDesdeInput?.value || '';
+  const hasta = analisisHastaInput?.value || '';
+  const sub = desde && hasta ? `Análisis del negocio · ${desde} a ${hasta}` : 'Análisis del negocio';
+  const cuerpo = `${construirEncabezadoPdf(sub)}${clone.outerHTML}`;
+  abrirVentanaImpresion('Análisis del negocio', cuerpo);
+};
+
+inventarioPdfBtn?.addEventListener('click', () => descargarInventarioPdf());
+analisisPdfBtn?.addEventListener('click', () => descargarAnalisisPdf());
+
 adminTabs.forEach((btn) =>
   btn.addEventListener('click', () => {
     if (btn.classList.contains('hidden')) {
@@ -14078,6 +14432,11 @@ adminTabs.forEach((btn) =>
     if (tab === 'menuPublico') {
       cargarMenuPublicoAccesos({ force: true }).catch((error) => {
         console.warn('No se pudieron cargar los accesos del menu publico:', error);
+      });
+    }
+    if (tab === 'operarComo') {
+      cargarOperarComo().catch((error) => {
+        console.warn('No se pudo cargar operar-como:', error);
       });
     }
     if (tab === 'facturacionEcf') {
@@ -14209,6 +14568,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   await reaplicarTemaNegocioActual();
   ocultarTabsNoPermitidos();
+  aplicarVisibilidadOperarComo();
   aplicarModulosUI();
   ajustarRolesUsuariosUI();
   await cargarCategorias();

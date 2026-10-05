@@ -1339,6 +1339,35 @@ body[data-role='mesera'] .kanm-main {
   padding: 10px 16px;
   box-shadow: 0 10px 20px rgba(0, 0, 0, 0.12);
   letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.kanm-impersonation-banner__volver {
+  border: none;
+  cursor: pointer;
+  background: #1f2937;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 6px 14px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  transition: transform 0.1s ease, opacity 0.1s ease;
+}
+
+.kanm-impersonation-banner__volver:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+@media print {
+  .kanm-impersonation-banner {
+    display: none !important;
+  }
 }
 
 .kanm-table-wrapper {

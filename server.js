@@ -21254,6 +21254,96 @@ app.post('/api/admin/negocios/:id/impersonar', (req, res) => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// "Operar como usuario": permite al ADMIN del negocio asumir temporalmente la
+// sesion de uno de sus usuarios (caja, mostrador, mesera, etc.) sin tener que
+// cerrar su sesion de admin. Reutiliza el mismo token de impersonacion que usa
+// el super-admin, pero restringido al propio negocio y solo para el rol 'admin'.
+// El frontend guarda la sesion original y la restaura con "Volver a mi usuario".
+// ---------------------------------------------------------------------------
+app.post('/api/negocio/usuarios/:id/operar-como', (req, res) => {
+  requireUsuarioSesion(req, res, async (usuarioSesion) => {
+    // Solo el admin del negocio (no supervisor, no empresa). El super-admin ya
+    // tiene su propio flujo de "entrar como negocio".
+    if (usuarioSesion.rol !== 'admin' || usuarioSesion.impersonated) {
+      return res
+        .status(403)
+        .json({ ok: false, error: 'Solo el administrador del negocio puede operar como otros usuarios.' });
+    }
+
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID de usuario invalido' });
+    }
+    if (id === Number(usuarioSesion.id)) {
+      return res.status(400).json({ ok: false, error: 'Ya estas operando con tu propio usuario.' });
+    }
+
+    try {
+      const objetivo = await usuariosRepo.findById(id);
+      if (!objetivo) {
+        return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+      }
+      if (Number(objetivo.negocio_id) !== Number(usuarioSesion.negocio_id)) {
+        return res.status(403).json({ ok: false, error: 'Ese usuario no pertenece a tu negocio.' });
+      }
+      if (objetivo.activo === 0) {
+        return res.status(400).json({ ok: false, error: 'Ese usuario esta inactivo.' });
+      }
+      if (objetivo.es_super_admin) {
+        return res.status(403).json({ ok: false, error: 'No puedes operar como un super administrador.' });
+      }
+      if (objetivo.rol === 'empresa') {
+        return res.status(403).json({ ok: false, error: 'No puedes operar como un usuario de empresa.' });
+      }
+      if (objetivo.force_password_change) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Ese usuario tiene un cambio de contrasena pendiente. No se puede operar como el hasta que lo resuelva.',
+        });
+      }
+
+      const token = crearTokenImpersonacion({
+        role: objetivo.rol,
+        impersonated: true,
+        negocio_id: usuarioSesion.negocio_id,
+        usuario_id: objetivo.id,
+        admin_id: usuarioSesion.id,
+        impersonated_by_role: 'admin',
+      });
+
+      await registrarImpersonacionAdmin({
+        adminId: usuarioSesion.id,
+        negocioId: usuarioSesion.negocio_id,
+        ip: req.ip || null,
+      });
+      await registrarAccionAdmin({
+        adminId: usuarioSesion.id,
+        negocioId: usuarioSesion.negocio_id,
+        accion: `operar_como:${objetivo.id}`,
+      });
+
+      res.json({
+        ok: true,
+        token,
+        rol: objetivo.rol,
+        usuario_id: objetivo.id,
+        usuario: objetivo.usuario,
+        nombre: objetivo.nombre,
+        negocio_id: usuarioSesion.negocio_id,
+        force_password_change: false,
+        impersonated: true,
+        impersonated_by_role: 'admin',
+        expires_in: IMPERSONATION_TOKEN_TTL_SECONDS,
+      });
+    } catch (error) {
+      console.error('Error en operar-como:', error?.message || error);
+      res.status(500).json({ ok: false, error: 'No se pudo iniciar la sesion como ese usuario.' });
+    }
+  });
+});
+
 app.put('/api/usuarios/mi-password', (req, res) => {
   requireUsuarioSesion(req, res, async (usuarioSesion) => {
     const nuevaPassword = (req.body?.password || '').toString().trim();

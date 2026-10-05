@@ -12,6 +12,9 @@ const roleRoutes = {
 
 const STORAGE_KEY = 'kanmUser';
 const STORAGE_APP_KEY = 'sesionApp';
+// Guarda la sesion original del admin cuando usa "Operar como usuario", para
+// poder restaurarla sin pedir contrasena al pulsar "Volver a mi usuario".
+const OPERAR_COMO_ORIGEN_KEY = 'kanmOperarComoOrigen';
 const FORCE_PASSWORD_PATH = '/force-password.html';
 const DEFAULT_THEME = {
   colorPrimario: '#255bc7',
@@ -198,15 +201,38 @@ const applyImpersonationBanner = (user) => {
     if (existing) {
       existing.remove();
     }
+    // Si no hay impersonacion activa, limpiar cualquier origen huerfano.
+    limpiarOrigenOperarComo();
     return;
   }
 
-  if (existing) return;
+  const origen = leerOrigenOperarComo();
+
+  // Reconstruir siempre (para refrescar nombre/rol del usuario asumido).
+  if (existing) existing.remove();
 
   const banner = document.createElement('div');
   banner.id = 'kanm-impersonation-banner';
   banner.className = 'kanm-impersonation-banner';
-  banner.textContent = 'Estas operando como ADMIN MASTER.';
+
+  if (origen) {
+    const nombre = user?.nombre || user?.usuario || 'usuario';
+    const rol = (user?.rol || '').toString().toUpperCase();
+    const etiqueta = document.createElement('span');
+    etiqueta.className = 'kanm-impersonation-banner__text';
+    etiqueta.textContent = `Estás operando como ${nombre}${rol ? ` (${rol})` : ''}.`;
+
+    const volverBtn = document.createElement('button');
+    volverBtn.type = 'button';
+    volverBtn.className = 'kanm-impersonation-banner__volver';
+    volverBtn.textContent = '← Volver a mi usuario';
+    volverBtn.addEventListener('click', () => volverAMiUsuario());
+
+    banner.append(etiqueta, volverBtn);
+  } else {
+    banner.textContent = 'Estas operando como ADMIN MASTER.';
+  }
+
   document.body.prepend(banner);
 };
 
@@ -282,12 +308,45 @@ const clearStoredUser = () => {
   try {
     localStorage.removeItem(STORAGE_APP_KEY);
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(OPERAR_COMO_ORIGEN_KEY);
   } catch (error) {
     // Ignorar errores al limpiar valores antiguos
   }
 
   window.APP_SESION = null;
 };
+
+const leerOrigenOperarComo = () => {
+  try {
+    const raw = localStorage.getItem(OPERAR_COMO_ORIGEN_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (error) {
+    return null;
+  }
+};
+
+const limpiarOrigenOperarComo = () => {
+  try {
+    localStorage.removeItem(OPERAR_COMO_ORIGEN_KEY);
+  } catch (error) {
+    // ignore
+  }
+};
+
+// Restaura la sesion del admin guardada antes de "Operar como usuario".
+function volverAMiUsuario() {
+  const origen = leerOrigenOperarComo();
+  limpiarOrigenOperarComo();
+  if (origen && origen.token) {
+    setStoredUser(origen);
+    redirectTo('/admin.html');
+  } else {
+    // Sin origen valido: cerrar sesion para evitar quedar en un estado raro.
+    logout();
+  }
+}
 
 // Devuelve los encabezados de autenticacion a partir de la sesion guardada
 const getAuthHeaders = () => {
@@ -594,8 +653,10 @@ const cargarTemaNegocio = async () => {
 
     const data = await response.json();
     if (data?.ok && data?.tema) {
+      window.KANM_TEMA = data.tema;
       applyTemaNegocio(data.tema);
     } else if (data?.colorPrimario || data?.colorSecundario) {
+      window.KANM_TEMA = data;
       applyTemaNegocio(data);
     }
   } catch (error) {

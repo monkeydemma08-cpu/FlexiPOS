@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/styles.css?v=20260805c" />
+  <link rel="stylesheet" href="/css/styles.css?v=20261004a" />
   <link rel="stylesheet" href="/css/admin-shell.css?v=20260424a" />
   <style>
     /* ================================================================
@@ -359,6 +359,10 @@
             <span class="kanm-sidebar-icon" aria-hidden="true">🧾</span>
             <span class="kanm-sidebar-label">Cuadres de caja</span>
           </button>
+          <button type="button" class="kanm-tab kanm-sidebar-item admin-operar-como-only" data-admin-tab="operarComo" data-modulo="admin">
+            <span class="kanm-sidebar-icon" aria-hidden="true">🛂</span>
+            <span class="kanm-sidebar-label">Operar como usuario</span>
+          </button>
           <button type="button" class="kanm-tab kanm-sidebar-item" data-admin-tab="historial" data-modulo="historialCocina">
             <span class="kanm-sidebar-icon" aria-hidden="true">👨‍🍳</span>
             <span class="kanm-sidebar-label">Historial preparación</span>
@@ -503,6 +507,9 @@
             </button>
             <button type="button" class="kanm-button ghost" id="admin-inventario-auditar" title="Verifica que el stock de cada producto coincide con la suma de sus lotes FIFO">
               Auditar consistencia
+            </button>
+            <button type="button" class="kanm-button ghost" id="admin-inventario-pdf" title="Descargar el inventario completo en PDF">
+              Descargar PDF
             </button>
             <button type="button" class="kanm-button primary" id="admin-inventario-nuevo">Nuevo item</button>
           </div>
@@ -3304,6 +3311,7 @@
           <div class="admin-report-actions">
             <button type="button" class="kanm-button" id="analisis-actualizar">Actualizar</button>
             <button type="button" class="kanm-button secondary" id="analisis-exportar-csv">Exportar CSV</button>
+            <button type="button" class="kanm-button secondary" id="analisis-exportar-pdf">Descargar PDF</button>
           </div>
         </div>
         <div id="analisis-mensaje" class="kanm-message"></div>
@@ -3980,6 +3988,44 @@
               </tr>
             </thead>
             <tbody id="cierres-detalle-tabla"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- Operar como usuario -->
+    <section class="admin-panel hidden" data-admin-section="operarComo" id="admin-section-operar-como">
+      <div class="kanm-card-header">
+        <h2>Operar como usuario</h2>
+        <p class="kanm-subtitle">
+          Entra a la sesión de cualquiera de tus usuarios (caja, mostrador, mesera, etc.) para ver lo que
+          ven y operar como ellos, sin cerrar tu sesión de administrador. Un banner te permitirá volver a
+          tu usuario en un clic.
+        </p>
+      </div>
+      <section class="kanm-card admin-card">
+        <div class="admin-report-controls">
+          <div class="kanm-input-group">
+            <label for="operar-como-buscar">Buscar usuario</label>
+            <input type="text" id="operar-como-buscar" placeholder="Nombre o usuario..." autocomplete="off" />
+          </div>
+          <div class="admin-report-actions">
+            <button type="button" class="kanm-button secondary" id="operar-como-refrescar">Refrescar</button>
+          </div>
+        </div>
+        <div id="operar-como-mensaje" class="kanm-message"></div>
+        <div class="kanm-table-wrapper">
+          <table class="kanm-table">
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th>Rol</th>
+                <th>Estado</th>
+                <th>Última actividad</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody id="operar-como-tabla"></tbody>
           </table>
         </div>
       </section>
@@ -5778,7 +5824,7 @@
   </div>
 
   <script src="/js/password-toggle.js"></script>
-  <script src="/js/auth.js?v=20260805c"></script>
+  <script src="/js/auth.js?v=20261004a"></script>
   <!-- Chart.js para graficos analisis-extension (F3) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script>
@@ -5914,7 +5960,7 @@
       }
     })();
   </script>
-  <script src="/js/admin.js?v=20260815a"></script>
+  <script src="/js/admin.js?v=20261004a"></script>
   <script src="/js/admin-facturacion-posium.js?v=20260522a"></script>
   <script src="/js/admin-cotizaciones.js?v=20260815c"></script>
   <script src="/js/admin-clientes.js?v=20260704c"></script>
