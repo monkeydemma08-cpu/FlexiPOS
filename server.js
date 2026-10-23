@@ -36278,15 +36278,25 @@ app.put('/api/inventario/compras/:id', (req, res) => {
           return res.status(400).json({ error: 'El costo unitario debe ser mayor o igual a 0.' });
         }
 
-        let cantidadInsumoFinal = null;
-        if (esInsumo) {
-          if (cantidadInsumoEntrada === null || cantidadInsumoEntrada <= 0) {
-            return res.status(400).json({
-              error: `Indica la cantidad recibida del insumo "${productoActual?.nombre || productoId}" en su unidad base.`,
-            });
-          }
-          cantidadInsumoFinal = Number(cantidadInsumoEntrada.toFixed(4));
+        // Model B (stock en PAQUETES): el insumo se acumula al stock en la unidad
+        // que se compra (cajas/botellas), igual que un producto de reventa. La compra
+        // puede traer "contenido por unidad" (piezas por paquete) para actualizar esa
+        // propiedad del producto; NO cambia cuánto suma al stock. Esta logica es la
+        // misma que en el POST de creacion: antes este bloque estaba a medio migrar y
+        // referenciaba variables inexistentes (ReferenceError al guardar la edicion).
+        let contenidoPorUnidadActualizar = null;
+        if (esInsumo && contenidoPorUnidadEntrada !== null && contenidoPorUnidadEntrada > 0) {
+          contenidoPorUnidadActualizar = Number(contenidoPorUnidadEntrada.toFixed(4));
         }
+        const contenidoEfectivoInsumo = esInsumo
+          ? (contenidoPorUnidadActualizar
+              || normalizarContenidoPorUnidad(productoActual?.contenido_por_unidad, 1))
+          : 1;
+        // cantidad_insumo se guarda solo como referencia (piezas totales recibidas =
+        // paquetes × contenido). No interviene en el stock ni en el costo.
+        const cantidadInsumoFinal = esInsumo
+          ? Number((cantidad * contenidoEfectivoInsumo).toFixed(4))
+          : null;
 
         const costoUnitarioSinItbis = Number(costoUnitario.toFixed(2));
         const costoUnitarioReal = resolverCostoUnitarioReal(costoUnitarioSinItbis, aplicaItbis);
@@ -36298,18 +36308,11 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         const totalLinea = Number((cantidad * costoUnitarioSinItbis).toFixed(2));
         subtotal += totalLinea;
 
-        // Mismas reglas que en POST: para INSUMO trabajamos sobre cantidad_insumo
-        // (en su unidad base); para FINAL seguimos usando cantidad.
-        const cantidadParaStock = esInsumo ? cantidadInsumoFinal : cantidad;
-        const costoEfectivoPorUnidadStock = esInsumo
-          ? Number(((cantidad * costoUnitarioEfectivo) / cantidadInsumoFinal).toFixed(4))
-          : costoUnitarioEfectivo;
-        const ultimoCostoStockSinItbis = esInsumo
-          ? Number(((cantidad * costoUnitarioSinItbis) / cantidadInsumoFinal).toFixed(4))
-          : costoUnitarioSinItbis;
-        const costoUnitarioRealStock = esInsumo
-          ? Number(((cantidad * costoUnitarioReal) / cantidadInsumoFinal).toFixed(4))
-          : costoUnitarioReal;
+        // Stock y costo por unidad de stock = por PAQUETE comprado (insumo y final igual).
+        const cantidadParaStock = cantidad;
+        const costoEfectivoPorUnidadStock = costoUnitarioEfectivo;
+        const ultimoCostoStockSinItbis = costoUnitarioSinItbis;
+        const costoUnitarioRealStock = costoUnitarioReal;
 
         detalles.push({
           producto_id: productoId,
@@ -36358,14 +36361,28 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         fechaPagoActual: compraActual?.gasto_fecha_pago ?? null,
       });
 
-      // Para el delta de stock usamos la cantidad efectiva que se acredito al stock:
-      //   - Si el detalle previo trae cantidad_insumo (> 0), ese era el monto que se sumo
-      //     al stock cuando se registro la compra de insumo.
-      //   - Caso contrario, se sumo la "cantidad" tal cual (FINAL para reventa o data vieja).
+      // Cuanto aporto esta compra al stock ORIGINALMENTE. Fuente confiable y
+      // model-agnostic: los lotes FIFO que genero (cantidad_inicial = lo que se
+      // sumo al stock). Se puede confiar en ellos porque arriba ya validamos que
+      // no fueron consumidos. Para compras antiguas sin lotes (data previa a FIFO)
+      // caemos al criterio historico por detalle (cantidad_insumo si aplica, si no cantidad).
       const cantidadesPrevias = new Map();
+      const lotesPrevios = await db.all(
+        `SELECT producto_id, SUM(cantidad_inicial) AS total
+           FROM inventario_lotes
+          WHERE compra_id = ? AND negocio_id = ?
+          GROUP BY producto_id`,
+        [compraId, negocioId]
+      );
+      (lotesPrevios || []).forEach((row) => {
+        const productoId = Number(row?.producto_id);
+        if (!Number.isFinite(productoId) || productoId <= 0) return;
+        cantidadesPrevias.set(productoId, Number((Number(row?.total) || 0).toFixed(4)));
+      });
       detallesActuales.forEach((detalle) => {
         const productoId = Number(detalle?.producto_id);
         if (!Number.isFinite(productoId) || productoId <= 0) return;
+        if (cantidadesPrevias.has(productoId)) return; // ya cubierto por sus lotes
         const cantidadInsumoPrev = Number(detalle?.cantidad_insumo);
         const cantidadStock =
           Number.isFinite(cantidadInsumoPrev) && cantidadInsumoPrev > 0
@@ -36375,13 +36392,13 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         cantidadesPrevias.set(productoId, Number((acumulado + cantidadStock).toFixed(4)));
       });
 
+      // Stock nuevo: Model B suma siempre la cantidad comprada en paquetes
+      // (cantidad_para_stock, igual que el lote que se insertara mas abajo).
       const cantidadesNuevas = new Map();
       detalles.forEach((detalle) => {
         const productoId = Number(detalle?.producto_id);
         if (!Number.isFinite(productoId) || productoId <= 0) return;
-        const cantidadStock = detalle.es_insumo
-          ? Number(detalle?.cantidad_insumo) || 0
-          : Number(detalle?.cantidad) || 0;
+        const cantidadStock = Number(detalle?.cantidad_para_stock) || 0;
         const acumulado = cantidadesNuevas.get(productoId) || 0;
         cantidadesNuevas.set(productoId, Number((acumulado + cantidadStock).toFixed(4)));
       });
@@ -36448,8 +36465,18 @@ app.put('/api/inventario/compras/:id', (req, res) => {
         );
         const compraDetalleId = insertDetalle?.lastID || null;
 
-        // Crear lote nuevo (mismo criterio que en POST).
         const producto = productosMap.get(detalle.producto_id);
+
+        // Si la edicion trajo "contenido por unidad" (piezas por paquete), se
+        // actualiza como propiedad del insumo, igual que en el POST de creacion.
+        if (detalle.contenido_por_unidad_actualizar && detalle.contenido_por_unidad_actualizar > 0) {
+          await db.run(
+            'UPDATE productos SET contenido_por_unidad = ? WHERE id = ? AND negocio_id = ?',
+            [detalle.contenido_por_unidad_actualizar, detalle.producto_id, negocioId]
+          );
+        }
+
+        // Crear lote nuevo (mismo criterio que en POST).
         if (!esStockIndefinido(producto)) {
           const cantidadStockSumar = Number(detalle.cantidad_para_stock) || 0;
           if (cantidadStockSumar > 0) {
