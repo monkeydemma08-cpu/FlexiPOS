@@ -11165,6 +11165,8 @@ const obtenerPedidosDetalleCierre = (cierreId, negocioId, origen, callback) => {
       SUM(COALESCE(pago_cambio, 0)) AS pago_cambio,
       SUM(${totalCalculadoSql}) AS total,
       MAX(metodo_pago) AS metodo_pago,
+      MAX(ncf) AS ncf,
+      MIN(CASE WHEN estado = 'cancelado' THEN 1 ELSE 0 END) AS todo_cancelado,
       MIN(fecha_cierre) AS fecha_cierre,
       MIN(fecha_listo) AS fecha_listo
     FROM pedidos

@@ -9775,6 +9775,16 @@ const renderDetalleCierre = (pedidos, cierreId) => {
     const esFacturaCliente = String(pedido?.tipo_registro || '').toLowerCase() === 'factura_cliente';
     const idFacturaCliente = Number(pedido?.factura_deuda_id || pedido?.id);
     const facturaPedidoId = Number(pedido?.factura_pedido_id || pedido?.id);
+    // Factura eliminada (anulada): toda la cuenta quedo en estado 'cancelado'. Se
+    // mantiene visible en el cuadre como historial, pero en rojo, con la etiqueta
+    // "Eliminada" y SIN ninguna accion posible (no editar, no ver, no re-eliminar,
+    // no cambiar metodo de pago).
+    const eliminada = !esFacturaCliente && Number(pedido?.todo_cancelado) === 1;
+    if (eliminada) {
+      fila.classList.add('cuadre-fila-eliminada');
+      fila.style.background = '#fdecef';
+      fila.style.color = '#c0392b';
+    }
     const totalPedido = esFacturaCliente
       ? Number(pedido?.total) || 0
       : Number(
@@ -9800,12 +9810,34 @@ const renderDetalleCierre = (pedidos, cierreId) => {
     fila.appendChild(celdaTotal);
 
     const celdaMetodo = document.createElement('td');
-    celdaMetodo.appendChild(crearControlMetodoPagoCierre(pedido, cierreId));
+    if (eliminada) {
+      const metodoTxt = document.createElement('span');
+      metodoTxt.textContent = '—';
+      celdaMetodo.appendChild(metodoTxt);
+    } else {
+      celdaMetodo.appendChild(crearControlMetodoPagoCierre(pedido, cierreId));
+    }
     fila.appendChild(celdaMetodo);
 
     const celdaFecha = document.createElement('td');
     celdaFecha.textContent = formatDateTime(pedido.fecha_cierre || pedido.fecha_listo);
     fila.appendChild(celdaFecha);
+
+    // Factura eliminada: sin acciones, solo la etiqueta "Eliminada".
+    if (eliminada) {
+      const celdaEstado = document.createElement('td');
+      celdaEstado.style.whiteSpace = 'nowrap';
+      const badge = document.createElement('span');
+      badge.textContent = 'Eliminada';
+      badge.style.color = '#c0392b';
+      badge.style.fontWeight = '700';
+      badge.style.textTransform = 'uppercase';
+      badge.style.letterSpacing = '0.04em';
+      celdaEstado.appendChild(badge);
+      fila.appendChild(celdaEstado);
+      fragment.appendChild(fila);
+      return;
+    }
 
     const celdaFactura = document.createElement('td');
     celdaFactura.style.whiteSpace = 'nowrap';
